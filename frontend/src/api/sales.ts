@@ -1,0 +1,33 @@
+import api from "./client";
+import type { DashboardSummary, Period, SalesMonthly } from "@/types";
+
+export const salesApi = {
+  async periods(): Promise<Period[]> {
+    const { data } = await api.get("/sales/periods/");
+    return data.results ?? data;
+  },
+
+  async dashboard(periodId: number): Promise<DashboardSummary> {
+    const { data } = await api.get("/sales/dashboard/summary/", {
+      params: { period: periodId },
+    });
+    return data;
+  },
+
+  async salesRows(periodId: number): Promise<SalesMonthly[]> {
+    const { data } = await api.get("/sales/sales-monthly/", {
+      params: { period: periodId, page_size: 100 },
+    });
+    return data.results ?? data;
+  },
+
+  async updateRow(id: number, patch: Partial<SalesMonthly>): Promise<SalesMonthly> {
+    const { data } = await api.patch(`/sales/sales-monthly/${id}/`, patch);
+    return data;
+  },
+
+  async transition(id: number, action: "submit" | "approve" | "reject") {
+    const { data } = await api.post(`/sales/sales-monthly/${id}/${action}/`);
+    return data as SalesMonthly;
+  },
+};
