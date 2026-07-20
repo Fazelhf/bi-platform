@@ -2,12 +2,11 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from apps.core.models import DimPeriod
+from apps.core.models import DimPeriod, FactKPI
 from apps.sales.models import (
     ApprovalStatus,
     DimEmployee,
     DimTeam,
-    FactKPI,
     FactSalesMonthly,
 )
 from apps.sales.services.kpi import compute_period_kpis

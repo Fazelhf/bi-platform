@@ -1,12 +1,13 @@
 from django.contrib import admin
 
+from apps.core.models import FactKPI
+
 from apps.sales.models import (
     DimBank,
     DimEmployee,
     DimProvince,
     DimTeam,
     FactCollection,
-    FactKPI,
     FactSalesMonthly,
     FactSalesProvince,
 )

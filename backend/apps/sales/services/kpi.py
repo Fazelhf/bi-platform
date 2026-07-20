@@ -15,14 +15,15 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from apps.core.models import DimKPI, DimPeriod
+from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope
 from apps.sales.models import (
     ApprovalStatus,
     DimEmployee,
     DimTeam,
-    FactKPI,
     FactSalesMonthly,
 )
+
+DOMAIN = "sales"
 
 # KPI catalog: (code, name_fa, name_en, unit, direction, note)
 KPI_CATALOG = [
@@ -137,8 +138,9 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
 
     company_revenue = company.revenue
 
-    # Wipe & rewrite this period's KPI rows.
-    FactKPI.objects.filter(period=period).delete()
+    # Wipe & rewrite this period's SALES KPI rows only. FactKPI is shared
+    # across domains, so this must never touch production results.
+    FactKPI.objects.filter(period=period, kpi__domain=DOMAIN).delete()
 
     rows: list[FactKPI] = []
 
@@ -157,18 +159,18 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
                 )
             )
 
-    emit(FactKPI.Scope.COMPANY, None, "کل شرکت", company)
+    emit(KPIScope.COMPANY, None, "کل شرکت", company)
 
     team_names = {t.id: t.name_fa for t in DimTeam.objects.all()}
     for team_id, m in by_team.items():
-        emit(FactKPI.Scope.TEAM, team_id, team_names.get(team_id, ""), m)
+        emit(KPIScope.TEAM, team_id, team_names.get(team_id, ""), m)
 
     emp_names = {
         e.id: e.full_name_fa
         for e in DimEmployee.objects.filter(id__in=by_employee.keys())
     }
     for emp_id, m in by_employee.items():
-        emit(FactKPI.Scope.EMPLOYEE, emp_id, emp_names.get(emp_id, ""), m)
+        emit(KPIScope.EMPLOYEE, emp_id, emp_names.get(emp_id, ""), m)
 
     FactKPI.objects.bulk_create(rows)
     return len(rows)

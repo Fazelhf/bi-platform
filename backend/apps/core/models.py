@@ -81,3 +81,47 @@ class DimKPI(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.name_en} ({self.code})"
+
+
+class KPIScope(models.TextChoices):
+    """
+    Who/what a KPI result describes. Conformed across every domain so one
+    table and one API serve sales, production and anything added later.
+    """
+
+    COMPANY = "company", "Company"
+    TEAM = "team", "Team"
+    EMPLOYEE = "employee", "Employee"
+    MACHINE = "machine", "Machine / production line"
+    PRODUCT = "product", "Product"
+
+
+class FactKPI(TimeStampedModel):
+    """
+    Computed KPI results for every domain. Grain: kpi x scope x period.
+
+    This is the single analytical surface the dashboards read — the Excel
+    workbooks' hidden calculation sheets, for both sales and production,
+    materialise into rows here.
+    """
+
+    period = models.ForeignKey(DimPeriod, on_delete=models.CASCADE, related_name="kpis")
+    kpi = models.ForeignKey(DimKPI, on_delete=models.CASCADE, related_name="results")
+    scope = models.CharField(max_length=12, choices=KPIScope.choices)
+    scope_id = models.PositiveBigIntegerField(null=True, blank=True)
+    scope_label = models.CharField(max_length=150, blank=True)
+
+    # actual / مطلوب / ایده‌آل — the comparison frame the production
+    # workbook uses, applied uniformly to every KPI.
+    actual = models.DecimalField(max_digits=24, decimal_places=4, null=True)
+    target = models.DecimalField(max_digits=24, decimal_places=4, null=True)
+    ideal = models.DecimalField(max_digits=24, decimal_places=4, null=True)
+    deviation = models.DecimalField(max_digits=24, decimal_places=4, null=True)
+    efficiency_pct = models.DecimalField(max_digits=12, decimal_places=2, null=True)
+
+    class Meta:
+        unique_together = ("period", "kpi", "scope", "scope_id")
+        ordering = ("period", "kpi", "scope")
+
+    def __str__(self) -> str:
+        return f"{self.kpi.code} · {self.scope}:{self.scope_label} · {self.period}"

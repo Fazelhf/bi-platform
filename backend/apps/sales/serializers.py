@@ -1,13 +1,12 @@
 from rest_framework import serializers
 
-from apps.core.models import DimKPI, DimPeriod
+from apps.core.models import DimKPI, DimPeriod, FactKPI
 from apps.sales.models import (
     DimBank,
     DimEmployee,
     DimProvince,
     DimTeam,
     FactCollection,
-    FactKPI,
     FactSalesMonthly,
     FactSalesProvince,
 )

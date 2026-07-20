@@ -158,33 +158,6 @@ class FactCollection(TimeStampedModel):
         return f"{self.bank} · {self.period}"
 
 
-class FactKPI(TimeStampedModel):
-    """
-    Computed KPI results. Grain: kpi x scope x period, where scope is a
-    salesperson, a team, or the whole company. This is what dashboards read
-    — the Excel "hidden calc sheets" become rows here.
-    """
-
-    class Scope(models.TextChoices):
-        COMPANY = "company", "Company"
-        TEAM = "team", "Team"
-        EMPLOYEE = "employee", "Employee"
-
-    period = models.ForeignKey(DimPeriod, on_delete=models.CASCADE, related_name="kpis")
-    kpi = models.ForeignKey("core.DimKPI", on_delete=models.CASCADE)
-    scope = models.CharField(max_length=10, choices=Scope.choices)
-    scope_id = models.PositiveBigIntegerField(null=True, blank=True)  # employee/team pk
-    scope_label = models.CharField(max_length=150, blank=True)
-
-    actual = models.DecimalField(max_digits=24, decimal_places=4, null=True)
-    target = models.DecimalField(max_digits=24, decimal_places=4, null=True)
-    ideal = models.DecimalField(max_digits=24, decimal_places=4, null=True)
-    deviation = models.DecimalField(max_digits=24, decimal_places=4, null=True)
-    efficiency_pct = models.DecimalField(max_digits=10, decimal_places=2, null=True)
-
-    class Meta:
-        unique_together = ("period", "kpi", "scope", "scope_id")
-        ordering = ("period", "kpi", "scope")
-
-    def __str__(self) -> str:
-        return f"{self.kpi.code} · {self.scope}:{self.scope_label} · {self.period}"
+# NOTE: FactKPI now lives in apps.core — it is shared by every domain
+# (sales, production, …) so dashboards can read one conformed table.
+# Import it from there: `from apps.core.models import FactKPI, KPIScope`.

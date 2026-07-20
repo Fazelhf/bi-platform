@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.models import DimKPI, DimPeriod
+from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope
 from apps.sales.models import (
     ApprovalStatus,
     DimBank,
@@ -13,7 +13,6 @@ from apps.sales.models import (
     DimProvince,
     DimTeam,
     FactCollection,
-    FactKPI,
     FactSalesMonthly,
     FactSalesProvince,
 )
@@ -150,12 +149,12 @@ class DashboardSummaryView(APIView):
         period = DimPeriod.objects.get(pk=period_id)
 
         company_kpis = FactKPI.objects.filter(
-            period=period, scope=FactKPI.Scope.COMPANY
+            period=period, scope=KPIScope.COMPANY
         ).select_related("kpi")
 
         team_revenue = (
             FactKPI.objects.filter(
-                period=period, scope=FactKPI.Scope.TEAM, kpi__code="revenue"
+                period=period, scope=KPIScope.TEAM, kpi__code="revenue"
             )
             .select_related("kpi")
             .values("scope_label", "actual")
@@ -181,7 +180,7 @@ class DashboardSummaryView(APIView):
         leaderboard = (
             FactKPI.objects.filter(
                 period=period,
-                scope=FactKPI.Scope.EMPLOYEE,
+                scope=KPIScope.EMPLOYEE,
                 kpi__code="target_achievement",
             )
             .values("scope_label", "actual")
