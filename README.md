@@ -145,15 +145,20 @@ cp .env.example .env      # then set SECRET_KEY etc.
 docker compose up --build # app+API via Nginx :8080 · RabbitMQ UI :15672
 ```
 
-### Demo personas (password `demo12345`)
+### Users (password `demo12345`)
 
-| User | Role | Sees |
-|---|---|---|
-| `ceo` | Executive | All 4 dashboards (read-only) |
-| `team_manager` | Manager | Team-sales entry + dashboard |
-| `org_manager` | Manager | Organizational-sales entry + dashboard |
-| `prod_manager` | Manager | Production entry + dashboard |
-| `admin` | Superuser | Django admin |
+Only these accounts have site access; every other account (specialists / کارشناس) is deactivated.
+
+| Username | Name | Role | Sees |
+|---|---|---|---|
+| `ceo` | امیر عصاری | مدیرعامل | All dashboards + کارتابل + تنظیمات سایت |
+| `sales_team_mgr` | محمدمحسن شاهان | مدیر فروش همکار | Only فروش همکار entry + dashboard |
+| `banking_mgr` | هانیه منزه | مدیر فروش بانکی | Only فروش بانکی entry + dashboard |
+| `b2b_mgr` | سارا مسگرچیان | مدیر فروش B2B | Only فروش B2B entry + dashboard |
+| `production_mgr` | محمد مهدی صیفی | مدیر تولید | Only تولید entry + dashboard |
+| `admin` | مدیر سیستم | Admin (superuser) | Everything + تنظیمات سایت |
+
+Everyone gets the collaboration features: profile with online presence, team directory, 1:1 chat, and notes.
 
 ---
 

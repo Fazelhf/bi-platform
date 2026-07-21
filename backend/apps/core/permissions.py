@@ -38,6 +38,7 @@ class DepartmentEntryPermission(BasePermission):
 CHANNEL_DEPARTMENT = {
     "team": "sales_team",
     "organizational": "sales_org",
+    "b2b": "sales_b2b",
 }
 
 

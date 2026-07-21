@@ -29,7 +29,8 @@ const primary = computed<Item[]>(() => {
     items.push(
       { name: "overview", label: "نمای کلی", icon: "grid" },
       { name: "sales-dashboard", label: "فروش همکار", icon: "chart" },
-      { name: "sales-org-dashboard", label: "فروش کلی", icon: "chart" },
+      { name: "sales-org-dashboard", label: "فروش بانکی", icon: "chart" },
+      { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "chart" },
       { name: "production-dashboard", label: "تولید", icon: "box" },
     );
   } else if (auth.department === "production") {
@@ -39,13 +40,18 @@ const primary = computed<Item[]>(() => {
     );
   } else if (auth.department === "sales_org") {
     items.push(
-      { name: "sales-org-entry", label: "ورود فروش سازمانی", icon: "box" },
-      { name: "sales-org-dashboard", label: "داشبورد فروش کلی", icon: "chart" },
+      { name: "sales-org-entry", label: "ورود فروش بانکی", icon: "box" },
+      { name: "sales-org-dashboard", label: "داشبورد فروش بانکی", icon: "chart" },
     );
   } else if (auth.department === "sales_team") {
     items.push(
-      { name: "sales-entry", label: "ورود تیم فروش", icon: "box" },
+      { name: "sales-entry", label: "ورود فروش همکار", icon: "box" },
       { name: "sales-dashboard", label: "داشبورد فروش همکار", icon: "chart" },
+    );
+  } else if (auth.department === "sales_b2b") {
+    items.push(
+      { name: "sales-b2b-entry", label: "ورود فروش B2B", icon: "box" },
+      { name: "sales-b2b-dashboard", label: "داشبورد فروش B2B", icon: "chart" },
     );
   }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
@@ -59,22 +65,17 @@ const primary = computed<Item[]>(() => {
   return items;
 });
 
-const adminItems: Item[] = [
-  { name: "admin-users", label: "کاربران", icon: "users" },
-  { name: "admin-dimensions", label: "داده‌های پایه", icon: "database" },
-  { name: "admin-formulas", label: "فرمول‌ها", icon: "formula" },
-  { name: "admin-audit", label: "تاریخچه", icon: "history" },
-];
 
 const pageTitle = computed(() => {
   const map: Record<string, string> = {
     overview: "نمای کلی", "sales-dashboard": "داشبورد فروش همکار",
     "sales-org-dashboard": "داشبورد فروش کلی", "production-dashboard": "داشبورد تولید",
+    "sales-b2b-dashboard": "داشبورد فروش B2B",
     inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "تیم",
-    "sales-entry": "ورود اطلاعات تیم فروش", "sales-org-entry": "ورود فروش سازمانی",
+    "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
+    "sales-b2b-entry": "ورود فروش B2B",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
-    "admin-users": "مدیریت کاربران", "admin-dimensions": "داده‌های پایه",
-    "admin-formulas": "فرمول‌های BI", "admin-audit": "تاریخچه تغییرات",
+    settings: "تنظیمات سایت",
   };
   return map[route.name as string] ?? "پلتفرم هوش تجاری";
 });
@@ -150,35 +151,30 @@ onMounted(() => {
           >{{ it.badge() }}</span>
         </button>
 
-        <template v-if="auth.isExecutive">
-          <div class="h-px bg-slate-100 my-3"></div>
-          <p v-if="!collapsed" class="text-[11px] text-slate-400 px-3 pb-1">مدیریت سیستم</p>
-          <button
-            v-for="it in adminItems"
-            :key="it.name"
-            class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
-            :class="[
-              route.name === it.name ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100',
-              collapsed ? 'justify-center' : '',
-            ]"
-            :title="collapsed ? it.label : ''"
-            @click="go(it.name)"
-          >
-            <NavIcon :name="it.icon" :size="20" />
-            <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
-          </button>
-        </template>
       </nav>
 
-      <!-- Bottom -->
+      <!-- Bottom: profile, settings (admin+CEO only), logout -->
       <div class="p-3 border-t border-slate-100 space-y-1">
         <button
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-slate-500 hover:bg-slate-100"
           :class="collapsed ? 'justify-center' : ''"
           @click="go('profile-me')"
         >
-          <NavIcon name="settings" :size="20" />
+          <NavIcon name="team" :size="20" />
           <span v-if="!collapsed" class="text-right flex-1">پروفایل من</span>
+        </button>
+        <button
+          v-if="auth.isExecutive"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
+          :class="[
+            route.name === 'settings' ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100',
+            collapsed ? 'justify-center' : '',
+          ]"
+          :title="collapsed ? 'تنظیمات سایت' : ''"
+          @click="go('settings')"
+        >
+          <NavIcon name="settings" :size="20" />
+          <span v-if="!collapsed" class="text-right flex-1">تنظیمات سایت</span>
         </button>
         <button
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-red-500 hover:bg-red-50"

@@ -25,8 +25,9 @@ const columns: CrudColumn[] = [
     options: [
       { value: "", label: "— بدون بخش" },
       { value: "production", label: "تولید" },
-      { value: "sales_org", label: "فروش سازمانی" },
-      { value: "sales_team", label: "تیم فروش" },
+      { value: "sales_org", label: "فروش بانکی" },
+      { value: "sales_team", label: "فروش همکار" },
+      { value: "sales_b2b", label: "فروش B2B" },
     ],
   },
   { key: "is_active", label: "فعال", type: "boolean" },

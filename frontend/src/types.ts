@@ -175,6 +175,7 @@ export interface ExecutiveOverview {
   period: Period;
   sales_team: { kpis: KpiResult[]; revenue: number };
   sales_org: { kpis: KpiResult[]; revenue: number };
+  sales_b2b: { kpis: KpiResult[]; revenue: number };
   sales_completeness: Completeness;
   production: {
     kpis: KpiResult[];
@@ -187,6 +188,7 @@ export interface ExecutiveOverview {
     total_sales_revenue: number;
     sales_team_revenue: number;
     sales_org_revenue: number;
+    sales_b2b_revenue: number;
     internal_piece_rate_revenue: number;
     production_cost: number;
     production_margin: number;

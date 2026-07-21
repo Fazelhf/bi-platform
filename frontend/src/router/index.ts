@@ -10,8 +10,10 @@ export function homeRouteFor(department: string): string {
       return "sales-org-entry";
     case "sales_team":
       return "sales-entry";
+    case "sales_b2b":
+      return "sales-b2b-entry";
     default:
-      return "overview";
+      return "overview"; // CEO / admin
   }
 }
 
@@ -32,7 +34,12 @@ const router = createRouter({
         },
 
         // --- CEO dashboards (read-only) ---
-        { path: "overview", name: "overview", component: () => import("@/views/OverviewView.vue") },
+        {
+          path: "overview",
+          name: "overview",
+          component: () => import("@/views/OverviewView.vue"),
+          meta: { executive: true }, // company-wide view — CEO/admin only
+        },
         {
           path: "sales",
           name: "sales-dashboard",
@@ -43,7 +50,13 @@ const router = createRouter({
           path: "sales-org",
           name: "sales-org-dashboard",
           component: () => import("@/views/DashboardView.vue"),
-          props: { channel: "organizational", title: "داشبورد فروش کلی (سازمانی)" },
+          props: { channel: "organizational", title: "داشبورد فروش بانکی" },
+        },
+        {
+          path: "sales-b2b",
+          name: "sales-b2b-dashboard",
+          component: () => import("@/views/DashboardView.vue"),
+          props: { channel: "b2b", title: "داشبورد فروش B2B" },
         },
         {
           path: "production",
@@ -63,8 +76,15 @@ const router = createRouter({
           path: "sales-org/entry",
           name: "sales-org-entry",
           component: () => import("@/views/DataEntryView.vue"),
-          props: { channel: "organizational", title: "ورود اطلاعات فروش سازمانی" },
+          props: { channel: "organizational", title: "ورود اطلاعات فروش بانکی" },
           meta: { department: "sales_org" },
+        },
+        {
+          path: "sales-b2b/entry",
+          name: "sales-b2b-entry",
+          component: () => import("@/views/DataEntryView.vue"),
+          props: { channel: "b2b", title: "ورود اطلاعات فروش B2B" },
+          meta: { department: "sales_b2b" },
         },
         {
           path: "production/entry",
@@ -88,29 +108,11 @@ const router = createRouter({
         { path: "profile", name: "profile-me", component: () => import("@/views/ProfileView.vue") },
         { path: "profile/:id", name: "profile", component: () => import("@/views/ProfileView.vue") },
 
-        // --- Admin panel — executives/superusers only ---
+        // --- Site settings (users, base data, formulas, audit) — admin + CEO ---
         {
-          path: "admin/users",
-          name: "admin-users",
-          component: () => import("@/views/admin/AdminUsersView.vue"),
-          meta: { executive: true },
-        },
-        {
-          path: "admin/dimensions",
-          name: "admin-dimensions",
-          component: () => import("@/views/admin/AdminDimensionsView.vue"),
-          meta: { executive: true },
-        },
-        {
-          path: "admin/formulas",
-          name: "admin-formulas",
-          component: () => import("@/views/admin/AdminFormulasView.vue"),
-          meta: { executive: true },
-        },
-        {
-          path: "admin/audit",
-          name: "admin-audit",
-          component: () => import("@/views/admin/AdminAuditView.vue"),
+          path: "settings",
+          name: "settings",
+          component: () => import("@/views/admin/SettingsView.vue"),
           meta: { executive: true },
         },
       ],

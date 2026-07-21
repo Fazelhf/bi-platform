@@ -90,8 +90,9 @@ class SalesChannel(models.TextChoices):
     workbooks; keeping channel on the fact keeps them cleanly separate.
     """
 
-    TEAM = "team", "تیم فروش (همکار)"
-    ORGANIZATIONAL = "organizational", "فروش سازمانی"
+    TEAM = "team", "فروش همکار"
+    ORGANIZATIONAL = "organizational", "فروش بانکی"
+    B2B = "b2b", "فروش B2B"
 
 
 class FactSalesMonthly(TimeStampedModel):

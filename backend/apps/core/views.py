@@ -66,6 +66,7 @@ class ExecutiveOverviewView(APIView):
 
         team = _kpi_map(period, "sales", SalesChannel.TEAM)
         org = _kpi_map(period, "sales", SalesChannel.ORGANIZATIONAL)
+        b2b = _kpi_map(period, "sales", SalesChannel.B2B)
         production = _kpi_map(period, "production")
 
         def actual(m, code):
@@ -74,7 +75,8 @@ class ExecutiveOverviewView(APIView):
 
         team_revenue = actual(team, "revenue") or 0
         org_revenue = actual(org, "revenue") or 0
-        total_sales_revenue = team_revenue + org_revenue
+        b2b_revenue = actual(b2b, "revenue") or 0
+        total_sales_revenue = team_revenue + org_revenue + b2b_revenue
         production_cost = (
             FactProductionCost.objects.filter(period=period).aggregate(
                 t=Sum("amount_rial")
@@ -104,10 +106,15 @@ class ExecutiveOverviewView(APIView):
                     "kpis": KPIResultSerializer(list(team.values()), many=True).data,
                     "revenue": team_revenue,
                 },
-                # فروش سازمانی (کلی)
+                # فروش بانکی (سازمانی)
                 "sales_org": {
                     "kpis": KPIResultSerializer(list(org.values()), many=True).data,
                     "revenue": org_revenue,
+                },
+                # فروش B2B
+                "sales_b2b": {
+                    "kpis": KPIResultSerializer(list(b2b.values()), many=True).data,
+                    "revenue": b2b_revenue,
                 },
                 "sales_completeness": completeness(FactSalesMonthly),
                 "production": {
@@ -124,6 +131,7 @@ class ExecutiveOverviewView(APIView):
                     "total_sales_revenue": total_sales_revenue,
                     "sales_team_revenue": team_revenue,
                     "sales_org_revenue": org_revenue,
+                    "sales_b2b_revenue": b2b_revenue,
                     "internal_piece_rate_revenue": piece_rate_revenue,
                     "production_cost": production_cost,
                     "production_margin": (piece_rate_revenue - production_cost),

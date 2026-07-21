@@ -11,13 +11,15 @@ const loading = ref(true);
 const busy = ref<string>("");
 
 // A manager only sees (and can only decide) their own section.
+const DEPT_CHANNEL: Record<string, string> = {
+  sales_team: "team",
+  sales_org: "organizational",
+  sales_b2b: "b2b",
+};
 const visibleSales = computed(() => {
   if (auth.isExecutive) return sales.value;
-  if (auth.department === "sales_team")
-    return sales.value.filter((r) => r.channel === "team");
-  if (auth.department === "sales_org")
-    return sales.value.filter((r) => r.channel === "organizational");
-  return [];
+  const ch = DEPT_CHANNEL[auth.department];
+  return ch ? sales.value.filter((r) => r.channel === ch) : [];
 });
 const visibleProduction = computed(() =>
   auth.isExecutive || auth.department === "production" ? production.value : [],
@@ -60,8 +62,9 @@ async function decide(
 }
 
 const CHANNEL_FA: Record<string, string> = {
-  team: "تیم فروش",
-  organizational: "فروش سازمانی",
+  team: "فروش همکار",
+  organizational: "فروش بانکی",
+  b2b: "فروش B2B",
 };
 
 onMounted(load);
