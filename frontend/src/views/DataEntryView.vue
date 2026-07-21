@@ -7,6 +7,11 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 import { salesApi } from "@/api/sales";
 import type { Period, SalesMonthly } from "@/types";
 
+const props = withDefaults(
+  defineProps<{ channel?: string; title?: string }>(),
+  { channel: "team", title: "ورود اطلاعات فروش" },
+);
+
 const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
 const rows = shallowRef<SalesMonthly[]>([]);
@@ -116,7 +121,7 @@ async function onCellClicked(e: {
 
 async function load() {
   if (!selectedPeriod.value) return;
-  rows.value = await salesApi.salesRows(selectedPeriod.value);
+  rows.value = await salesApi.salesRows(selectedPeriod.value, props.channel);
 }
 
 onMounted(async () => {
@@ -125,13 +130,13 @@ onMounted(async () => {
   await load();
 });
 
-watch(selectedPeriod, load);
+watch([selectedPeriod, () => props.channel], load);
 </script>
 
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h1 class="text-xl font-bold text-slate-800">ورود اطلاعات فروش</h1>
+      <h1 class="text-xl font-bold text-slate-800">{{ title }}</h1>
       <div class="flex items-center gap-3">
         <span class="text-sm text-slate-500">{{ saving }}</span>
         <select

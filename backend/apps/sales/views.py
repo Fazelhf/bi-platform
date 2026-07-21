@@ -16,7 +16,13 @@ from apps.sales.models import (
     FactSalesMonthly,
     FactSalesProvince,
 )
+from apps.core.permissions import (
+    CHANNEL_DEPARTMENT,
+    DepartmentEntryPermission,
+    SalesChannelOwnership,
+)
 from apps.sales.permissions import CanApprove, CanEnterData
+from rest_framework.exceptions import PermissionDenied
 from apps.sales.serializers import (
     BankSerializer,
     CollectionSerializer,
@@ -66,8 +72,19 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
 
     queryset = FactSalesMonthly.objects.select_related("employee", "period").all()
     serializer_class = SalesMonthlySerializer
-    permission_classes = [CanEnterData]
-    filterset_fields = ["period", "employee", "status"]
+    permission_classes = [SalesChannelOwnership]
+    filterset_fields = ["period", "employee", "status", "channel"]
+
+    def _assert_owns_channel(self, channel):
+        user = self.request.user
+        if user.is_superuser:
+            return
+        if user.department != CHANNEL_DEPARTMENT.get(channel):
+            raise PermissionDenied("این ردیف متعلق به کانال فروش دیگری است.")
+
+    def perform_create(self, serializer):
+        self._assert_owns_channel(serializer.validated_data.get("channel", "team"))
+        serializer.save()
 
     def perform_update(self, serializer):
         # Any edit to an approved row sends it back to draft.
@@ -81,7 +98,7 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
         fact.save(update_fields=["status", "submitted_by", "updated_at"])
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove])
+    @action(detail=True, methods=["post"], permission_classes=[CanApprove, SalesChannelOwnership])
     def approve(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.APPROVED
@@ -91,7 +108,7 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
         compute_period_kpis(fact.period)
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove])
+    @action(detail=True, methods=["post"], permission_classes=[CanApprove, SalesChannelOwnership])
     def reject(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.REJECTED
@@ -102,14 +119,16 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
 class SalesProvinceViewSet(viewsets.ModelViewSet):
     queryset = FactSalesProvince.objects.select_related("province", "period").all()
     serializer_class = SalesProvinceSerializer
-    permission_classes = [CanEnterData]
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "sales_org"
     filterset_fields = ["period", "province"]
 
 
 class CollectionViewSet(viewsets.ModelViewSet):
     queryset = FactCollection.objects.select_related("bank", "period").all()
     serializer_class = CollectionSerializer
-    permission_classes = [CanEnterData]
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "sales_org"
     filterset_fields = ["period", "bank"]
 
 
@@ -123,7 +142,7 @@ class KPIDefinitionViewSet(viewsets.ReadOnlyModelViewSet):
 class KPIResultViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = FactKPI.objects.select_related("kpi", "period").all()
     serializer_class = KPIResultSerializer
-    filterset_fields = ["period", "scope", "kpi__code"]
+    filterset_fields = ["period", "scope", "kpi__code", "channel", "kpi__domain"]
 
     @extend_schema(
         parameters=[OpenApiParameter("period", int, description="Period id to recompute")],
@@ -141,26 +160,38 @@ class DashboardSummaryView(APIView):
     """One call that returns everything the executive sales dashboard needs."""
 
     @extend_schema(
-        parameters=[OpenApiParameter("period", int, required=True)],
+        parameters=[
+            OpenApiParameter("period", int, required=True),
+            OpenApiParameter(
+                "channel", str,
+                description="team | organizational (default: team)",
+            ),
+        ],
         responses=dict,
     )
     def get(self, request):
+        from apps.sales.models import SalesChannel
+
         period_id = request.query_params.get("period")
         period = DimPeriod.objects.get(pk=period_id)
+        channel = request.query_params.get("channel", SalesChannel.TEAM)
 
         company_kpis = FactKPI.objects.filter(
-            period=period, scope=KPIScope.COMPANY
+            period=period, scope=KPIScope.COMPANY, kpi__domain="sales", channel=channel
         ).select_related("kpi")
 
         team_revenue = (
             FactKPI.objects.filter(
-                period=period, scope=KPIScope.TEAM, kpi__code="revenue"
+                period=period, scope=KPIScope.TEAM, kpi__code="revenue", channel=channel
             )
             .select_related("kpi")
             .values("scope_label", "actual")
             .order_by("-actual")
         )
 
+        # Province + collections belong to the organizational channel's detail,
+        # but province sales are merged, so we scope province to the channel's
+        # own facts.
         province = (
             FactSalesProvince.objects.filter(period=period)
             .select_related("province")
@@ -179,9 +210,8 @@ class DashboardSummaryView(APIView):
 
         leaderboard = (
             FactKPI.objects.filter(
-                period=period,
-                scope=KPIScope.EMPLOYEE,
-                kpi__code="target_achievement",
+                period=period, scope=KPIScope.EMPLOYEE,
+                kpi__code="target_achievement", channel=channel,
             )
             .values("scope_label", "actual")
             .order_by("-actual")
@@ -190,6 +220,7 @@ class DashboardSummaryView(APIView):
         return Response(
             {
                 "period": PeriodSerializer(period).data,
+                "channel": channel,
                 "kpis": KPIResultSerializer(company_kpis, many=True).data,
                 "team_revenue": list(team_revenue),
                 "province_sales": list(province),

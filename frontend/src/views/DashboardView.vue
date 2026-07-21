@@ -6,6 +6,11 @@ import KpiCard from "@/components/KpiCard.vue";
 import BarChart from "@/components/BarChart.vue";
 import { pct, rial } from "@/utils/format";
 
+const props = withDefaults(
+  defineProps<{ channel?: string; title?: string }>(),
+  { channel: "team", title: "داشبورد مدیریتی فروش" },
+);
+
 const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
 const data = ref<DashboardSummary | null>(null);
@@ -40,11 +45,16 @@ const leaderboard = computed(() =>
   (data.value?.leaderboard ?? []).filter((l) => l.actual > 0).slice(0, 10),
 );
 
+const collections = computed(() => (data.value?.collections ?? []).filter((c) => c.amount > 0));
+
+// The team-revenue chart is only meaningful for the multi-team channel.
+const showTeamChart = computed(() => props.channel === "team");
+
 async function load() {
   if (!selectedPeriod.value) return;
   loading.value = true;
   try {
-    data.value = await salesApi.dashboard(selectedPeriod.value);
+    data.value = await salesApi.dashboard(selectedPeriod.value, props.channel);
   } finally {
     loading.value = false;
   }
@@ -56,13 +66,13 @@ onMounted(async () => {
   await load();
 });
 
-watch(selectedPeriod, load);
+watch([selectedPeriod, () => props.channel], load);
 </script>
 
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h1 class="text-xl font-bold text-slate-800">داشبورد مدیریتی فروش</h1>
+      <h1 class="text-xl font-bold text-slate-800">{{ title }}</h1>
       <select
         v-model.number="selectedPeriod"
         class="border border-slate-300 rounded-lg px-3 py-1.5 bg-white text-sm"
@@ -82,6 +92,7 @@ watch(selectedPeriod, load);
       <!-- Charts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <BarChart
+          v-if="showTeamChart"
           title="فروش بر اساس تیم (ریال)"
           :categories="teamRevenue.categories"
           :values="teamRevenue.values"
@@ -93,6 +104,22 @@ watch(selectedPeriod, load);
           :values="provinces.sales"
           :second="{ name: 'تارگت', values: provinces.targets }"
         />
+      </div>
+
+      <!-- Bank collections (organizational channel) -->
+      <div
+        v-if="collections.length"
+        class="bg-white rounded-xl shadow-sm border border-slate-200 p-4"
+      >
+        <h3 class="text-sm font-semibold text-slate-700 mb-3">وصول بانکی</h3>
+        <table class="w-full text-sm">
+          <tbody>
+            <tr v-for="c in collections" :key="c.bank__name_fa" class="border-b border-slate-50">
+              <td class="py-2">{{ c.bank__name_fa }}</td>
+              <td class="py-2 text-left ltr-nums font-medium text-emerald-600">{{ rial(c.amount) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Leaderboard -->

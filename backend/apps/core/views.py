@@ -22,12 +22,13 @@ from apps.sales.models import ApprovalStatus, FactSalesMonthly
 from apps.sales.serializers import KPIResultSerializer, PeriodSerializer
 
 
-def _kpi_map(period, domain):
-    """{kpi_code: FactKPI} for a domain's company-level results."""
+def _kpi_map(period, domain, channel=""):
+    """{kpi_code: FactKPI} for a domain/channel's company-level results."""
     return {
         k.kpi.code: k
         for k in FactKPI.objects.filter(
-            period=period, scope=KPIScope.COMPANY, kpi__domain=domain
+            period=period, scope=KPIScope.COMPANY,
+            kpi__domain=domain, channel=channel,
         ).select_related("kpi")
     }
 
@@ -40,16 +41,21 @@ class ExecutiveOverviewView(APIView):
         responses=dict,
     )
     def get(self, request):
+        from apps.sales.models import SalesChannel
+
         period = DimPeriod.objects.get(pk=request.query_params.get("period"))
 
-        sales = _kpi_map(period, "sales")
+        team = _kpi_map(period, "sales", SalesChannel.TEAM)
+        org = _kpi_map(period, "sales", SalesChannel.ORGANIZATIONAL)
         production = _kpi_map(period, "production")
 
         def actual(m, code):
             k = m.get(code)
             return k.actual if k else None
 
-        sales_revenue = actual(sales, "revenue")
+        team_revenue = actual(team, "revenue") or 0
+        org_revenue = actual(org, "revenue") or 0
+        total_sales_revenue = team_revenue + org_revenue
         production_cost = (
             FactProductionCost.objects.filter(period=period).aggregate(
                 t=Sum("amount_rial")
@@ -74,11 +80,17 @@ class ExecutiveOverviewView(APIView):
         return Response(
             {
                 "period": PeriodSerializer(period).data,
-                "sales": {
-                    "kpis": KPIResultSerializer(list(sales.values()), many=True).data,
-                    "revenue": sales_revenue,
-                    "completeness": completeness(FactSalesMonthly),
+                # فروش تیم (همکار)
+                "sales_team": {
+                    "kpis": KPIResultSerializer(list(team.values()), many=True).data,
+                    "revenue": team_revenue,
                 },
+                # فروش سازمانی (کلی)
+                "sales_org": {
+                    "kpis": KPIResultSerializer(list(org.values()), many=True).data,
+                    "revenue": org_revenue,
+                },
+                "sales_completeness": completeness(FactSalesMonthly),
                 "production": {
                     "kpis": KPIResultSerializer(list(production.values()), many=True).data,
                     "output": actual(production, "prod_productivity"),
@@ -86,16 +98,19 @@ class ExecutiveOverviewView(APIView):
                     "piece_rate_revenue": piece_rate_revenue,
                     "completeness": completeness(FactProduction),
                 },
-                # Cross-domain figures. Kept explicit and labelled so nobody
-                # mistakes internal piece-rate income for external sales.
+                # Company-wide figures. Sales channels DO sum (two distinct
+                # external channels, no double-count). Production piece-rate is
+                # internal and kept separate from external sales.
                 "combined": {
-                    "external_sales_revenue": sales_revenue,
+                    "total_sales_revenue": total_sales_revenue,
+                    "sales_team_revenue": team_revenue,
+                    "sales_org_revenue": org_revenue,
                     "internal_piece_rate_revenue": piece_rate_revenue,
                     "production_cost": production_cost,
                     "production_margin": (piece_rate_revenue - production_cost),
                     "note": (
-                        "فروش ریالی (خارجی) و درآمد اجرت (داخلی) دو معیار متفاوت‌اند "
-                        "و با هم جمع نمی‌شوند."
+                        "فروش تیم و فروش سازمانی دو کانال خارجی مجزا هستند و جمع "
+                        "می‌شوند؛ اما درآمد اجرت تولید (داخلی) با فروش خارجی جمع نمی‌شود."
                     ),
                 },
             }

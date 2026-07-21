@@ -111,22 +111,8 @@ def _kpi_values(m: Measures, company_revenue: Decimal) -> dict[str, Decimal | No
     }
 
 
-@transaction.atomic
-def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int:
-    """
-    (Re)compute all sales KPIs for a period. Returns the number of FactKPI
-    rows written. Safe to run repeatedly — it replaces the period's rows.
-    """
-    catalog = ensure_kpi_catalog()
-
-    facts = FactSalesMonthly.objects.filter(period=period).select_related(
-        "employee", "employee__team"
-    )
-    if only_approved:
-        facts = facts.filter(status=ApprovalStatus.APPROVED)
-    facts = list(facts)
-
-    # Aggregate into scopes.
+def _compute_channel(period, catalog, facts, channel, rows):
+    """Aggregate one channel's facts into company/team/employee KPI rows."""
     company = Measures()
     by_employee: dict[int, Measures] = {}
     by_team: dict[int, Measures] = {}
@@ -138,22 +124,13 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
 
     company_revenue = company.revenue
 
-    # Wipe & rewrite this period's SALES KPI rows only. FactKPI is shared
-    # across domains, so this must never touch production results.
-    FactKPI.objects.filter(period=period, kpi__domain=DOMAIN).delete()
-
-    rows: list[FactKPI] = []
-
     def emit(scope, scope_id, label, measures):
         values = _kpi_values(measures, company_revenue)
         for code, actual in values.items():
             rows.append(
                 FactKPI(
-                    period=period,
-                    kpi=catalog[code],
-                    scope=scope,
-                    scope_id=scope_id,
-                    scope_label=label,
+                    period=period, kpi=catalog[code], channel=channel,
+                    scope=scope, scope_id=scope_id, scope_label=label,
                     actual=actual,
                     target=measures.target if code == "revenue" else None,
                 )
@@ -171,6 +148,34 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
     }
     for emp_id, m in by_employee.items():
         emit(KPIScope.EMPLOYEE, emp_id, emp_names.get(emp_id, ""), m)
+
+
+@transaction.atomic
+def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int:
+    """
+    (Re)compute all sales KPIs for a period, separately per channel (team vs
+    organizational). Returns the number of FactKPI rows written. Idempotent —
+    replaces this period's sales KPI rows without touching production.
+    """
+    from apps.sales.models import SalesChannel
+
+    catalog = ensure_kpi_catalog()
+
+    base = FactSalesMonthly.objects.filter(period=period).select_related(
+        "employee", "employee__team"
+    )
+    if only_approved:
+        base = base.filter(status=ApprovalStatus.APPROVED)
+
+    # Wipe & rewrite this period's SALES KPI rows only. FactKPI is shared
+    # across domains, so this must never touch production results.
+    FactKPI.objects.filter(period=period, kpi__domain=DOMAIN).delete()
+
+    rows: list[FactKPI] = []
+    for channel in SalesChannel.values:
+        facts = [f for f in base if f.channel == channel]
+        if facts:
+            _compute_channel(period, catalog, facts, channel, rows)
 
     FactKPI.objects.bulk_create(rows)
     return len(rows)

@@ -53,7 +53,7 @@ class SalesMonthlySerializer(serializers.ModelSerializer):
     class Meta:
         model = FactSalesMonthly
         fields = [
-            "id", "period", "period_label", "employee", "employee_name",
+            "id", "period", "period_label", "employee", "employee_name", "channel",
             "revenue_rial", "invoice_count", "active_customers", "new_customers",
             "profit_rial", "cost_rial", "target_rial", "calls",
             "status", "updated_at",
@@ -88,7 +88,7 @@ class KPIResultSerializer(serializers.ModelSerializer):
         model = FactKPI
         fields = [
             "id", "period", "kpi_code", "kpi_name_fa", "kpi_name_en",
-            "unit", "direction", "scope", "scope_id", "scope_label",
+            "unit", "direction", "scope", "scope_id", "scope_label", "channel",
             "actual", "target", "ideal", "deviation", "efficiency_pct",
         ]
 

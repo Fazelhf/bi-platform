@@ -7,16 +7,16 @@ export const salesApi = {
     return data.results ?? data;
   },
 
-  async dashboard(periodId: number): Promise<DashboardSummary> {
+  async dashboard(periodId: number, channel = "team"): Promise<DashboardSummary> {
     const { data } = await api.get("/sales/dashboard/summary/", {
-      params: { period: periodId },
+      params: { period: periodId, channel },
     });
     return data;
   },
 
-  async salesRows(periodId: number): Promise<SalesMonthly[]> {
+  async salesRows(periodId: number, channel = "team"): Promise<SalesMonthly[]> {
     const { data } = await api.get("/sales/sales-monthly/", {
-      params: { period: periodId, page_size: 100 },
+      params: { period: periodId, channel, page_size: 100 },
     });
     return data.results ?? data;
   },

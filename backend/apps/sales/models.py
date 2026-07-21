@@ -78,15 +78,33 @@ class ApprovalStatus(models.TextChoices):
     REJECTED = "rejected", "Rejected"
 
 
+class SalesChannel(models.TextChoices):
+    """
+    The company sells through two distinct channels, tracked in two separate
+    workbooks:
+      - TEAM (تیم فروش / همکار): the field sales team (9 reps, regional teams).
+      - ORGANIZATIONAL (فروش سازمانی): key-account / بانکی channel (2 reps,
+        provincial + bank-collection detail).
+    They must never be double-counted. The same person can appear in both
+    workbooks; keeping channel on the fact keeps them cleanly separate.
+    """
+
+    TEAM = "team", "تیم فروش (همکار)"
+    ORGANIZATIONAL = "organizational", "فروش سازمانی"
+
+
 class FactSalesMonthly(TimeStampedModel):
     """
-    Grain: one salesperson x one period. The 8 manually-entered measures
-    from rows 3-10 of the input sheets. All monetary values in Rials.
+    Grain: one salesperson x one period x one channel. The 8 manually-entered
+    measures from rows 3-10 of the input sheets. All monetary values in Rials.
     """
 
     period = models.ForeignKey(DimPeriod, on_delete=models.PROTECT, related_name="sales")
     employee = models.ForeignKey(
         DimEmployee, on_delete=models.PROTECT, related_name="sales"
+    )
+    channel = models.CharField(
+        max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM
     )
 
     revenue_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
@@ -118,25 +136,30 @@ class FactSalesMonthly(TimeStampedModel):
     )
 
     class Meta:
-        unique_together = ("period", "employee")
+        unique_together = ("period", "employee", "channel")
         ordering = ("-period__jalali_year", "-period__jalali_month", "employee")
 
     def __str__(self) -> str:
-        return f"{self.employee} · {self.period}"
+        return f"{self.employee} · {self.get_channel_display()} · {self.period}"
 
 
 class FactSalesProvince(TimeStampedModel):
-    """Grain: province x period. Sales vs target by geography (rows 14-48)."""
+    """Grain: province x period x channel. Sales vs target by geography.
+    Channel-scoped so each importer owns its own rows (idempotent re-import);
+    dashboards sum across channels for the combined geographic view."""
 
     period = models.ForeignKey(
         DimPeriod, on_delete=models.PROTECT, related_name="province_sales"
     )
     province = models.ForeignKey(DimProvince, on_delete=models.PROTECT)
+    channel = models.CharField(
+        max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM
+    )
     sales_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     target_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
 
     class Meta:
-        unique_together = ("period", "province")
+        unique_together = ("period", "province", "channel")
 
     def __str__(self) -> str:
         return f"{self.province} · {self.period}"

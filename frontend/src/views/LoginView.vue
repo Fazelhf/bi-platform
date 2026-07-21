@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { homeRouteFor } from "@/router";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -16,7 +17,7 @@ async function submit() {
   loading.value = true;
   try {
     await auth.login(username.value, password.value);
-    router.push({ name: "dashboard" });
+    router.push({ name: homeRouteFor(auth.department) });
   } catch {
     error.value = "نام کاربری یا رمز عبور نادرست است.";
   } finally {

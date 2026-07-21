@@ -17,7 +17,9 @@ PY
 
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput || true
-# Seed static dimensions (idempotent).
+# Seed static dimensions + demo users (idempotent).
 python manage.py seed_sales || true
+python manage.py seed_production || true
+python manage.py seed_users || true
 
 exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3

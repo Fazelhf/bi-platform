@@ -5,6 +5,18 @@ export interface Period {
   label: string;
 }
 
+export type Department = "" | "production" | "sales_org" | "sales_team";
+
+export interface Me {
+  username: string;
+  display_name_fa: string;
+  role: "executive" | "manager" | "operator" | "viewer";
+  department: Department;
+  is_superuser: boolean;
+  can_enter_data: boolean;
+  can_approve: boolean;
+}
+
 export interface KpiResult {
   id: number;
   period: number;
@@ -48,4 +60,73 @@ export interface SalesMonthly {
   calls: number;
   status: "draft" | "submitted" | "approved" | "rejected";
   updated_at: string;
+}
+
+// ---------------- Production ----------------
+export interface ProductionRow {
+  id: number;
+  period: number;
+  period_label: string;
+  machine: number;
+  machine_name: string;
+  machine_kind: "cutting" | "print";
+  active_shifts: string;
+  output_units: string;
+  waste_pct: string;
+  repair_count: string;
+  downtime_breakdown_shifts: string;
+  downtime_sizechange_shifts: string;
+  downtime_nowork_shifts: string;
+  total_downtime_shifts: string;
+  status: "draft" | "submitted" | "approved" | "rejected";
+  updated_at: string;
+}
+
+export interface ProductionDashboard {
+  period: Period;
+  kpis: KpiResult[];
+  machine_kpis: KpiResult[];
+  machines: {
+    machine__name_fa: string;
+    machine__kind: string;
+    active_shifts: number;
+    output_units: number;
+    waste_pct: number;
+    downtime_breakdown_shifts: number;
+    downtime_sizechange_shifts: number;
+    downtime_nowork_shifts: number;
+  }[];
+  costs: { category__name_fa: string; amount: number }[];
+  revenue: { product: string; quantity: number; amount: number }[];
+  print_colors: { color_count: number; area_sqm: number }[];
+}
+
+// ---------------- Cross-domain executive overview ----------------
+interface Completeness {
+  total: number;
+  approved: number;
+  complete: boolean;
+}
+
+export interface ExecutiveOverview {
+  period: Period;
+  sales_team: { kpis: KpiResult[]; revenue: number };
+  sales_org: { kpis: KpiResult[]; revenue: number };
+  sales_completeness: Completeness;
+  production: {
+    kpis: KpiResult[];
+    output: number | null;
+    cost: number;
+    piece_rate_revenue: number;
+    completeness: Completeness;
+  };
+  combined: {
+    total_sales_revenue: number;
+    sales_team_revenue: number;
+    sales_org_revenue: number;
+    internal_piece_rate_revenue: number;
+    production_cost: number;
+    production_margin: number;
+    note: string;
+  };
 }

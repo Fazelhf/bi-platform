@@ -27,6 +27,7 @@ from apps.sales.models import (
     DimTeam,
     FactSalesMonthly,
     FactSalesProvince,
+    SalesChannel,
 )
 from apps.sales.services.kpi import compute_period_kpis
 
@@ -138,6 +139,7 @@ class Command(BaseCommand):
             FactSalesMonthly.objects.update_or_create(
                 period=period,
                 employee=employee,
+                channel=SalesChannel.TEAM,
                 defaults={**values, "status": status},
             )
             n_facts += 1
@@ -159,6 +161,7 @@ class Command(BaseCommand):
             FactSalesProvince.objects.update_or_create(
                 period=period,
                 province=province,
+                channel=SalesChannel.TEAM,
                 defaults={
                     "sales_rial": _num(ws.cell(row=row, column=PROVINCE_SALES_COL).value),
                     "target_rial": _num(ws.cell(row=row, column=PROVINCE_TARGET_COL).value),

@@ -111,6 +111,10 @@ class FactKPI(TimeStampedModel):
     scope_id = models.PositiveBigIntegerField(null=True, blank=True)
     scope_label = models.CharField(max_length=150, blank=True)
 
+    # Optional partition within a domain. Sales uses it to separate the
+    # team vs organizational channels; production leaves it blank.
+    channel = models.CharField(max_length=16, blank=True, default="")
+
     # actual / مطلوب / ایده‌آل — the comparison frame the production
     # workbook uses, applied uniformly to every KPI.
     actual = models.DecimalField(max_digits=24, decimal_places=4, null=True)
@@ -120,7 +124,7 @@ class FactKPI(TimeStampedModel):
     efficiency_pct = models.DecimalField(max_digits=12, decimal_places=2, null=True)
 
     class Meta:
-        unique_together = ("period", "kpi", "scope", "scope_id")
+        unique_together = ("period", "kpi", "scope", "scope_id", "channel")
         ordering = ("period", "kpi", "scope")
 
     def __str__(self) -> str:

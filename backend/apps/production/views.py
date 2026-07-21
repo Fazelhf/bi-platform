@@ -28,6 +28,7 @@ from apps.production.serializers import (
     ProductionRevenueSerializer,
     ProductionSerializer,
 )
+from apps.core.permissions import DepartmentEntryPermission
 from apps.production.services.kpi import compute_period_kpis
 from apps.sales.models import ApprovalStatus
 from apps.sales.permissions import CanApprove, CanEnterData
@@ -64,7 +65,8 @@ class ProductionViewSet(viewsets.ModelViewSet):
 
     queryset = FactProduction.objects.select_related("machine", "period").all()
     serializer_class = ProductionSerializer
-    permission_classes = [CanEnterData]
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "production"
     filterset_fields = ["period", "machine", "status"]
 
     def perform_update(self, serializer):
@@ -78,7 +80,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
         fact.save(update_fields=["status", "submitted_by", "updated_at"])
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove])
+    @action(detail=True, methods=["post"], permission_classes=[CanApprove, DepartmentEntryPermission])
     def approve(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.APPROVED
@@ -87,7 +89,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
         compute_period_kpis(fact.period)
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove])
+    @action(detail=True, methods=["post"], permission_classes=[CanApprove, DepartmentEntryPermission])
     def reject(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.REJECTED
@@ -98,28 +100,32 @@ class ProductionViewSet(viewsets.ModelViewSet):
 class ProductionCostViewSet(viewsets.ModelViewSet):
     queryset = FactProductionCost.objects.select_related("category", "period").all()
     serializer_class = ProductionCostSerializer
-    permission_classes = [CanEnterData]
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "production"
     filterset_fields = ["period", "category"]
 
 
 class ProductionRevenueViewSet(viewsets.ModelViewSet):
     queryset = FactProductionRevenue.objects.select_related("product", "period").all()
     serializer_class = ProductionRevenueSerializer
-    permission_classes = [CanEnterData]
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "production"
     filterset_fields = ["period", "product"]
 
 
 class PrintColorViewSet(viewsets.ModelViewSet):
     queryset = FactPrintColor.objects.select_related("period").all()
     serializer_class = PrintColorSerializer
-    permission_classes = [CanEnterData]
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "production"
     filterset_fields = ["period"]
 
 
 class MaterialBalanceViewSet(viewsets.ModelViewSet):
     queryset = FactMaterialBalance.objects.select_related("period").all()
     serializer_class = MaterialBalanceSerializer
-    permission_classes = [CanEnterData]
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "production"
     filterset_fields = ["period", "stream"]
 
 

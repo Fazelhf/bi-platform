@@ -11,16 +11,35 @@ manufacturer + nationwide distributor). See
 [`docs/analysis.md`](docs/analysis.md) for the source-workbook analysis that
 drives the design.
 
-## Status — Phase 1 (Sales domain) ✅
+## Status
 
+### Phase 1 — Sales domain ✅
 | Layer | Status |
 |-------|--------|
-| **1a** Backend + data warehouse (Django/DRF, star schema, Excel importer, KPI engine, JWT/RBAC, Swagger) | ✅ built & verified on real data |
-| **1b** Frontend (Vue 3 + TS + Pinia, AG Grid entry, ECharts dashboard, RTL/Persian) | ✅ built & verified in browser |
+| **1a** Backend + warehouse (star schema, Excel importer, KPI engine, JWT/RBAC, Swagger) | ✅ verified on real data |
+| **1b** Frontend (Vue 3 + TS + Pinia, AG Grid entry, ECharts dashboard, RTL/Persian) | ✅ verified in browser |
 | **1c** Infra (Docker, Postgres, Redis, RabbitMQ, Celery, Nginx, GitHub Actions) | ✅ compose + CI |
 
-**Next phases:** Production domain (7 manufacturing KPIs) · Employee scorecards ·
-executive PDF/Excel export · 2FA · row-level security by team.
+### Phase 2 — Production domain + unification ✅
+| Layer | Status |
+|-------|--------|
+| **2a** Unified KPI core — `FactKPI` moved to `core`, conformed scopes (company/team/employee/machine/product) shared by every domain | ✅ verified |
+| **2b** Production warehouse + KPI engine (7 factory KPIs, machines/products/costs, importer) — fixes the workbook's `#REF!`/`#DIV/0!`/unclosed-paren defects | ✅ verified on real data |
+| **2c** Unified executive overview — sales + production on one screen, one API, one period | ✅ verified in browser |
+
+### Phase 3 — Sales channels + two-role access ✅
+| Layer | Status |
+|-------|--------|
+| **3a** Sales split into two channels (team/همکار + organizational/سازمانی); organizational importer adds key-account reps, provincial sales & bank collections — total company sales now **188.2B** | ✅ verified on real data |
+| **3b** Two-role access model — CEO (executive, read-only, all dashboards) vs department managers (each edits only their section/channel), `/api/auth/me/`, 5 permission tests | ✅ verified via API + tests |
+| **3c** Role-aware frontend — CEO's 4-section view (کلی/تولید/فروش همکار/فروش کلی); managers land on their own entry only; department-guarded routes | ✅ verified in browser |
+
+**Personas (demo, password `demo12345`):** `ceo` (executive) · `prod_manager` ·
+`org_manager` · `team_manager` · `admin` (Django superuser).
+
+**Next candidates:** multi-month trends & month-over-month comparison · executive
+PDF/Excel export · 2FA · scheduled KPI recompute via Celery · row-level detail
+security within a channel.
 
 ## Architecture
 
@@ -54,9 +73,14 @@ cd backend && python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt
 .venv/Scripts/python manage.py migrate
 .venv/Scripts/python manage.py seed_sales
+.venv/Scripts/python manage.py seed_production
+.venv/Scripts/python manage.py seed_users          # CEO + 3 managers + admin
 .venv/Scripts/python manage.py import_sales_excel \
     --employee-file "path/to/KPI همکار اردیبهشت 1405.xlsx" --year 1405 --month 2 --approve
-.venv/Scripts/python manage.py createsuperuser
+.venv/Scripts/python manage.py import_org_sales_excel \
+    --file "path/to/سازمانیKPI ورودی اردیبهشت 1405.xlsx" --year 1405 --month 2 --approve
+.venv/Scripts/python manage.py import_production_excel \
+    --file "path/to/KPI اردیبهشت تولید1405.xlsx" --year 1405 --month 2 --approve
 .venv/Scripts/python manage.py runserver          # :8000, docs at /api/docs/
 
 # 2) Frontend
