@@ -1,107 +1,187 @@
-# Enterprise BI Platform
+<div align="center">
 
-A centralized **Business Intelligence platform** (in the spirit of Power BI /
-Tableau / Looker) for executive reporting, KPI management, and analytics —
-replacing the company's manual Excel-based KPI workflow with a proper data
-warehouse, an Excel-like data-entry experience for operators, and live
-dashboards for executives.
+# 📊 Enterprise BI Platform · پلتفرم هوش تجاری سازمانی
 
-Built from analysis of the company's real reporting workbooks (a paper-roll
-manufacturer + nationwide distributor). See
-[`docs/analysis.md`](docs/analysis.md) for the source-workbook analysis that
-drives the design.
+**A centralized executive-reporting, KPI-management and analytics platform** — replacing a
+manual, Excel-based monthly reporting workflow with a proper data warehouse, an Excel-like
+data-entry experience for operators, and live dashboards for executives.
 
-## Status
+جایگزینی گزارش‌گیری دستی مبتنی بر اکسل با یک پلتفرم متمرکز هوش تجاری: انبار داده، ورود اطلاعات شبیه اکسل برای اپراتورها، و داشبورد زنده برای مدیران.
 
-### Phase 1 — Sales domain ✅
-| Layer | Status |
-|-------|--------|
-| **1a** Backend + warehouse (star schema, Excel importer, KPI engine, JWT/RBAC, Swagger) | ✅ verified on real data |
-| **1b** Frontend (Vue 3 + TS + Pinia, AG Grid entry, ECharts dashboard, RTL/Persian) | ✅ verified in browser |
-| **1c** Infra (Docker, Postgres, Redis, RabbitMQ, Celery, Nginx, GitHub Actions) | ✅ compose + CI |
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![Django](https://img.shields.io/badge/Django-5.1-092E20?logo=django&logoColor=white)
+![DRF](https://img.shields.io/badge/DRF-3.15-A30000?logo=django&logoColor=white)
+![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)
+![ECharts](https://img.shields.io/badge/ECharts-5.5-AA344D?logo=apacheecharts&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
 
-### Phase 2 — Production domain + unification ✅
-| Layer | Status |
-|-------|--------|
-| **2a** Unified KPI core — `FactKPI` moved to `core`, conformed scopes (company/team/employee/machine/product) shared by every domain | ✅ verified |
-| **2b** Production warehouse + KPI engine (7 factory KPIs, machines/products/costs, importer) — fixes the workbook's `#REF!`/`#DIV/0!`/unclosed-paren defects | ✅ verified on real data |
-| **2c** Unified executive overview — sales + production on one screen, one API, one period | ✅ verified in browser |
+</div>
 
-### Phase 3 — Sales channels + two-role access ✅
-| Layer | Status |
-|-------|--------|
-| **3a** Sales split into two channels (team/همکار + organizational/سازمانی); organizational importer adds key-account reps, provincial sales & bank collections — total company sales now **188.2B** | ✅ verified on real data |
-| **3b** Two-role access model — CEO (executive, read-only, all dashboards) vs department managers (each edits only their section/channel), `/api/auth/me/`, 5 permission tests | ✅ verified via API + tests |
-| **3c** Role-aware frontend — CEO's 4-section view (کلی/تولید/فروش همکار/فروش کلی); managers land on their own entry only; department-guarded routes | ✅ verified in browser |
+![Executive overview](docs/screenshots/01-overview.png)
 
-**Personas (demo, password `demo12345`):** `ceo` (executive) · `prod_manager` ·
-`org_manager` · `team_manager` · `admin` (Django superuser).
+---
 
-**Next candidates:** multi-month trends & month-over-month comparison · executive
-PDF/Excel export · 2FA · scheduled KPI recompute via Celery · row-level detail
-security within a channel.
+## What it is · معرفی
 
-## Architecture
+Built for a **paper-roll manufacturer + nationwide distributor** by reverse-engineering
+three real monthly KPI workbooks (sales team, organizational sales, production). Operators
+enter data in an Excel-like grid → managers approve → executives see live Power-BI-style
+dashboards. **Approved data is the single source of truth.**
 
+این پلتفرم برای یک شرکت **تولید رول کاغذ + توزیع سراسری** ساخته شده و از دل سه فایل واقعی KPI ماهانه (تیم فروش، فروش سازمانی، تولید) مهندسی معکوس شده است. اپراتور داده را در گرید شبیه‌اکسل وارد می‌کند ← مدیر تأیید می‌کند ← مدیرعامل داشبورد زنده می‌بیند. **داده تأییدشده، منبع واحد حقیقت است.**
+
+Two user personas:
+- **CEO (executive)** — read-only, sees all four dashboards (Overview · Production · Team Sales · Organizational Sales).
+- **Department managers** — each edits **only** their own section/channel.
+
+---
+
+## Screenshots · تصاویر
+
+| Production dashboard (7 KPIs) | Team-sales dashboard |
+|---|---|
+| ![Production](docs/screenshots/02-production.png) | ![Team sales](docs/screenshots/03-sales-team.png) |
+
+| Organizational sales | Excel-like entry grid (AG Grid) |
+|---|---|
+| ![Org sales](docs/screenshots/04-sales-org.png) | ![Entry grid](docs/screenshots/05-entry-grid.png) |
+
+---
+
+## Architecture · معماری
+
+```mermaid
+flowchart TB
+    subgraph Sources["📄 Monthly Excel workbooks"]
+        X1[Team sales / همکار]
+        X2[Organizational / سازمانی]
+        X3[Production / تولید]
+    end
+
+    subgraph Backend["⚙️ Django + DRF"]
+        IMP[Excel importers]
+        WH[(PostgreSQL<br/>star-schema warehouse)]
+        KPI[KPI engine<br/>replaces hidden calc sheets]
+        API[REST API + JWT/RBAC + Swagger]
+    end
+
+    subgraph Frontend["🖥️ Vue 3 + TypeScript"]
+        GRID[AG Grid entry<br/>operators]
+        DASH[ECharts dashboards<br/>executives]
+    end
+
+    X1 & X2 & X3 --> IMP --> WH --> KPI --> WH
+    WH --> API
+    GRID -- "draft → submit → approve" --> API
+    API --> DASH
 ```
-┌────────────┐   Excel import    ┌─────────────────────────────┐
-│  Workbooks │ ────────────────► │  PostgreSQL data warehouse  │
-└────────────┘                   │  (star schema: dims + facts)│
-                                 └─────────────┬───────────────┘
-   operators                                   │ KPI engine (Celery)
-   ┌────────────┐   REST/JWT      ┌─────────────▼───────────────┐
-   │  AG Grid   │ ◄─────────────► │  Django + DRF API + Swagger │
-   │  entry     │                 └─────────────┬───────────────┘
-   └────────────┘                               │
-   executives                                   │
-   ┌────────────┐   REST/JWT                     │
-   │  ECharts   │ ◄─────────────────────────────┘
-   │  dashboard │
-   └────────────┘
-```
 
-- **Operators** enter data in an Excel-like grid → **managers** approve →
-  **executives** see live dashboards. Approved data is the single source of truth.
-- KPIs are computed in the pipeline (`apps/sales/services/kpi.py`), not in the
-  grid — the workbook's hidden calc sheets become `FactKPI` rows.
+**Dimensional model (star schema).** Conformed dimensions — `DimPeriod` (Jalali month),
+`DimEmployee`, `DimTeam`, `DimProvince`, `DimBank`, `DimMachine`, `DimProduct`, `DimKPI` —
+shared across domains. Facts: `FactSalesMonthly` (employee × channel × month),
+`FactProduction` (machine × month), cost/revenue/collection facts, and a single conformed
+`FactKPI` (computed results at company / team / employee / machine scope) that **both** sales
+and production write to. The workbooks' hidden calculation sheets become code in
+`services/kpi.py`, not formulas in a grid.
 
-## Run locally (two terminals, zero Docker)
+---
+
+## Key results (اردیبهشت ۱۴۰۵, on real data)
+
+| Metric | Value |
+|---|---|
+| **Total company sales** (team + organizational) | **۱۸۸٫۲ B Rial** |
+| — Team channel (9 reps) | 126.0 B |
+| — Organizational channel (2 key accounts) | 62.2 B |
+| Production output vs 16 000/shift benchmark | 1,145,442 |
+| Production waste rate (from material balance) | ~1% |
+| Production margin (piece-rate − cost) | 2.19 B |
+| Backend tests | **11 passing** |
+
+> **Engineering note.** The source workbooks contained real defects — `#REF!` references, an
+> unclosed-parenthesis waste formula, `#DIV/0!` cells, and a team-profit average that should
+> have been a sum. These are **fixed and documented in code**, not copied. Ratios are computed
+> from aggregated numerators (not averaged per-row ratios). Internal piece-rate income is kept
+> strictly separate from external invoiced sales.
+
+---
+
+## Tech stack
+
+**Backend** Python 3.13 · Django 5 · DRF · PostgreSQL · Redis · Celery · RabbitMQ · openpyxl · JWT + RBAC · drf-spectacular (Swagger)
+**Frontend** Vue 3 · TypeScript · Vite · Pinia · Vue Router · TailwindCSS · Apache ECharts · AG Grid (Community) · Axios
+**Infra** Docker Compose · Nginx · GitHub Actions
+
+---
+
+## Quick start · اجرا
+
+### Local (SQLite — zero config)
 
 ```bash
-# 1) Backend  (SQLite, no config)
-cd backend && python -m venv .venv
+# Backend
+cd backend
+python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt
 .venv/Scripts/python manage.py migrate
 .venv/Scripts/python manage.py seed_sales
 .venv/Scripts/python manage.py seed_production
 .venv/Scripts/python manage.py seed_users          # CEO + 3 managers + admin
-.venv/Scripts/python manage.py import_sales_excel \
-    --employee-file "path/to/KPI همکار اردیبهشت 1405.xlsx" --year 1405 --month 2 --approve
-.venv/Scripts/python manage.py import_org_sales_excel \
-    --file "path/to/سازمانیKPI ورودی اردیبهشت 1405.xlsx" --year 1405 --month 2 --approve
-.venv/Scripts/python manage.py import_production_excel \
-    --file "path/to/KPI اردیبهشت تولید1405.xlsx" --year 1405 --month 2 --approve
-.venv/Scripts/python manage.py runserver          # :8000, docs at /api/docs/
+.venv/Scripts/python manage.py import_sales_excel        --employee-file "…/KPI همکار اردیبهشت 1405.xlsx"   --year 1405 --month 2 --approve
+.venv/Scripts/python manage.py import_org_sales_excel    --file          "…/سازمانیKPI ورودی اردیبهشت 1405.xlsx" --year 1405 --month 2 --approve
+.venv/Scripts/python manage.py import_production_excel    --file          "…/KPI اردیبهشت تولید1405.xlsx"     --year 1405 --month 2 --approve
+.venv/Scripts/python manage.py runserver           # :8000 · Swagger at /api/docs/
 
-# 2) Frontend
+# Frontend (new terminal)
 cd frontend && npm install && npm run dev          # :5173
 ```
 
-## Run with Docker (full stack)
+### Docker (full stack)
 
 ```bash
-cp .env.example .env          # then edit SECRET_KEY etc.
-docker compose up --build
-# Frontend + API behind Nginx:  http://localhost:8080
-# RabbitMQ management UI:       http://localhost:15672
+cp .env.example .env      # then set SECRET_KEY etc.
+docker compose up --build # app+API via Nginx :8080 · RabbitMQ UI :15672
 ```
+
+### Demo personas (password `demo12345`)
+
+| User | Role | Sees |
+|---|---|---|
+| `ceo` | Executive | All 4 dashboards (read-only) |
+| `team_manager` | Manager | Team-sales entry + dashboard |
+| `org_manager` | Manager | Organizational-sales entry + dashboard |
+| `prod_manager` | Manager | Production entry + dashboard |
+| `admin` | Superuser | Django admin |
+
+---
 
 ## Repository layout
 
 ```
-backend/    Django 5 + DRF — warehouse, KPI engine, importer, API   (see backend/README.md)
-frontend/   Vue 3 + TS + Vite — dashboard + Excel-like entry         (see frontend/README.md)
-docs/       Source-workbook analysis + KPI catalog
+backend/    Django 5 + DRF — warehouse, KPI engines, importers, API   (backend/README.md)
+  apps/core        DimPeriod · DimKPI · FactKPI (shared) · exec overview · permissions
+  apps/accounts    custom User (role + department), JWT /me
+  apps/sales       team + organizational channels, KPI engine, importers
+  apps/production   machines/products/costs, 7-KPI engine, importer
+frontend/   Vue 3 + TS + Vite — dashboards + Excel-like entry           (frontend/README.md)
+docs/       source-workbook analysis · KPI catalog · screenshots
 docker-compose.yml   Postgres · Redis · RabbitMQ · backend · worker · frontend/Nginx
 .github/    CI (backend checks/tests + frontend build)
 ```
+
+See [`docs/analysis.md`](docs/analysis.md) for the full source-workbook analysis and KPI catalog.
+
+---
+
+## Status
+
+| Phase | Scope | State |
+|---|---|---|
+| **1** | Sales domain — warehouse, KPI engine, AG Grid entry, ECharts dashboard, JWT/RBAC, Docker/CI | ✅ |
+| **2** | Production domain — 7 factory KPIs; unified `FactKPI`; cross-domain executive overview | ✅ |
+| **3** | Two sales channels (team + organizational); two-role access (CEO vs department managers) | ✅ |
+
+**Roadmap:** multi-month trends & MoM comparison · executive PDF/Excel export · 2FA ·
+scheduled KPI recompute via Celery.
