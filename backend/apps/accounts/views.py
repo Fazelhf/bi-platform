@@ -1,11 +1,18 @@
+from django.db.models import Q
 from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.models import User
-from apps.accounts.serializers import UserSerializer
+from apps.accounts.models import Message, Note, User
+from apps.accounts.serializers import (
+    MessageSerializer,
+    NoteSerializer,
+    UserCardSerializer,
+    UserSerializer,
+)
 from apps.core.audit import log as audit_log
 from apps.core.models import AuditLog
 from apps.core.permissions import IsExecutiveOrAdmin
@@ -56,6 +63,9 @@ class MeView(APIView):
             {
                 "username": u.get_username(),
                 "display_name_fa": u.display_name_fa,
+                "job_title_fa": u.job_title_fa,
+                "initials": u.initials,
+                "avatar_color": u.avatar_color,
                 "role": u.role,
                 "department": u.department,
                 "is_superuser": u.is_superuser,
@@ -63,3 +73,90 @@ class MeView(APIView):
                 "can_approve": u.can_approve,
             }
         )
+
+
+class HeartbeatView(APIView):
+    """Frontend pings this every ~30s so the user shows as online."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        request.user.touch_presence()
+        return Response({"ok": True})
+
+
+class TeamViewSet(viewsets.ReadOnlyModelViewSet):
+    """Directory of system users with live online status — for the team card,
+    profile popovers, and the chat contact list."""
+
+    queryset = User.objects.filter(is_active=True).order_by("display_name_fa")
+    serializer_class = UserCardSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ["role", "department"]
+
+
+class NoteViewSet(viewsets.ModelViewSet):
+    """Personal notes and notes attached to a colleague's profile."""
+
+    serializer_class = NoteSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ["subject"]
+
+    def get_queryset(self):
+        # A user sees notes they authored, plus notes about them.
+        return Note.objects.filter(
+            Q(author=self.request.user) | Q(subject=self.request.user)
+        ).select_related("author")
+
+    def perform_create(self, serializer):
+        note = serializer.save(author=self.request.user)
+        audit_log(self.request.user, note, AuditLog.Action.CREATE)
+
+    def perform_destroy(self, instance):
+        if instance.author_id != self.request.user.pk and not self.request.user.is_superuser:
+            raise PermissionDenied("فقط نویسنده می‌تواند یادداشت را حذف کند.")
+        instance.delete()
+
+
+class MessageViewSet(viewsets.ModelViewSet):
+    """1:1 chat between system users."""
+
+    serializer_class = MessageSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        me = self.request.user
+        qs = Message.objects.filter(Q(sender=me) | Q(recipient=me))
+        other = self.request.query_params.get("with")
+        if other:
+            qs = qs.filter(Q(sender_id=other) | Q(recipient_id=other))
+        return qs.select_related("sender", "recipient")
+
+    def perform_create(self, serializer):
+        serializer.save(sender=self.request.user)
+
+    @action(detail=False, methods=["get"])
+    def conversation(self, request):
+        """Full thread with ?with=<user_id>; marks their messages read."""
+        other = request.query_params.get("with")
+        if not other:
+            return Response({"detail": "پارامتر with الزامی است."}, status=400)
+        me = request.user
+        thread = Message.objects.filter(
+            Q(sender=me, recipient_id=other) | Q(sender_id=other, recipient=me)
+        ).order_by("created_at")
+        Message.objects.filter(sender_id=other, recipient=me, is_read=False).update(
+            is_read=True
+        )
+        return Response(MessageSerializer(thread, many=True).data)
+
+    @action(detail=False, methods=["get"])
+    def unread_count(self, request):
+        counts = {}
+        rows = Message.objects.filter(recipient=request.user, is_read=False).values_list(
+            "sender_id", flat=True
+        )
+        for sid in rows:
+            counts[sid] = counts.get(sid, 0) + 1
+        return Response({"total": sum(counts.values()), "by_sender": counts})

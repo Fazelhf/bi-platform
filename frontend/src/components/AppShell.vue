@@ -1,0 +1,245 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
+import { RouterView, useRoute, useRouter } from "vue-router";
+import { useAuthStore } from "@/stores/auth";
+import { usePresence } from "@/composables/usePresence";
+import { socialApi } from "@/api/social";
+import { inboxApi } from "@/api/platform";
+import NavIcon from "@/components/NavIcon.vue";
+import UserAvatar from "@/components/UserAvatar.vue";
+import NotificationBell from "@/components/NotificationBell.vue";
+
+const auth = useAuthStore();
+const route = useRoute();
+const router = useRouter();
+
+usePresence(); // keep me online
+
+const collapsed = ref(false);
+const inboxCount = ref(0);
+const chatCount = ref(0);
+const userMenu = ref(false);
+const search = ref("");
+
+interface Item { name: string; label: string; icon: string; badge?: () => number }
+
+const primary = computed<Item[]>(() => {
+  const items: Item[] = [];
+  if (auth.isExecutive) {
+    items.push(
+      { name: "overview", label: "نمای کلی", icon: "grid" },
+      { name: "sales-dashboard", label: "فروش همکار", icon: "chart" },
+      { name: "sales-org-dashboard", label: "فروش کلی", icon: "chart" },
+      { name: "production-dashboard", label: "تولید", icon: "box" },
+    );
+  } else if (auth.department === "production") {
+    items.push(
+      { name: "production-entry", label: "ورود تولید", icon: "box" },
+      { name: "production-dashboard", label: "داشبورد تولید", icon: "chart" },
+    );
+  } else if (auth.department === "sales_org") {
+    items.push(
+      { name: "sales-org-entry", label: "ورود فروش سازمانی", icon: "box" },
+      { name: "sales-org-dashboard", label: "داشبورد فروش کلی", icon: "chart" },
+    );
+  } else if (auth.department === "sales_team") {
+    items.push(
+      { name: "sales-entry", label: "ورود تیم فروش", icon: "box" },
+      { name: "sales-dashboard", label: "داشبورد فروش همکار", icon: "chart" },
+    );
+  }
+  if (auth.me?.can_approve || auth.me?.is_superuser) {
+    items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
+  }
+  items.push(
+    { name: "chat", label: "پیام‌ها", icon: "chat", badge: () => chatCount.value },
+    { name: "notes", label: "یادداشت‌ها", icon: "notes" },
+    { name: "team", label: "تیم", icon: "team" },
+  );
+  return items;
+});
+
+const adminItems: Item[] = [
+  { name: "admin-users", label: "کاربران", icon: "users" },
+  { name: "admin-dimensions", label: "داده‌های پایه", icon: "database" },
+  { name: "admin-formulas", label: "فرمول‌ها", icon: "formula" },
+  { name: "admin-audit", label: "تاریخچه", icon: "history" },
+];
+
+const pageTitle = computed(() => {
+  const map: Record<string, string> = {
+    overview: "نمای کلی", "sales-dashboard": "داشبورد فروش همکار",
+    "sales-org-dashboard": "داشبورد فروش کلی", "production-dashboard": "داشبورد تولید",
+    inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "تیم",
+    "sales-entry": "ورود اطلاعات تیم فروش", "sales-org-entry": "ورود فروش سازمانی",
+    "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
+    "admin-users": "مدیریت کاربران", "admin-dimensions": "داده‌های پایه",
+    "admin-formulas": "فرمول‌های BI", "admin-audit": "تاریخچه تغییرات",
+  };
+  return map[route.name as string] ?? "پلتفرم هوش تجاری";
+});
+
+const today = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+  day: "numeric", month: "long", year: "numeric",
+}).format(new Date());
+
+async function refreshBadges() {
+  try {
+    if (auth.me?.can_approve || auth.me?.is_superuser) {
+      const [s, p] = await Promise.all([inboxApi.pendingSales(), inboxApi.pendingProduction()]);
+      inboxCount.value = s.length + p.length;
+    }
+    chatCount.value = (await socialApi.unreadMessages()).total;
+  } catch { /* ignore */ }
+}
+
+function go(name: string) { router.push({ name }); }
+function logout() { auth.logout(); router.push({ name: "login" }); }
+
+onMounted(() => {
+  refreshBadges();
+  window.setInterval(refreshBadges, 30_000);
+});
+</script>
+
+<template>
+  <div class="min-h-screen flex gap-4 p-4" dir="rtl">
+    <!-- ============ Sidebar (right in RTL) ============ -->
+    <aside
+      class="bg-white rounded-card shadow-soft flex flex-col shrink-0 transition-all duration-200"
+      :class="collapsed ? 'w-[76px]' : 'w-64'"
+      style="height: calc(100vh - 2rem); position: sticky; top: 1rem"
+    >
+      <!-- Logo + collapse -->
+      <div class="flex items-center gap-3 p-4" :class="collapsed ? 'justify-center' : ''">
+        <div class="w-10 h-10 rounded-2xl bg-ink text-white flex items-center justify-center shrink-0">
+          <NavIcon name="chart" :size="20" />
+        </div>
+        <span v-if="!collapsed" class="font-bold text-ink flex-1">هوش تجاری</span>
+        <button
+          v-if="!collapsed"
+          class="text-slate-400 hover:text-ink"
+          @click="collapsed = true"
+        ><NavIcon name="chevron" :size="18" /></button>
+      </div>
+      <button
+        v-if="collapsed"
+        class="mx-auto mb-2 text-slate-400 hover:text-ink rotate-180"
+        @click="collapsed = false"
+      ><NavIcon name="chevron" :size="18" /></button>
+
+      <!-- Nav -->
+      <nav class="flex-1 overflow-y-auto px-3 space-y-1">
+        <button
+          v-for="it in primary"
+          :key="it.name"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition group relative"
+          :class="[
+            route.name === it.name ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100',
+            collapsed ? 'justify-center' : '',
+          ]"
+          :title="collapsed ? it.label : ''"
+          @click="go(it.name)"
+        >
+          <NavIcon :name="it.icon" :size="20" />
+          <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
+          <span
+            v-if="it.badge && it.badge()"
+            class="text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center"
+            :class="route.name === it.name ? 'bg-white/20' : 'bg-slate-200 text-slate-600'"
+          >{{ it.badge() }}</span>
+        </button>
+
+        <template v-if="auth.isExecutive">
+          <div class="h-px bg-slate-100 my-3"></div>
+          <p v-if="!collapsed" class="text-[11px] text-slate-400 px-3 pb-1">مدیریت سیستم</p>
+          <button
+            v-for="it in adminItems"
+            :key="it.name"
+            class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
+            :class="[
+              route.name === it.name ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100',
+              collapsed ? 'justify-center' : '',
+            ]"
+            :title="collapsed ? it.label : ''"
+            @click="go(it.name)"
+          >
+            <NavIcon :name="it.icon" :size="20" />
+            <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
+          </button>
+        </template>
+      </nav>
+
+      <!-- Bottom -->
+      <div class="p-3 border-t border-slate-100 space-y-1">
+        <button
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-slate-500 hover:bg-slate-100"
+          :class="collapsed ? 'justify-center' : ''"
+          @click="go('profile-me')"
+        >
+          <NavIcon name="settings" :size="20" />
+          <span v-if="!collapsed" class="text-right flex-1">پروفایل من</span>
+        </button>
+        <button
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-red-500 hover:bg-red-50"
+          :class="collapsed ? 'justify-center' : ''"
+          @click="logout"
+        >
+          <NavIcon name="logout" :size="20" />
+          <span v-if="!collapsed" class="text-right flex-1">خروج</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ============ Main ============ -->
+    <div class="flex-1 min-w-0 flex flex-col gap-4">
+      <!-- Topbar -->
+      <header class="bg-white rounded-card shadow-soft px-5 py-3 flex items-center justify-between">
+        <!-- Title (right) -->
+        <div class="flex items-center gap-2">
+          <h1 class="font-bold text-ink">{{ pageTitle }}</h1>
+          <span class="text-slate-300">|</span>
+          <span class="text-xs text-slate-400">{{ today }}</span>
+        </div>
+
+        <!-- Actions (left) -->
+        <div class="flex items-center gap-3">
+          <div class="hidden md:flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1.5 text-sm text-slate-500">
+            <NavIcon name="search" :size="16" />
+            <input v-model="search" placeholder="جستجو" class="bg-transparent outline-none w-32 text-ink" />
+          </div>
+          <NotificationBell />
+          <div class="relative">
+            <button class="flex items-center gap-2" @click="userMenu = !userMenu">
+              <UserAvatar
+                :name="auth.me?.display_name_fa"
+                :initials="auth.me?.initials"
+                :color="auth.me?.avatar_color"
+                :online="true"
+                :size="38"
+              />
+            </button>
+            <div
+              v-if="userMenu"
+              class="absolute left-0 mt-2 w-48 bg-white rounded-2xl shadow-pop border border-slate-100 p-2 z-50 animate-pop"
+              @mouseleave="userMenu = false"
+            >
+              <div class="px-3 py-2">
+                <p class="text-sm font-semibold text-ink">{{ auth.username }}</p>
+                <p class="text-xs text-slate-400">{{ auth.me?.job_title_fa }}</p>
+              </div>
+              <div class="h-px bg-slate-100 my-1"></div>
+              <button class="w-full text-right text-sm px-3 py-2 rounded-lg hover:bg-slate-100" @click="go('profile-me'); userMenu = false">پروفایل من</button>
+              <button class="w-full text-right text-sm px-3 py-2 rounded-lg text-red-500 hover:bg-red-50" @click="logout">خروج</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Page content -->
+      <main class="flex-1 min-w-0">
+        <RouterView />
+      </main>
+    </div>
+  </div>
+</template>

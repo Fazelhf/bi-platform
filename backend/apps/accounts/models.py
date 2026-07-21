@@ -1,5 +1,11 @@
+from datetime import timedelta
+
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
+
+ONLINE_WINDOW = timedelta(minutes=2)
 
 
 class Role(models.TextChoices):
@@ -40,6 +46,26 @@ class User(AbstractUser):
     display_name_fa = models.CharField(
         "display name (Persian)", max_length=150, blank=True
     )
+    job_title_fa = models.CharField("job title", max_length=120, blank=True)
+    phone = models.CharField(max_length=30, blank=True)
+    avatar_color = models.CharField(max_length=7, blank=True)  # e.g. #3b6fed
+    last_seen = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def is_online(self) -> bool:
+        return bool(self.last_seen and timezone.now() - self.last_seen <= ONLINE_WINDOW)
+
+    def touch_presence(self):
+        self.last_seen = timezone.now()
+        self.save(update_fields=["last_seen"])
+
+    @property
+    def initials(self) -> str:
+        source = self.display_name_fa or self.get_username()
+        parts = source.split()
+        if len(parts) >= 2:
+            return parts[0][:1] + parts[1][:1]
+        return source[:2]
 
     @property
     def can_approve(self) -> bool:
@@ -60,3 +86,46 @@ class User(AbstractUser):
 
     def __str__(self) -> str:
         return self.display_name_fa or self.get_username()
+
+
+class Note(models.Model):
+    """A note. Either a personal note (subject is null) or a note attached to
+    a colleague's profile (subject = that user), matching the یادداشت‌ها card."""
+
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notes_written"
+    )
+    subject = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.CASCADE, related_name="notes_about",
+    )
+    title = models.CharField(max_length=200, blank=True)
+    body = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.title or self.body[:30]} — {self.author}"
+
+
+class Message(models.Model):
+    """A 1:1 chat message between two system users (پیام‌ها)."""
+
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_sent"
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_received"
+    )
+    body = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.sender} → {self.recipient}: {self.body[:30]}"

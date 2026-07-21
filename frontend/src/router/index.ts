@@ -21,7 +21,7 @@ const router = createRouter({
     { path: "/login", name: "login", component: () => import("@/views/LoginView.vue") },
     {
       path: "/",
-      component: () => import("@/components/AppLayout.vue"),
+      component: () => import("@/components/AppShell.vue"),
       meta: { requiresAuth: true },
       children: [
         {
@@ -80,6 +80,13 @@ const router = createRouter({
           component: () => import("@/views/InboxView.vue"),
           meta: { approver: true },
         },
+
+        // --- Collaboration: chat, notes, team, profiles ---
+        { path: "chat", name: "chat", component: () => import("@/views/ChatView.vue") },
+        { path: "notes", name: "notes", component: () => import("@/views/NotesView.vue") },
+        { path: "team", name: "team", component: () => import("@/views/TeamView.vue") },
+        { path: "profile", name: "profile-me", component: () => import("@/views/ProfileView.vue") },
+        { path: "profile/:id", name: "profile", component: () => import("@/views/ProfileView.vue") },
 
         // --- Admin panel — executives/superusers only ---
         {

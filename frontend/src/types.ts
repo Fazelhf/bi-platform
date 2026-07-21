@@ -70,6 +70,9 @@ export interface UserRow {
 export interface Me {
   username: string;
   display_name_fa: string;
+  job_title_fa: string;
+  initials: string;
+  avatar_color: string;
   role: "executive" | "manager" | "operator" | "viewer";
   department: Department;
   is_superuser: boolean;

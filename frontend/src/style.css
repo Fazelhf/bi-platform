@@ -7,11 +7,33 @@
 }
 
 body {
-  @apply bg-slate-100 text-slate-800 font-sans antialiased;
+  @apply bg-canvas text-ink font-sans antialiased;
 }
 
 /* Numbers read better left-to-right even inside an RTL layout. */
 .ltr-nums {
   direction: ltr;
   unicode-bidi: embed;
+}
+
+/* Thin, unobtrusive scrollbars to match the clean mockup. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbcbc6 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cdccc7;
+  border-radius: 999px;
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-pop {
+  animation: pop-in 0.16s ease-out;
 }
