@@ -28,7 +28,10 @@ from apps.production.serializers import (
     ProductionRevenueSerializer,
     ProductionSerializer,
 )
-from apps.core.permissions import DepartmentEntryPermission
+from apps.core.audit import diff as audit_diff, log as audit_log, snapshot
+from apps.core.models import AuditLog
+from apps.core.notify import notify_decision, notify_submitted
+from apps.core.permissions import ApprovalPermission, DepartmentEntryPermission
 from apps.production.services.kpi import compute_period_kpis
 from apps.sales.models import ApprovalStatus
 from apps.sales.permissions import CanApprove, CanEnterData
@@ -70,7 +73,13 @@ class ProductionViewSet(viewsets.ModelViewSet):
     filterset_fields = ["period", "machine", "status"]
 
     def perform_update(self, serializer):
-        serializer.save(status=ApprovalStatus.DRAFT)
+        before = snapshot(serializer.instance)
+        instance = serializer.save(status=ApprovalStatus.DRAFT)
+        audit_log(self.request.user, instance, AuditLog.Action.UPDATE,
+                  audit_diff(before, snapshot(instance)))
+
+    def _detail(self, fact) -> str:
+        return f"تولید {fact.machine.name_fa} · {fact.period.label}"
 
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
@@ -78,22 +87,39 @@ class ProductionViewSet(viewsets.ModelViewSet):
         fact.status = ApprovalStatus.SUBMITTED
         fact.submitted_by = request.user
         fact.save(update_fields=["status", "submitted_by", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.SUBMIT)
+        notify_submitted(request.user, fact, "production", self._detail(fact))
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove, DepartmentEntryPermission])
+    @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission])
     def approve(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.APPROVED
         fact.approved_by = request.user
         fact.save(update_fields=["status", "approved_by", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.APPROVE)
+        notify_decision(request.user, fact, "approved", self._detail(fact))
         compute_period_kpis(fact.period)
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove, DepartmentEntryPermission])
+    @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission])
     def reject(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.REJECTED
         fact.save(update_fields=["status", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.REJECT)
+        notify_decision(request.user, fact, "rejected", self._detail(fact))
+        return Response(self.get_serializer(fact).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission],
+            url_path="request-revision")
+    def request_revision(self, request, pk=None):
+        fact = self.get_object()
+        fact.status = ApprovalStatus.NEEDS_REVISION
+        fact.save(update_fields=["status", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.REVISION,
+                  {"note": {"before": None, "after": request.data.get("note", "")}})
+        notify_decision(request.user, fact, "revision", self._detail(fact))
         return Response(self.get_serializer(fact).data)
 
 

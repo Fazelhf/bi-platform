@@ -41,6 +41,7 @@ from decimal import Decimal
 
 from django.db import transaction
 
+from apps.core.formula import FormulaError, evaluate
 from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope
 from apps.production.models import (
     DimMachine,
@@ -186,6 +187,7 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
     capacity_output = per_shift * Decimal(bench.monthly_shift_capacity)
 
     # --- The 7 company-level KPIs: (code, actual, desired, ideal) ---
+    # Built-in fallbacks; an active DB formula for (kpi, slot) overrides.
     company: list[tuple[str, Decimal | None, Decimal | None, Decimal | None]] = [
         ("prod_productivity", t.output, desired_output or None, ideal_output),
         ("waste_rate", _pct(total_in - total_out, total_in), Decimal(1), Decimal(1)),
@@ -201,6 +203,46 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
          _div(total_cost, desired_output),
          _div(total_cost, capacity_output)),
         ("financial_return", total_revenue - total_cost, None, None),
+    ]
+
+    # Variables available to production formulas (EN + FA vocabulary).
+    ctx = {
+        "output": t.output, "active_shifts": t.active_shifts,
+        "repairs": t.repairs, "downtime": t.downtime,
+        "scheduled_shifts": scheduled_shifts,
+        "desired_output": desired_output, "ideal_output": ideal_output,
+        "capacity_output": capacity_output, "man_hours": man_hours,
+        "total_cost": total_cost, "total_revenue": total_revenue,
+        "input_weight": total_in, "output_weight": total_out,
+        "تولید": t.output, "شیفت_فعال": t.active_shifts,
+        "تعمیری": t.repairs, "توقف": t.downtime,
+        "شیفت_برنامه": scheduled_shifts,
+        "تولید_مطلوب": desired_output, "تولید_ایده_آل": ideal_output,
+        "ظرفیت_تولید": capacity_output, "نفر_ساعت": man_hours,
+        "هزینه_کل": total_cost, "درآمد_کل": total_revenue,
+        "وزن_ورودی": total_in, "وزن_خروجی": total_out,
+    }
+    from apps.sales.services.kpi import active_formula_map
+
+    formulas = active_formula_map(DOMAIN)
+
+    def resolved(code, slot, fallback):
+        expr = formulas.get((code, slot))
+        if expr:
+            try:
+                return evaluate(expr, ctx)
+            except FormulaError:
+                pass  # broken formula never blanks the dashboard
+        return fallback
+
+    company = [
+        (
+            code,
+            resolved(code, "actual", actual),
+            resolved(code, "target", desired),
+            resolved(code, "ideal", ideal),
+        )
+        for code, actual, desired, ideal in company
     ]
 
     # Replace this period's production KPI rows only.

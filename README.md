@@ -182,6 +182,8 @@ See [`docs/analysis.md`](docs/analysis.md) for the full source-workbook analysis
 | **1** | Sales domain — warehouse, KPI engine, AG Grid entry, ECharts dashboard, JWT/RBAC, Docker/CI | ✅ |
 | **2** | Production domain — 7 factory KPIs; unified `FactKPI`; cross-domain executive overview | ✅ |
 | **3** | Two sales channels (team + organizational); two-role access (CEO vs department managers) | ✅ |
+| **4a** | **Platform core** — DB-driven versioned Formula Engine (Persian expressions, safe AST evaluator, rollback), Audit Log (who/when/what/before/after), in-app Notifications, full approval workflow incl. request-revision; CEO is the approver | ✅ |
 
-**Roadmap:** multi-month trends & MoM comparison · executive PDF/Excel export · 2FA ·
-scheduled KPI recompute via Celery.
+**Roadmap (phases 4b–4e):** approval inbox + notification bell · frontend admin panel
+(users/dimensions/formulas/KPIs/logs) · Excel-import UI (upload→validate→preview→map→pending)
+· UI/UX redesign + DB-driven chart configs · multi-month trends · PDF/Excel export · 2FA.

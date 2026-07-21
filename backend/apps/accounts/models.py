@@ -43,8 +43,9 @@ class User(AbstractUser):
 
     @property
     def can_approve(self) -> bool:
-        # Executives are view-only; approval belongs to department managers.
-        return self.role == Role.MANAGER or self.is_superuser
+        # Per the approval workflow, the CEO (executive) is the final
+        # approver; department managers may also approve their own section.
+        return self.role in {Role.MANAGER, Role.EXECUTIVE} or self.is_superuser
 
     @property
     def can_enter_data(self) -> bool:

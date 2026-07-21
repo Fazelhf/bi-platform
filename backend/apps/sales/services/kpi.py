@@ -15,7 +15,8 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope
+from apps.core.formula import FormulaError, evaluate
+from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIFormula, KPIScope
 from apps.sales.models import (
     ApprovalStatus,
     DimEmployee,
@@ -24,6 +25,16 @@ from apps.sales.models import (
 )
 
 DOMAIN = "sales"
+
+
+def active_formula_map(domain: str) -> dict[tuple[str, str], str]:
+    """{(kpi_code, slot): expression} for a domain's active formulas."""
+    return {
+        (f.kpi.code, f.slot): f.expression
+        for f in KPIFormula.objects.filter(
+            is_active=True, kpi__domain=domain
+        ).select_related("kpi")
+    }
 
 # KPI catalog: (code, name_fa, name_en, unit, direction, note)
 KPI_CATALOG = [
@@ -98,7 +109,7 @@ def _div(num, den) -> Decimal | None:
 
 
 def _kpi_values(m: Measures, company_revenue: Decimal) -> dict[str, Decimal | None]:
-    """All KPI actuals for a scope, keyed by KPI code."""
+    """Built-in KPI actuals — the fallback when no DB formula is active."""
     return {
         "revenue": m.revenue,
         "target_achievement": _pct(m.revenue, m.target),
@@ -111,7 +122,46 @@ def _kpi_values(m: Measures, company_revenue: Decimal) -> dict[str, Decimal | No
     }
 
 
-def _compute_channel(period, catalog, facts, channel, rows):
+def formula_context(m: Measures, company_revenue: Decimal) -> dict[str, object]:
+    """
+    Variables available to sales formulas — every raw measure under both an
+    English and a Persian name. This is the vocabulary admins write with.
+    """
+    return {
+        # English
+        "revenue": m.revenue, "invoices": m.invoices,
+        "active_customers": m.active_customers, "new_customers": m.new_customers,
+        "profit": m.profit, "cost": m.cost, "target": m.target, "calls": m.calls,
+        "company_revenue": company_revenue,
+        # Persian aliases
+        "فروش": m.revenue, "تعداد_فاکتور": m.invoices,
+        "مشتری_فعال": m.active_customers, "مشتری_جدید": m.new_customers,
+        "سود": m.profit, "هزینه": m.cost, "تارگت": m.target, "تماس": m.calls,
+        "فروش_کل_شرکت": company_revenue,
+    }
+
+
+def resolve_kpi_values(
+    m: Measures, company_revenue: Decimal, formulas: dict[tuple[str, str], str]
+) -> dict[str, Decimal | None]:
+    """DB formula wins; on any formula error or absence, fall back to the
+    built-in calculation so dashboards never go dark from a bad edit."""
+    builtin = _kpi_values(m, company_revenue)
+    ctx = formula_context(m, company_revenue)
+    out: dict[str, Decimal | None] = {}
+    for code, fallback in builtin.items():
+        expr = formulas.get((code, "actual"))
+        if expr:
+            try:
+                out[code] = evaluate(expr, ctx)
+                continue
+            except FormulaError:
+                pass  # broken formula must never take the dashboard down
+        out[code] = fallback
+    return out
+
+
+def _compute_channel(period, catalog, facts, channel, rows, formulas):
     """Aggregate one channel's facts into company/team/employee KPI rows."""
     company = Measures()
     by_employee: dict[int, Measures] = {}
@@ -125,7 +175,7 @@ def _compute_channel(period, catalog, facts, channel, rows):
     company_revenue = company.revenue
 
     def emit(scope, scope_id, label, measures):
-        values = _kpi_values(measures, company_revenue)
+        values = resolve_kpi_values(measures, company_revenue, formulas)
         for code, actual in values.items():
             rows.append(
                 FactKPI(
@@ -171,11 +221,12 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
     # across domains, so this must never touch production results.
     FactKPI.objects.filter(period=period, kpi__domain=DOMAIN).delete()
 
+    formulas = active_formula_map(DOMAIN)
     rows: list[FactKPI] = []
     for channel in SalesChannel.values:
         facts = [f for f in base if f.channel == channel]
         if facts:
-            _compute_channel(period, catalog, facts, channel, rows)
+            _compute_channel(period, catalog, facts, channel, rows, formulas)
 
     FactKPI.objects.bulk_create(rows)
     return len(rows)

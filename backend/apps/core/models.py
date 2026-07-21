@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 # Persian (Jalali) month names, index 1..12
@@ -129,3 +130,110 @@ class FactKPI(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.kpi.code} · {self.scope}:{self.scope_label} · {self.period}"
+
+
+# --------------------------------------------------------------------------
+# Formula engine — versioned, DB-driven KPI formulas
+# --------------------------------------------------------------------------
+class FormulaSlot(models.TextChoices):
+    """Which value of the KPI this formula computes (the production domain
+    compares actual against desired/ideal, so each is its own formula)."""
+
+    ACTUAL = "actual", "واقعی"
+    TARGET = "target", "مطلوب"
+    IDEAL = "ideal", "ایده‌آل"
+
+
+class KPIFormula(TimeStampedModel):
+    """
+    One immutable VERSION of a KPI's formula. Editing never mutates a row —
+    a new version is created and activated, so the full history is always
+    auditable and any prior version can be re-activated (rollback).
+
+    The expression is safe arithmetic over named variables (see
+    apps.core.formula) and may use Persian identifiers:
+        (فروش / تارگت) * 100
+    """
+
+    kpi = models.ForeignKey(DimKPI, on_delete=models.CASCADE, related_name="formulas")
+    slot = models.CharField(
+        max_length=10, choices=FormulaSlot.choices, default=FormulaSlot.ACTUAL
+    )
+    version = models.PositiveIntegerField()
+    expression = models.CharField(max_length=500)
+    note = models.CharField(max_length=300, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+
+    class Meta:
+        unique_together = ("kpi", "slot", "version")
+        ordering = ("kpi", "slot", "-version")
+
+    def __str__(self) -> str:
+        flag = "✓" if self.is_active else "·"
+        return f"{flag} {self.kpi.code}.{self.slot} v{self.version}: {self.expression}"
+
+
+# --------------------------------------------------------------------------
+# Audit log — who / when / what / before / after
+# --------------------------------------------------------------------------
+class AuditLog(models.Model):
+    """Append-only record of every mutation made through the API."""
+
+    class Action(models.TextChoices):
+        CREATE = "create", "ایجاد"
+        UPDATE = "update", "ویرایش"
+        DELETE = "delete", "حذف"
+        SUBMIT = "submit", "ارسال برای تایید"
+        APPROVE = "approve", "تایید"
+        REJECT = "reject", "رد"
+        REVISION = "revision", "ارسال برای اصلاح"
+        IMPORT = "import", "ایمپورت اکسل"
+        FORMULA = "formula", "تغییر فرمول"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    action = models.CharField(max_length=12, choices=Action.choices)
+    model_label = models.CharField(max_length=100)  # e.g. "sales.FactSalesMonthly"
+    object_id = models.CharField(max_length=40, blank=True)
+    object_repr = models.CharField(max_length=200, blank=True)
+    # {field: {"before": "...", "after": "..."}} — values stringified.
+    changes = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.user} {self.action} {self.model_label}#{self.object_id}"
+
+
+# --------------------------------------------------------------------------
+# Notifications — the workflow's messenger
+# --------------------------------------------------------------------------
+class Notification(TimeStampedModel):
+    """In-app notification. Submit -> notifies approvers; decision -> notifies
+    the submitter. The frontend bell polls unread count."""
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications"
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    verb = models.CharField(max_length=20)  # submitted / approved / rejected / revision
+    message = models.CharField(max_length=300)
+    target_label = models.CharField(max_length=100, blank=True)
+    target_id = models.CharField(max_length=40, blank=True)
+    is_read = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"→ {self.recipient}: {self.message[:50]}"

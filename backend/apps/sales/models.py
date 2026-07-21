@@ -76,6 +76,7 @@ class ApprovalStatus(models.TextChoices):
     SUBMITTED = "submitted", "Submitted for approval"
     APPROVED = "approved", "Approved"
     REJECTED = "rejected", "Rejected"
+    NEEDS_REVISION = "needs_revision", "Returned for revision"
 
 
 class SalesChannel(models.TextChoices):
@@ -118,7 +119,7 @@ class FactSalesMonthly(TimeStampedModel):
 
     # Approval workflow
     status = models.CharField(
-        max_length=12, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT
+        max_length=16, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT
     )
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

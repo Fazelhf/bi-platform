@@ -16,8 +16,12 @@ from apps.sales.models import (
     FactSalesMonthly,
     FactSalesProvince,
 )
+from apps.core.audit import diff as audit_diff, log as audit_log, snapshot
+from apps.core.models import AuditLog
+from apps.core.notify import notify_decision, notify_submitted
 from apps.core.permissions import (
     CHANNEL_DEPARTMENT,
+    ApprovalPermission,
     DepartmentEntryPermission,
     SalesChannelOwnership,
 )
@@ -84,11 +88,18 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._assert_owns_channel(serializer.validated_data.get("channel", "team"))
-        serializer.save()
+        instance = serializer.save()
+        audit_log(self.request.user, instance, AuditLog.Action.CREATE)
 
     def perform_update(self, serializer):
+        before = snapshot(serializer.instance)
         # Any edit to an approved row sends it back to draft.
-        serializer.save(status=ApprovalStatus.DRAFT)
+        instance = serializer.save(status=ApprovalStatus.DRAFT)
+        audit_log(self.request.user, instance, AuditLog.Action.UPDATE,
+                  audit_diff(before, snapshot(instance)))
+
+    def _detail(self, fact) -> str:
+        return f"فروش {fact.employee.full_name_fa} · {fact.period.label}"
 
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
@@ -96,23 +107,42 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
         fact.status = ApprovalStatus.SUBMITTED
         fact.submitted_by = request.user
         fact.save(update_fields=["status", "submitted_by", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.SUBMIT)
+        notify_submitted(request.user, fact,
+                         CHANNEL_DEPARTMENT.get(fact.channel, ""), self._detail(fact))
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove, SalesChannelOwnership])
+    @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission])
     def approve(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.APPROVED
         fact.approved_by = request.user
         fact.save(update_fields=["status", "approved_by", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.APPROVE)
+        notify_decision(request.user, fact, "approved", self._detail(fact))
         # Recompute KPIs for the affected period.
         compute_period_kpis(fact.period)
         return Response(self.get_serializer(fact).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[CanApprove, SalesChannelOwnership])
+    @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission])
     def reject(self, request, pk=None):
         fact = self.get_object()
         fact.status = ApprovalStatus.REJECTED
         fact.save(update_fields=["status", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.REJECT)
+        notify_decision(request.user, fact, "rejected", self._detail(fact))
+        return Response(self.get_serializer(fact).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission],
+            url_path="request-revision")
+    def request_revision(self, request, pk=None):
+        """ارسال برای اصلاح — back to the submitter with a note."""
+        fact = self.get_object()
+        fact.status = ApprovalStatus.NEEDS_REVISION
+        fact.save(update_fields=["status", "updated_at"])
+        audit_log(request.user, fact, AuditLog.Action.REVISION,
+                  {"note": {"before": None, "after": request.data.get("note", "")}})
+        notify_decision(request.user, fact, "revision", self._detail(fact))
         return Response(self.get_serializer(fact).data)
 
 

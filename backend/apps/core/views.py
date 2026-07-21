@@ -11,12 +11,31 @@ output — while the sales domain's فروش ریالی is externally invoiced r
 They are different measures of different things and are deliberately NOT
 summed. The response exposes them as separate figures.
 """
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import status as http_status
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.models import DimPeriod, FactKPI, KPIScope
+from apps.core.audit import log as audit_log
+from apps.core.formula import FormulaError, evaluate, validate
+from apps.core.models import (
+    AuditLog,
+    DimPeriod,
+    FactKPI,
+    KPIFormula,
+    KPIScope,
+    Notification,
+)
+from apps.core.permissions import IsExecutiveOrAdmin
+from apps.core.serializers import (
+    AuditLogSerializer,
+    FormulaSerializer,
+    NotificationSerializer,
+)
 from apps.production.models import FactProduction, FactProductionCost, FactProductionRevenue
 from apps.sales.models import ApprovalStatus, FactSalesMonthly
 from apps.sales.serializers import KPIResultSerializer, PeriodSerializer
@@ -115,3 +134,161 @@ class ExecutiveOverviewView(APIView):
                 },
             }
         )
+
+
+# --------------------------------------------------------------------------
+# Formula engine API — versioned, no code changes needed to edit a KPI
+# --------------------------------------------------------------------------
+class FormulaViewSet(viewsets.ModelViewSet):
+    """
+    Formulas are immutable versions. POST creates version N+1 for the
+    (kpi, slot) pair and activates it; `activate` re-activates an older
+    version (rollback); `deactivate` turns a formula family off entirely
+    (the engine then uses the built-in fallback). PUT/PATCH are disabled.
+    """
+
+    queryset = KPIFormula.objects.select_related("kpi", "created_by").all()
+    serializer_class = FormulaSerializer
+    permission_classes = [IsExecutiveOrAdmin]
+    filterset_fields = ["kpi", "kpi__code", "kpi__domain", "slot", "is_active"]
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def perform_create(self, serializer):
+        kpi = serializer.validated_data["kpi"]
+        slot = serializer.validated_data.get("slot", "actual")
+        expression = serializer.validated_data["expression"]
+        # Validate against the domain's variable vocabulary before saving.
+        validate(expression, _variables_for_domain(kpi.domain))
+        siblings = KPIFormula.objects.filter(kpi=kpi, slot=slot)
+        version = (siblings.aggregate(m=Max("version"))["m"] or 0) + 1
+        siblings.filter(is_active=True).update(is_active=False)
+        instance = serializer.save(
+            version=version, is_active=True, created_by=self.request.user
+        )
+        audit_log(
+            self.request.user, instance, AuditLog.Action.FORMULA,
+            {"expression": {"before": None, "after": expression},
+             "version": {"before": None, "after": str(version)}},
+        )
+        _recompute_all_periods()
+
+    @action(detail=True, methods=["post"])
+    def activate(self, request, pk=None):
+        formula = self.get_object()
+        KPIFormula.objects.filter(kpi=formula.kpi, slot=formula.slot).update(
+            is_active=False
+        )
+        formula.is_active = True
+        formula.save(update_fields=["is_active", "updated_at"])
+        audit_log(request.user, formula, AuditLog.Action.FORMULA,
+                  {"is_active": {"before": "False", "after": "True"}})
+        _recompute_all_periods()
+        return Response(self.get_serializer(formula).data)
+
+    @action(detail=True, methods=["post"])
+    def deactivate(self, request, pk=None):
+        formula = self.get_object()
+        formula.is_active = False
+        formula.save(update_fields=["is_active", "updated_at"])
+        audit_log(request.user, formula, AuditLog.Action.FORMULA,
+                  {"is_active": {"before": "True", "after": "False"}})
+        _recompute_all_periods()
+        return Response(self.get_serializer(formula).data)
+
+    @action(detail=False, methods=["post"])
+    def test(self, request):
+        """Dry-run an expression against sample or supplied variables."""
+        expression = request.data.get("expression", "")
+        domain = request.data.get("domain", "sales")
+        variables = dict(_sample_variables(domain))
+        variables.update(request.data.get("variables") or {})
+        try:
+            result = evaluate(expression, variables)
+        except FormulaError as exc:
+            return Response(
+                {"ok": False, "error": str(exc)},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({
+            "ok": True,
+            "result": None if result is None else str(result),
+            "variables_used": {k: str(v) for k, v in variables.items()},
+        })
+
+    @action(detail=False, methods=["get"])
+    def variables(self, request):
+        """The vocabulary an admin may use, per domain."""
+        domain = request.query_params.get("domain", "sales")
+        return Response(sorted(_variables_for_domain(domain)))
+
+
+def _variables_for_domain(domain: str) -> set:
+    if domain == "production":
+        return {
+            "output", "active_shifts", "repairs", "downtime", "scheduled_shifts",
+            "desired_output", "ideal_output", "capacity_output", "man_hours",
+            "total_cost", "total_revenue", "input_weight", "output_weight",
+            "تولید", "شیفت_فعال", "تعمیری", "توقف", "شیفت_برنامه",
+            "تولید_مطلوب", "تولید_ایده_آل", "ظرفیت_تولید", "نفر_ساعت",
+            "هزینه_کل", "درآمد_کل", "وزن_ورودی", "وزن_خروجی",
+        }
+    return {
+        "revenue", "invoices", "active_customers", "new_customers",
+        "profit", "cost", "target", "calls", "company_revenue",
+        "فروش", "تعداد_فاکتور", "مشتری_فعال", "مشتری_جدید",
+        "سود", "هزینه", "تارگت", "تماس", "فروش_کل_شرکت",
+    }
+
+
+def _sample_variables(domain: str) -> dict:
+    return {name: 100 for name in _variables_for_domain(domain)}
+
+
+def _recompute_all_periods() -> None:
+    """A formula change re-materialises every period's KPIs immediately."""
+    from apps.production.services.kpi import compute_period_kpis as compute_production
+    from apps.sales.services.kpi import compute_period_kpis as compute_sales
+
+    for period in DimPeriod.objects.all():
+        compute_sales(period)
+        compute_production(period)
+
+
+# --------------------------------------------------------------------------
+# Audit log API (read-only)
+# --------------------------------------------------------------------------
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = AuditLog.objects.select_related("user").all()
+    serializer_class = AuditLogSerializer
+    permission_classes = [IsExecutiveOrAdmin]
+    filterset_fields = ["action", "model_label", "user"]
+
+
+# --------------------------------------------------------------------------
+# Notifications API — the bell
+# --------------------------------------------------------------------------
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ["is_read", "verb"]
+
+    def get_queryset(self):
+        return Notification.objects.filter(
+            recipient=self.request.user
+        ).select_related("actor")
+
+    @action(detail=False, methods=["get"])
+    def unread_count(self, request):
+        return Response({"count": self.get_queryset().filter(is_read=False).count()})
+
+    @action(detail=True, methods=["post"])
+    def mark_read(self, request, pk=None):
+        n = self.get_object()
+        n.is_read = True
+        n.save(update_fields=["is_read", "updated_at"])
+        return Response(self.get_serializer(n).data)
+
+    @action(detail=False, methods=["post"])
+    def mark_all_read(self, request):
+        updated = self.get_queryset().filter(is_read=False).update(is_read=True)
+        return Response({"marked": updated})

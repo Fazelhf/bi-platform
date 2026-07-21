@@ -156,7 +156,7 @@ class FactProduction(TimeStampedModel):
     )
 
     status = models.CharField(
-        max_length=12, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT
+        max_length=16, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT
     )
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
