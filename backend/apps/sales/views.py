@@ -163,10 +163,21 @@ class CollectionViewSet(viewsets.ModelViewSet):
 
 
 # -------------------- KPI catalog + results --------------------
-class KPIDefinitionViewSet(viewsets.ReadOnlyModelViewSet):
+class KPIDefinitionViewSet(viewsets.ModelViewSet):
+    """Everyone reads the catalog; only executives edit display metadata."""
+
     queryset = DimKPI.objects.all()
     serializer_class = KPIDefinitionSerializer
     filterset_fields = ["domain"]
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_permissions(self):
+        from apps.core.permissions import IsExecutiveOrAdmin
+        from rest_framework.permissions import IsAuthenticated
+
+        if self.request.method in ("PATCH",):
+            return [IsExecutiveOrAdmin()]
+        return [IsAuthenticated()]
 
 
 class KPIResultViewSet(viewsets.ReadOnlyModelViewSet):

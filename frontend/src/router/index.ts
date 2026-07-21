@@ -72,6 +72,40 @@ const router = createRouter({
           component: () => import("@/views/ProductionEntryView.vue"),
           meta: { department: "production" },
         },
+
+        // --- Approval inbox (کارتابل) — anyone who can approve ---
+        {
+          path: "inbox",
+          name: "inbox",
+          component: () => import("@/views/InboxView.vue"),
+          meta: { approver: true },
+        },
+
+        // --- Admin panel — executives/superusers only ---
+        {
+          path: "admin/users",
+          name: "admin-users",
+          component: () => import("@/views/admin/AdminUsersView.vue"),
+          meta: { executive: true },
+        },
+        {
+          path: "admin/dimensions",
+          name: "admin-dimensions",
+          component: () => import("@/views/admin/AdminDimensionsView.vue"),
+          meta: { executive: true },
+        },
+        {
+          path: "admin/formulas",
+          name: "admin-formulas",
+          component: () => import("@/views/admin/AdminFormulasView.vue"),
+          meta: { executive: true },
+        },
+        {
+          path: "admin/audit",
+          name: "admin-audit",
+          component: () => import("@/views/admin/AdminAuditView.vue"),
+          meta: { executive: true },
+        },
       ],
     },
   ],
@@ -86,6 +120,14 @@ router.beforeEach((to) => {
   // Entry pages are department-scoped; keep others out.
   const dept = to.meta.department as string | undefined;
   if (dept && !auth.me?.is_superuser && auth.department !== dept) {
+    return { name: homeRouteFor(auth.department) };
+  }
+  // Admin panel: executives/superusers only.
+  if (to.meta.executive && !auth.isExecutive) {
+    return { name: homeRouteFor(auth.department) };
+  }
+  // Inbox: approvers only.
+  if (to.meta.approver && !auth.me?.can_approve && !auth.me?.is_superuser) {
     return { name: homeRouteFor(auth.department) };
   }
 });

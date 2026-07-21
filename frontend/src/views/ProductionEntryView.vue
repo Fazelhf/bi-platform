@@ -16,6 +16,7 @@ const saving = ref("");
 
 const STATUS_FA: Record<string, string> = {
   draft: "پیش‌نویس", submitted: "ارسال‌شده", approved: "تأییدشده", rejected: "ردشده",
+  needs_revision: "نیازمند اصلاح",
 };
 
 type PField = ColDef<ProductionRow>["field"];
@@ -42,7 +43,8 @@ const columnDefs: ColDef<ProductionRow>[] = [
     field: "status", headerName: "وضعیت", editable: false, minWidth: 110,
     cellRenderer: (p: { value: string }) => {
       const c: Record<string, string> = {
-        draft: "#94a3b8", submitted: "#d97706", approved: "#16a34a", rejected: "#dc2626",
+        draft: "#94a3b8",
+        needs_revision: "#d97706", submitted: "#d97706", approved: "#16a34a", rejected: "#dc2626",
       };
       return `<span style="color:${c[p.value] ?? "#64748b"};font-weight:600">${STATUS_FA[p.value] ?? p.value}</span>`;
     },
@@ -53,7 +55,7 @@ const columnDefs: ColDef<ProductionRow>[] = [
       const s = p.data.status;
       const btn = (a: string, l: string, c: string) =>
         `<button data-action="${a}" style="margin:0 2px;padding:2px 8px;border-radius:6px;border:1px solid ${c};color:${c};background:#fff;cursor:pointer;font-size:12px">${l}</button>`;
-      if (s === "draft" || s === "rejected") return btn("submit", "ارسال", "#2b57d4");
+      if (s === "draft" || s === "rejected" || s === "needs_revision") return btn("submit", "ارسال", "#2b57d4");
       if (s === "submitted") return btn("approve", "تأیید", "#16a34a") + btn("reject", "رد", "#dc2626");
       return "";
     },

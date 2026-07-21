@@ -7,6 +7,66 @@ export interface Period {
 
 export type Department = "" | "production" | "sales_org" | "sales_team";
 
+export interface AppNotification {
+  id: number;
+  actor_name: string;
+  verb: "submitted" | "approved" | "rejected" | "revision";
+  message: string;
+  target_label: string;
+  target_id: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface AuditEntry {
+  id: number;
+  username: string;
+  display_name: string;
+  action: string;
+  model_label: string;
+  object_id: string;
+  object_repr: string;
+  changes: Record<string, { before: string | null; after: string | null }>;
+  created_at: string;
+}
+
+export interface Formula {
+  id: number;
+  kpi: number;
+  kpi_code: string;
+  kpi_name_fa: string;
+  domain: string;
+  slot: "actual" | "target" | "ideal";
+  version: number;
+  expression: string;
+  note: string;
+  is_active: boolean;
+  created_by_name: string;
+  created_at: string;
+}
+
+export interface KpiDefinition {
+  id: number;
+  code: string;
+  name_fa: string;
+  name_en: string;
+  domain: string;
+  unit: string;
+  direction: string;
+  formula_note: string;
+}
+
+export interface UserRow {
+  id: number;
+  username: string;
+  display_name_fa: string;
+  role: string;
+  department: Department;
+  is_active: boolean;
+  is_superuser: boolean;
+  last_login: string | null;
+}
+
 export interface Me {
   username: string;
   display_name_fa: string;
@@ -58,7 +118,7 @@ export interface SalesMonthly {
   cost_rial: string;
   target_rial: string;
   calls: number;
-  status: "draft" | "submitted" | "approved" | "rejected";
+  status: "draft" | "submitted" | "approved" | "rejected" | "needs_revision";
   updated_at: string;
 }
 
@@ -78,7 +138,7 @@ export interface ProductionRow {
   downtime_sizechange_shifts: string;
   downtime_nowork_shifts: string;
   total_downtime_shifts: string;
-  status: "draft" | "submitted" | "approved" | "rejected";
+  status: "draft" | "submitted" | "approved" | "rejected" | "needs_revision";
   updated_at: string;
 }
 
