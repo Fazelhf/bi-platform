@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
 import { rial } from "@/utils/format";
+import { AXIS, COLORS, TOOLTIP, barGradient, compact } from "./charts/theme";
 
 const props = defineProps<{
   title: string;
@@ -16,17 +17,21 @@ const props = defineProps<{
 const el = ref<HTMLElement | null>(null);
 
 const option = computed<EChartsOption>(() => {
-  const cat = { type: "category" as const, data: props.categories, axisLabel: { fontSize: 11 } };
+  const cat = { ...AXIS.category, data: props.categories };
   const val = {
-    type: "value" as const,
-    axisLabel: { formatter: (v: number) => rial(v) },
+    ...AXIS.value,
+    axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => compact(v) },
   };
   const series: EChartsOption["series"] = [
     {
       name: props.title,
       type: "bar",
       data: props.values,
-      itemStyle: { color: props.color ?? "#3b6fed", borderRadius: 4 },
+      barMaxWidth: 34,
+      itemStyle: {
+        color: barGradient(props.color ?? COLORS.actual),
+        borderRadius: props.horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0],
+      },
     },
   ];
   if (props.second) {
@@ -34,14 +39,18 @@ const option = computed<EChartsOption>(() => {
       name: props.second.name,
       type: "bar",
       data: props.second.values,
-      itemStyle: { color: "#cbd5e1", borderRadius: 4 },
+      barMaxWidth: 34,
+      itemStyle: { color: COLORS.slate, borderRadius: props.horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0] },
     });
   }
   return {
-    grid: { left: props.horizontal ? 90 : 50, right: 20, top: 30, bottom: props.horizontal ? 20 : 60 },
-    tooltip: { trigger: "axis", valueFormatter: (v) => rial(Number(v)) },
-    legend: props.second ? { top: 0, textStyle: { fontSize: 11 } } : undefined,
-    xAxis: props.horizontal ? val : { ...cat, axisLabel: { ...cat.axisLabel, rotate: 45 } },
+    grid: { left: props.horizontal ? 90 : 46, right: 18, top: 28, bottom: props.horizontal ? 20 : 54 },
+    tooltip: { ...TOOLTIP, trigger: "axis", axisPointer: { type: "shadow" },
+      valueFormatter: (v) => rial(Number(v)) },
+    legend: props.second
+      ? { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: "#64748b" } }
+      : undefined,
+    xAxis: props.horizontal ? val : { ...cat, axisLabel: { ...cat.axisLabel, rotate: 40 } },
     yAxis: props.horizontal ? cat : val,
     series,
   };
@@ -51,8 +60,8 @@ useChart(el, option);
 </script>
 
 <template>
-  <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-    <h3 class="text-sm font-semibold text-slate-700 mb-2">{{ title }}</h3>
-    <div ref="el" class="w-full" style="height: 300px"></div>
+  <div class="bg-white rounded-card shadow-soft p-4">
+    <h3 class="text-sm font-semibold text-ink mb-2 text-center">{{ title }}</h3>
+    <div ref="el" class="w-full" style="height: 280px"></div>
   </div>
 </template>

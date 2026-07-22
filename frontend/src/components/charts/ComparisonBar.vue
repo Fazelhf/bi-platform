@@ -2,8 +2,9 @@
 import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
+import { AXIS, COLORS, TOOLTIP, barGradient, compact } from "./theme";
 
-// واقعی / مطلوب / ایده‌آل — colours mirror the source workbook (blue/green/pink).
+// واقعی / مطلوب / ایده‌آل — brand blue / green / soft violet.
 const props = defineProps<{
   title: string;
   actual: number | null;
@@ -15,25 +16,23 @@ const props = defineProps<{
 const el = ref<HTMLElement | null>(null);
 
 const option = computed<EChartsOption>(() => ({
-  grid: { top: 24, right: 12, bottom: 28, left: 48 },
-  tooltip: { trigger: "axis" },
-  xAxis: {
-    type: "category",
-    data: ["واقعی", "مطلوب", "ایده‌آل"],
-    axisLabel: { fontSize: 12 },
-  },
-  yAxis: { type: "value", axisLabel: { fontSize: 10 } },
+  grid: { top: 28, right: 14, bottom: 26, left: 42 },
+  tooltip: { ...TOOLTIP, trigger: "axis", axisPointer: { type: "shadow" },
+    valueFormatter: (v) => compact(Number(v)) },
+  xAxis: { ...AXIS.category, data: ["واقعی", "مطلوب", "ایده‌آل"] },
+  yAxis: { ...AXIS.value, axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => compact(v) } },
   series: [
     {
       type: "bar",
-      barWidth: "45%",
+      barWidth: "46%",
+      itemStyle: { borderRadius: [6, 6, 0, 0] },
       data: [
-        { value: props.actual ?? 0, itemStyle: { color: "#4f7cf6" } },
-        { value: props.target ?? 0, itemStyle: { color: "#34d399" } },
-        { value: props.ideal ?? 0, itemStyle: { color: "#f472b6" } },
+        { value: props.actual ?? 0, itemStyle: { color: barGradient(COLORS.actual) } },
+        { value: props.target ?? 0, itemStyle: { color: barGradient(COLORS.target) } },
+        { value: props.ideal ?? 0, itemStyle: { color: barGradient(COLORS.ideal) } },
       ],
-      itemStyle: { borderRadius: [4, 4, 0, 0] },
-      label: { show: true, position: "top", fontSize: 10 },
+      label: { show: true, position: "top", fontSize: 10, color: "#475569",
+        formatter: (p: any) => compact(p.value) },
     },
   ],
 }));
@@ -44,6 +43,6 @@ useChart(el, option);
 <template>
   <div class="bg-white rounded-card shadow-soft p-4">
     <h3 class="text-sm font-semibold text-ink mb-1 text-center">{{ title }}</h3>
-    <div ref="el" style="height: 220px"></div>
+    <div ref="el" style="height: 210px"></div>
   </div>
 </template>

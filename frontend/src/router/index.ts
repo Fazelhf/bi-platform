@@ -105,7 +105,6 @@ const router = createRouter({
         { path: "chat", name: "chat", component: () => import("@/views/ChatView.vue") },
         { path: "notes", name: "notes", component: () => import("@/views/NotesView.vue") },
         { path: "team", name: "team", component: () => import("@/views/TeamView.vue") },
-        { path: "formulas", name: "formula-docs", component: () => import("@/views/FormulaDocsView.vue") },
         { path: "profile", name: "profile-me", component: () => import("@/views/ProfileView.vue") },
         { path: "profile/:id", name: "profile", component: () => import("@/views/ProfileView.vue") },
 

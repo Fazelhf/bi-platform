@@ -2,23 +2,24 @@
 import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
+import { AXIS, COLORS, TOOLTIP, barGradient, compact } from "./theme";
 import { rial } from "@/utils/format";
 
-// سود و زیان — درآمد vs هزینه as horizontal bars on one axis.
+// سود و زیان — درآمد (green) vs هزینه (rose) as horizontal bars.
 const props = defineProps<{ revenue: number; cost: number }>();
 
 const el = ref<HTMLElement | null>(null);
 const option = computed<EChartsOption>(() => ({
-  grid: { top: 30, right: 20, bottom: 20, left: 70 },
-  tooltip: { trigger: "axis", valueFormatter: (v) => rial(Number(v)) },
-  legend: { top: 0, textStyle: { fontSize: 11 } },
-  xAxis: { type: "value", axisLabel: { formatter: (v: number) => rial(v), fontSize: 9 } },
-  yAxis: { type: "category", data: [""], axisLabel: { show: false } },
+  grid: { top: 28, right: 24, bottom: 16, left: 66 },
+  tooltip: { ...TOOLTIP, trigger: "axis", valueFormatter: (v) => rial(Number(v)) },
+  legend: { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: "#64748b" } },
+  xAxis: { ...AXIS.value, axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => compact(v) } },
+  yAxis: { ...AXIS.category, data: [""], axisLabel: { show: false } },
   series: [
-    { name: "درآمد", type: "bar", data: [props.revenue],
-      itemStyle: { color: "#34d399", borderRadius: 4 }, barWidth: 22 },
-    { name: "هزینه", type: "bar", data: [props.cost],
-      itemStyle: { color: "#f472b6", borderRadius: 4 }, barWidth: 22 },
+    { name: "درآمد", type: "bar", data: [props.revenue], barWidth: 20,
+      itemStyle: { color: barGradient(COLORS.target), borderRadius: [0, 6, 6, 0] } },
+    { name: "هزینه", type: "bar", data: [props.cost], barWidth: 20,
+      itemStyle: { color: barGradient(COLORS.rose), borderRadius: [0, 6, 6, 0] } },
   ],
 }));
 useChart(el, option);
@@ -27,6 +28,6 @@ useChart(el, option);
 <template>
   <div class="bg-white rounded-card shadow-soft p-4">
     <h3 class="text-sm font-semibold text-ink mb-1 text-center">سود و زیان (درآمد در برابر هزینه)</h3>
-    <div ref="el" style="height: 160px"></div>
+    <div ref="el" style="height: 150px"></div>
   </div>
 </template>

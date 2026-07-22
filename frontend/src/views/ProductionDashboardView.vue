@@ -98,12 +98,12 @@ function fmtCell(v: string | null, unit: string) {
         <ComparisonBar title="بهره‌وری نیروی انسانی"
           :actual="n(kpi('labor_productivity')?.actual)" :target="n(kpi('labor_productivity')?.target)" :ideal="n(kpi('labor_productivity')?.ideal)" />
         <DonutChart title="درصد بهره‌وری" :value="n(kpi('prod_productivity')?.efficiency_pct)" />
-        <BarChart title="بهره‌وری تولید (بر اساس خط)" :categories="machineNames" :values="machineOutput" color="#f472b6" />
+        <BarChart title="بهره‌وری تولید (بر اساس خط)" :categories="machineNames" :values="machineOutput" color="#3b6fed" />
       </div>
 
       <!-- Row 2: avg per shift, waste, machine utilization, cost per roll -->
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <BarChart title="میانگین تولید در شیفت" :categories="machineNames" :values="machineAvg" color="#f472b6" />
+        <BarChart title="میانگین تولید در شیفت" :categories="machineNames" :values="machineAvg" color="#8b7cf6" />
         <ComparisonBar title="نرخ ضایعات"
           :actual="n(kpi('waste_rate')?.actual)" :target="n(kpi('waste_rate')?.target)" :ideal="n(kpi('waste_rate')?.ideal)" />
         <StackedMachineBar title="عملکرد دستگاه‌ها" :categories="machineNames" :active="activeShifts" :inactive="inactiveShifts" />

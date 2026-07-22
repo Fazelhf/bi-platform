@@ -29,6 +29,12 @@ function resetDrafts() {
     slots.value.map((s) => [s.key, { expression: "", note: "", testResult: "" }]),
   );
 }
+resetDrafts(); // populate before first render so the template never hits undefined
+
+function draftFor(slot: string) {
+  if (!draft.value[slot]) draft.value[slot] = { expression: "", note: "", testResult: "" };
+  return draft.value[slot];
+}
 
 const bySlot = computed(() => {
   const map: Record<string, Formula[]> = {};
@@ -153,7 +159,7 @@ watch(selectedKpi, loadFormulas);
               :key="v"
               class="text-xs bg-slate-100 rounded px-2 py-0.5 cursor-pointer hover:bg-brand-50"
               title="کلیک = افزودن به فرمول"
-              @click="slots.forEach(s => { draft[s.key].expression += (draft[s.key].expression ? ' ' : '') + v })"
+              @click="slots.forEach(s => { draftFor(s.key).expression += (draftFor(s.key).expression ? ' ' : '') + v })"
             >{{ v }}</code>
           </div>
           <p class="text-xs text-slate-400 mt-2">
@@ -223,30 +229,30 @@ watch(selectedKpi, loadFormulas);
           <div class="border-t border-slate-100 pt-3 space-y-2">
             <label class="text-xs text-slate-500">فرمول جدید (نسخه بعدی)</label>
             <textarea
-              v-model="draft[s.key].expression"
+              v-model="draftFor(s.key).expression"
               dir="rtl"
               rows="2"
               class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono"
               placeholder="مثال: (سود / فروش) * 100"
             ></textarea>
             <input
-              v-model="draft[s.key].note"
+              v-model="draftFor(s.key).note"
               placeholder="یادداشت تغییر (اختیاری)"
               class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
             />
             <div class="flex items-center gap-2">
               <button
                 class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 hover:bg-slate-50"
-                :disabled="!draft[s.key].expression"
+                :disabled="!draftFor(s.key).expression"
                 @click="testDraft(s.key)"
               >آزمایش</button>
               <button
                 class="px-3 py-1.5 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
-                :disabled="!draft[s.key].expression"
+                :disabled="!draftFor(s.key).expression"
                 @click="saveDraft(s.key)"
               >ذخیره و فعال‌سازی</button>
-              <span class="text-xs" :class="draft[s.key].testResult.startsWith('❌') ? 'text-red-600' : 'text-slate-500'">
-                {{ draft[s.key].testResult }}
+              <span class="text-xs" :class="draftFor(s.key).testResult.startsWith('❌') ? 'text-red-600' : 'text-slate-500'">
+                {{ draftFor(s.key).testResult }}
               </span>
             </div>
           </div>
