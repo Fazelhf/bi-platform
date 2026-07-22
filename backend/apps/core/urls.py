@@ -9,6 +9,7 @@ router.register("audit-logs", views.AuditLogViewSet)
 router.register("notifications", views.NotificationViewSet, basename="notification")
 
 urlpatterns = [
+    path("site-settings/", views.SiteSettingView.as_view(), name="site-settings"),
     path("overview/", views.ExecutiveOverviewView.as_view(), name="executive-overview"),
     path("", include(router.urls)),
 ]

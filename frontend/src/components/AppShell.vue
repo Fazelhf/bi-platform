@@ -69,7 +69,7 @@ const primary = computed<Item[]>(() => {
 const pageTitle = computed(() => {
   const map: Record<string, string> = {
     overview: "نمای کلی", "sales-dashboard": "داشبورد فروش همکار",
-    "sales-org-dashboard": "داشبورد فروش کلی", "production-dashboard": "داشبورد تولید",
+    "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
     inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "تیم",
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
@@ -77,7 +77,7 @@ const pageTitle = computed(() => {
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
     settings: "تنظیمات سایت",
   };
-  return map[route.name as string] ?? "پلتفرم هوش تجاری";
+  return map[route.name as string] ?? "شرکت کاغذ حساس نمابر مهر";
 });
 
 const today = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
@@ -116,7 +116,7 @@ onMounted(() => {
         <div class="w-10 h-10 rounded-2xl bg-ink text-white flex items-center justify-center shrink-0">
           <NavIcon name="chart" :size="20" />
         </div>
-        <span v-if="!collapsed" class="font-bold text-ink flex-1">هوش تجاری</span>
+        <span v-if="!collapsed" class="font-bold text-ink flex-1">کاغذ حساس نمابر مهر</span>
         <button
           v-if="!collapsed"
           class="text-slate-400 hover:text-ink"
@@ -236,6 +236,11 @@ onMounted(() => {
       <main class="flex-1 min-w-0">
         <RouterView />
       </main>
+
+      <!-- Footer -->
+      <footer class="text-center text-xs text-slate-400 py-3">
+        شرکت کاغذ حساس نمابر مهر · طراحی و توسعه: <span class="font-medium text-slate-500">فاضل حافظی</span>
+      </footer>
     </div>
   </div>
 </template>

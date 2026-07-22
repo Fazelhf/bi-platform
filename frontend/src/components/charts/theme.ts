@@ -1,24 +1,43 @@
 import * as echarts from "echarts";
+import { paletteByKey, type Palette } from "./palettes";
 
-// Palette harmonised with the app (brand blue / accent green / soft violet).
-export const COLORS = {
-  actual: "#3b6fed", // واقعی — brand blue (where we are)
-  target: "#10b981", // مطلوب — accent green (realistic goal)
-  ideal: "#8b7cf6", // ایده‌آل — soft violet (aspiration)
-  slate: "#cbd5e1", // neutral / inactive
-  rose: "#f43f5e", // cost / negative
-  ink: "#1c1c1e",
-};
+/**
+ * Live chart theme. Reads the palette the CEO selected (stored in the ui
+ * store / localStorage) so every chart in every section changes together.
+ */
+export function activePalette(): Palette {
+  return paletteByKey(localStorage.getItem("chartTheme") || "modern");
+}
 
-/** A soft top-to-bottom gradient for a bar, lighter at the top. */
+/** Back-compat colour accessor used by chart components. */
+export const COLORS = new Proxy({} as Record<string, string>, {
+  get(_t, key: string) {
+    const p = activePalette();
+    if (key === "ink") return "#1c1c1e";
+    return (p as any)[key] ?? "#3b6fed";
+  },
+});
+
+/** A soft gradient for a bar (flat fill when the theme disables gradients). */
 export function barGradient(hex: string) {
+  if (!activePalette().gradient) return hex;
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
     { offset: 0, color: mix(hex, "#ffffff", 0.22) },
     { offset: 1, color: hex },
   ]);
 }
 
-/** Shared axis styling: no hard lines, faint dashed splits. */
+/** Corner radius from the active theme. */
+export function barRadius(): number {
+  return activePalette().radius;
+}
+
+/** Categorical colour for multi-series charts. */
+export function seriesColor(i: number): string {
+  const s = activePalette().series;
+  return s[i % s.length];
+}
+
 export const AXIS = {
   category: {
     type: "category" as const,
@@ -42,13 +61,13 @@ export const TOOLTIP = {
   padding: [6, 10],
 };
 
-/** Compact Persian number for labels/axes (K/M/B). */
+/** Compact number for labels/axes (K/M/B). */
 export function compact(v: number): string {
   const abs = Math.abs(v);
   if (abs >= 1e9) return (v / 1e9).toFixed(1) + "B";
   if (abs >= 1e6) return (v / 1e6).toFixed(1) + "M";
   if (abs >= 1e3) return (v / 1e3).toFixed(0) + "K";
-  return String(Math.round(v));
+  return String(Math.round(v * 100) / 100);
 }
 
 function mix(a: string, b: string, t: number): string {

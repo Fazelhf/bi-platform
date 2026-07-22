@@ -5,6 +5,7 @@ import AdminUsersView from "@/views/admin/AdminUsersView.vue";
 import AdminDimensionsView from "@/views/admin/AdminDimensionsView.vue";
 import AdminFormulasView from "@/views/admin/AdminFormulasView.vue";
 import AdminAuditView from "@/views/admin/AdminAuditView.vue";
+import AdminAppearanceView from "@/views/admin/AdminAppearanceView.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -13,6 +14,7 @@ const tabs = [
   { key: "users", label: "کاربران", comp: AdminUsersView },
   { key: "dimensions", label: "داده‌های پایه", comp: AdminDimensionsView },
   { key: "formulas", label: "فرمول‌ها", comp: AdminFormulasView },
+  { key: "appearance", label: "طرح گرافیکی", comp: AdminAppearanceView },
   { key: "audit", label: "تاریخچه", comp: AdminAuditView },
 ];
 

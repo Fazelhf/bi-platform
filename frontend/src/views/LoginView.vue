@@ -32,7 +32,7 @@ async function submit() {
       class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm space-y-5"
       @submit.prevent="submit"
     >
-      <h1 class="text-xl font-bold text-center text-brand-600">پلتفرم هوش تجاری</h1>
+      <h1 class="text-xl font-bold text-center text-brand-600">شرکت کاغذ حساس نمابر مهر</h1>
       <p class="text-center text-sm text-slate-500 -mt-2">ورود به سامانه</p>
 
       <div>

@@ -237,3 +237,30 @@ class Notification(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"→ {self.recipient}: {self.message[:50]}"
+
+
+class SiteSetting(TimeStampedModel):
+    """
+    Singleton of site-wide preferences the CEO controls in تنظیمات سایت.
+    `chart_theme` drives the graphic style of every chart in every section,
+    so the whole platform stays visually coherent.
+    """
+
+    THEMES = [
+        ("modern", "مدرن"),
+        ("corporate", "سازمانی"),
+        ("vivid", "پرکنتراست"),
+        ("mono", "تک‌رنگ مینیمال"),
+    ]
+
+    singleton = models.BooleanField(default=True, unique=True, editable=False)
+    chart_theme = models.CharField(max_length=20, choices=THEMES, default="modern")
+    company_name = models.CharField(max_length=150, default="شرکت کاغذ حساس نمابر مهر")
+
+    @classmethod
+    def get(cls):
+        obj, _ = cls.objects.get_or_create(singleton=True)
+        return obj
+
+    def __str__(self) -> str:
+        return f"تنظیمات سایت ({self.chart_theme})"

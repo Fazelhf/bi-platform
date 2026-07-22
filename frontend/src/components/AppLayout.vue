@@ -68,7 +68,7 @@ function logout() {
     <header class="bg-white border-b border-slate-200 shadow-sm">
       <div class="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
         <div class="flex items-center gap-4">
-          <span class="font-bold text-brand-600 text-lg whitespace-nowrap">هوش تجاری</span>
+          <span class="font-bold text-brand-600 text-lg whitespace-nowrap">کاغذ حساس نمابر مهر</span>
           <nav class="flex items-center gap-1">
             <RouterLink
               v-for="item in navItems"

@@ -305,3 +305,37 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     def mark_all_read(self, request):
         updated = self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({"marked": updated})
+
+
+# --------------------------------------------------------------------------
+# Site settings — chart theme picker (read: everyone, write: CEO/admin)
+# --------------------------------------------------------------------------
+class SiteSettingView(APIView):
+    """GET is open to any signed-in user (the app needs the theme to render);
+    PATCH is restricted to the CEO/admin."""
+
+    def get_permissions(self):
+        from rest_framework.permissions import IsAuthenticated
+        return [IsExecutiveOrAdmin()] if self.request.method == "PATCH" else [IsAuthenticated()]
+
+    def get(self, request):
+        from apps.core.models import SiteSetting
+        s = SiteSetting.get()
+        return Response({
+            "chart_theme": s.chart_theme,
+            "company_name": s.company_name,
+            "themes": [{"key": k, "label": v} for k, v in SiteSetting.THEMES],
+        })
+
+    def patch(self, request):
+        from apps.core.models import SiteSetting
+        s = SiteSetting.get()
+        before = s.chart_theme
+        if "chart_theme" in request.data:
+            s.chart_theme = request.data["chart_theme"]
+        if "company_name" in request.data:
+            s.company_name = request.data["company_name"]
+        s.save()
+        audit_log(request.user, s, AuditLog.Action.UPDATE,
+                  {"chart_theme": {"before": before, "after": s.chart_theme}})
+        return Response({"chart_theme": s.chart_theme, "company_name": s.company_name})

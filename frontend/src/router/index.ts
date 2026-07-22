@@ -43,19 +43,19 @@ const router = createRouter({
         {
           path: "sales",
           name: "sales-dashboard",
-          component: () => import("@/views/DashboardView.vue"),
+          component: () => import("@/views/SalesDashboardView.vue"),
           props: { channel: "team", title: "داشبورد فروش همکار" },
         },
         {
           path: "sales-org",
           name: "sales-org-dashboard",
-          component: () => import("@/views/DashboardView.vue"),
+          component: () => import("@/views/SalesDashboardView.vue"),
           props: { channel: "organizational", title: "داشبورد فروش بانکی" },
         },
         {
           path: "sales-b2b",
           name: "sales-b2b-dashboard",
-          component: () => import("@/views/DashboardView.vue"),
+          component: () => import("@/views/SalesDashboardView.vue"),
           props: { channel: "b2b", title: "داشبورد فروش B2B" },
         },
         {

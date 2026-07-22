@@ -409,3 +409,108 @@ class SalesInputView(APIView):
                                  f"فروش {channel} · {period.label}")
 
         return Response({"ok": True, "submitted": submit, "salespeople": len(kept_employee_ids)})
+
+
+# --------------------------------------------------------------------------
+# DETAILED SALES DASHBOARD — mirrors the workbook's two chart sheets:
+#   داشبورد فروشنده (11 charts, per salesperson + provinces)
+#   داشبورد تیم     (9 charts, per team across the 5 teams)
+# --------------------------------------------------------------------------
+def _ratio(num, den):
+    return float(num) / float(den) if den else None
+
+
+class SalesDashboardDetailView(APIView):
+    """Per-salesperson and per-team series for the sales chart dashboards."""
+
+    @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
+                              OpenApiParameter("channel", str)], responses=dict)
+    def get(self, request):
+        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        channel = request.query_params.get("channel", "team")
+
+        # ---- Salesperson block (channel-scoped) — Sheet3 rows 18-30 ----
+        facts = list(
+            FactSalesMonthly.objects.filter(
+                period=period, channel=channel, status=ApprovalStatus.APPROVED
+            ).select_related("employee").order_by("employee__id")
+        )
+        channel_revenue = sum(float(f.revenue_rial) for f in facts)
+
+        salespeople = []
+        for f in facts:
+            rev = float(f.revenue_rial)
+            salespeople.append({
+                "name": f.employee.full_name_fa,
+                "revenue": rev,
+                "invoices": f.invoice_count,
+                "active_customers": f.active_customers,
+                "new_customers": f.new_customers,
+                "profit": float(f.profit_rial),
+                "cost": float(f.cost_rial),
+                "target": float(f.target_rial),
+                "calls": f.calls,
+                # derived (Sheet3 rows 28-30)
+                "volume_share": _ratio(rev, channel_revenue) and _ratio(rev, channel_revenue) * 100,
+                "target_achievement": _ratio(rev, f.target_rial) and _ratio(rev, f.target_rial) * 100,
+                "call_conversion": _ratio(f.invoice_count, f.calls) and _ratio(f.invoice_count, f.calls) * 100,
+            })
+
+        # ---- Team block (company-wide across channels) — Sheet3 rows 47-59 ----
+        all_facts = FactSalesMonthly.objects.filter(
+            period=period, status=ApprovalStatus.APPROVED
+        ).select_related("employee", "employee__team")
+
+        agg: dict[int, dict] = {}
+        for f in all_facts:
+            t = f.employee.team
+            if t is None:
+                continue
+            a = agg.setdefault(t.id, {
+                "name": t.name_fa, "revenue": 0.0, "invoices": 0, "active_customers": 0,
+                "new_customers": 0, "profit": 0.0, "cost": 0.0, "target": 0.0, "calls": 0,
+            })
+            a["revenue"] += float(f.revenue_rial)
+            a["invoices"] += f.invoice_count
+            a["active_customers"] += f.active_customers
+            a["new_customers"] += f.new_customers
+            a["profit"] += float(f.profit_rial)
+            a["cost"] += float(f.cost_rial)
+            a["target"] += float(f.target_rial)
+            a["calls"] += f.calls
+
+        total_target = sum(a["target"] for a in agg.values())
+        teams = []
+        for t in DimTeam.objects.all().order_by("id"):
+            a = agg.get(t.id)
+            if a is None:
+                a = {"name": t.name_fa, "revenue": 0.0, "invoices": 0, "active_customers": 0,
+                     "new_customers": 0, "profit": 0.0, "cost": 0.0, "target": 0.0, "calls": 0}
+            r = _ratio(a["calls"], a["invoices"])            # نسبت تماس موفق
+            tp = _ratio(a["revenue"], a["target"])            # درصد تحقق تارگت
+            share = _ratio(a["revenue"], total_target)        # سهم تیم از فروش به تارگت
+            c2s = _ratio(a["cost"], a["revenue"])             # هزینه به فروش
+            teams.append({
+                **a,
+                "success_call_ratio": r,
+                "target_achievement": tp and tp * 100,
+                "share_of_total_target": share and share * 100,
+                "cost_to_sales": c2s and c2s * 100,
+            })
+
+        # ---- Provinces (channel-scoped) ----
+        provinces = [{
+            "name": p.province.name_fa,
+            "sales": float(p.sales_rial),
+            "target": float(p.target_rial),
+        } for p in FactSalesProvince.objects.filter(
+            period=period, channel=channel
+        ).select_related("province").order_by("-sales_rial")]
+
+        return Response({
+            "period": PeriodSerializer(period).data,
+            "channel": channel,
+            "salespeople": salespeople,
+            "teams": teams,
+            "provinces": provinces,
+        })
