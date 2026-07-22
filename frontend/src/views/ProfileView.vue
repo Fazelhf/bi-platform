@@ -55,6 +55,43 @@ function openChat() {
   if (member.value) router.push({ name: "chat", query: { with: String(member.value.id) } });
 }
 
+// --- Edit own profile ---
+const editing = ref(false);
+const form = ref({ display_name_fa: "", job_title_fa: "", phone: "", avatar_color: "" });
+const AVATAR_COLORS = ["#10b981", "#3b6fed", "#f59e0b", "#ec4899", "#8b5cf6", "#1c1c1e", "#ef4444", "#0ea5e9"];
+
+function openEdit() {
+  if (!member.value) return;
+  form.value = {
+    display_name_fa: member.value.name,
+    job_title_fa: member.value.job_title_fa,
+    phone: member.value.phone,
+    avatar_color: member.value.avatar_color || "#3b6fed",
+  };
+  editing.value = true;
+}
+async function saveProfile() {
+  await socialApi.updateMe(form.value);
+  editing.value = false;
+  await auth.fetchMe();
+  await load();
+}
+
+// --- Delete account (admin/CEO on a colleague) ---
+const canDelete = computed(
+  () => !isMe.value && (auth.isExecutive || auth.me?.is_superuser) && member.value?.username !== "admin",
+);
+async function deleteAccount() {
+  if (!member.value) return;
+  if (!window.confirm(`اکانت «${member.value.name}» برای همیشه حذف شود؟`)) return;
+  try {
+    await socialApi.deleteUser(member.value.id);
+    router.push({ name: "team" });
+  } catch {
+    window.alert("حذف انجام نشد (ممکن است دسترسی نداشته باشید).");
+  }
+}
+
 onMounted(load);
 watch(() => route.params.id, load);
 </script>
@@ -72,13 +109,60 @@ watch(() => route.params.id, load);
           ● {{ lastSeenText(member) }}
         </p>
       </div>
-      <div v-if="!isMe" class="flex gap-2">
-        <button class="px-4 py-2 rounded-xl bg-ink text-white text-sm hover:bg-ink-soft" @click="openChat">💬 گفتگو</button>
-        <a
-          v-if="member.phone"
-          :href="`tel:${member.phone}`"
+      <div class="flex gap-2">
+        <template v-if="!isMe">
+          <button class="px-4 py-2 rounded-xl bg-ink text-white text-sm hover:bg-ink-soft" @click="openChat">💬 گفتگو</button>
+          <a
+            v-if="member.phone"
+            :href="`tel:${member.phone}`"
+            class="px-4 py-2 rounded-xl bg-slate-100 text-ink text-sm hover:bg-slate-200"
+          >📞 تماس</a>
+          <button
+            v-if="canDelete"
+            class="px-4 py-2 rounded-xl bg-red-50 text-red-600 text-sm hover:bg-red-100"
+            @click="deleteAccount"
+          >🗑 حذف اکانت</button>
+        </template>
+        <button
+          v-else
           class="px-4 py-2 rounded-xl bg-slate-100 text-ink text-sm hover:bg-slate-200"
-        >📞 تماس</a>
+          @click="openEdit"
+        >✎ ویرایش پروفایل</button>
+      </div>
+    </div>
+
+    <!-- Edit-profile modal -->
+    <div v-if="editing" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="editing = false">
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+        <h3 class="font-bold text-ink mb-1">ویرایش پروفایل</h3>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">نام نمایشی</label>
+          <input v-model="form.display_name_fa" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">عنوان شغلی</label>
+          <input v-model="form.job_title_fa" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">تلفن</label>
+          <input v-model="form.phone" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm ltr-nums" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-2">رنگ آواتار</label>
+          <div class="flex gap-2">
+            <button
+              v-for="c in AVATAR_COLORS" :key="c"
+              class="w-8 h-8 rounded-full transition"
+              :style="{ backgroundColor: c }"
+              :class="form.avatar_color === c ? 'ring-2 ring-offset-2 ring-ink' : ''"
+              @click="form.avatar_color = c"
+            ></button>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button class="px-4 py-2 text-sm rounded-lg hover:bg-slate-100" @click="editing = false">انصراف</button>
+          <button class="px-4 py-2 text-sm rounded-lg bg-accent-500 text-white hover:bg-accent-600" @click="saveProfile">ذخیره</button>
+        </div>
       </div>
     </div>
 

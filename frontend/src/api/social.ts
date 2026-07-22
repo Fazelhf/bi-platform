@@ -79,4 +79,13 @@ export const socialApi = {
     const { data } = await api.get("/auth/messages/unread_count/");
     return data;
   },
+
+  // Profile
+  async updateMe(payload: Partial<Pick<TeamMember, "name" | "job_title_fa" | "phone" | "avatar_color">> & { display_name_fa?: string }) {
+    const { data } = await api.patch("/auth/me/", payload);
+    return data;
+  },
+  async deleteUser(id: number) {
+    await api.delete(`/auth/users/${id}/`);
+  },
 };

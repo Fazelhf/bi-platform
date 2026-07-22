@@ -7,8 +7,9 @@ class DEPT_LABEL:
     MAP = {
         "": "—",
         "production": "تولید",
-        "sales_org": "فروش سازمانی",
-        "sales_team": "تیم فروش",
+        "sales_org": "فروش بانکی",
+        "sales_team": "فروش همکار",
+        "sales_b2b": "فروش B2B",
     }
 
 

@@ -269,3 +269,143 @@ class DashboardSummaryView(APIView):
                 "leaderboard": list(leaderboard),
             }
         )
+
+
+# --------------------------------------------------------------------------
+# Combined SALES INPUT — the Excel single-sheet table (salespeople as columns)
+# --------------------------------------------------------------------------
+SALES_METRIC_FIELDS = [
+    "revenue_rial", "invoice_count", "active_customers", "new_customers",
+    "profit_rial", "cost_rial", "target_rial", "calls",
+]
+# Row labels, in the exact order of the source workbook.
+SALES_METRIC_ROWS = [
+    ("revenue_rial", "فروش ریالی"),
+    ("invoice_count", "تعداد فاکتور فروش"),
+    ("active_customers", "تعداد مشتری فعال ماه"),
+    ("new_customers", "تعداد مشتری جدید"),
+    ("profit_rial", "سود فروش"),
+    ("cost_rial", "هزینه فروش"),
+    ("target_rial", "تارگت فروش"),
+    ("calls", "تعداد تماس"),
+]
+
+
+class SalesInputView(APIView):
+    """
+    Mirrors the sales workbook's single input sheet: one column per
+    salesperson (کارشناس), the 8 metric rows, plus the provincial block.
+    Managers may add/rename/remove salespeople by hand (not tied to a fixed
+    DB list). GET returns the table; POST syncs it (upsert + prune).
+    """
+
+    permission_classes = [SalesChannelOwnership]
+
+    def _channel(self, request):
+        return request.query_params.get("channel") or request.data.get("channel") or "team"
+
+    def _assert_owner(self, request, channel):
+        u = request.user
+        if u.is_superuser or u.role == "executive":
+            return
+        if u.department != CHANNEL_DEPARTMENT.get(channel):
+            raise PermissionDenied("این کانال فروش متعلق به بخش شما نیست.")
+
+    @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
+                              OpenApiParameter("channel", str)], responses=dict)
+    def get(self, request):
+        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        channel = self._channel(request)
+        facts = FactSalesMonthly.objects.filter(
+            period=period, channel=channel
+        ).select_related("employee").order_by("employee__id")
+
+        columns = [{
+            "employee_id": f.employee_id,
+            "name": f.employee.full_name_fa,
+            "status": f.status,
+            **{m: str(getattr(f, m)) for m in SALES_METRIC_FIELDS},
+        } for f in facts]
+
+        provinces = [{
+            "province_id": p.province_id,
+            "name": p.province.name_fa,
+            "sales_rial": str(p.sales_rial),
+            "target_rial": str(p.target_rial),
+        } for p in FactSalesProvince.objects.filter(
+            period=period, channel=channel
+        ).select_related("province").order_by("province__id")]
+
+        # Also expose the full province catalog so managers can add any.
+        all_provinces = [{"id": p.id, "name": p.name_fa}
+                         for p in DimProvince.objects.all()]
+
+        return Response({
+            "period": PeriodSerializer(period).data,
+            "channel": channel,
+            "metric_rows": [{"field": f, "label": l} for f, l in SALES_METRIC_ROWS],
+            "columns": columns,
+            "provinces": provinces,
+            "all_provinces": all_provinces,
+        })
+
+    def post(self, request):
+        import uuid
+        period = DimPeriod.objects.get(pk=request.data.get("period"))
+        channel = self._channel(request)
+        self._assert_owner(request, channel)
+        submit = bool(request.data.get("submit"))
+        status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
+        user = request.user
+
+        kept_employee_ids = set()
+        for row in request.data.get("columns", []):
+            name = (row.get("name") or "").strip()
+            if not name:
+                continue
+            emp_id = row.get("employee_id")
+            if emp_id:
+                employee = DimEmployee.objects.filter(pk=emp_id).first()
+                if employee and employee.full_name_fa != name:
+                    employee.full_name_fa = name
+                    employee.save(update_fields=["full_name_fa"])
+            else:
+                employee = DimEmployee.objects.filter(full_name_fa=name).first()
+            if employee is None:
+                employee = DimEmployee.objects.create(
+                    full_name_fa=name, code=f"emp-{uuid.uuid4().hex[:8]}"
+                )
+            values = {m: (row.get(m) or 0) for m in SALES_METRIC_FIELDS}
+            values["status"] = status
+            if submit:
+                values["submitted_by"] = user
+            obj, _ = FactSalesMonthly.objects.update_or_create(
+                period=period, employee=employee, channel=channel, defaults=values
+            )
+            kept_employee_ids.add(employee.id)
+
+        # Prune salespeople the manager removed from the table.
+        FactSalesMonthly.objects.filter(period=period, channel=channel).exclude(
+            employee_id__in=kept_employee_ids
+        ).delete()
+
+        # Provinces
+        for p in request.data.get("provinces", []):
+            if not p.get("province_id"):
+                continue
+            FactSalesProvince.objects.update_or_create(
+                period=period, province_id=p["province_id"], channel=channel,
+                defaults={"sales_rial": p.get("sales_rial") or 0,
+                          "target_rial": p.get("target_rial") or 0},
+            )
+
+        audit_log(user, period, AuditLog.Action.UPDATE,
+                  {"sales_input": {"before": None, "after": f"{channel} · {len(kept_employee_ids)} کارشناس"}})
+
+        if submit:
+            first = FactSalesMonthly.objects.filter(period=period, channel=channel).first()
+            if first:
+                notify_submitted(user, first, CHANNEL_DEPARTMENT.get(channel, ""),
+                                 f"فروش {channel} · {period.label}")
+
+        return Response({"ok": True, "submitted": submit, "salespeople": len(kept_employee_ids)})

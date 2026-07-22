@@ -58,21 +58,33 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        return Response(self._payload(request.user))
+
+    def patch(self, request):
+        """Self-service profile edit — a user may change their own display
+        name, job title, phone and avatar colour (never role/department)."""
         u = request.user
-        return Response(
-            {
-                "username": u.get_username(),
-                "display_name_fa": u.display_name_fa,
-                "job_title_fa": u.job_title_fa,
-                "initials": u.initials,
-                "avatar_color": u.avatar_color,
-                "role": u.role,
-                "department": u.department,
-                "is_superuser": u.is_superuser,
-                "can_enter_data": u.can_enter_data,
-                "can_approve": u.can_approve,
-            }
-        )
+        for field in ("display_name_fa", "job_title_fa", "phone", "avatar_color"):
+            if field in request.data:
+                setattr(u, field, request.data[field] or "")
+        u.save(update_fields=["display_name_fa", "job_title_fa", "phone", "avatar_color"])
+        return Response(self._payload(u))
+
+    @staticmethod
+    def _payload(u):
+        return {
+            "username": u.get_username(),
+            "display_name_fa": u.display_name_fa,
+            "job_title_fa": u.job_title_fa,
+            "phone": u.phone,
+            "initials": u.initials,
+            "avatar_color": u.avatar_color,
+            "role": u.role,
+            "department": u.department,
+            "is_superuser": u.is_superuser,
+            "can_enter_data": u.can_enter_data,
+            "can_approve": u.can_approve,
+        }
 
 
 class HeartbeatView(APIView):
