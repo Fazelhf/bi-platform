@@ -63,6 +63,10 @@ export const formulasApi = {
     });
     return data;
   },
+  async requestChange(id: number, note: string) {
+    const { data } = await api.post(`/executive/formulas/${id}/request_change/`, { note });
+    return data as { ok: boolean; message: string };
+  },
 };
 
 // ---------------- KPI catalog ----------------

@@ -57,6 +57,10 @@ const primary = computed<Item[]>(() => {
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
   }
+  // Managers get a read-only formula reference for their section.
+  if (!auth.isExecutive && auth.department) {
+    items.push({ name: "formula-docs", label: "فرمول‌ها", icon: "formula" });
+  }
   items.push(
     { name: "chat", label: "پیام‌ها", icon: "chat", badge: () => chatCount.value },
     { name: "notes", label: "یادداشت‌ها", icon: "notes" },

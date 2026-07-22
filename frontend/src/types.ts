@@ -162,6 +162,8 @@ export interface ProductionDashboard {
   costs: { category__name_fa: string; amount: number }[];
   revenue: { product: string; quantity: number; amount: number }[];
   print_colors: { color_count: number; area_sqm: number }[];
+  days_in_month: number;
+  financials: { revenue: number; cost: number; net: number };
 }
 
 // ---------------- Cross-domain executive overview ----------------

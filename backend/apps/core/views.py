@@ -157,9 +157,40 @@ class FormulaViewSet(viewsets.ModelViewSet):
 
     queryset = KPIFormula.objects.select_related("kpi", "created_by").all()
     serializer_class = FormulaSerializer
-    permission_classes = [IsExecutiveOrAdmin]
     filterset_fields = ["kpi", "kpi__code", "kpi__domain", "slot", "is_active"]
     http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def get_permissions(self):
+        from rest_framework.permissions import IsAuthenticated
+        # Anyone signed in may READ formulas + request a change; only the CEO/
+        # admin may create/activate/deactivate/delete.
+        if self.action in ("list", "retrieve", "variables", "request_change"):
+            return [IsAuthenticated()]
+        return [IsExecutiveOrAdmin()]
+
+    @action(detail=True, methods=["post"])
+    def request_change(self, request, pk=None):
+        """A manager requests a formula change; it notifies the CEO/admins."""
+        formula = self.get_object()
+        note = (request.data.get("note") or "").strip()
+        from django.contrib.auth import get_user_model
+        from apps.core.models import Notification
+        User = get_user_model()
+        approvers = User.objects.filter(is_active=True).filter(
+            models_Q_exec()
+        )
+        who = request.user.display_name_fa or request.user.get_username()
+        Notification.objects.bulk_create([
+            Notification(
+                recipient=u, actor=request.user, verb="formula_request",
+                message=f"درخواست تغییر فرمول «{formula.kpi.name_fa}» از {who}: {note}",
+                target_label="core.KPIFormula", target_id=str(formula.pk),
+            )
+            for u in approvers if u.pk != request.user.pk
+        ])
+        audit_log(request.user, formula, AuditLog.Action.FORMULA,
+                  {"change_request": {"before": None, "after": note}})
+        return Response({"ok": True, "message": "درخواست شما برای مدیر سیستم ارسال شد."})
 
     def perform_create(self, serializer):
         kpi = serializer.validated_data["kpi"]
@@ -228,6 +259,11 @@ class FormulaViewSet(viewsets.ModelViewSet):
         """The vocabulary an admin may use, per domain."""
         domain = request.query_params.get("domain", "sales")
         return Response(sorted(_variables_for_domain(domain)))
+
+
+def models_Q_exec():
+    from django.db.models import Q
+    return Q(role="executive") | Q(is_superuser=True)
 
 
 def _variables_for_domain(domain: str) -> set:

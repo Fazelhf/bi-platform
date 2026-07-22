@@ -16,6 +16,7 @@ router.register("material-balance", views.MaterialBalanceViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("input/", views.ProductionInputView.as_view(), name="production-input"),
     path("dashboard/summary/", views.ProductionDashboardView.as_view(),
          name="production-dashboard"),
     path("recompute/", views.RecomputeProductionView.as_view(),

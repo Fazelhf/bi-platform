@@ -210,6 +210,10 @@ class ProductionDashboardView(APIView):
             .order_by("color_count")
         )
 
+        bench, _ = ProductionBenchmark.objects.get_or_create(period=period)
+        total_cost = sum((c["amount"] for c in costs), 0)
+        total_revenue = sum((r["amount"] for r in revenue), 0)
+
         return Response(
             {
                 "period": PeriodSerializer(period).data,
@@ -219,6 +223,12 @@ class ProductionDashboardView(APIView):
                 "costs": list(costs),
                 "revenue": revenue,
                 "print_colors": list(print_colors),
+                "days_in_month": bench.days_in_month,
+                "financials": {
+                    "revenue": total_revenue,      # درآمد
+                    "cost": total_cost,            # هزینه
+                    "net": total_revenue - total_cost,  # کارکرد / سود
+                },
             }
         )
 
@@ -232,3 +242,143 @@ class RecomputeProductionView(APIView):
         period = DimPeriod.objects.get(pk=period_id)
         n = compute_period_kpis(period)
         return Response({"period": period.label, "rows_written": n})
+
+
+# --------------------------------------------------------------------------
+# Combined production INPUT — the manager fills all four Excel tables here
+# --------------------------------------------------------------------------
+CUT_FIELDS = [
+    "active_shifts", "output_units", "waste_pct", "repair_count",
+    "downtime_breakdown_shifts", "downtime_sizechange_shifts", "downtime_nowork_shifts",
+]
+
+
+class ProductionInputView(APIView):
+    """
+    One endpoint that mirrors the production workbook's four input tables:
+      1) cutting lines (برش ۱–۵) · 2) resources & costs (منابع) ·
+      3) print by colour (چاپ) · 4) roll counts (تعداد رول).
+    GET returns everything for a period; POST upserts everything at once.
+    """
+
+    permission_classes = [DepartmentEntryPermission]
+    entry_department = "production"
+
+    def _bench(self, period):
+        b, _ = ProductionBenchmark.objects.get_or_create(period=period)
+        return b
+
+    @extend_schema(parameters=[OpenApiParameter("period", int, required=True)], responses=dict)
+    def get(self, request):
+        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        bench = self._bench(period)
+
+        machines = list(DimMachine.objects.all())
+        facts = {f.machine_id: f for f in FactProduction.objects.filter(period=period)}
+
+        def machine_row(m):
+            f = facts.get(m.id)
+            row = {"machine": m.id, "machine_name": m.name_fa, "kind": m.kind,
+                   "status": f.status if f else "draft"}
+            for fld in CUT_FIELDS:
+                row[fld] = str(getattr(f, fld)) if f else "0"
+            return row
+
+        cutting = [machine_row(m) for m in machines if m.kind == DimMachine.Kind.CUTTING]
+        print_machine = next((m for m in machines if m.kind == DimMachine.Kind.PRINT), None)
+        print_row = machine_row(print_machine) if print_machine else None
+
+        colors = {c.color_count: c for c in FactPrintColor.objects.filter(period=period)}
+        print_colors = [
+            {"color_count": n, "area_sqm": str(colors[n].area_sqm) if n in colors else "0"}
+            for n in (1, 2, 3, 4)
+        ]
+
+        cost_rows = {c.category_id: c for c in FactProductionCost.objects.filter(period=period)}
+        costs = [
+            {"category": c.id, "category_name": c.name_fa,
+             "amount_rial": str(cost_rows[c.id].amount_rial) if c.id in cost_rows else "0"}
+            for c in DimCostCategory.objects.all()
+        ]
+
+        rev_rows = {r.product_id: r for r in FactProductionRevenue.objects.filter(period=period)}
+        rolls = [
+            {"product": p.id, "product_name": p.name_fa,
+             "piece_rate_rial": str(p.piece_rate_rial),
+             "quantity": str(rev_rows[p.id].quantity) if p.id in rev_rows else "0"}
+            for p in DimProduct.objects.all()
+        ]
+
+        return Response({
+            "period": PeriodSerializer(period).data,
+            "benchmark": BenchmarkSerializer(bench).data,
+            "cutting": cutting,
+            "print": print_row,
+            "print_colors": print_colors,
+            "costs": costs,
+            "rolls": rolls,
+        })
+
+    def post(self, request):
+        period = DimPeriod.objects.get(pk=request.data.get("period"))
+        data = request.data
+        user = request.user
+        submit = bool(data.get("submit"))
+        status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
+
+        # 1) Headcount (benchmark)
+        bench = self._bench(period)
+        if "total_headcount" in data:
+            bench.total_headcount = int(float(data["total_headcount"] or 0))
+            bench.save(update_fields=["total_headcount"])
+
+        # 2) Machines (cutting + print)
+        for row in list(data.get("cutting", [])) + ([data["print"]] if data.get("print") else []):
+            machine = DimMachine.objects.get(pk=row["machine"])
+            defaults = {f: (row.get(f) or 0) for f in CUT_FIELDS}
+            defaults["status"] = status
+            if submit:
+                defaults["submitted_by"] = user
+            obj, _ = FactProduction.objects.update_or_create(
+                period=period, machine=machine, defaults=defaults
+            )
+            audit_log(user, obj, AuditLog.Action.UPDATE)
+
+        # 3) Print colours
+        for c in data.get("print_colors", []):
+            FactPrintColor.objects.update_or_create(
+                period=period, color_count=int(c["color_count"]),
+                defaults={"area_sqm": c.get("area_sqm") or 0},
+            )
+
+        # 4) Costs
+        for c in data.get("costs", []):
+            FactProductionCost.objects.update_or_create(
+                period=period, category_id=c["category"],
+                defaults={"amount_rial": c.get("amount_rial") or 0},
+            )
+
+        # 5) Roll counts (revenue)
+        for r in data.get("rolls", []):
+            product = DimProduct.objects.get(pk=r["product"])
+            FactProductionRevenue.objects.update_or_create(
+                period=period, product=product,
+                defaults={"quantity": r.get("quantity") or 0,
+                          "piece_rate_rial": product.piece_rate_rial},
+            )
+
+        # Material balance from paper weights (optional inputs)
+        if "input_weight" in data or "output_weight" in data:
+            FactMaterialBalance.objects.update_or_create(
+                period=period, stream=FactMaterialBalance.Stream.CUTTING,
+                defaults={"input_weight": data.get("input_weight") or 0,
+                          "output_weight": data.get("output_weight") or 0},
+            )
+
+        if submit:
+            # Notify approvers that production data is pending.
+            first = FactProduction.objects.filter(period=period).first()
+            if first:
+                notify_submitted(user, first, "production", f"اطلاعات تولید · {period.label}")
+
+        return Response({"ok": True, "submitted": submit, "period": period.label})
