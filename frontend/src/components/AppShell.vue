@@ -228,6 +228,7 @@ onMounted(() => {
                 :name="auth.me?.display_name_fa"
                 :initials="auth.me?.initials"
                 :color="auth.me?.avatar_color"
+                :image="auth.me?.avatar_image"
                 :online="true"
                 :size="38"
               />

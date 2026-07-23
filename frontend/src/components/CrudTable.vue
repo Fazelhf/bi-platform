@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { confirm } from "@/composables/useUi";
 
 export interface CrudColumn {
   key: string;
@@ -95,8 +96,10 @@ function save() {
   else emit("update", editingId.value, payload);
   showModal.value = false;
 }
-function remove(row: Record<string, any>) {
-  if (window.confirm(`«${row[tableCols.value[0].key]}» حذف شود؟`)) emit("remove", row.id);
+async function remove(row: Record<string, any>) {
+  if (await confirm({ title: "حذف", message: `«${row[tableCols.value[0].key]}» حذف شود؟`, danger: true })) {
+    emit("remove", row.id);
+  }
 }
 
 function display(row: Record<string, any>, col: CrudColumn): string {

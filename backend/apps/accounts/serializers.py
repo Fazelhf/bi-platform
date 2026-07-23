@@ -24,7 +24,7 @@ class UserCardSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "username", "name", "initials", "job_title_fa",
-            "role", "department", "department_label", "avatar_color",
+            "role", "department", "department_label", "avatar_color", "avatar_image",
             "is_online", "last_seen", "phone",
         ]
 

@@ -1,6 +1,7 @@
 import api from "./client";
 
 export interface TeamMember {
+  avatar_image?: string;
   id: number;
   username: string;
   name: string;

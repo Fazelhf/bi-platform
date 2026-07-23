@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { socialApi, type Note, type TeamMember } from "@/api/social";
 import { useAuthStore } from "@/stores/auth";
+import { toast, confirm } from "@/composables/useUi";
 import UserAvatar from "@/components/UserAvatar.vue";
 
 const route = useRoute();
@@ -57,7 +58,7 @@ function openChat() {
 
 // --- Edit own profile ---
 const editing = ref(false);
-const form = ref({ display_name_fa: "", job_title_fa: "", phone: "", avatar_color: "" });
+const form = ref({ display_name_fa: "", job_title_fa: "", phone: "", avatar_color: "", avatar_image: "" });
 const AVATAR_COLORS = ["#10b981", "#3b6fed", "#f59e0b", "#ec4899", "#8b5cf6", "#1c1c1e", "#ef4444", "#0ea5e9"];
 
 function openEdit() {
@@ -67,11 +68,38 @@ function openEdit() {
     job_title_fa: member.value.job_title_fa,
     phone: member.value.phone,
     avatar_color: member.value.avatar_color || "#3b6fed",
+    avatar_image: member.value.avatar_image || "",
   };
   editing.value = true;
 }
+
+// Resize the chosen photo to a 160px square data-URL — no server files needed.
+function onPhoto(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) { toast.error("فقط فایل تصویری مجاز است."); return; }
+  const img = new Image();
+  const reader = new FileReader();
+  reader.onload = () => { img.src = reader.result as string; };
+  img.onload = () => {
+    const S = 160;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = S;
+    const ctx = canvas.getContext("2d")!;
+    const side = Math.min(img.width, img.height);
+    ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S);
+    form.value.avatar_image = canvas.toDataURL("image/jpeg", 0.82);
+  };
+  reader.readAsDataURL(file);
+}
 async function saveProfile() {
-  await socialApi.updateMe(form.value);
+  try {
+    await socialApi.updateMe(form.value);
+    toast.success("پروفایل به‌روزرسانی شد.");
+  } catch {
+    toast.error("ذخیره نشد — شاید عکس بزرگ است.");
+    return;
+  }
   editing.value = false;
   await auth.fetchMe();
   await load();
@@ -83,12 +111,18 @@ const canDelete = computed(
 );
 async function deleteAccount() {
   if (!member.value) return;
-  if (!window.confirm(`اکانت «${member.value.name}» برای همیشه حذف شود؟`)) return;
+  const ok = await confirm({
+    title: "حذف اکانت",
+    message: `اکانت «${member.value.name}» برای همیشه حذف شود؟ این عمل قابل بازگشت نیست.`,
+    danger: true,
+  });
+  if (!ok) return;
   try {
     await socialApi.deleteUser(member.value.id);
+    toast.success("اکانت حذف شد.");
     router.push({ name: "team" });
   } catch {
-    window.alert("حذف انجام نشد (ممکن است دسترسی نداشته باشید).");
+    toast.error("حذف انجام نشد (ممکن است دسترسی نداشته باشید).");
   }
 }
 
@@ -101,7 +135,7 @@ watch(() => route.params.id, load);
   <div v-else-if="member" class="max-w-3xl space-y-4">
     <!-- Header card -->
     <div class="bg-white rounded-card shadow-soft p-6 flex items-center gap-5">
-      <UserAvatar :name="member.name" :initials="member.initials" :color="member.avatar_color" :online="member.is_online" :size="80" />
+      <UserAvatar :name="member.name" :initials="member.initials" :color="member.avatar_color" :image="member.avatar_image" :online="member.is_online" :size="80" />
       <div class="flex-1">
         <h1 class="text-xl font-bold text-ink">{{ member.name }}</h1>
         <p class="text-slate-500">{{ member.job_title_fa || member.department_label }}</p>
@@ -135,6 +169,19 @@ watch(() => route.params.id, load);
     <div v-if="editing" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="editing = false">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
         <h3 class="font-bold text-ink mb-1">ویرایش پروفایل</h3>
+
+        <!-- Photo -->
+        <div class="flex items-center gap-4">
+          <UserAvatar :name="form.display_name_fa" :color="form.avatar_color" :image="form.avatar_image" :show-dot="false" :size="64" />
+          <div class="flex gap-2">
+            <label class="px-3 py-1.5 text-sm rounded-lg border border-slate-300 hover:bg-slate-50 cursor-pointer">
+              انتخاب عکس
+              <input type="file" accept="image/*" class="hidden" @change="onPhoto" />
+            </label>
+            <button v-if="form.avatar_image" class="px-3 py-1.5 text-sm rounded-lg text-rose-500 hover:bg-rose-50" @click="form.avatar_image = ''">حذف عکس</button>
+          </div>
+        </div>
+
         <div>
           <label class="block text-xs text-slate-500 mb-1">نام نمایشی</label>
           <input v-model="form.display_name_fa" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />

@@ -67,7 +67,15 @@ class MeView(APIView):
         for field in ("display_name_fa", "job_title_fa", "phone", "avatar_color"):
             if field in request.data:
                 setattr(u, field, request.data[field] or "")
-        u.save(update_fields=["display_name_fa", "job_title_fa", "phone", "avatar_color"])
+        if "avatar_image" in request.data:
+            img = request.data["avatar_image"] or ""
+            # Accept a small data-URL only (client resizes to ~160px first).
+            if img and (not img.startswith("data:image/") or len(img) > 300_000):
+                return Response({"avatar_image": "تصویر نامعتبر یا بزرگ است."}, status=400)
+            u.avatar_image = img
+        u.save(update_fields=[
+            "display_name_fa", "job_title_fa", "phone", "avatar_color", "avatar_image",
+        ])
         return Response(self._payload(u))
 
     @staticmethod
@@ -79,6 +87,7 @@ class MeView(APIView):
             "phone": u.phone,
             "initials": u.initials,
             "avatar_color": u.avatar_color,
+            "avatar_image": u.avatar_image,
             "role": u.role,
             "department": u.department,
             "is_superuser": u.is_superuser,

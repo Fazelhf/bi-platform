@@ -80,6 +80,7 @@ export interface UserRow {
 }
 
 export interface Me {
+  avatar_image?: string;
   username: string;
   display_name_fa: string;
   job_title_fa: string;

@@ -19,7 +19,8 @@
   "job_title_fa": "مدیرعامل",
   "phone": "",
   "avatar_color": "#10b981",
-  "last_seen": "2026-07-23T12:33:35.500Z",
+  "avatar_image": "",
+  "last_seen": "2026-07-23T17:16:18.183Z",
   "groups": [],
   "user_permissions": []
  }
@@ -44,6 +45,7 @@
   "job_title_fa": "مدیر تولید",
   "phone": "",
   "avatar_color": "#3b6fed",
+  "avatar_image": "",
   "last_seen": "2026-07-21T21:44:05.885Z",
   "groups": [],
   "user_permissions": []
@@ -69,6 +71,7 @@
   "job_title_fa": "مدیر فروش سازمانی",
   "phone": "",
   "avatar_color": "#f59e0b",
+  "avatar_image": "",
   "last_seen": null,
   "groups": [],
   "user_permissions": []
@@ -94,6 +97,7 @@
   "job_title_fa": "مدیر تیم فروش",
   "phone": "",
   "avatar_color": "#ec4899",
+  "avatar_image": "",
   "last_seen": null,
   "groups": [],
   "user_permissions": []
@@ -119,6 +123,7 @@
   "job_title_fa": "ادمین سیستم",
   "phone": "",
   "avatar_color": "#1c1c1e",
+  "avatar_image": "",
   "last_seen": null,
   "groups": [],
   "user_permissions": []
@@ -144,6 +149,7 @@
   "job_title_fa": "کارشناس فروش",
   "phone": "",
   "avatar_color": "#8b5cf6",
+  "avatar_image": "",
   "last_seen": null,
   "groups": [],
   "user_permissions": []
@@ -169,6 +175,7 @@
   "job_title_fa": "کارشناس فروش",
   "phone": "",
   "avatar_color": "#06b6d4",
+  "avatar_image": "",
   "last_seen": null,
   "groups": [],
   "user_permissions": []
@@ -194,6 +201,7 @@
   "job_title_fa": "اپراتور خط تولید",
   "phone": "",
   "avatar_color": "#ef4444",
+  "avatar_image": "",
   "last_seen": null,
   "groups": [],
   "user_permissions": []
@@ -219,6 +227,7 @@
   "job_title_fa": "x",
   "phone": "",
   "avatar_color": "#10b981",
+  "avatar_image": "",
   "last_seen": "2026-07-22T08:10:18.180Z",
   "groups": [],
   "user_permissions": []
@@ -244,7 +253,8 @@
   "job_title_fa": "مدیر فروش بانکی",
   "phone": "",
   "avatar_color": "#f59e0b",
-  "last_seen": "2026-07-22T21:39:00.674Z",
+  "avatar_image": "",
+  "last_seen": "2026-07-23T17:17:35.848Z",
   "groups": [],
   "user_permissions": []
  }
@@ -269,6 +279,7 @@
   "job_title_fa": "مدیر فروش B2B",
   "phone": "",
   "avatar_color": "#ec4899",
+  "avatar_image": "",
   "last_seen": "2026-07-22T21:57:37.324Z",
   "groups": [],
   "user_permissions": []
@@ -294,6 +305,7 @@
   "job_title_fa": "مدیر تولید",
   "phone": "",
   "avatar_color": "#8b5cf6",
+  "avatar_image": "",
   "last_seen": "2026-07-22T08:10:34.516Z",
   "groups": [],
   "user_permissions": []

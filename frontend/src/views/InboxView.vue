@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { inboxApi } from "@/api/platform";
 import { useAuthStore } from "@/stores/auth";
+import { toast, prompt } from "@/composables/useUi";
 import { num, rial } from "@/utils/format";
 
 const auth = useAuthStore();
@@ -47,15 +48,19 @@ async function decide(
 ) {
   let note = "";
   if (action === "request-revision") {
-    note = window.prompt("توضیح برای اصلاح (اختیاری):") ?? "";
+    const r = await prompt({ title: "ارسال برای اصلاح", message: "توضیح برای فروشنده (اختیاری):", placeholder: "مثلاً: عدد فروش را بازبینی کنید" });
+    if (r === null) return; // cancelled
+    note = r;
   }
   busy.value = `${kind}-${row.id}`;
   try {
     if (kind === "sales") await inboxApi.decideSales(row.id, action, note);
     else await inboxApi.decideProduction(row.id, action, note);
+    const verb = action === "approve" ? "تأیید شد" : action === "reject" ? "رد شد" : "برای اصلاح ارسال شد";
+    toast.success(`مورد ${verb}.`);
     await load();
   } catch {
-    window.alert("خطا در انجام عملیات یا نداشتن دسترسی.");
+    toast.error("انجام نشد یا دسترسی ندارید.");
   } finally {
     busy.value = "";
   }

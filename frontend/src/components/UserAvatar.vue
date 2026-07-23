@@ -6,6 +6,7 @@ const props = withDefaults(
     name?: string;
     initials?: string;
     color?: string;
+    image?: string;
     online?: boolean;
     size?: number;
     showDot?: boolean;
@@ -26,7 +27,16 @@ const dotSize = computed(() => Math.max(9, Math.round(props.size * 0.28)));
 
 <template>
   <div class="relative inline-flex shrink-0">
+    <img
+      v-if="image"
+      :src="image"
+      alt=""
+      class="rounded-full object-cover select-none"
+      :class="ring ? 'ring-2 ring-white' : ''"
+      :style="{ width: `${size}px`, height: `${size}px` }"
+    />
     <div
+      v-else
       class="rounded-full flex items-center justify-center text-white font-semibold select-none"
       :class="ring ? 'ring-2 ring-white' : ''"
       :style="style"

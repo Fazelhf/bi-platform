@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { salesApi } from "@/api/sales";
 import { salesInputApi, type SalesInput } from "@/api/salesInput";
+import { toast, prompt, confirm } from "@/composables/useUi";
 import { num } from "@/utils/format";
 
 const props = withDefaults(defineProps<{ channel?: string; title?: string }>(), {
@@ -30,17 +31,17 @@ async function load() {
   }
 }
 
-function addSalesperson() {
-  const name = window.prompt("نام فروشنده (کارشناس) جدید:");
+async function addSalesperson() {
+  const name = await prompt({ title: "افزودن فروشنده", message: "نام فروشنده (کارشناس) جدید:", placeholder: "نام و نام خانوادگی" });
   if (!name || !name.trim()) return;
   const blank: Record<string, any> = { employee_id: null, name: name.trim(), status: "draft" };
   for (const m of data.value!.metric_rows) blank[m.field] = "0";
   data.value!.columns.push(blank);
 }
 
-function removeSalesperson(i: number) {
+async function removeSalesperson(i: number) {
   const c = data.value!.columns[i];
-  if (window.confirm(`ستون «${c.name}» از این دوره حذف شود؟`)) {
+  if (await confirm({ title: "حذف فروشنده", message: `ستون «${c.name}» از این دوره حذف شود؟`, danger: true })) {
     data.value!.columns.splice(i, 1);
   }
 }
@@ -68,10 +69,12 @@ async function save(submit: boolean) {
       columns: data.value!.columns,
       provinces: data.value!.provinces,
     });
-    saving.value = submit ? "برای تایید ارسال شد ✓" : "ذخیره شد ✓";
+    saving.value = "";
+    toast.success(submit ? "برای تایید مدیرعامل ارسال شد." : "پیش‌نویس ذخیره شد.");
     if (submit) await load();
   } catch (e: any) {
-    saving.value = "خطا: " + (e?.response?.status === 403 ? "دسترسی ندارید" : "ذخیره نشد");
+    saving.value = "";
+    toast.error(e?.response?.status === 403 ? "دسترسی ندارید." : "ذخیره نشد.");
   }
 }
 

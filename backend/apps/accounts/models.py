@@ -50,6 +50,9 @@ class User(AbstractUser):
     job_title_fa = models.CharField("job title", max_length=120, blank=True)
     phone = models.CharField(max_length=30, blank=True)
     avatar_color = models.CharField(max_length=7, blank=True)  # e.g. #3b6fed
+    # Profile photo stored as a small resized data-URL (no media files / no
+    # Pillow needed) — the client resizes to ~160px before upload.
+    avatar_image = models.TextField(blank=True)
     last_seen = models.DateTimeField(null=True, blank=True)
 
     @property
