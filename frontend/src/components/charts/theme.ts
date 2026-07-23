@@ -1,4 +1,4 @@
-import * as echarts from "echarts";
+import { graphic } from "@/lib/echarts";
 import { paletteByKey, type Palette } from "./palettes";
 
 /**
@@ -21,7 +21,7 @@ export const COLORS = new Proxy({} as Record<string, string>, {
 /** A soft gradient for a bar (flat fill when the theme disables gradients). */
 export function barGradient(hex: string) {
   if (!activePalette().gradient) return hex;
-  return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+  return new graphic.LinearGradient(0, 0, 0, 1, [
     { offset: 0, color: mix(hex, "#ffffff", 0.22) },
     { offset: 1, color: hex },
   ]);

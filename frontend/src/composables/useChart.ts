@@ -1,4 +1,4 @@
-import * as echarts from "echarts";
+import { init, type EChartsOption, type EChartsType } from "@/lib/echarts";
 import { onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue";
 
 /**
@@ -7,9 +7,9 @@ import { onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue";
  */
 export function useChart(
   el: Ref<HTMLElement | null>,
-  option: Ref<echarts.EChartsOption>,
+  option: Ref<EChartsOption>,
 ) {
-  let chart: echarts.ECharts | null = null;
+  let chart: EChartsType | null = null;
   const ready = ref(false);
 
   function resize() {
@@ -18,7 +18,7 @@ export function useChart(
 
   onMounted(() => {
     if (!el.value) return;
-    chart = echarts.init(el.value, undefined, { renderer: "canvas" });
+    chart = init(el.value, undefined, { renderer: "canvas" });
     chart.setOption(option.value);
     ready.value = true;
     window.addEventListener("resize", resize);

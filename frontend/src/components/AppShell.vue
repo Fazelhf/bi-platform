@@ -16,6 +16,7 @@ const router = useRouter();
 usePresence(); // keep me online
 
 const collapsed = ref(false);
+const mobileOpen = ref(false); // drawer state on phones
 const inboxCount = ref(0);
 const chatCount = ref(0);
 const userMenu = ref(false);
@@ -94,7 +95,7 @@ async function refreshBadges() {
   } catch { /* ignore */ }
 }
 
-function go(name: string) { router.push({ name }); }
+function go(name: string) { router.push({ name }); mobileOpen.value = false; }
 function logout() { auth.logout(); router.push({ name: "login" }); }
 
 onMounted(() => {
@@ -104,12 +105,23 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen flex gap-4 p-4" dir="rtl">
+  <div class="min-h-screen md:flex md:gap-4 md:p-4" dir="rtl">
+    <!-- Mobile backdrop -->
+    <div
+      v-if="mobileOpen"
+      class="fixed inset-0 bg-black/40 z-40 md:hidden"
+      @click="mobileOpen = false"
+    ></div>
+
     <!-- ============ Sidebar (right in RTL) ============ -->
     <aside
-      class="bg-white rounded-card shadow-soft flex flex-col shrink-0 transition-all duration-200"
-      :class="collapsed ? 'w-[76px]' : 'w-64'"
-      style="height: calc(100vh - 2rem); position: sticky; top: 1rem"
+      class="bg-white shadow-soft flex flex-col shrink-0 transition-transform duration-200
+             fixed inset-y-0 right-0 z-50 w-64 rounded-none h-screen
+             md:sticky md:top-4 md:z-auto md:rounded-card md:h-[calc(100vh-2rem)]"
+      :class="[
+        collapsed ? 'md:w-[76px]' : 'md:w-64',
+        mobileOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0',
+      ]"
     >
       <!-- Logo + collapse -->
       <div class="flex items-center gap-3 p-4" :class="collapsed ? 'justify-center' : ''">
@@ -188,19 +200,24 @@ onMounted(() => {
     </aside>
 
     <!-- ============ Main ============ -->
-    <div class="flex-1 min-w-0 flex flex-col gap-4">
+    <div class="flex-1 min-w-0 flex flex-col gap-4 p-3 md:p-0">
       <!-- Topbar -->
-      <header class="bg-white rounded-card shadow-soft px-5 py-3 flex items-center justify-between">
-        <!-- Title (right) -->
-        <div class="flex items-center gap-2">
-          <h1 class="font-bold text-ink">{{ pageTitle }}</h1>
-          <span class="text-slate-300">|</span>
-          <span class="text-xs text-slate-400">{{ today }}</span>
+      <header class="bg-white rounded-card shadow-soft px-4 md:px-5 py-3 flex items-center justify-between gap-2">
+        <!-- Title (right) + hamburger -->
+        <div class="flex items-center gap-2 min-w-0">
+          <button
+            class="md:hidden text-slate-500 hover:text-ink shrink-0 -mr-1 p-1"
+            aria-label="منو"
+            @click="mobileOpen = true"
+          ><NavIcon name="grid" :size="22" /></button>
+          <h1 class="font-bold text-ink truncate">{{ pageTitle }}</h1>
+          <span class="text-slate-300 hidden sm:inline">|</span>
+          <span class="text-xs text-slate-400 hidden sm:inline">{{ today }}</span>
         </div>
 
         <!-- Actions (left) -->
-        <div class="flex items-center gap-3">
-          <div class="hidden md:flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1.5 text-sm text-slate-500">
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <div class="hidden lg:flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1.5 text-sm text-slate-500">
             <NavIcon name="search" :size="16" />
             <input v-model="search" placeholder="جستجو" class="bg-transparent outline-none w-32 text-ink" />
           </div>
