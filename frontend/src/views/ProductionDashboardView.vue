@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { salesApi } from "@/api/sales";
 import { productionApi } from "@/api/production";
+import { defaultPeriodId } from "@/types";
 import type { KpiResult, Period, ProductionDashboard } from "@/types";
 import ComparisonBar from "@/components/charts/ComparisonBar.vue";
 import DonutChart from "@/components/charts/DonutChart.vue";
@@ -51,7 +52,7 @@ async function load() {
 }
 onMounted(async () => {
   periods.value = await salesApi.periods();
-  selectedPeriod.value = periods.value[0]?.id ?? null;
+  selectedPeriod.value = defaultPeriodId(periods.value);
   await load();
 });
 watch(selectedPeriod, load);

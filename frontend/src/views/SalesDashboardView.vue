@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { defaultPeriodId, type Period } from "@/types";
 import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 import { salesApi } from "@/api/sales";
@@ -22,7 +23,7 @@ interface Detail {
   provinces: { name: string; sales: number; target: number }[];
 }
 
-const periods = ref<{ id: number; label: string }[]>([]);
+const periods = ref<Period[]>([]);
 const periodA = ref<number | null>(null);
 const periodB = ref<number | null>(null);   // comparison month
 const compare = ref(false);
@@ -84,8 +85,9 @@ const totalRevenue = computed(() =>
 
 onMounted(async () => {
   periods.value = await salesApi.periods();
-  periodA.value = periods.value.find((p) => p.label.includes("اردیبهشت"))?.id ?? periods.value[0]?.id ?? null;
-  periodB.value = periods.value[0]?.id ?? null;
+  // Main period = latest month that has data; comparison starts unset.
+  periodA.value = defaultPeriodId(periods.value);
+  periodB.value = null;
   await load();
 });
 watch([periodA, periodB, compare, () => props.channel], load);

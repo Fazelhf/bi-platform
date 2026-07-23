@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { salesApi } from "@/api/sales";
 import { executiveApi } from "@/api/executive";
+import { defaultPeriodId } from "@/types";
 import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, rial } from "@/utils/format";
 
@@ -41,7 +42,7 @@ async function load() {
 
 onMounted(async () => {
   periods.value = await salesApi.periods();
-  selectedPeriod.value = periods.value[0]?.id ?? null;
+  selectedPeriod.value = defaultPeriodId(periods.value);
   await load();
 });
 watch(selectedPeriod, load);

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { salesApi } from "@/api/sales";
+import { defaultPeriodId } from "@/types";
 import type { DashboardSummary, Period } from "@/types";
 import KpiCard from "@/components/KpiCard.vue";
 import BarChart from "@/components/BarChart.vue";
@@ -62,7 +63,7 @@ async function load() {
 
 onMounted(async () => {
   periods.value = await salesApi.periods();
-  selectedPeriod.value = periods.value[0]?.id ?? null;
+  selectedPeriod.value = defaultPeriodId(periods.value);
   await load();
 });
 

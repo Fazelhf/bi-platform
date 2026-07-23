@@ -1,0 +1,6794 @@
+[
+{
+ "model": "accounts.user",
+ "pk": 1,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$QZHYZMoW7J9n8LOYQlwl0G$EJu9fTuFaYk845Mh3uz+sSCQtYW8vF4y15lIhJ2gg1M=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "ceo",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": true,
+  "date_joined": "2026-07-17T20:08:56.031Z",
+  "role": "executive",
+  "department": "",
+  "display_name_fa": "امیر عصاری",
+  "job_title_fa": "مدیرعامل",
+  "phone": "",
+  "avatar_color": "#10b981",
+  "last_seen": "2026-07-23T12:33:35.500Z",
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 2,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$ijTLmMnF3VcguSMZoIOc9E$vLmV5y4a1m0h+B7Kf0c0LDNh7jvtB9PARRLiaHHdjNY=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "prod_manager",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": false,
+  "date_joined": "2026-07-21T06:32:55.972Z",
+  "role": "manager",
+  "department": "production",
+  "display_name_fa": "مسعود کمالی",
+  "job_title_fa": "مدیر تولید",
+  "phone": "",
+  "avatar_color": "#3b6fed",
+  "last_seen": "2026-07-21T21:44:05.885Z",
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 3,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$ZpHfj8unOAJZav84zjFrrD$WFm7fXjBbG0VHE8VIwHDkYekmpW4lk+FWNrB6+fXfl0=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "org_manager",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": false,
+  "date_joined": "2026-07-21T06:32:56.616Z",
+  "role": "manager",
+  "department": "sales_org",
+  "display_name_fa": "سهراب بهروزی",
+  "job_title_fa": "مدیر فروش سازمانی",
+  "phone": "",
+  "avatar_color": "#f59e0b",
+  "last_seen": null,
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 4,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$DN1ab4755yY6tbAmNkPKKi$PUrOjUEI7rde3q7N47+lEzfFZyejUj8L6l6M64MFuu0=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "team_manager",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": false,
+  "date_joined": "2026-07-21T06:32:57.270Z",
+  "role": "manager",
+  "department": "sales_team",
+  "display_name_fa": "هانیه منزه",
+  "job_title_fa": "مدیر تیم فروش",
+  "phone": "",
+  "avatar_color": "#ec4899",
+  "last_seen": null,
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 5,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$VjoUtDdpXhquHb3AQsDuF4$H98IMyLIvM9DDq/q+ibn4xvL2WTOVAaHZvYc69Njek8=",
+  "last_login": "2026-07-22T22:06:38.422Z",
+  "is_superuser": true,
+  "username": "admin",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": true,
+  "is_active": true,
+  "date_joined": "2026-07-21T06:41:08.773Z",
+  "role": "executive",
+  "department": "",
+  "display_name_fa": "مدیر سیستم",
+  "job_title_fa": "ادمین سیستم",
+  "phone": "",
+  "avatar_color": "#1c1c1e",
+  "last_seen": null,
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 6,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$dQr6CBm3nOWBQ7WfpaZsCp$dJHz1p+ztSFwS6jp0PElxVurxmibEnLmRdZk6gUZlK0=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "s.mousavi",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": false,
+  "date_joined": "2026-07-21T20:47:28.684Z",
+  "role": "operator",
+  "department": "sales_team",
+  "display_name_fa": "صبا موسوی",
+  "job_title_fa": "کارشناس فروش",
+  "phone": "",
+  "avatar_color": "#8b5cf6",
+  "last_seen": null,
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 7,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$hm60V7cNB7S1lNZuzfSHz4$p2oLsCGHicv2UjFMfm73lSHOUi4wJr6/H3kqniB7y9k=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "m.momeni",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": false,
+  "date_joined": "2026-07-21T20:47:29.605Z",
+  "role": "operator",
+  "department": "sales_team",
+  "display_name_fa": "مهدیس مومنی",
+  "job_title_fa": "کارشناس فروش",
+  "phone": "",
+  "avatar_color": "#06b6d4",
+  "last_seen": null,
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 8,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$fq2YWg4wm7KKlmEJ60hcl5$H/h2vJlQM3bS9hJGo4h9Q1PHzKgXuBEgsOZ8oIe38hM=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "a.rezaei",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": false,
+  "date_joined": "2026-07-21T20:47:30.393Z",
+  "role": "operator",
+  "department": "production",
+  "display_name_fa": "علی رضایی",
+  "job_title_fa": "اپراتور خط تولید",
+  "phone": "",
+  "avatar_color": "#ef4444",
+  "last_seen": null,
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 9,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$xGpVdGfEQgOxMAhzNuIyHe$RhiODGaokQHr6/n6aH/Q2RHXbD8FERudaHCm9prdJr8=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "sales_team_mgr",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": true,
+  "date_joined": "2026-07-21T21:44:19.129Z",
+  "role": "manager",
+  "department": "sales_team",
+  "display_name_fa": "محمدمحسن شاهان",
+  "job_title_fa": "x",
+  "phone": "",
+  "avatar_color": "#10b981",
+  "last_seen": "2026-07-22T08:10:18.180Z",
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 10,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$mjQ6EG8koZ0JDXKEVvmOLk$wN+DSGwsHioalz2Z8w4pN5GhvkMNbPgEfbWeFDNUQX0=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "banking_mgr",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": true,
+  "date_joined": "2026-07-21T21:44:19.800Z",
+  "role": "manager",
+  "department": "sales_org",
+  "display_name_fa": "هانیه منزه",
+  "job_title_fa": "مدیر فروش بانکی",
+  "phone": "",
+  "avatar_color": "#f59e0b",
+  "last_seen": "2026-07-22T21:39:00.674Z",
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 11,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$mhnF4aAKM071JQEZlRDchO$t7wBS7ACfmMwdSBmx6yXrWWj8Xgr0ZedONPjEADf31Q=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "b2b_mgr",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": true,
+  "date_joined": "2026-07-21T21:44:20.483Z",
+  "role": "manager",
+  "department": "sales_b2b",
+  "display_name_fa": "سارا مسگرچیان",
+  "job_title_fa": "مدیر فروش B2B",
+  "phone": "",
+  "avatar_color": "#ec4899",
+  "last_seen": "2026-07-22T21:57:37.324Z",
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "accounts.user",
+ "pk": 12,
+ "fields": {
+  "password": "pbkdf2_sha256$870000$uH7hqY3v1lImHFc5fQniFE$TyQoUk/I8ftz6Ueej8SEuJtwMeTijXF3HhjCWMCeU4w=",
+  "last_login": null,
+  "is_superuser": false,
+  "username": "production_mgr",
+  "first_name": "",
+  "last_name": "",
+  "email": "",
+  "is_staff": false,
+  "is_active": true,
+  "date_joined": "2026-07-21T21:44:21.222Z",
+  "role": "manager",
+  "department": "production",
+  "display_name_fa": "محمد مهدی صیفی",
+  "job_title_fa": "مدیر تولید",
+  "phone": "",
+  "avatar_color": "#8b5cf6",
+  "last_seen": "2026-07-22T08:10:34.516Z",
+  "groups": [],
+  "user_permissions": []
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.330Z",
+  "updated_at": "2026-07-17T20:06:53.331Z",
+  "jalali_year": 1405,
+  "jalali_month": 2
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.914Z",
+  "updated_at": "2026-07-22T20:09:32.914Z",
+  "jalali_year": 1405,
+  "jalali_month": 1
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.922Z",
+  "updated_at": "2026-07-22T20:09:32.922Z",
+  "jalali_year": 1405,
+  "jalali_month": 3
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.927Z",
+  "updated_at": "2026-07-22T20:09:32.927Z",
+  "jalali_year": 1405,
+  "jalali_month": 4
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.932Z",
+  "updated_at": "2026-07-22T20:09:32.932Z",
+  "jalali_year": 1405,
+  "jalali_month": 5
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.936Z",
+  "updated_at": "2026-07-22T20:09:32.936Z",
+  "jalali_year": 1405,
+  "jalali_month": 6
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.940Z",
+  "updated_at": "2026-07-22T20:09:32.941Z",
+  "jalali_year": 1405,
+  "jalali_month": 7
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 8,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.947Z",
+  "updated_at": "2026-07-22T20:09:32.947Z",
+  "jalali_year": 1405,
+  "jalali_month": 8
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 9,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.952Z",
+  "updated_at": "2026-07-22T20:09:32.952Z",
+  "jalali_year": 1405,
+  "jalali_month": 9
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 10,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.956Z",
+  "updated_at": "2026-07-22T20:09:32.956Z",
+  "jalali_year": 1405,
+  "jalali_month": 10
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 11,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.961Z",
+  "updated_at": "2026-07-22T20:09:32.961Z",
+  "jalali_year": 1405,
+  "jalali_month": 11
+ }
+},
+{
+ "model": "core.dimperiod",
+ "pk": 12,
+ "fields": {
+  "created_at": "2026-07-22T20:09:32.966Z",
+  "updated_at": "2026-07-22T20:09:32.966Z",
+  "jalali_year": 1405,
+  "jalali_month": 12
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.507Z",
+  "updated_at": "2026-07-23T12:33:57.392Z",
+  "code": "revenue",
+  "name_fa": "فروش ریالی",
+  "name_en": "Revenue",
+  "domain": "sales",
+  "unit": "rial",
+  "direction": "higher",
+  "formula_note": "جمع فروش ریالی همه فروشندگان. منبع: شیت ورودی ردیف ۳ (=SUM). فرمول: فروش."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.510Z",
+  "updated_at": "2026-07-23T12:33:57.395Z",
+  "code": "target_achievement",
+  "name_fa": "درصد تحقق تارگت",
+  "name_en": "Target achievement",
+  "domain": "sales",
+  "unit": "%",
+  "direction": "higher",
+  "formula_note": "فروش ÷ تارگت × ۱۰۰. عیناً مطابق Sheet3!C29 = (C19/C25)*100 «درصد رسیدن به تارگت»."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.514Z",
+  "updated_at": "2026-07-23T12:33:57.398Z",
+  "code": "volume_share",
+  "name_fa": "سهم از حجم فروش",
+  "name_en": "Share of sales volume",
+  "domain": "sales",
+  "unit": "%",
+  "direction": "higher",
+  "formula_note": "فروش هر واحد ÷ کل فروش شرکت × ۱۰۰. اکسل (Sheet3!C28) بر عدد ثابت ۲۴۰ میلیارد تقسیم می‌کرد که با جمع تارگت‌ها (۷۵۰ میلیارد) هم‌خوان نبود؛ اینجا بر فروش واقعی کل تقسیم می‌شود که معیار درست «سهم» است."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.522Z",
+  "updated_at": "2026-07-23T12:33:57.401Z",
+  "code": "call_conversion",
+  "name_fa": "نرخ تبدیل تماس به فروش",
+  "name_en": "Call-to-sale conversion",
+  "domain": "sales",
+  "unit": "%",
+  "direction": "higher",
+  "formula_note": "تعداد فاکتور ÷ تعداد تماس × ۱۰۰. عیناً مطابق Sheet3!C30 = (C20/C26)*100 «تماس به فروش»."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.526Z",
+  "updated_at": "2026-07-23T12:33:57.405Z",
+  "code": "profit_margin",
+  "name_fa": "حاشیه سود",
+  "name_en": "Profit margin",
+  "domain": "sales",
+  "unit": "%",
+  "direction": "higher",
+  "formula_note": "سود فروش ÷ فروش ریالی × ۱۰۰. حاشیه سود استاندارد (از ردیف‌های ۳ و ۷ ورودی)."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.530Z",
+  "updated_at": "2026-07-23T12:33:57.408Z",
+  "code": "cost_to_sales",
+  "name_fa": "نسبت هزینه به فروش",
+  "name_en": "Cost-to-sales",
+  "domain": "sales",
+  "unit": "%",
+  "direction": "lower",
+  "formula_note": "هزینه فروش ÷ فروش ریالی × ۱۰۰ (کمتر بهتر). توجه: اکسل (Sheet3!J59) برعکس «فروش÷هزینه» را حساب می‌کرد؛ اینجا نسبت استاندارد هزینه‌به‌فروش استفاده شده."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.535Z",
+  "updated_at": "2026-07-23T12:33:57.411Z",
+  "code": "avg_invoice_value",
+  "name_fa": "میانگین ارزش فاکتور",
+  "name_en": "Average invoice value",
+  "domain": "sales",
+  "unit": "rial",
+  "direction": "higher",
+  "formula_note": "فروش ریالی ÷ تعداد فاکتور. میانگین مبلغ هر فاکتور (ردیف‌های ۳ و ۴ ورودی)."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 8,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.539Z",
+  "updated_at": "2026-07-23T12:33:57.414Z",
+  "code": "new_customer_ratio",
+  "name_fa": "نسبت مشتری جدید",
+  "name_en": "New-customer ratio",
+  "domain": "sales",
+  "unit": "%",
+  "direction": "higher",
+  "formula_note": "مشتری جدید ÷ مشتری فعال × ۱۰۰ (ردیف‌های ۶ و ۵ ورودی)."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 9,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.685Z",
+  "updated_at": "2026-07-21T18:29:01.114Z",
+  "code": "prod_productivity",
+  "name_fa": "بهره وری تولید",
+  "name_en": "Production productivity",
+  "domain": "production",
+  "unit": "unit",
+  "direction": "higher",
+  "formula_note": "Total output vs 16,000/shift benchmark. Source: KPI!B3 (efficiency formula corrected)."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 10,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.693Z",
+  "updated_at": "2026-07-21T18:29:01.116Z",
+  "code": "waste_rate",
+  "name_fa": "نرخ ضایعات",
+  "name_en": "Waste rate",
+  "domain": "production",
+  "unit": "%",
+  "direction": "lower",
+  "formula_note": "(input weight - output weight) / input weight * 100. Source: KPI!B5 (formula rebuilt)."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 11,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.699Z",
+  "updated_at": "2026-07-21T18:29:01.117Z",
+  "code": "line_stoppage_rate",
+  "name_fa": "نرخ توقف خط تولید",
+  "name_en": "Line stoppage rate",
+  "domain": "production",
+  "unit": "%",
+  "direction": "lower",
+  "formula_note": "Downtime shifts / scheduled shifts * 100. Source: KPI!B7 (was #REF!)."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 12,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.706Z",
+  "updated_at": "2026-07-21T18:29:01.118Z",
+  "code": "labor_productivity",
+  "name_fa": "بهره وری نیروی انسانی",
+  "name_en": "Labour productivity",
+  "domain": "production",
+  "unit": "unit/man-hour",
+  "direction": "higher",
+  "formula_note": "Output / (headcount * hours per shift). Source: KPI!B9. See ambiguity note."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 13,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.712Z",
+  "updated_at": "2026-07-21T18:29:01.118Z",
+  "code": "defect_free_rate",
+  "name_fa": "نرخ تولید بدون نقص",
+  "name_en": "Defect-free rate",
+  "domain": "production",
+  "unit": "%",
+  "direction": "higher",
+  "formula_note": "(output - repairs) / output * 100. Source: KPI!B11."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 14,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.718Z",
+  "updated_at": "2026-07-21T18:29:01.119Z",
+  "code": "cost_per_roll",
+  "name_fa": "هزینه تولید به ازای هر رول",
+  "name_en": "Cost per roll",
+  "domain": "production",
+  "unit": "rial",
+  "direction": "lower",
+  "formula_note": "Total production cost / total output. Source: KPI!B13."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 15,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.723Z",
+  "updated_at": "2026-07-21T18:29:01.120Z",
+  "code": "financial_return",
+  "name_fa": "نرخ بازدهی مالی",
+  "name_en": "Financial return",
+  "domain": "production",
+  "unit": "rial",
+  "direction": "higher",
+  "formula_note": "Piece-rate revenue - total cost. Source: KPI!B15."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 16,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.727Z",
+  "updated_at": "2026-07-21T18:29:01.121Z",
+  "code": "machine_output",
+  "name_fa": "تولید دستگاه",
+  "name_en": "Machine output",
+  "domain": "production",
+  "unit": "unit",
+  "direction": "higher",
+  "formula_note": "Output per line. Source: KPI!B22."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 17,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.732Z",
+  "updated_at": "2026-07-21T18:29:01.122Z",
+  "code": "machine_output_per_shift",
+  "name_fa": "میانگین تولید در شیفت",
+  "name_en": "Output per shift",
+  "domain": "production",
+  "unit": "unit",
+  "direction": "higher",
+  "formula_note": "Output / active shifts. Source: KPI!B25."
+ }
+},
+{
+ "model": "core.dimkpi",
+ "pk": 18,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.739Z",
+  "updated_at": "2026-07-21T18:29:01.123Z",
+  "code": "machine_utilization",
+  "name_fa": "درصد بهره‌برداری دستگاه",
+  "name_en": "Machine utilisation",
+  "domain": "production",
+  "unit": "%",
+  "direction": "higher",
+  "formula_note": "Active shifts / shifts available in month * 100. Derived from KPI!B24."
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1051,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 9,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل کارخانه",
+  "channel": "",
+  "actual": "1145442.0000",
+  "target": "1264000.0000",
+  "ideal": "2480000.0000",
+  "deviation": "-118558.0000",
+  "efficiency_pct": "46.19"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1052,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 10,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل کارخانه",
+  "channel": "",
+  "actual": "1.0000",
+  "target": "1.0000",
+  "ideal": "1.0000",
+  "deviation": "0.0000",
+  "efficiency_pct": "100.00"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1053,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 11,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل کارخانه",
+  "channel": "",
+  "actual": "37.6667",
+  "target": "0.0000",
+  "ideal": "0.0000",
+  "deviation": "37.6667",
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1054,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 12,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل کارخانه",
+  "channel": "",
+  "actual": "212.1189",
+  "target": "234.0741",
+  "ideal": "459.2593",
+  "deviation": "-21.9552",
+  "efficiency_pct": "46.19"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1055,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 13,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل کارخانه",
+  "channel": "",
+  "actual": "100.0000",
+  "target": "100.0000",
+  "ideal": "100.0000",
+  "deviation": "0.0000",
+  "efficiency_pct": "100.00"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1056,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 14,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل کارخانه",
+  "channel": "",
+  "actual": "13432.6034",
+  "target": "12172.6805",
+  "ideal": "8013.6813",
+  "deviation": "1259.9229",
+  "efficiency_pct": "59.66"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1057,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 15,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل کارخانه",
+  "channel": "",
+  "actual": "2188427844.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1058,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 16,
+  "scope": "machine",
+  "scope_id": 1,
+  "scope_label": "برش ۱",
+  "channel": "",
+  "actual": "372049.0000",
+  "target": "416000.0000",
+  "ideal": null,
+  "deviation": "-43951.0000",
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1059,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 17,
+  "scope": "machine",
+  "scope_id": 1,
+  "scope_label": "برش ۱",
+  "channel": "",
+  "actual": "14309.5769",
+  "target": "16000.0000",
+  "ideal": "16000.0000",
+  "deviation": "-1690.4231",
+  "efficiency_pct": "89.43"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1060,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 18,
+  "scope": "machine",
+  "scope_id": 1,
+  "scope_label": "برش ۱",
+  "channel": "",
+  "actual": "86.6667",
+  "target": "100.0000",
+  "ideal": "100.0000",
+  "deviation": "-13.3333",
+  "efficiency_pct": "86.67"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1061,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 16,
+  "scope": "machine",
+  "scope_id": 2,
+  "scope_label": "برش ۲",
+  "channel": "",
+  "actual": "399843.0000",
+  "target": "416000.0000",
+  "ideal": null,
+  "deviation": "-16157.0000",
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1062,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 17,
+  "scope": "machine",
+  "scope_id": 2,
+  "scope_label": "برش ۲",
+  "channel": "",
+  "actual": "15378.5769",
+  "target": "16000.0000",
+  "ideal": "16000.0000",
+  "deviation": "-621.4231",
+  "efficiency_pct": "96.12"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1063,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 18,
+  "scope": "machine",
+  "scope_id": 2,
+  "scope_label": "برش ۲",
+  "channel": "",
+  "actual": "86.6667",
+  "target": "100.0000",
+  "ideal": "100.0000",
+  "deviation": "-13.3333",
+  "efficiency_pct": "86.67"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1064,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 16,
+  "scope": "machine",
+  "scope_id": 3,
+  "scope_label": "برش ۳",
+  "channel": "",
+  "actual": "373550.0000",
+  "target": "432000.0000",
+  "ideal": null,
+  "deviation": "-58450.0000",
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1065,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 17,
+  "scope": "machine",
+  "scope_id": 3,
+  "scope_label": "برش ۳",
+  "channel": "",
+  "actual": "13835.1852",
+  "target": "16000.0000",
+  "ideal": "16000.0000",
+  "deviation": "-2164.8148",
+  "efficiency_pct": "86.47"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1066,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 18,
+  "scope": "machine",
+  "scope_id": 3,
+  "scope_label": "برش ۳",
+  "channel": "",
+  "actual": "90.0000",
+  "target": "100.0000",
+  "ideal": "100.0000",
+  "deviation": "-10.0000",
+  "efficiency_pct": "90.00"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1067,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 16,
+  "scope": "machine",
+  "scope_id": 4,
+  "scope_label": "برش ۴",
+  "channel": "",
+  "actual": "0.0000",
+  "target": "0.0000",
+  "ideal": null,
+  "deviation": "0.0000",
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1068,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 17,
+  "scope": "machine",
+  "scope_id": 4,
+  "scope_label": "برش ۴",
+  "channel": "",
+  "actual": null,
+  "target": "16000.0000",
+  "ideal": "16000.0000",
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1069,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.137Z",
+  "period": 1,
+  "kpi": 18,
+  "scope": "machine",
+  "scope_id": 4,
+  "scope_label": "برش ۴",
+  "channel": "",
+  "actual": "0.0000",
+  "target": "100.0000",
+  "ideal": "100.0000",
+  "deviation": "-100.0000",
+  "efficiency_pct": "0.00"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1070,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.137Z",
+  "updated_at": "2026-07-21T18:29:01.138Z",
+  "period": 1,
+  "kpi": 16,
+  "scope": "machine",
+  "scope_id": 5,
+  "scope_label": "برش ۵",
+  "channel": "",
+  "actual": "0.0000",
+  "target": "0.0000",
+  "ideal": null,
+  "deviation": "0.0000",
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1071,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.138Z",
+  "updated_at": "2026-07-21T18:29:01.138Z",
+  "period": 1,
+  "kpi": 17,
+  "scope": "machine",
+  "scope_id": 5,
+  "scope_label": "برش ۵",
+  "channel": "",
+  "actual": null,
+  "target": "16000.0000",
+  "ideal": "16000.0000",
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1072,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.138Z",
+  "updated_at": "2026-07-21T18:29:01.138Z",
+  "period": 1,
+  "kpi": 18,
+  "scope": "machine",
+  "scope_id": 5,
+  "scope_label": "برش ۵",
+  "channel": "",
+  "actual": "0.0000",
+  "target": "100.0000",
+  "ideal": "100.0000",
+  "deviation": "-100.0000",
+  "efficiency_pct": "0.00"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1073,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.138Z",
+  "updated_at": "2026-07-21T18:29:01.138Z",
+  "period": 1,
+  "kpi": 16,
+  "scope": "machine",
+  "scope_id": 6,
+  "scope_label": "چاپ",
+  "channel": "",
+  "actual": "235680.0000",
+  "target": "48000.0000",
+  "ideal": null,
+  "deviation": "187680.0000",
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1074,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.138Z",
+  "updated_at": "2026-07-21T18:29:01.138Z",
+  "period": 1,
+  "kpi": 17,
+  "scope": "machine",
+  "scope_id": 6,
+  "scope_label": "چاپ",
+  "channel": "",
+  "actual": "78560.0000",
+  "target": "16000.0000",
+  "ideal": "16000.0000",
+  "deviation": "62560.0000",
+  "efficiency_pct": "491.00"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 1075,
+ "fields": {
+  "created_at": "2026-07-21T18:29:01.138Z",
+  "updated_at": "2026-07-21T18:29:01.138Z",
+  "period": 1,
+  "kpi": 18,
+  "scope": "machine",
+  "scope_id": 6,
+  "scope_label": "چاپ",
+  "channel": "",
+  "actual": "10.0000",
+  "target": "100.0000",
+  "ideal": "100.0000",
+  "deviation": "-90.0000",
+  "efficiency_pct": "10.00"
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2052,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "119580861910.0000",
+  "target": "675000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2053,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "17.7157",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2054,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2055,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "8.8949",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2056,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "13.4095",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2057,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2058,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "3623662482.1212",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2059,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "team",
+  "actual": "45.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2060,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "31152190000.0000",
+  "target": "200000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2061,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "15.5761",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2062,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "26.0512",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2063,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "3.9130",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2064,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "42.5300",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2065,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2066,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "3461354444.4444",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2067,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "team",
+  "scope_id": 2,
+  "scope_label": "ایران غرب",
+  "channel": "team",
+  "actual": "60.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2068,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "54308079600.0000",
+  "target": "200000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2069,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "27.1540",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2070,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "45.4154",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2071,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "19.6970",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2072,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "3.3711",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2073,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2074,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "4177544584.6154",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2075,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "team",
+  "scope_id": 3,
+  "scope_label": "ایران شرق",
+  "channel": "team",
+  "actual": "40.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2076,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "34120592310.0000",
+  "target": "275000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2077,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "12.4075",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2078,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "28.5335",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2079,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.590Z",
+  "updated_at": "2026-07-22T21:18:34.590Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "14.6667",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2080,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "2.8000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2081,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2082,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "3101872028.1818",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2083,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "team",
+  "scope_id": 4,
+  "scope_label": "تهران",
+  "channel": "team",
+  "actual": "40.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2084,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "7106700000.0000",
+  "target": "100000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2085,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "7.1067",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2086,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "5.9430",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2087,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "8.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2088,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "9.7000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2089,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2090,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "3553350000.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2091,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 3,
+  "scope_label": "هستی خانی",
+  "channel": "team",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2092,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "24045490000.0000",
+  "target": "100000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2093,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "24.0455",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2094,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "20.1081",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2095,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "3.4146",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2096,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "52.2329",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2097,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2098,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "3435070000.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2099,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 4,
+  "scope_label": "مهدیس مومنی",
+  "channel": "team",
+  "actual": "50.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2100,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "47095554000.0000",
+  "target": "100000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2101,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "47.0956",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2102,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "39.3839",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2103,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "12.7660",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2104,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "2.8000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2105,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2106,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "7849259000.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2107,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 5,
+  "scope_label": "افسانه چوبینی",
+  "channel": "team",
+  "actual": "20.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2108,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "7212525600.0000",
+  "target": "100000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2109,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.591Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "7.2125",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2110,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.591Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "6.0315",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2111,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "36.8421",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2112,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "7.1000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2113,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2114,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "1030360800.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2115,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 6,
+  "scope_label": "مهسا قنبری",
+  "channel": "team",
+  "actual": "60.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2116,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "34120592310.0000",
+  "target": "200000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2117,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "17.0603",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2118,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "28.5335",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2119,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "44.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2120,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "2.8000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2121,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2122,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "3101872028.1818",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2123,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 7,
+  "scope_label": "صبا موسوی",
+  "channel": "team",
+  "actual": "40.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2124,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": "75000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2125,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2126,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2127,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.592Z",
+  "updated_at": "2026-07-22T21:18:34.592Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": "0.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2128,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2129,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2130,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2131,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 9,
+  "scope_label": "پارسا مروتی",
+  "channel": "team",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2132,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": "62209820000.0000",
+  "target": "0.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2133,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2134,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2135,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2136,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": "7.5768",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2137,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": "0.7351",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2138,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": "2962372380.9524",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2139,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "organizational",
+  "actual": "25.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2140,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": "62209820000.0000",
+  "target": "0.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2141,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2142,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2143,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2144,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": "7.5768",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2145,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": "0.7351",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2146,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": "2962372380.9524",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2147,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "team",
+  "scope_id": 1,
+  "scope_label": "بانکی",
+  "channel": "organizational",
+  "actual": "25.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2148,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": "53648620000.0000",
+  "target": "0.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2149,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2150,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": "86.2382",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2151,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2152,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": "7.8913",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2153,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.599Z",
+  "updated_at": "2026-07-22T21:18:34.599Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": "0.6507",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2154,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": "3155801176.4706",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2155,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 1,
+  "scope_label": "هانیه منزه",
+  "channel": "organizational",
+  "actual": "23.0769",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2156,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": "8561200000.0000",
+  "target": "0.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2157,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2158,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": "13.7618",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2159,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": null,
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2160,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": "5.6058",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2161,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": "1.2636",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2162,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": "2140300000.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2163,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 2,
+  "scope_label": "مهسا احمدی",
+  "channel": "organizational",
+  "actual": "33.3333",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2164,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "6380000000.0000",
+  "target": "75000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2165,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "8.5067",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2166,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2167,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "0.8929",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2168,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "7.8000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2169,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "3.9185",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2170,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "6380000000.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2171,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "company",
+  "scope_id": null,
+  "scope_label": "کل شرکت",
+  "channel": "b2b",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2172,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "6380000000.0000",
+  "target": "75000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2173,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "8.5067",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2174,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2175,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "0.8929",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2176,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "7.8000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2177,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "3.9185",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2178,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "6380000000.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2179,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "team",
+  "scope_id": 5,
+  "scope_label": "بی‌تو‌بی",
+  "channel": "b2b",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2180,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 1,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "6380000000.0000",
+  "target": "75000000000.0000",
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2181,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 2,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "8.5067",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2182,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 3,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2183,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.600Z",
+  "updated_at": "2026-07-22T21:18:34.600Z",
+  "period": 1,
+  "kpi": 4,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "0.8929",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2184,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.601Z",
+  "updated_at": "2026-07-22T21:18:34.601Z",
+  "period": 1,
+  "kpi": 5,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "7.8000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2185,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.601Z",
+  "updated_at": "2026-07-22T21:18:34.601Z",
+  "period": 1,
+  "kpi": 6,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "3.9185",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2186,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.601Z",
+  "updated_at": "2026-07-22T21:18:34.601Z",
+  "period": 1,
+  "kpi": 7,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "6380000000.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.factkpi",
+ "pk": 2187,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.601Z",
+  "updated_at": "2026-07-22T21:18:34.601Z",
+  "period": 1,
+  "kpi": 8,
+  "scope": "employee",
+  "scope_id": 8,
+  "scope_label": "شیما نظام ابادی",
+  "channel": "b2b",
+  "actual": "100.0000",
+  "target": null,
+  "ideal": null,
+  "deviation": null,
+  "efficiency_pct": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-21T18:27:51.986Z",
+  "updated_at": "2026-07-21T18:27:51.986Z",
+  "kpi": 1,
+  "slot": "actual",
+  "version": 1,
+  "expression": "فروش",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-21T18:27:51.992Z",
+  "updated_at": "2026-07-21T18:27:51.992Z",
+  "kpi": 2,
+  "slot": "actual",
+  "version": 1,
+  "expression": "(فروش / تارگت) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-21T18:27:51.997Z",
+  "updated_at": "2026-07-21T18:27:51.997Z",
+  "kpi": 3,
+  "slot": "actual",
+  "version": 1,
+  "expression": "(فروش / فروش_کل_شرکت) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.001Z",
+  "updated_at": "2026-07-21T18:27:52.001Z",
+  "kpi": 4,
+  "slot": "actual",
+  "version": 1,
+  "expression": "(تعداد_فاکتور / تماس) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.008Z",
+  "updated_at": "2026-07-21T18:27:52.008Z",
+  "kpi": 5,
+  "slot": "actual",
+  "version": 1,
+  "expression": "(سود / فروش) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.012Z",
+  "updated_at": "2026-07-21T18:27:52.012Z",
+  "kpi": 6,
+  "slot": "actual",
+  "version": 1,
+  "expression": "(هزینه / فروش) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.016Z",
+  "updated_at": "2026-07-21T18:27:52.016Z",
+  "kpi": 7,
+  "slot": "actual",
+  "version": 1,
+  "expression": "فروش / تعداد_فاکتور",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 8,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.021Z",
+  "updated_at": "2026-07-21T18:27:52.021Z",
+  "kpi": 8,
+  "slot": "actual",
+  "version": 1,
+  "expression": "(مشتری_جدید / مشتری_فعال) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 9,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.026Z",
+  "updated_at": "2026-07-21T18:27:52.026Z",
+  "kpi": 9,
+  "slot": "actual",
+  "version": 1,
+  "expression": "تولید",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 10,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.030Z",
+  "updated_at": "2026-07-21T18:27:52.030Z",
+  "kpi": 9,
+  "slot": "target",
+  "version": 1,
+  "expression": "تولید_مطلوب",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 11,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.033Z",
+  "updated_at": "2026-07-21T18:27:52.033Z",
+  "kpi": 9,
+  "slot": "ideal",
+  "version": 1,
+  "expression": "تولید_ایده_آل",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 12,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.037Z",
+  "updated_at": "2026-07-21T18:27:52.037Z",
+  "kpi": 10,
+  "slot": "actual",
+  "version": 1,
+  "expression": "((وزن_ورودی - وزن_خروجی) / وزن_ورودی) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 13,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.043Z",
+  "updated_at": "2026-07-21T18:27:52.043Z",
+  "kpi": 10,
+  "slot": "target",
+  "version": 1,
+  "expression": "1",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 14,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.046Z",
+  "updated_at": "2026-07-21T18:27:52.046Z",
+  "kpi": 10,
+  "slot": "ideal",
+  "version": 1,
+  "expression": "1",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 15,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.049Z",
+  "updated_at": "2026-07-21T18:27:52.049Z",
+  "kpi": 11,
+  "slot": "actual",
+  "version": 1,
+  "expression": "(توقف / شیفت_برنامه) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 16,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.052Z",
+  "updated_at": "2026-07-21T18:27:52.053Z",
+  "kpi": 11,
+  "slot": "target",
+  "version": 1,
+  "expression": "0",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 17,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.058Z",
+  "updated_at": "2026-07-21T18:27:52.058Z",
+  "kpi": 11,
+  "slot": "ideal",
+  "version": 1,
+  "expression": "0",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 18,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.062Z",
+  "updated_at": "2026-07-21T18:27:52.062Z",
+  "kpi": 12,
+  "slot": "actual",
+  "version": 1,
+  "expression": "تولید / نفر_ساعت",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 19,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.065Z",
+  "updated_at": "2026-07-21T18:27:52.065Z",
+  "kpi": 12,
+  "slot": "target",
+  "version": 1,
+  "expression": "تولید_مطلوب / نفر_ساعت",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 20,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.068Z",
+  "updated_at": "2026-07-21T18:27:52.068Z",
+  "kpi": 12,
+  "slot": "ideal",
+  "version": 1,
+  "expression": "تولید_ایده_آل / نفر_ساعت",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 21,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.074Z",
+  "updated_at": "2026-07-21T18:27:52.074Z",
+  "kpi": 13,
+  "slot": "actual",
+  "version": 1,
+  "expression": "((تولید - تعمیری) / تولید) * 100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 22,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.078Z",
+  "updated_at": "2026-07-21T18:27:52.078Z",
+  "kpi": 13,
+  "slot": "target",
+  "version": 1,
+  "expression": "100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 23,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.081Z",
+  "updated_at": "2026-07-21T18:27:52.081Z",
+  "kpi": 13,
+  "slot": "ideal",
+  "version": 1,
+  "expression": "100",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 24,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.084Z",
+  "updated_at": "2026-07-21T18:27:52.084Z",
+  "kpi": 14,
+  "slot": "actual",
+  "version": 1,
+  "expression": "هزینه_کل / تولید",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 25,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.090Z",
+  "updated_at": "2026-07-21T18:27:52.090Z",
+  "kpi": 14,
+  "slot": "target",
+  "version": 1,
+  "expression": "هزینه_کل / تولید_مطلوب",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 26,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.094Z",
+  "updated_at": "2026-07-21T18:27:52.094Z",
+  "kpi": 14,
+  "slot": "ideal",
+  "version": 1,
+  "expression": "هزینه_کل / ظرفیت_تولید",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.kpiformula",
+ "pk": 27,
+ "fields": {
+  "created_at": "2026-07-21T18:27:52.097Z",
+  "updated_at": "2026-07-21T18:27:52.097Z",
+  "kpi": 15,
+  "slot": "actual",
+  "version": 1,
+  "expression": "درآمد_کل - هزینه_کل",
+  "note": "نسخه اولیه — معادل محاسبه داخلی",
+  "is_active": true,
+  "created_by": null
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 1,
+ "fields": {
+  "user": 4,
+  "action": "update",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "12",
+  "object_repr": "هانیه منزه · تیم فروش (همکار) · اردیبهشت 1405",
+  "changes": {
+   "calls": {
+    "before": "0",
+    "after": "26"
+   },
+   "status": {
+    "before": "approved",
+    "after": "draft"
+   }
+  },
+  "created_at": "2026-07-21T18:39:31.270Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 2,
+ "fields": {
+  "user": 4,
+  "action": "submit",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "12",
+  "object_repr": "هانیه منزه · تیم فروش (همکار) · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-21T18:39:31.368Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 3,
+ "fields": {
+  "user": 1,
+  "action": "approve",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "12",
+  "object_repr": "هانیه منزه · تیم فروش (همکار) · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-21T18:39:31.555Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 4,
+ "fields": {
+  "user": 2,
+  "action": "submit",
+  "model_label": "production.FactProduction",
+  "object_id": "1",
+  "object_repr": "برش ۱ · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-21T19:35:18.094Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 5,
+ "fields": {
+  "user": 9,
+  "action": "create",
+  "model_label": "accounts.Note",
+  "object_id": "1",
+  "object_repr": "تست — محمدمحسن شاهان",
+  "changes": {},
+  "created_at": "2026-07-21T22:46:49.551Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 6,
+ "fields": {
+  "user": 12,
+  "action": "formula",
+  "model_label": "core.KPIFormula",
+  "object_id": "24",
+  "object_repr": "✓ cost_per_roll.actual v1: هزینه_کل / تولید",
+  "changes": {
+   "change_request": {
+    "before": null,
+    "after": "لطفا مطلوب را ۸۵ شیفت"
+   }
+  },
+  "created_at": "2026-07-22T00:00:53.187Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 7,
+ "fields": {
+  "user": 9,
+  "action": "update",
+  "model_label": "core.DimPeriod",
+  "object_id": "1",
+  "object_repr": "اردیبهشت 1405",
+  "changes": {
+   "sales_input": {
+    "before": null,
+    "after": "team · 6 کارشناس"
+   }
+  },
+  "created_at": "2026-07-22T07:58:50.989Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 8,
+ "fields": {
+  "user": 1,
+  "action": "approve",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "14",
+  "object_repr": "هستی خانی · فروش همکار · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-22T21:18:33.873Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 9,
+ "fields": {
+  "user": 1,
+  "action": "approve",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "15",
+  "object_repr": "مهدیس مومنی · فروش همکار · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-22T21:18:34.012Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 10,
+ "fields": {
+  "user": 1,
+  "action": "approve",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "16",
+  "object_repr": "افسانه چوبینی · فروش همکار · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-22T21:18:34.146Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 11,
+ "fields": {
+  "user": 1,
+  "action": "approve",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "17",
+  "object_repr": "مهسا قنبری · فروش همکار · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-22T21:18:34.279Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 12,
+ "fields": {
+  "user": 1,
+  "action": "approve",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "18",
+  "object_repr": "صبا موسوی · فروش همکار · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-22T21:18:34.413Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 13,
+ "fields": {
+  "user": 1,
+  "action": "approve",
+  "model_label": "sales.FactSalesMonthly",
+  "object_id": "20",
+  "object_repr": "پارسا مروتی · فروش همکار · اردیبهشت 1405",
+  "changes": {},
+  "created_at": "2026-07-22T21:18:34.555Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 14,
+ "fields": {
+  "user": 1,
+  "action": "update",
+  "model_label": "core.SiteSetting",
+  "object_id": "1",
+  "object_repr": "تنظیمات سایت (corporate)",
+  "changes": {
+   "chart_theme": {
+    "before": "modern",
+    "after": "corporate"
+   }
+  },
+  "created_at": "2026-07-22T21:40:38.177Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 15,
+ "fields": {
+  "user": 1,
+  "action": "update",
+  "model_label": "core.SiteSetting",
+  "object_id": "1",
+  "object_repr": "تنظیمات سایت (vivid)",
+  "changes": {
+   "chart_theme": {
+    "before": "corporate",
+    "after": "vivid"
+   }
+  },
+  "created_at": "2026-07-22T21:40:40.834Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 16,
+ "fields": {
+  "user": 1,
+  "action": "update",
+  "model_label": "core.SiteSetting",
+  "object_id": "1",
+  "object_repr": "تنظیمات سایت (mono)",
+  "changes": {
+   "chart_theme": {
+    "before": "vivid",
+    "after": "mono"
+   }
+  },
+  "created_at": "2026-07-22T21:40:42.635Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 17,
+ "fields": {
+  "user": 1,
+  "action": "update",
+  "model_label": "core.SiteSetting",
+  "object_id": "1",
+  "object_repr": "تنظیمات سایت (corporate)",
+  "changes": {
+   "chart_theme": {
+    "before": "mono",
+    "after": "corporate"
+   }
+  },
+  "created_at": "2026-07-22T21:41:00.644Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 18,
+ "fields": {
+  "user": 1,
+  "action": "update",
+  "model_label": "core.SiteSetting",
+  "object_id": "1",
+  "object_repr": "تنظیمات سایت (vivid)",
+  "changes": {
+   "chart_theme": {
+    "before": "corporate",
+    "after": "vivid"
+   }
+  },
+  "created_at": "2026-07-22T21:41:04.887Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 19,
+ "fields": {
+  "user": 1,
+  "action": "update",
+  "model_label": "core.SiteSetting",
+  "object_id": "1",
+  "object_repr": "تنظیمات سایت (modern)",
+  "changes": {
+   "chart_theme": {
+    "before": "vivid",
+    "after": "modern"
+   }
+  },
+  "created_at": "2026-07-22T21:41:06.211Z"
+ }
+},
+{
+ "model": "core.auditlog",
+ "pk": 20,
+ "fields": {
+  "user": 1,
+  "action": "revision",
+  "model_label": "production.FactProduction",
+  "object_id": "1",
+  "object_repr": "برش ۱ · اردیبهشت 1405",
+  "changes": {
+   "note": {
+    "before": null,
+    "after": ""
+   }
+  },
+  "created_at": "2026-07-22T21:56:04.783Z"
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-21T18:39:31.374Z",
+  "updated_at": "2026-07-21T18:39:31.374Z",
+  "recipient": 1,
+  "actor": 4,
+  "verb": "submitted",
+  "message": "فروش هانیه منزه · اردیبهشت 1405 — اطلاعات جدید ثبت شده است. آیا تایید می‌کنید؟",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "12",
+  "is_read": true
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-21T18:39:31.374Z",
+  "updated_at": "2026-07-21T18:39:31.374Z",
+  "recipient": 5,
+  "actor": 4,
+  "verb": "submitted",
+  "message": "فروش هانیه منزه · اردیبهشت 1405 — اطلاعات جدید ثبت شده است. آیا تایید می‌کنید؟",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "12",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-21T18:39:31.559Z",
+  "updated_at": "2026-07-21T18:39:31.559Z",
+  "recipient": 4,
+  "actor": 1,
+  "verb": "approved",
+  "message": "فروش هانیه منزه · اردیبهشت 1405 — اطلاعات شما تایید شد و وارد داشبورد گردید.",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "12",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-21T19:35:18.100Z",
+  "updated_at": "2026-07-21T19:35:18.100Z",
+  "recipient": 1,
+  "actor": 2,
+  "verb": "submitted",
+  "message": "تولید برش ۱ · اردیبهشت 1405 — اطلاعات جدید ثبت شده است. آیا تایید می‌کنید؟",
+  "target_label": "production.FactProduction",
+  "target_id": "1",
+  "is_read": true
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-21T19:35:18.100Z",
+  "updated_at": "2026-07-21T19:35:18.100Z",
+  "recipient": 5,
+  "actor": 2,
+  "verb": "submitted",
+  "message": "تولید برش ۱ · اردیبهشت 1405 — اطلاعات جدید ثبت شده است. آیا تایید می‌کنید؟",
+  "target_label": "production.FactProduction",
+  "target_id": "1",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-22T00:00:53.179Z",
+  "updated_at": "2026-07-22T00:00:53.179Z",
+  "recipient": 1,
+  "actor": 12,
+  "verb": "formula_request",
+  "message": "درخواست تغییر فرمول «هزینه تولید به ازای هر رول» از محمد مهدی صیفی: لطفا مطلوب را ۸۵ شیفت",
+  "target_label": "core.KPIFormula",
+  "target_id": "24",
+  "is_read": true
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-22T00:00:53.179Z",
+  "updated_at": "2026-07-22T00:00:53.179Z",
+  "recipient": 5,
+  "actor": 12,
+  "verb": "formula_request",
+  "message": "درخواست تغییر فرمول «هزینه تولید به ازای هر رول» از محمد مهدی صیفی: لطفا مطلوب را ۸۵ شیفت",
+  "target_label": "core.KPIFormula",
+  "target_id": "24",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 8,
+ "fields": {
+  "created_at": "2026-07-22T07:58:50.996Z",
+  "updated_at": "2026-07-22T07:58:50.996Z",
+  "recipient": 1,
+  "actor": 9,
+  "verb": "submitted",
+  "message": "فروش team · اردیبهشت 1405 — اطلاعات جدید ثبت شده است. آیا تایید می‌کنید؟",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "14",
+  "is_read": true
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 9,
+ "fields": {
+  "created_at": "2026-07-22T07:58:50.997Z",
+  "updated_at": "2026-07-22T07:58:50.997Z",
+  "recipient": 5,
+  "actor": 9,
+  "verb": "submitted",
+  "message": "فروش team · اردیبهشت 1405 — اطلاعات جدید ثبت شده است. آیا تایید می‌کنید؟",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "14",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 10,
+ "fields": {
+  "created_at": "2026-07-22T21:18:33.880Z",
+  "updated_at": "2026-07-22T21:18:33.880Z",
+  "recipient": 9,
+  "actor": 1,
+  "verb": "approved",
+  "message": "فروش هستی خانی · اردیبهشت 1405 — اطلاعات شما تایید شد و وارد داشبورد گردید.",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "14",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 11,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.017Z",
+  "updated_at": "2026-07-22T21:18:34.017Z",
+  "recipient": 9,
+  "actor": 1,
+  "verb": "approved",
+  "message": "فروش مهدیس مومنی · اردیبهشت 1405 — اطلاعات شما تایید شد و وارد داشبورد گردید.",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "15",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 12,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.151Z",
+  "updated_at": "2026-07-22T21:18:34.151Z",
+  "recipient": 9,
+  "actor": 1,
+  "verb": "approved",
+  "message": "فروش افسانه چوبینی · اردیبهشت 1405 — اطلاعات شما تایید شد و وارد داشبورد گردید.",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "16",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 13,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.283Z",
+  "updated_at": "2026-07-22T21:18:34.283Z",
+  "recipient": 9,
+  "actor": 1,
+  "verb": "approved",
+  "message": "فروش مهسا قنبری · اردیبهشت 1405 — اطلاعات شما تایید شد و وارد داشبورد گردید.",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "17",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 14,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.418Z",
+  "updated_at": "2026-07-22T21:18:34.418Z",
+  "recipient": 9,
+  "actor": 1,
+  "verb": "approved",
+  "message": "فروش صبا موسوی · اردیبهشت 1405 — اطلاعات شما تایید شد و وارد داشبورد گردید.",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "18",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 15,
+ "fields": {
+  "created_at": "2026-07-22T21:18:34.560Z",
+  "updated_at": "2026-07-22T21:18:34.561Z",
+  "recipient": 9,
+  "actor": 1,
+  "verb": "approved",
+  "message": "فروش پارسا مروتی · اردیبهشت 1405 — اطلاعات شما تایید شد و وارد داشبورد گردید.",
+  "target_label": "sales.FactSalesMonthly",
+  "target_id": "20",
+  "is_read": false
+ }
+},
+{
+ "model": "core.notification",
+ "pk": 16,
+ "fields": {
+  "created_at": "2026-07-22T21:56:04.789Z",
+  "updated_at": "2026-07-22T21:56:04.789Z",
+  "recipient": 2,
+  "actor": 1,
+  "verb": "revision",
+  "message": "تولید برش ۱ · اردیبهشت 1405 — اطلاعات شما برای اصلاح بازگردانده شد.",
+  "target_label": "production.FactProduction",
+  "target_id": "1",
+  "is_read": false
+ }
+},
+{
+ "model": "core.sitesetting",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-22T21:04:52.167Z",
+  "updated_at": "2026-07-22T21:41:06.204Z",
+  "singleton": true,
+  "chart_theme": "modern",
+  "company_name": "شرکت کاغذ حساس نمابر مهر"
+ }
+},
+{
+ "model": "sales.dimteam",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.358Z",
+  "updated_at": "2026-07-23T12:33:57.257Z",
+  "code": "banking",
+  "name_fa": "بانکی",
+  "name_en": "Banking"
+ }
+},
+{
+ "model": "sales.dimteam",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.363Z",
+  "updated_at": "2026-07-23T12:33:57.263Z",
+  "code": "west",
+  "name_fa": "ایران غرب",
+  "name_en": "Iran West"
+ }
+},
+{
+ "model": "sales.dimteam",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.369Z",
+  "updated_at": "2026-07-23T12:33:57.267Z",
+  "code": "east",
+  "name_fa": "ایران شرق",
+  "name_en": "Iran East"
+ }
+},
+{
+ "model": "sales.dimteam",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.373Z",
+  "updated_at": "2026-07-23T12:33:57.273Z",
+  "code": "tehran",
+  "name_fa": "تهران",
+  "name_en": "Tehran"
+ }
+},
+{
+ "model": "sales.dimteam",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.377Z",
+  "updated_at": "2026-07-23T12:33:57.278Z",
+  "code": "b2b",
+  "name_fa": "بی‌تو‌بی",
+  "name_en": "B2B"
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.338Z",
+  "updated_at": "2026-07-17T20:06:53.338Z",
+  "code": "emp-1",
+  "full_name_fa": "هانیه منزه",
+  "team": 1,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.344Z",
+  "updated_at": "2026-07-17T20:06:53.344Z",
+  "code": "emp-2",
+  "full_name_fa": "مهسا احمدی",
+  "team": 1,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.351Z",
+  "updated_at": "2026-07-17T20:06:53.351Z",
+  "code": "emp-3",
+  "full_name_fa": "هستی خانی",
+  "team": 2,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.355Z",
+  "updated_at": "2026-07-17T20:06:53.355Z",
+  "code": "emp-4",
+  "full_name_fa": "مهدیس مومنی",
+  "team": 2,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.360Z",
+  "updated_at": "2026-07-17T20:06:53.360Z",
+  "code": "emp-5",
+  "full_name_fa": "افسانه چوبینی",
+  "team": 3,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.367Z",
+  "updated_at": "2026-07-17T20:06:53.367Z",
+  "code": "emp-6",
+  "full_name_fa": "مهسا قنبری",
+  "team": 3,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.371Z",
+  "updated_at": "2026-07-17T20:06:53.371Z",
+  "code": "emp-7",
+  "full_name_fa": "صبا موسوی",
+  "team": 4,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 8,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.376Z",
+  "updated_at": "2026-07-17T20:06:53.376Z",
+  "code": "emp-8",
+  "full_name_fa": "شیما نظام ابادی",
+  "team": 5,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimemployee",
+ "pk": 9,
+ "fields": {
+  "created_at": "2026-07-17T20:06:53.382Z",
+  "updated_at": "2026-07-17T20:06:53.383Z",
+  "code": "emp-9",
+  "full_name_fa": "پارسا مروتی",
+  "team": 4,
+  "is_active": true
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.380Z",
+  "updated_at": "2026-07-23T12:33:57.282Z",
+  "code": "prov-1",
+  "name_fa": "اردبیل"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.387Z",
+  "updated_at": "2026-07-23T12:33:57.287Z",
+  "code": "prov-2",
+  "name_fa": "آذربایجان شرقی"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.390Z",
+  "updated_at": "2026-07-23T12:33:57.293Z",
+  "code": "prov-3",
+  "name_fa": "آذربایجان غربی"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.394Z",
+  "updated_at": "2026-07-23T12:33:57.296Z",
+  "code": "prov-4",
+  "name_fa": "گیلان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.396Z",
+  "updated_at": "2026-07-23T12:33:57.300Z",
+  "code": "prov-5",
+  "name_fa": "زنجان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.402Z",
+  "updated_at": "2026-07-23T12:33:57.304Z",
+  "code": "prov-6",
+  "name_fa": "قزوین"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.406Z",
+  "updated_at": "2026-07-23T12:33:57.308Z",
+  "code": "prov-7",
+  "name_fa": "مازندران"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 8,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.409Z",
+  "updated_at": "2026-07-23T12:33:57.311Z",
+  "code": "prov-8",
+  "name_fa": "گلستان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 9,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.412Z",
+  "updated_at": "2026-07-23T12:33:57.313Z",
+  "code": "prov-9",
+  "name_fa": "سمنان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 10,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.416Z",
+  "updated_at": "2026-07-23T12:33:57.316Z",
+  "code": "prov-10",
+  "name_fa": "خراسان شمالی"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 11,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.421Z",
+  "updated_at": "2026-07-23T12:33:57.319Z",
+  "code": "prov-11",
+  "name_fa": "خراسان جنوبی"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 12,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.425Z",
+  "updated_at": "2026-07-23T12:33:57.324Z",
+  "code": "prov-12",
+  "name_fa": "خراسان رضوی"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 13,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.427Z",
+  "updated_at": "2026-07-23T12:33:57.327Z",
+  "code": "prov-13",
+  "name_fa": "کرمان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 14,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.430Z",
+  "updated_at": "2026-07-23T12:33:57.330Z",
+  "code": "prov-14",
+  "name_fa": "سیستان و بلوچستان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 15,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.437Z",
+  "updated_at": "2026-07-23T12:33:57.333Z",
+  "code": "prov-15",
+  "name_fa": "یزد"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 16,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.440Z",
+  "updated_at": "2026-07-23T12:33:57.335Z",
+  "code": "prov-16",
+  "name_fa": "همدان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 17,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.443Z",
+  "updated_at": "2026-07-23T12:33:57.341Z",
+  "code": "prov-17",
+  "name_fa": "کردستان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 18,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.446Z",
+  "updated_at": "2026-07-23T12:33:57.344Z",
+  "code": "prov-18",
+  "name_fa": "کرمانشاه"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 19,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.452Z",
+  "updated_at": "2026-07-23T12:33:57.348Z",
+  "code": "prov-19",
+  "name_fa": "لرستان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 20,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.456Z",
+  "updated_at": "2026-07-23T12:33:57.351Z",
+  "code": "prov-20",
+  "name_fa": "فارس"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 21,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.459Z",
+  "updated_at": "2026-07-23T12:33:57.356Z",
+  "code": "prov-21",
+  "name_fa": "بوشهر"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 22,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.463Z",
+  "updated_at": "2026-07-23T12:33:57.359Z",
+  "code": "prov-22",
+  "name_fa": "ایلام"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 23,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.471Z",
+  "updated_at": "2026-07-23T12:33:57.363Z",
+  "code": "prov-23",
+  "name_fa": "مرکزی"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 24,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.474Z",
+  "updated_at": "2026-07-23T12:33:57.365Z",
+  "code": "prov-24",
+  "name_fa": "قم"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 25,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.478Z",
+  "updated_at": "2026-07-23T12:33:57.368Z",
+  "code": "prov-25",
+  "name_fa": "خوزستان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 26,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.481Z",
+  "updated_at": "2026-07-23T12:33:57.372Z",
+  "code": "prov-26",
+  "name_fa": "کهگیلویه و بویر احمد"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 27,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.487Z",
+  "updated_at": "2026-07-23T12:33:57.375Z",
+  "code": "prov-27",
+  "name_fa": "اصفهان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 28,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.491Z",
+  "updated_at": "2026-07-23T12:33:57.378Z",
+  "code": "prov-28",
+  "name_fa": "هرمزگان"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 29,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.494Z",
+  "updated_at": "2026-07-23T12:33:57.381Z",
+  "code": "prov-29",
+  "name_fa": "چهارمحال بختیاری"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 30,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.497Z",
+  "updated_at": "2026-07-23T12:33:57.384Z",
+  "code": "prov-30",
+  "name_fa": "البرز"
+ }
+},
+{
+ "model": "sales.dimprovince",
+ "pk": 31,
+ "fields": {
+  "created_at": "2026-07-17T20:06:18.504Z",
+  "updated_at": "2026-07-23T12:33:57.388Z",
+  "code": "prov-31",
+  "name_fa": "تهران"
+ }
+},
+{
+ "model": "sales.dimbank",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-21T06:19:30.977Z",
+  "updated_at": "2026-07-21T06:19:30.977Z",
+  "code": "bank-39",
+  "name_fa": "بانک ملی ایران",
+  "kind": "bank"
+ }
+},
+{
+ "model": "sales.dimbank",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-21T06:19:30.993Z",
+  "updated_at": "2026-07-21T06:19:30.993Z",
+  "code": "bank-42",
+  "name_fa": "پست بانک ایران",
+  "kind": "bank"
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 14,
+ "fields": {
+  "created_at": "2026-07-21T06:48:27.986Z",
+  "updated_at": "2026-07-22T21:18:33.866Z",
+  "period": 1,
+  "employee": 3,
+  "channel": "team",
+  "revenue_rial": "7106700000",
+  "invoice_count": 2,
+  "active_customers": 1,
+  "new_customers": 1,
+  "profit_rial": "689349900",
+  "cost_rial": "0",
+  "target_rial": "100000000000",
+  "calls": 25,
+  "status": "approved",
+  "submitted_by": 9,
+  "approved_by": 1
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 15,
+ "fields": {
+  "created_at": "2026-07-21T06:48:27.995Z",
+  "updated_at": "2026-07-22T21:18:34.005Z",
+  "period": 1,
+  "employee": 4,
+  "channel": "team",
+  "revenue_rial": "24045490000",
+  "invoice_count": 7,
+  "active_customers": 4,
+  "new_customers": 2,
+  "profit_rial": "12559665480",
+  "cost_rial": "0",
+  "target_rial": "100000000000",
+  "calls": 205,
+  "status": "approved",
+  "submitted_by": 9,
+  "approved_by": 1
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 16,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.002Z",
+  "updated_at": "2026-07-22T21:18:34.139Z",
+  "period": 1,
+  "employee": 5,
+  "channel": "team",
+  "revenue_rial": "47095554000",
+  "invoice_count": 6,
+  "active_customers": 5,
+  "new_customers": 1,
+  "profit_rial": "1318675512",
+  "cost_rial": "0",
+  "target_rial": "100000000000",
+  "calls": 47,
+  "status": "approved",
+  "submitted_by": 9,
+  "approved_by": 1
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 17,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.011Z",
+  "updated_at": "2026-07-22T21:18:34.273Z",
+  "period": 1,
+  "employee": 6,
+  "channel": "team",
+  "revenue_rial": "7212525600",
+  "invoice_count": 7,
+  "active_customers": 5,
+  "new_customers": 3,
+  "profit_rial": "512089318",
+  "cost_rial": "0",
+  "target_rial": "100000000000",
+  "calls": 19,
+  "status": "approved",
+  "submitted_by": 9,
+  "approved_by": 1
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 18,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.018Z",
+  "updated_at": "2026-07-22T21:18:34.406Z",
+  "period": 1,
+  "employee": 7,
+  "channel": "team",
+  "revenue_rial": "34120592310",
+  "invoice_count": 11,
+  "active_customers": 5,
+  "new_customers": 2,
+  "profit_rial": "955376584",
+  "cost_rial": "0",
+  "target_rial": "200000000000",
+  "calls": 25,
+  "status": "approved",
+  "submitted_by": 9,
+  "approved_by": 1
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 19,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.029Z",
+  "updated_at": "2026-07-21T06:48:28.029Z",
+  "period": 1,
+  "employee": 8,
+  "channel": "b2b",
+  "revenue_rial": "6380000000",
+  "invoice_count": 1,
+  "active_customers": 1,
+  "new_customers": 1,
+  "profit_rial": "497640000",
+  "cost_rial": "250000000",
+  "target_rial": "75000000000",
+  "calls": 112,
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 20,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.037Z",
+  "updated_at": "2026-07-22T21:18:34.549Z",
+  "period": 1,
+  "employee": 9,
+  "channel": "team",
+  "revenue_rial": "0",
+  "invoice_count": 0,
+  "active_customers": 0,
+  "new_customers": 0,
+  "profit_rial": "0",
+  "cost_rial": "0",
+  "target_rial": "75000000000",
+  "calls": 50,
+  "status": "approved",
+  "submitted_by": 9,
+  "approved_by": 1
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 21,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.254Z",
+  "updated_at": "2026-07-21T06:48:30.254Z",
+  "period": 1,
+  "employee": 1,
+  "channel": "organizational",
+  "revenue_rial": "53648620000",
+  "invoice_count": 17,
+  "active_customers": 13,
+  "new_customers": 3,
+  "profit_rial": "4233578775",
+  "cost_rial": "349095725",
+  "target_rial": "0",
+  "calls": 0,
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "sales.factsalesmonthly",
+ "pk": 22,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.262Z",
+  "updated_at": "2026-07-21T06:48:30.262Z",
+  "period": 1,
+  "employee": 2,
+  "channel": "organizational",
+  "revenue_rial": "8561200000",
+  "invoice_count": 4,
+  "active_customers": 3,
+  "new_customers": 1,
+  "profit_rial": "479919600",
+  "cost_rial": "108182400",
+  "target_rial": "0",
+  "calls": 0,
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 32,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.047Z",
+  "updated_at": "2026-07-22T07:58:50.820Z",
+  "period": 1,
+  "province": 1,
+  "channel": "team",
+  "sales_rial": "68",
+  "target_rial": "42000000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 33,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.054Z",
+  "updated_at": "2026-07-22T07:58:50.825Z",
+  "period": 1,
+  "province": 2,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "33600000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 34,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.062Z",
+  "updated_at": "2026-07-22T07:58:50.832Z",
+  "period": 1,
+  "province": 3,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "14700000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 35,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.069Z",
+  "updated_at": "2026-07-22T07:58:50.840Z",
+  "period": 1,
+  "province": 4,
+  "channel": "team",
+  "sales_rial": "567000000",
+  "target_rial": "10500000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 36,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.076Z",
+  "updated_at": "2026-07-22T07:58:50.847Z",
+  "period": 1,
+  "province": 5,
+  "channel": "team",
+  "sales_rial": "2795880000",
+  "target_rial": "4200000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 37,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.084Z",
+  "updated_at": "2026-07-22T07:58:50.851Z",
+  "period": 1,
+  "province": 6,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "4200000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 38,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.091Z",
+  "updated_at": "2026-07-22T07:58:50.855Z",
+  "period": 1,
+  "province": 7,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "17500000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 39,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.099Z",
+  "updated_at": "2026-07-22T07:58:50.859Z",
+  "period": 1,
+  "province": 8,
+  "channel": "team",
+  "sales_rial": "572880000",
+  "target_rial": "10500000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 40,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.106Z",
+  "updated_at": "2026-07-22T07:58:50.863Z",
+  "period": 1,
+  "province": 9,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "4200000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 41,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.116Z",
+  "updated_at": "2026-07-22T07:58:50.867Z",
+  "period": 1,
+  "province": 10,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "6300000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 42,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.122Z",
+  "updated_at": "2026-07-22T07:58:50.872Z",
+  "period": 1,
+  "province": 11,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "2100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 43,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.132Z",
+  "updated_at": "2026-07-22T07:58:50.876Z",
+  "period": 1,
+  "province": 12,
+  "channel": "team",
+  "sales_rial": "48243316000",
+  "target_rial": "65000000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 44,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.139Z",
+  "updated_at": "2026-07-22T07:58:50.880Z",
+  "period": 1,
+  "province": 13,
+  "channel": "team",
+  "sales_rial": "3562675200",
+  "target_rial": "8400000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 45,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.148Z",
+  "updated_at": "2026-07-22T07:58:50.883Z",
+  "period": 1,
+  "province": 14,
+  "channel": "team",
+  "sales_rial": "486000000",
+  "target_rial": "2100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 46,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.154Z",
+  "updated_at": "2026-07-22T07:58:50.887Z",
+  "period": 1,
+  "province": 15,
+  "channel": "team",
+  "sales_rial": "1513512000",
+  "target_rial": "4200000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 47,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.162Z",
+  "updated_at": "2026-07-22T07:58:50.892Z",
+  "period": 1,
+  "province": 16,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "4200000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 48,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.168Z",
+  "updated_at": "2026-07-22T07:58:50.899Z",
+  "period": 1,
+  "province": 17,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "2100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 49,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.172Z",
+  "updated_at": "2026-07-22T07:58:50.908Z",
+  "period": 1,
+  "province": 18,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "4200000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 50,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.178Z",
+  "updated_at": "2026-07-22T07:58:50.916Z",
+  "period": 1,
+  "province": 19,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "6300000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 51,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.184Z",
+  "updated_at": "2026-07-22T07:58:50.923Z",
+  "period": 1,
+  "province": 20,
+  "channel": "team",
+  "sales_rial": "99550000",
+  "target_rial": "31500000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 52,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.192Z",
+  "updated_at": "2026-07-22T07:58:50.929Z",
+  "period": 1,
+  "province": 21,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "2100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 53,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.199Z",
+  "updated_at": "2026-07-22T07:58:50.936Z",
+  "period": 1,
+  "province": 22,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "2100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 54,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.202Z",
+  "updated_at": "2026-07-22T07:58:50.942Z",
+  "period": 1,
+  "province": 23,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "6300000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 55,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.206Z",
+  "updated_at": "2026-07-22T07:58:50.948Z",
+  "period": 1,
+  "province": 24,
+  "channel": "team",
+  "sales_rial": "13405980000",
+  "target_rial": "6300000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 56,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.213Z",
+  "updated_at": "2026-07-22T07:58:50.955Z",
+  "period": 1,
+  "province": 25,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "16800000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 57,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.217Z",
+  "updated_at": "2026-07-22T07:58:50.961Z",
+  "period": 1,
+  "province": 26,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "2100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 58,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.222Z",
+  "updated_at": "2026-07-22T07:58:50.965Z",
+  "period": 1,
+  "province": 27,
+  "channel": "team",
+  "sales_rial": "17465220000",
+  "target_rial": "65100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 59,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.230Z",
+  "updated_at": "2026-07-22T07:58:50.969Z",
+  "period": 1,
+  "province": 28,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "12600000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 60,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.235Z",
+  "updated_at": "2026-07-22T07:58:50.975Z",
+  "period": 1,
+  "province": 29,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "2100000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 61,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.243Z",
+  "updated_at": "2026-07-22T07:58:50.980Z",
+  "period": 1,
+  "province": 30,
+  "channel": "team",
+  "sales_rial": "0",
+  "target_rial": "30000000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 62,
+ "fields": {
+  "created_at": "2026-07-21T06:48:28.250Z",
+  "updated_at": "2026-07-22T07:58:50.985Z",
+  "period": 1,
+  "province": 31,
+  "channel": "team",
+  "sales_rial": "35311049310",
+  "target_rial": "200000000000"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 63,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.268Z",
+  "updated_at": "2026-07-21T06:48:30.268Z",
+  "period": 1,
+  "province": 1,
+  "channel": "organizational",
+  "sales_rial": "8180000000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 64,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.272Z",
+  "updated_at": "2026-07-21T06:48:30.272Z",
+  "period": 1,
+  "province": 2,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 65,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.279Z",
+  "updated_at": "2026-07-21T06:48:30.279Z",
+  "period": 1,
+  "province": 3,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 66,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.284Z",
+  "updated_at": "2026-07-21T06:48:30.284Z",
+  "period": 1,
+  "province": 4,
+  "channel": "organizational",
+  "sales_rial": "1728320000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 67,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.288Z",
+  "updated_at": "2026-07-21T06:48:30.288Z",
+  "period": 1,
+  "province": 5,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 68,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.296Z",
+  "updated_at": "2026-07-21T06:48:30.296Z",
+  "period": 1,
+  "province": 6,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 69,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.300Z",
+  "updated_at": "2026-07-21T06:48:30.300Z",
+  "period": 1,
+  "province": 7,
+  "channel": "organizational",
+  "sales_rial": "5458800000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 70,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.304Z",
+  "updated_at": "2026-07-21T06:48:30.304Z",
+  "period": 1,
+  "province": 8,
+  "channel": "organizational",
+  "sales_rial": "1492000000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 71,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.309Z",
+  "updated_at": "2026-07-21T06:48:30.310Z",
+  "period": 1,
+  "province": 9,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 72,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.315Z",
+  "updated_at": "2026-07-21T06:48:30.315Z",
+  "period": 1,
+  "province": 10,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 73,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.319Z",
+  "updated_at": "2026-07-21T06:48:30.319Z",
+  "period": 1,
+  "province": 11,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 74,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.323Z",
+  "updated_at": "2026-07-21T06:48:30.323Z",
+  "period": 1,
+  "province": 12,
+  "channel": "organizational",
+  "sales_rial": "3920000000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 75,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.332Z",
+  "updated_at": "2026-07-21T06:48:30.332Z",
+  "period": 1,
+  "province": 13,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 76,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.339Z",
+  "updated_at": "2026-07-21T06:48:30.339Z",
+  "period": 1,
+  "province": 14,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 77,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.348Z",
+  "updated_at": "2026-07-21T06:48:30.348Z",
+  "period": 1,
+  "province": 15,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 78,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.352Z",
+  "updated_at": "2026-07-21T06:48:30.352Z",
+  "period": 1,
+  "province": 16,
+  "channel": "organizational",
+  "sales_rial": "9334000000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 79,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.359Z",
+  "updated_at": "2026-07-21T06:48:30.359Z",
+  "period": 1,
+  "province": 17,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 80,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.365Z",
+  "updated_at": "2026-07-21T06:48:30.365Z",
+  "period": 1,
+  "province": 18,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 81,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.370Z",
+  "updated_at": "2026-07-21T06:48:30.370Z",
+  "period": 1,
+  "province": 19,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 82,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.375Z",
+  "updated_at": "2026-07-21T06:48:30.375Z",
+  "period": 1,
+  "province": 20,
+  "channel": "organizational",
+  "sales_rial": "9671500000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 83,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.381Z",
+  "updated_at": "2026-07-21T06:48:30.381Z",
+  "period": 1,
+  "province": 21,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 84,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.386Z",
+  "updated_at": "2026-07-21T06:48:30.386Z",
+  "period": 1,
+  "province": 22,
+  "channel": "organizational",
+  "sales_rial": "2553600000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 85,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.391Z",
+  "updated_at": "2026-07-21T06:48:30.391Z",
+  "period": 1,
+  "province": 23,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 86,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.398Z",
+  "updated_at": "2026-07-21T06:48:30.398Z",
+  "period": 1,
+  "province": 24,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 87,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.402Z",
+  "updated_at": "2026-07-21T06:48:30.402Z",
+  "period": 1,
+  "province": 25,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 88,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.405Z",
+  "updated_at": "2026-07-21T06:48:30.405Z",
+  "period": 1,
+  "province": 26,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 89,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.413Z",
+  "updated_at": "2026-07-21T06:48:30.413Z",
+  "period": 1,
+  "province": 27,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 90,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.417Z",
+  "updated_at": "2026-07-21T06:48:30.417Z",
+  "period": 1,
+  "province": 28,
+  "channel": "organizational",
+  "sales_rial": "0",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 91,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.421Z",
+  "updated_at": "2026-07-21T06:48:30.421Z",
+  "period": 1,
+  "province": 29,
+  "channel": "organizational",
+  "sales_rial": "2510000000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 92,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.428Z",
+  "updated_at": "2026-07-21T06:48:30.428Z",
+  "period": 1,
+  "province": 30,
+  "channel": "organizational",
+  "sales_rial": "4184400000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factsalesprovince",
+ "pk": 93,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.433Z",
+  "updated_at": "2026-07-21T06:48:30.433Z",
+  "period": 1,
+  "province": 31,
+  "channel": "organizational",
+  "sales_rial": "10746000000",
+  "target_rial": "0"
+ }
+},
+{
+ "model": "sales.factcollection",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.437Z",
+  "updated_at": "2026-07-21T06:48:30.437Z",
+  "period": 1,
+  "bank": 1,
+  "amount_rial": "6938000000"
+ }
+},
+{
+ "model": "sales.factcollection",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-21T06:48:30.444Z",
+  "updated_at": "2026-07-21T06:48:30.444Z",
+  "period": 1,
+  "bank": 2,
+  "amount_rial": "3808000000"
+ }
+},
+{
+ "model": "production.dimmachine",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.580Z",
+  "updated_at": "2026-07-20T22:25:10.580Z",
+  "code": "cut-1",
+  "name_fa": "برش ۱",
+  "kind": "cutting",
+  "is_active": true,
+  "sort_order": 1
+ }
+},
+{
+ "model": "production.dimmachine",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.587Z",
+  "updated_at": "2026-07-20T22:25:10.587Z",
+  "code": "cut-2",
+  "name_fa": "برش ۲",
+  "kind": "cutting",
+  "is_active": true,
+  "sort_order": 2
+ }
+},
+{
+ "model": "production.dimmachine",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.592Z",
+  "updated_at": "2026-07-20T22:25:10.592Z",
+  "code": "cut-3",
+  "name_fa": "برش ۳",
+  "kind": "cutting",
+  "is_active": true,
+  "sort_order": 3
+ }
+},
+{
+ "model": "production.dimmachine",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.597Z",
+  "updated_at": "2026-07-20T22:25:10.597Z",
+  "code": "cut-4",
+  "name_fa": "برش ۴",
+  "kind": "cutting",
+  "is_active": true,
+  "sort_order": 4
+ }
+},
+{
+ "model": "production.dimmachine",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.602Z",
+  "updated_at": "2026-07-20T22:25:10.602Z",
+  "code": "cut-5",
+  "name_fa": "برش ۵",
+  "kind": "cutting",
+  "is_active": true,
+  "sort_order": 5
+ }
+},
+{
+ "model": "production.dimmachine",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.608Z",
+  "updated_at": "2026-07-20T22:25:10.608Z",
+  "code": "print",
+  "name_fa": "چاپ",
+  "kind": "print",
+  "is_active": true,
+  "sort_order": 6
+ }
+},
+{
+ "model": "production.dimproduct",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.614Z",
+  "updated_at": "2026-07-20T22:25:10.614Z",
+  "code": "prod-57",
+  "name_fa": "تولید ۵۷",
+  "unit": "roll",
+  "piece_rate_rial": "21500",
+  "index_factor": "1.00",
+  "sort_order": 1
+ }
+},
+{
+ "model": "production.dimproduct",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.621Z",
+  "updated_at": "2026-07-20T22:25:10.621Z",
+  "code": "prod-79",
+  "name_fa": "تولید ۷۹",
+  "unit": "roll",
+  "piece_rate_rial": "30000",
+  "index_factor": "2.10",
+  "sort_order": 2
+ }
+},
+{
+ "model": "production.dimproduct",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.627Z",
+  "updated_at": "2026-07-20T22:25:10.627Z",
+  "code": "prod-receipt",
+  "name_fa": "تولید رسید",
+  "unit": "roll",
+  "piece_rate_rial": "118000",
+  "index_factor": "9.20",
+  "sort_order": 3
+ }
+},
+{
+ "model": "production.dimproduct",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.633Z",
+  "updated_at": "2026-07-20T22:25:10.633Z",
+  "code": "prod-print",
+  "name_fa": "چاپ",
+  "unit": "sqm",
+  "piece_rate_rial": "3000",
+  "index_factor": "0.00",
+  "sort_order": 4
+ }
+},
+{
+ "model": "production.dimcostcategory",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.640Z",
+  "updated_at": "2026-07-20T22:25:10.640Z",
+  "code": "cost-production",
+  "name_fa": "هزینه تولید",
+  "is_direct": true,
+  "sort_order": 1
+ }
+},
+{
+ "model": "production.dimcostcategory",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.646Z",
+  "updated_at": "2026-07-20T22:25:10.646Z",
+  "code": "cost-rent",
+  "name_fa": "هزینه اجاره",
+  "is_direct": false,
+  "sort_order": 2
+ }
+},
+{
+ "model": "production.dimcostcategory",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.652Z",
+  "updated_at": "2026-07-20T22:25:10.652Z",
+  "code": "cost-maintenance",
+  "name_fa": "هزینه تعمیرات و نگهداری",
+  "is_direct": true,
+  "sort_order": 3
+ }
+},
+{
+ "model": "production.dimcostcategory",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.658Z",
+  "updated_at": "2026-07-20T22:25:10.658Z",
+  "code": "cost-utilities",
+  "name_fa": "هزینه آب برق گاز تلفن اینترنت",
+  "is_direct": false,
+  "sort_order": 4
+ }
+},
+{
+ "model": "production.dimcostcategory",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.665Z",
+  "updated_at": "2026-07-20T22:25:10.665Z",
+  "code": "cost-salary",
+  "name_fa": "هزینه حقوق",
+  "is_direct": true,
+  "sort_order": 5
+ }
+},
+{
+ "model": "production.dimcostcategory",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.672Z",
+  "updated_at": "2026-07-20T22:25:10.673Z",
+  "code": "cost-transport",
+  "name_fa": "هزینه حمل",
+  "is_direct": false,
+  "sort_order": 6
+ }
+},
+{
+ "model": "production.dimcostcategory",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-20T22:25:10.679Z",
+  "updated_at": "2026-07-20T22:25:10.679Z",
+  "code": "cost-other",
+  "name_fa": "سایر",
+  "is_direct": false,
+  "sort_order": 7
+ }
+},
+{
+ "model": "production.productionbenchmark",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.568Z",
+  "updated_at": "2026-07-20T22:26:01.580Z",
+  "period": 1,
+  "ideal_output_per_shift": 16000,
+  "monthly_shift_capacity": 120,
+  "hours_per_shift": 8,
+  "full_system_staff": 33,
+  "total_headcount": 675,
+  "ideal_shift_count": 155,
+  "days_in_month": 30
+ }
+},
+{
+ "model": "production.productionbenchmark",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-22T21:40:20.704Z",
+  "updated_at": "2026-07-22T21:40:20.704Z",
+  "period": 2,
+  "ideal_output_per_shift": 16000,
+  "monthly_shift_capacity": 120,
+  "hours_per_shift": 8,
+  "full_system_staff": 33,
+  "total_headcount": 675,
+  "ideal_shift_count": 155,
+  "days_in_month": 30
+ }
+},
+{
+ "model": "production.factproduction",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.598Z",
+  "updated_at": "2026-07-22T21:56:04.770Z",
+  "period": 1,
+  "machine": 1,
+  "active_shifts": "26.00",
+  "output_units": "372049.00",
+  "waste_pct": "1.54",
+  "repair_count": "0.00",
+  "downtime_breakdown_shifts": "0.00",
+  "downtime_sizechange_shifts": "0.50",
+  "downtime_nowork_shifts": "1.00",
+  "status": "needs_revision",
+  "submitted_by": 2,
+  "approved_by": null
+ }
+},
+{
+ "model": "production.factproduction",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.614Z",
+  "updated_at": "2026-07-20T22:26:01.614Z",
+  "period": 1,
+  "machine": 2,
+  "active_shifts": "26.00",
+  "output_units": "399843.00",
+  "waste_pct": "0.93",
+  "repair_count": "0.00",
+  "downtime_breakdown_shifts": "0.00",
+  "downtime_sizechange_shifts": "0.00",
+  "downtime_nowork_shifts": "1.00",
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "production.factproduction",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.630Z",
+  "updated_at": "2026-07-20T22:26:01.630Z",
+  "period": 1,
+  "machine": 3,
+  "active_shifts": "27.00",
+  "output_units": "373550.00",
+  "waste_pct": "1.74",
+  "repair_count": "0.00",
+  "downtime_breakdown_shifts": "0.00",
+  "downtime_sizechange_shifts": "0.00",
+  "downtime_nowork_shifts": "0.00",
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "production.factproduction",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.647Z",
+  "updated_at": "2026-07-20T22:26:01.647Z",
+  "period": 1,
+  "machine": 4,
+  "active_shifts": "0.00",
+  "output_units": "0.00",
+  "waste_pct": "0.00",
+  "repair_count": "0.00",
+  "downtime_breakdown_shifts": "0.00",
+  "downtime_sizechange_shifts": "0.00",
+  "downtime_nowork_shifts": "27.00",
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "production.factproduction",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.664Z",
+  "updated_at": "2026-07-20T22:26:01.664Z",
+  "period": 1,
+  "machine": 5,
+  "active_shifts": "0.00",
+  "output_units": "0.00",
+  "waste_pct": "0.00",
+  "repair_count": "0.00",
+  "downtime_breakdown_shifts": "0.00",
+  "downtime_sizechange_shifts": "0.00",
+  "downtime_nowork_shifts": "27.00",
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "production.factproduction",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.681Z",
+  "updated_at": "2026-07-20T22:26:01.681Z",
+  "period": 1,
+  "machine": 6,
+  "active_shifts": "3.00",
+  "output_units": "235680.00",
+  "waste_pct": "0.00",
+  "repair_count": "0.00",
+  "downtime_breakdown_shifts": "0.00",
+  "downtime_sizechange_shifts": "0.00",
+  "downtime_nowork_shifts": "24.00",
+  "status": "approved",
+  "submitted_by": null,
+  "approved_by": null
+ }
+},
+{
+ "model": "production.factprintcolor",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.696Z",
+  "updated_at": "2026-07-20T22:26:01.696Z",
+  "period": 1,
+  "color_count": 1,
+  "area_sqm": "108820.00"
+ }
+},
+{
+ "model": "production.factprintcolor",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.709Z",
+  "updated_at": "2026-07-20T22:26:01.709Z",
+  "period": 1,
+  "color_count": 2,
+  "area_sqm": "82800.00"
+ }
+},
+{
+ "model": "production.factprintcolor",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.722Z",
+  "updated_at": "2026-07-20T22:26:01.722Z",
+  "period": 1,
+  "color_count": 3,
+  "area_sqm": "44060.00"
+ }
+},
+{
+ "model": "production.factproductioncost",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.739Z",
+  "updated_at": "2026-07-20T22:26:01.739Z",
+  "period": 1,
+  "category": 1,
+  "amount_rial": "0"
+ }
+},
+{
+ "model": "production.factproductioncost",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.753Z",
+  "updated_at": "2026-07-20T22:26:01.753Z",
+  "period": 1,
+  "category": 2,
+  "amount_rial": "1670000000"
+ }
+},
+{
+ "model": "production.factproductioncost",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.766Z",
+  "updated_at": "2026-07-20T22:26:01.767Z",
+  "period": 1,
+  "category": 3,
+  "amount_rial": "70000000"
+ }
+},
+{
+ "model": "production.factproductioncost",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.779Z",
+  "updated_at": "2026-07-20T22:26:01.779Z",
+  "period": 1,
+  "category": 4,
+  "amount_rial": "113107000"
+ }
+},
+{
+ "model": "production.factproductioncost",
+ "pk": 5,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.792Z",
+  "updated_at": "2026-07-20T22:26:01.792Z",
+  "period": 1,
+  "category": 5,
+  "amount_rial": "10400000000"
+ }
+},
+{
+ "model": "production.factproductioncost",
+ "pk": 6,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.806Z",
+  "updated_at": "2026-07-20T22:26:01.806Z",
+  "period": 1,
+  "category": 6,
+  "amount_rial": "1117678156"
+ }
+},
+{
+ "model": "production.factproductioncost",
+ "pk": 7,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.818Z",
+  "updated_at": "2026-07-20T22:26:01.818Z",
+  "period": 1,
+  "category": 7,
+  "amount_rial": "2015483000"
+ }
+},
+{
+ "model": "production.factproductionrevenue",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.835Z",
+  "updated_at": "2026-07-20T22:26:01.835Z",
+  "period": 1,
+  "product": 1,
+  "quantity": "490096.00",
+  "piece_rate_rial": "21500"
+ }
+},
+{
+ "model": "production.factproductionrevenue",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.848Z",
+  "updated_at": "2026-07-20T22:26:01.848Z",
+  "period": 1,
+  "product": 2,
+  "quantity": "149762.00",
+  "piece_rate_rial": "30000"
+ }
+},
+{
+ "model": "production.factproductionrevenue",
+ "pk": 3,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.861Z",
+  "updated_at": "2026-07-20T22:26:01.861Z",
+  "period": 1,
+  "product": 3,
+  "quantity": "15574.00",
+  "piece_rate_rial": "118000"
+ }
+},
+{
+ "model": "production.factproductionrevenue",
+ "pk": 4,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.872Z",
+  "updated_at": "2026-07-20T22:26:01.872Z",
+  "period": 1,
+  "product": 4,
+  "quantity": "235680.00",
+  "piece_rate_rial": "3000"
+ }
+},
+{
+ "model": "production.factmaterialbalance",
+ "pk": 1,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.884Z",
+  "updated_at": "2026-07-20T22:26:01.884Z",
+  "period": 1,
+  "stream": "cutting",
+  "input_weight": "1000000.00",
+  "output_weight": "990000.00"
+ }
+},
+{
+ "model": "production.factmaterialbalance",
+ "pk": 2,
+ "fields": {
+  "created_at": "2026-07-20T22:26:01.896Z",
+  "updated_at": "2026-07-20T22:26:01.896Z",
+  "period": 1,
+  "stream": "print",
+  "input_weight": "1000000.00",
+  "output_weight": "990000.00"
+ }
+}
+]

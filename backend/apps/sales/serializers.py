@@ -14,10 +14,16 @@ from apps.sales.models import (
 
 class PeriodSerializer(serializers.ModelSerializer):
     label = serializers.CharField(read_only=True)
+    has_data = serializers.SerializerMethodField()
 
     class Meta:
         model = DimPeriod
-        fields = ["id", "jalali_year", "jalali_month", "label"]
+        fields = ["id", "jalali_year", "jalali_month", "label", "has_data"]
+
+    def get_has_data(self, obj) -> bool:
+        # A period "has data" if any computed KPI exists for it — this drives
+        # the dashboard's default selection (latest filled month).
+        return FactKPI.objects.filter(period=obj).exists()
 
 
 class TeamSerializer(serializers.ModelSerializer):

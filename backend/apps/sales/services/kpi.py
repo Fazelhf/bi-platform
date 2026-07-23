@@ -37,23 +37,27 @@ def active_formula_map(domain: str) -> dict[tuple[str, str], str]:
     }
 
 # KPI catalog: (code, name_fa, name_en, unit, direction, note)
+# Notes cite the exact source cell and flag any deliberate deviation.
 KPI_CATALOG = [
     ("revenue", "فروش ریالی", "Revenue", "rial", "higher",
-     "Sum of revenue_rial. Source: ورودی row 3."),
+     "جمع فروش ریالی همه فروشندگان. منبع: شیت ورودی ردیف ۳ (=SUM). فرمول: فروش."),
     ("target_achievement", "درصد تحقق تارگت", "Target achievement", "%", "higher",
-     "revenue / target * 100. Source: Sheet3 'درصد رسیدن به تارگت'."),
+     "فروش ÷ تارگت × ۱۰۰. عیناً مطابق Sheet3!C29 = (C19/C25)*100 «درصد رسیدن به تارگت»."),
     ("volume_share", "سهم از حجم فروش", "Share of sales volume", "%", "higher",
-     "revenue / company_revenue * 100. Source: Sheet3 'درصد از حجم فروش'."),
+     "فروش هر واحد ÷ کل فروش شرکت × ۱۰۰. اکسل (Sheet3!C28) بر عدد ثابت ۲۴۰ میلیارد "
+     "تقسیم می‌کرد که با جمع تارگت‌ها (۷۵۰ میلیارد) هم‌خوان نبود؛ اینجا بر فروش واقعی "
+     "کل تقسیم می‌شود که معیار درست «سهم» است."),
     ("call_conversion", "نرخ تبدیل تماس به فروش", "Call-to-sale conversion", "%", "higher",
-     "invoices / calls * 100. Source: Sheet3 'تماس به فروش'."),
+     "تعداد فاکتور ÷ تعداد تماس × ۱۰۰. عیناً مطابق Sheet3!C30 = (C20/C26)*100 «تماس به فروش»."),
     ("profit_margin", "حاشیه سود", "Profit margin", "%", "higher",
-     "profit / revenue * 100."),
+     "سود فروش ÷ فروش ریالی × ۱۰۰. حاشیه سود استاندارد (از ردیف‌های ۳ و ۷ ورودی)."),
     ("cost_to_sales", "نسبت هزینه به فروش", "Cost-to-sales", "%", "lower",
-     "cost / revenue * 100. Source: Sheet3 'هزینه به فروش'."),
+     "هزینه فروش ÷ فروش ریالی × ۱۰۰ (کمتر بهتر). توجه: اکسل (Sheet3!J59) برعکس "
+     "«فروش÷هزینه» را حساب می‌کرد؛ اینجا نسبت استاندارد هزینه‌به‌فروش استفاده شده."),
     ("avg_invoice_value", "میانگین ارزش فاکتور", "Average invoice value", "rial", "higher",
-     "revenue / invoices."),
+     "فروش ریالی ÷ تعداد فاکتور. میانگین مبلغ هر فاکتور (ردیف‌های ۳ و ۴ ورودی)."),
     ("new_customer_ratio", "نسبت مشتری جدید", "New-customer ratio", "%", "higher",
-     "new_customers / active_customers * 100."),
+     "مشتری جدید ÷ مشتری فعال × ۱۰۰ (ردیف‌های ۶ و ۵ ورودی)."),
 ]
 
 

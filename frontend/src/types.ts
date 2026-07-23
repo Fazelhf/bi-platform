@@ -3,6 +3,18 @@ export interface Period {
   jalali_year: number;
   jalali_month: number;
   label: string;
+  has_data?: boolean;
+}
+
+/** The default month a dashboard opens on: the latest month that has data,
+ *  falling back to the latest month overall. Assumes ascending order. */
+export function defaultPeriodId(periods: Period[]): number | null {
+  if (!periods.length) return null;
+  const withData = periods.filter((p) => p.has_data);
+  const pick = (withData.length ? withData : periods)[
+    (withData.length ? withData : periods).length - 1
+  ];
+  return pick.id;
 }
 
 export type Department = "" | "production" | "sales_org" | "sales_team";
