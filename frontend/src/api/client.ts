@@ -1,6 +1,9 @@
 import axios from "axios";
 
-const api = axios.create({ baseURL: "/api" });
+// Dev: "/api" is proxied to Django by Vite. Production build: set
+// VITE_API_URL (e.g. https://api.your-domain.com/api) in frontend/.env.production.
+const baseURL = import.meta.env.VITE_API_URL || "/api";
+const api = axios.create({ baseURL });
 
 // Attach the access token to every request.
 api.interceptors.request.use((config) => {
@@ -16,7 +19,7 @@ async function refreshToken(): Promise<string | null> {
   const refresh = localStorage.getItem("refresh");
   if (!refresh) return null;
   try {
-    const { data } = await axios.post("/api/auth/token/refresh/", { refresh });
+    const { data } = await axios.post(`${baseURL}/auth/token/refresh/`, { refresh });
     localStorage.setItem("access", data.access);
     if (data.refresh) localStorage.setItem("refresh", data.refresh);
     return data.access;

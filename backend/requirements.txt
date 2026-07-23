@@ -24,3 +24,4 @@ pandas==2.2.3
 
 # --- Server ---
 gunicorn==23.0.0
+whitenoise==6.8.2

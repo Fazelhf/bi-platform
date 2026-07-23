@@ -1,0 +1,138 @@
+# راهنمای دیپلوی روی هاست پایتون cPanel (LiteSpeed)
+
+این هاست از Python + PostgreSQL + Redis + Node.js + SSH + SSL رایگان پشتیبانی می‌کند،
+پس کل پروژه قابل اجراست. Docker نداریم؛ به‌جایش از بخش **Setup Python App** سی‌پنل استفاده می‌کنیم.
+
+## معماری روی این هاست
+
+- **بک‌اند (Django)** → یک **Python App** روی زیر‌دامنه `api.YOUR-DOMAIN.com`
+- **فرانت (Vue، فایل‌های ساخته‌شده)** → فایل‌های استاتیک روی دامنه‌ی اصلی `YOUR-DOMAIN.com`
+- **دیتابیس** → PostgreSQL (از cPanel می‌سازیم)
+
+> جدا کردن API روی زیر‌دامنه، تمیزترین راه روی cPanel است.
+
+---
+
+## گام ۱ — دیتابیس PostgreSQL
+
+1. cPanel → **PostgreSQL Databases**: یک دیتابیس بساز (مثلاً `user_bi`) + یک کاربر با رمز قوی و به دیتابیس اضافه‌اش کن.
+2. رشته‌ی اتصال را یادداشت کن:
+   `postgres://DBUSER:DBPASS@localhost:5432/DBNAME`
+
+## گام ۲ — زیر‌دامنه‌ی API
+
+cPanel → **Subdomains**: زیر‌دامنه‌ی `api` بساز (`api.YOUR-DOMAIN.com`). یک پوشه‌ی docroot می‌سازد مثل `/home/USER/api.YOUR-DOMAIN.com`.
+
+## گام ۳ — آپلود کد بک‌اند (SSH)
+
+```bash
+ssh USER@YOUR-DOMAIN.com
+cd ~
+git clone https://github.com/Fazelhf/bi-platform.git
+```
+
+## گام ۴ — ساخت Python App
+
+cPanel → **Setup Python App** → **Create Application**:
+- Python version: جدیدترین ۳.x موجود
+- **Application root:** `bi-platform/backend`
+- **Application URL:** `api.YOUR-DOMAIN.com`
+- **Application startup file:** `passenger_wsgi.py`
+- **Application Entry point:** `application`
+
+Create را بزن. یک virtualenv می‌سازد و دستور فعال‌سازی‌اش را نشان می‌دهد (`source ...activate`).
+
+## گام ۵ — نصب وابستگی‌ها (SSH)
+
+دستور activate که cPanel داد را اجرا کن، بعد:
+
+```bash
+cd ~/bi-platform/backend
+pip install -r requirements.txt
+```
+
+## گام ۶ — فایل `.env` بک‌اند
+
+در `~/bi-platform/backend/.env`:
+
+```env
+DEBUG=False
+SECRET_KEY=یک-رشته-تصادفی-بلند-بگذار
+ALLOWED_HOSTS=api.YOUR-DOMAIN.com
+DATABASE_URL=postgres://DBUSER:DBPASS@localhost:5432/DBNAME
+CORS_ALLOWED_ORIGINS=https://YOUR-DOMAIN.com
+CSRF_TRUSTED_ORIGINS=https://YOUR-DOMAIN.com,https://api.YOUR-DOMAIN.com
+REDIS_URL=redis://localhost:6379/0
+CELERY_TASK_ALWAYS_EAGER=True
+```
+
+> `CELERY_TASK_ALWAYS_EAGER=True` یعنی فعلاً بدون worker جدا کار می‌کند (کافی است).
+
+## گام ۷ — دیتابیس + استاتیک + داده‌ی اولیه (SSH)
+
+```bash
+cd ~/bi-platform/backend
+python manage.py migrate
+python manage.py collectstatic --noinput
+python manage.py seed_sales
+python manage.py seed_production
+python manage.py seed_formulas
+python manage.py loaddata fixtures/seed_data.json   # داده واقعی اردیبهشت ۱۴۰۵ + کاربران
+```
+
+سپس در **Setup Python App** دکمه‌ی **Restart** را بزن.
+تست: `https://api.YOUR-DOMAIN.com/api/docs/` باید Swagger را نشان دهد.
+
+## گام ۸ — build و آپلود فرانت
+
+روی کامپیوتر خودت:
+
+```bash
+cd frontend
+echo "VITE_API_URL=https://api.YOUR-DOMAIN.com/api" > .env.production
+npm install
+npm run build
+```
+
+محتویات پوشه‌ی `frontend/dist/` را در docroot دامنه‌ی اصلی آپلود کن
+(`/home/USER/public_html/`) — از طریق File Manager یا FTP.
+
+در همان پوشه یک فایل **`.htaccess`** بساز تا مسیرهای SPA کار کنند:
+
+```apache
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\.html$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.html [L]
+```
+
+## گام ۹ — SSL
+
+cPanel → **SSL/TLS Status** → برای هر دو `YOUR-DOMAIN.com` و `api.YOUR-DOMAIN.com`
+گزینه‌ی **Run AutoSSL** را بزن (Let's Encrypt رایگان).
+
+---
+
+## تمام شد ✅
+
+- سایت: `https://YOUR-DOMAIN.com`
+- ورود اولیه: کاربر `admin` یا `ceo` با رمز `demo12345`
+- **حتماً بعد از اولین ورود، رمزها را از پنل ادمین عوض کن و `SECRET_KEY` را تغییر بده.**
+
+## به‌روزرسانی بعدی
+
+```bash
+cd ~/bi-platform && git pull
+cd backend && pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput
+# سپس Restart در Setup Python App
+# و در صورت تغییر فرانت: build محلی + آپلود مجدد dist/
+```
+
+## عیب‌یابی سریع
+
+- **۵۰۰ در API:** فایل `~/bi-platform/backend/stderr.log` یا لاگ Python App را ببین؛ معمولاً `.env` یا اتصال دیتابیس است.
+- **CSS پنل ادمین نمی‌آید:** `collectstatic` را دوباره اجرا کن و Restart بزن (WhiteNoise سرو می‌کند).
+- **خطای CORS در مرورگر:** مطمئن شو `CORS_ALLOWED_ORIGINS` دقیقاً `https://YOUR-DOMAIN.com` باشد.
+- **صفحه‌ی سفید بعد از رفرش در مسیر داخلی:** فایل `.htaccess` را چک کن.
