@@ -105,13 +105,21 @@ TIME_ZONE = "Asia/Tehran"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 # Compressed, cache-busted static serving via WhiteNoise (production).
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
+
+# --- Single-domain SPA hosting ---
+# If a built frontend exists at backend/spa/, Django serves it: WhiteNoise
+# serves /assets/* and the catch-all in urls.py serves index.html for SPA
+# routes. This lets the whole app run from one domain (no subdomain, no CORS).
+SPA_DIR = BASE_DIR / "spa"
+if (SPA_DIR / "index.html").exists():
+    WHITENOISE_ROOT = SPA_DIR
 
 # Behind HTTPS/reverse-proxy on the host.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])

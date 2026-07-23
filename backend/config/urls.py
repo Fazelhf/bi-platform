@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.contrib import admin
-from django.urls import include, path
+from django.http import HttpResponse
+from django.urls import include, path, re_path
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -27,3 +29,17 @@ urlpatterns = [
         name="swagger-ui",
     ),
 ]
+
+# --- SPA catch-all (only when a built frontend is present) ---
+# Serves index.html for every non-API/admin/static route so client-side
+# routing (deep links, refresh) works. WhiteNoise serves /assets/* itself.
+_INDEX = settings.BASE_DIR / "spa" / "index.html"
+if _INDEX.exists():
+    _html = _INDEX.read_text(encoding="utf-8")
+
+    def spa_index(_request):
+        return HttpResponse(_html, content_type="text/html; charset=utf-8")
+
+    urlpatterns += [
+        re_path(r"^(?!api/|admin/|static/).*$", spa_index, name="spa"),
+    ]
