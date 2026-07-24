@@ -123,11 +123,24 @@ cPanel → **SSL/TLS Status** → برای هر دو `YOUR-DOMAIN.com` و `api.Y
 
 ## به‌روزرسانی بعدی
 
+روی سرور فقط این کافی است:
+
 ```bash
-cd ~/bi-platform && git pull
-cd backend && pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput
-# سپس Restart در Setup Python App
-# و در صورت تغییر فرانت: build محلی + آپلود مجدد dist/
+bash ~/bi-platform/deploy.sh
+```
+
+> ⚠️ **اگر فرانت را تغییر داده‌اید، قبلش حتماً روی ویندوز `build-spa.bat` را اجرا کنید.**
+> `deploy.sh` روی سرور فرانت را build **نمی‌کند** — نسخه‌ی بیلدشده در `backend/spa/`
+> داخل مخزن است و با گیت منتقل می‌شود. اگر این مرحله را رد کنید، دیپلوی بدون خطا
+> تمام می‌شود ولی سایت همان فرانت قدیمی را نشان می‌دهد.
+
+ترتیب درست برای هر تغییر فرانت:
+
+```bash
+build-spa.bat        # روی ویندوز: build + کپی در backend/spa
+git add -A && git commit -m "..." && git push
+# سپس روی سرور:
+bash ~/bi-platform/deploy.sh
 ```
 
 ## عیب‌یابی سریع
