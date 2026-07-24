@@ -58,7 +58,7 @@ onMounted(load);
 
 <template>
   <div class="space-y-4">
-    <h1 class="text-xl font-bold text-slate-800">مدیریت کاربران</h1>
+    <h1 class="text-xl font-bold text-ink">مدیریت کاربران</h1>
     <p v-if="error" class="text-sm text-red-600 bg-red-50 rounded-lg p-2 ltr-nums">{{ error }}</p>
     <CrudTable
       title="کاربران سیستم"

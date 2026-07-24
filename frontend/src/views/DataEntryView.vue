@@ -138,12 +138,12 @@ watch([selectedPeriod, () => props.channel], load);
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h1 class="text-xl font-bold text-slate-800">{{ title }}</h1>
+      <h1 class="text-xl font-bold text-ink">{{ title }}</h1>
       <div class="flex items-center gap-3">
         <span class="text-sm text-slate-500">{{ saving }}</span>
         <select
           v-model.number="selectedPeriod"
-          class="border border-slate-300 rounded-lg px-3 py-1.5 bg-white text-sm"
+          class="border border-slate-200 rounded-xl px-3 py-1.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
         >
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>

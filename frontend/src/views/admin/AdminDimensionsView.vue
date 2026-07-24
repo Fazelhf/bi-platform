@@ -122,7 +122,7 @@ watch(active, load);
 
 <template>
   <div class="space-y-4">
-    <h1 class="text-xl font-bold text-slate-800">مدیریت داده‌های پایه</h1>
+    <h1 class="text-xl font-bold text-ink">مدیریت داده‌های پایه</h1>
 
     <div class="flex flex-wrap gap-1">
       <button

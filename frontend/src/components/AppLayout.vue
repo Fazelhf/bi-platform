@@ -85,7 +85,7 @@ function logout() {
                 :key="item.name"
                 :to="{ name: item.name }"
                 class="px-3 py-1.5 rounded-md text-sm text-slate-500 hover:bg-slate-100 whitespace-nowrap"
-                active-class="bg-slate-100 text-slate-800 font-medium"
+                active-class="bg-slate-100 text-ink font-medium"
               >{{ item.label }}</RouterLink>
             </template>
           </nav>
