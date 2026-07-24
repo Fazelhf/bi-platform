@@ -32,7 +32,17 @@ onBeforeUnmount(() => window.clearInterval(timer));
       </span>
     </div>
 
-    <div v-if="loading" class="text-slate-400">در حال بارگذاری…</div>
+    <div v-if="loading" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div
+        v-for="i in 8"
+        :key="i"
+        class="bg-white rounded-card shadow-soft p-5 flex flex-col items-center"
+      >
+        <div class="skeleton rounded-full w-16 h-16 mb-3"></div>
+        <div class="skeleton h-3.5 w-24 mb-2"></div>
+        <div class="skeleton h-2.5 w-16"></div>
+      </div>
+    </div>
 
     <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
       <div

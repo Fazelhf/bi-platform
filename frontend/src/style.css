@@ -37,3 +37,42 @@ body {
 .animate-pop {
   animation: pop-in 0.16s ease-out;
 }
+
+/* Skeleton shimmer — a soft sweep across placeholder blocks while data loads. */
+@keyframes skeleton-shimmer {
+  100% { transform: translateX(-100%); }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #dedcd6;
+  border-radius: 0.5rem;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.55),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+/* Dark-surface variant — for skeletons placed on the dark ink cards. */
+.skeleton-dark {
+  background: rgba(255, 255, 255, 0.12);
+}
+.skeleton-dark::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.14),
+    transparent
+  );
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none; }
+}

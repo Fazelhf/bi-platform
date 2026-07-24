@@ -456,9 +456,13 @@ class SalesDashboardDetailView(APIView):
                 "call_conversion": _ratio(f.invoice_count, f.calls) and _ratio(f.invoice_count, f.calls) * 100,
             })
 
-        # ---- Team block (company-wide across channels) — Sheet3 rows 47-59 ----
+        # ---- Team block — Sheet3 rows 47-59 ----
+        # Scoped to THIS channel so the team charts match the channel the user is
+        # viewing (previously this aggregated across all channels, so the B2B and
+        # banking dashboards showed company-wide team totals that did not match
+        # their own recorded figures).
         all_facts = FactSalesMonthly.objects.filter(
-            period=period, status=ApprovalStatus.APPROVED
+            period=period, channel=channel, status=ApprovalStatus.APPROVED
         ).select_related("employee", "employee__team")
 
         agg: dict[int, dict] = {}

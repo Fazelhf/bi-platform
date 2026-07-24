@@ -54,11 +54,6 @@ function call() {
         :disabled="!member.phone"
         @click="call"
       >📞</button>
-      <button
-        class="flex-1 h-10 rounded-xl bg-accent-500 hover:bg-accent-600 flex items-center justify-center transition"
-        title="تماس تصویری"
-        @click="openChat"
-      >🎥</button>
     </div>
   </div>
 </template>

@@ -4,6 +4,8 @@ import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 import { salesApi } from "@/api/sales";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
+import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import { rial } from "@/utils/format";
 
 /**
@@ -107,8 +109,8 @@ watch([periodA, periodB, compare, () => props.channel], load);
         <select v-model.number="periodA" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>
-        <label class="flex items-center gap-1.5 text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-1.5">
-          <input v-model="compare" type="checkbox" class="rounded" /> مقایسه
+        <label class="flex items-center gap-1.5 text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-1.5 cursor-pointer hover:bg-slate-50 transition-colors">
+          <input v-model="compare" type="checkbox" class="rounded accent-brand-600" /> مقایسه با ماه دیگر
         </label>
         <select
           v-if="compare"
@@ -134,12 +136,16 @@ watch([periodA, periodB, compare, () => props.channel], load);
       >داشبورد تیم</button>
     </div>
 
-    <div v-if="loading || !data" class="text-slate-400">در حال بارگذاری…</div>
+    <DashboardSkeleton v-if="loading || !data" :cards="0" :charts="6" :table="false" />
 
     <!-- ========== داشبورد فروشنده — 11 charts ========== -->
     <template v-else-if="tab === 'people'">
-      <div v-if="!data.salespeople.length" class="bg-white rounded-card shadow-soft p-8 text-center text-slate-400">
-        برای این ماه داده‌ی تاییدشده‌ای ثبت نشده است.
+      <div v-if="!data.salespeople.length" class="bg-white rounded-card shadow-soft">
+        <EmptyState
+          icon="📊"
+          title="داده‌ای برای این ماه نیست"
+          hint="برای این دوره هنوز فروش تاییدشده‌ای ثبت نشده است. پس از ثبت و تأیید داده، نمودارها اینجا ظاهر می‌شوند."
+        />
       </div>
       <template v-else>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -193,7 +199,14 @@ watch([periodA, periodB, compare, () => props.channel], load);
 
     <!-- ========== داشبورد تیم — 9 charts ========== -->
     <template v-else>
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div v-if="!data.teams.length" class="bg-white rounded-card shadow-soft">
+        <EmptyState
+          icon="📊"
+          title="داده‌ای برای این ماه نیست"
+          hint="برای این دوره هنوز فروش تیمی تاییدشده‌ای ثبت نشده است. پس از ثبت و تأیید داده، نمودارها اینجا ظاهر می‌شوند."
+        />
+      </div>
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         <SeriesChart title="فروش ریالی تیم‌ها" :categories="teamNames" :series="teamSeries('فروش ریالی', 'revenue')" />
         <SeriesChart title="تعداد فاکتور فروش" :categories="teamNames" :series="teamSeries('تعداد فاکتور', 'invoices')" />
         <SeriesChart

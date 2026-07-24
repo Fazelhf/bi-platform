@@ -5,6 +5,8 @@ import { defaultPeriodId } from "@/types";
 import type { DashboardSummary, Period } from "@/types";
 import KpiCard from "@/components/KpiCard.vue";
 import BarChart from "@/components/BarChart.vue";
+import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import { pct, rial } from "@/utils/format";
 
 const props = withDefaults(
@@ -73,16 +75,16 @@ watch([selectedPeriod, () => props.channel], load);
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h1 class="text-xl font-bold text-slate-800">{{ title }}</h1>
+      <h1 class="text-xl font-bold text-ink">{{ title }}</h1>
       <select
         v-model.number="selectedPeriod"
-        class="border border-slate-300 rounded-lg px-3 py-1.5 bg-white text-sm"
+        class="border border-slate-200 rounded-xl px-3 py-1.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
       >
         <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
       </select>
     </div>
 
-    <div v-if="loading" class="text-slate-500">در حال بارگذاری…</div>
+    <DashboardSkeleton v-if="loading" />
 
     <template v-else-if="data">
       <!-- Headline KPI cards -->
@@ -110,9 +112,9 @@ watch([selectedPeriod, () => props.channel], load);
       <!-- Bank collections (organizational channel) -->
       <div
         v-if="collections.length"
-        class="bg-white rounded-xl shadow-sm border border-slate-200 p-4"
+        class="bg-white rounded-card shadow-soft p-4"
       >
-        <h3 class="text-sm font-semibold text-slate-700 mb-3">وصول بانکی</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">وصول بانکی</h3>
         <table class="w-full text-sm">
           <tbody>
             <tr v-for="c in collections" :key="c.bank__name_fa" class="border-b border-slate-50">
@@ -124,11 +126,11 @@ watch([selectedPeriod, () => props.channel], load);
       </div>
 
       <!-- Leaderboard -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-        <h3 class="text-sm font-semibold text-slate-700 mb-3">
+      <div class="bg-white rounded-card shadow-soft p-4">
+        <h3 class="text-sm font-semibold text-ink mb-3">
           رتبه‌بندی فروشندگان بر اساس تحقق تارگت
         </h3>
-        <table class="w-full text-sm">
+        <table v-if="leaderboard.length" class="w-full text-sm">
           <thead>
             <tr class="text-slate-400 border-b border-slate-100">
               <th class="text-right font-medium py-2 w-10">#</th>
@@ -137,7 +139,11 @@ watch([selectedPeriod, () => props.channel], load);
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, i) in leaderboard" :key="row.scope_label" class="border-b border-slate-50">
+            <tr
+              v-for="(row, i) in leaderboard"
+              :key="row.scope_label"
+              class="border-b border-slate-50 hover:bg-slate-50/60 transition-colors"
+            >
               <td class="py-2 text-slate-400">{{ i + 1 }}</td>
               <td class="py-2">{{ row.scope_label }}</td>
               <td class="py-2 text-left ltr-nums font-medium text-brand-600">
@@ -146,6 +152,12 @@ watch([selectedPeriod, () => props.channel], load);
             </tr>
           </tbody>
         </table>
+        <EmptyState
+          v-else
+          icon="🏆"
+          title="هنوز فروشی ثبت نشده"
+          hint="با ثبت و تأیید فروش فروشندگان در این دوره، رتبه‌بندی اینجا نمایش داده می‌شود."
+        />
       </div>
 
       <p class="text-xs text-slate-400">

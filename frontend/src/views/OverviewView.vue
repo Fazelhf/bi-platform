@@ -6,6 +6,7 @@ import { executiveApi } from "@/api/executive";
 import { defaultPeriodId } from "@/types";
 import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, rial } from "@/utils/format";
+import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 
 const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
@@ -52,12 +53,12 @@ watch(selectedPeriod, load);
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold text-ink">نمای کلی سازمان</h2>
-      <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
+      <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
         <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
       </select>
     </div>
 
-    <div v-if="loading" class="text-slate-400">در حال بارگذاری…</div>
+    <DashboardSkeleton v-if="loading" :cards="4" :charts="0" :rows="4" />
 
     <template v-else-if="data">
       <!-- Hero: total company sales -->
@@ -73,7 +74,7 @@ watch(selectedPeriod, load);
 
       <!-- 4 domain cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div v-for="c in cards" :key="c.title" class="bg-white rounded-card shadow-soft p-5">
+        <div v-for="c in cards" :key="c.title" class="bg-white rounded-card shadow-soft p-5 hover:shadow-pop transition-shadow duration-200">
           <div class="flex items-center gap-2 mb-4">
             <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: c.color }"></span>
             <h3 class="font-bold text-ink">{{ c.title }}</h3>

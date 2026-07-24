@@ -8,9 +8,16 @@ const adding = ref(false);
 const form = ref({ title: "", body: "" });
 
 async function load() {
-  notes.value = (await socialApi.notes()).filter((n) => n.subject === null);
-  loading.value = false;
+  loading.value = true;
+  try {
+    notes.value = (await socialApi.notes()).filter((n) => n.subject === null);
+  } catch {
+    notes.value = [];
+  } finally {
+    loading.value = false;
+  }
 }
+load();
 async function save() {
   if (!form.value.body.trim() && !form.value.title.trim()) return;
   await socialApi.createNote({ title: form.value.title, body: form.value.body, subject: null });
@@ -59,10 +66,18 @@ function fmt(iso: string) {
         </div>
       </div>
 
-      <div v-if="loading" class="text-white/50 text-sm py-6 text-center">در حال بارگذاری…</div>
-      <p v-else-if="!notes.length" class="text-white/40 text-sm py-6 text-center">
-        هنوز یادداشتی ندارید. با دکمه + اضافه کنید.
-      </p>
+      <!-- Loading: shimmering note placeholders -->
+      <div v-if="loading" class="space-y-2">
+        <div v-for="i in 3" :key="i" class="bg-white/5 rounded-2xl p-3">
+          <div class="skeleton skeleton-dark h-3.5 w-1/3 mb-2"></div>
+          <div class="skeleton skeleton-dark h-3 w-2/3"></div>
+        </div>
+      </div>
+      <div v-else-if="!notes.length" class="text-center py-8">
+        <div class="text-3xl mb-2 select-none">📝</div>
+        <p class="text-white/70 text-sm">یادداشتی ثبت نشده است.</p>
+        <p class="text-white/40 text-xs mt-1">با دکمه + اولین یادداشت را اضافه کنید.</p>
+      </div>
 
       <div class="space-y-2">
         <div

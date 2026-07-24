@@ -54,23 +54,30 @@ onBeforeUnmount(() => window.clearInterval(timer));
 <template>
   <div class="relative">
     <button
-      class="relative p-2 rounded-full hover:bg-slate-100 text-slate-600"
+      class="relative p-2 rounded-full hover:bg-slate-100 text-slate-600 transition-colors"
       title="اعلان‌ها"
       @click="toggle"
     >
-      🔔
+      <svg
+        xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+        stroke-linejoin="round" class="w-5 h-5"
+      >
+        <path d="M18 8A6 6 0 1 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
       <span
         v-if="unread > 0"
-        class="absolute -top-0.5 -left-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] leading-[18px] text-center font-bold"
+        class="absolute -top-0.5 -left-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] leading-[18px] text-center font-bold ltr-nums"
       >{{ unread > 99 ? "۹۹+" : unread }}</span>
     </button>
 
     <div
       v-if="open"
-      class="absolute left-0 mt-2 w-96 max-h-[28rem] overflow-auto bg-white border border-slate-200 rounded-xl shadow-xl z-50"
+      class="absolute left-0 mt-2 w-96 max-h-[28rem] overflow-auto bg-white rounded-card shadow-pop z-50 animate-pop"
     >
       <div class="flex items-center justify-between px-4 py-2 border-b border-slate-100">
-        <span class="text-sm font-semibold text-slate-700">اعلان‌ها</span>
+        <span class="text-sm font-semibold text-ink">اعلان‌ها</span>
         <button class="text-xs text-brand-600 hover:underline" @click="markAll">
           همه خوانده شد
         </button>

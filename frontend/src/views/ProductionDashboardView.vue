@@ -9,6 +9,7 @@ import DonutChart from "@/components/charts/DonutChart.vue";
 import StackedMachineBar from "@/components/charts/StackedMachineBar.vue";
 import ProfitLossBar from "@/components/charts/ProfitLossBar.vue";
 import BarChart from "@/components/BarChart.vue";
+import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import { kpiValue, num, rial } from "@/utils/format";
 
 const periods = ref<Period[]>([]);
@@ -66,12 +67,12 @@ function fmtCell(v: string | null, unit: string) {
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold text-ink">داشبورد مدیریتی تولید</h2>
-      <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
+      <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
         <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
       </select>
     </div>
 
-    <div v-if="loading || !data" class="text-slate-400">در حال بارگذاری…</div>
+    <DashboardSkeleton v-if="loading || !data" :cards="3" :charts="4" />
 
     <template v-else>
       <!-- Financial summary cards (درآمد / هزینه / کارکرد) -->
@@ -130,7 +131,7 @@ function fmtCell(v: string | null, unit: string) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="k in kpiRows" :key="k.id" class="border-b border-slate-50">
+            <tr v-for="k in kpiRows" :key="k.id" class="border-b border-slate-50 hover:bg-slate-50/60 transition-colors">
               <td class="py-2.5 font-medium">{{ k.kpi_name_fa }}</td>
               <td class="py-2.5 text-center ltr-nums bg-blue-50/50">{{ fmtCell(k.actual, k.unit) }}</td>
               <td class="py-2.5 text-center ltr-nums">{{ fmtCell(k.target, k.unit) }}</td>

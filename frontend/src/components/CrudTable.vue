@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { confirm } from "@/composables/useUi";
+import Skeleton from "@/components/Skeleton.vue";
+import EmptyState from "@/components/EmptyState.vue";
 
 export interface CrudColumn {
   key: string;
@@ -112,23 +114,46 @@ function display(row: Record<string, any>, col: CrudColumn): string {
 </script>
 
 <template>
-  <div class="bg-white rounded-xl shadow-sm border border-slate-200">
+  <div class="bg-white rounded-card shadow-soft">
     <div class="flex items-center justify-between gap-3 p-4 border-b border-slate-100">
-      <h2 class="font-semibold text-slate-700">{{ title }}</h2>
+      <h2 class="font-semibold text-ink">{{ title }}</h2>
       <div class="flex items-center gap-2">
         <input
           v-model="search"
           placeholder="جستجو…"
-          class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-48"
+          class="border border-slate-200 rounded-xl px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
         />
         <button
-          class="bg-brand-600 text-white text-sm rounded-lg px-3 py-1.5 hover:bg-brand-700"
+          class="bg-brand-600 text-white text-sm rounded-xl px-3 py-1.5 hover:bg-brand-700 transition-colors"
           @click="openCreate"
         >+ افزودن</button>
       </div>
     </div>
 
-    <div v-if="loading" class="p-6 text-slate-400 text-sm">در حال بارگذاری…</div>
+    <!-- Loading: skeleton rows -->
+    <div v-if="loading" class="p-4 space-y-3">
+      <div v-for="i in 6" :key="i" class="flex items-center gap-4">
+        <Skeleton class="h-3 flex-1" />
+        <Skeleton class="h-3 w-24" />
+        <Skeleton class="h-3 w-16" />
+      </div>
+    </div>
+
+    <!-- Empty: nothing to show at all -->
+    <EmptyState
+      v-else-if="!filtered.length"
+      :icon="search ? '🔍' : '📄'"
+      :title="search ? 'نتیجه‌ای یافت نشد' : 'هنوز موردی ثبت نشده'"
+      :hint="search ? 'عبارت دیگری را جستجو کنید.' : 'برای افزودن اولین مورد، دکمه‌ی «افزودن» را بزنید.'"
+    >
+      <template v-if="!search" #action>
+        <button
+          class="bg-brand-600 text-white text-sm rounded-xl px-4 py-2 hover:bg-brand-700 transition-colors"
+          @click="openCreate"
+        >+ افزودن</button>
+      </template>
+    </EmptyState>
+
     <table v-else class="w-full text-sm">
       <thead>
         <tr class="text-slate-400 border-b border-slate-100">
@@ -145,7 +170,7 @@ function display(row: Record<string, any>, col: CrudColumn): string {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in paged" :key="row.id" class="border-b border-slate-50 hover:bg-slate-50/50">
+        <tr v-for="row in paged" :key="row.id" class="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
           <td v-for="c in tableCols" :key="c.key" class="py-2 px-4">
             {{ display(row, c) }}
           </td>
@@ -153,9 +178,6 @@ function display(row: Record<string, any>, col: CrudColumn): string {
             <button class="text-brand-600 text-xs hover:underline ml-2" @click="openEdit(row)">ویرایش</button>
             <button v-if="canDelete !== false" class="text-red-500 text-xs hover:underline" @click="remove(row)">حذف</button>
           </td>
-        </tr>
-        <tr v-if="!paged.length">
-          <td :colspan="tableCols.length + 1" class="py-6 text-center text-slate-400">موردی یافت نشد.</td>
         </tr>
       </tbody>
     </table>
@@ -169,7 +191,7 @@ function display(row: Record<string, any>, col: CrudColumn): string {
     <!-- Modal -->
     <div v-if="showModal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="showModal = false">
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-        <h3 class="font-bold text-slate-800 mb-4">
+        <h3 class="font-bold text-ink mb-4">
           {{ editingId == null ? "افزودن" : "ویرایش" }} — {{ title }}
         </h3>
         <form class="space-y-3" @submit.prevent="save">

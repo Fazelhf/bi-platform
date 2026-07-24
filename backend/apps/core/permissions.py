@@ -73,12 +73,12 @@ class SalesChannelOwnership(BasePermission):
 
 class ApprovalPermission(BasePermission):
     """
-    For approve/reject/request-revision actions. Executives (the CEO) may
-    decide on ANY record; a department manager only on their own section
-    (matched via the view's entry_department or the object's sales channel).
+    For approve/reject/request-revision actions. ONLY the CEO (executive) or a
+    superuser may decide on a record. Department managers submit data but may
+    not approve/reject their own (or any) section — they only see the status.
     """
 
-    message = "شما مجاز به تایید/رد این رکورد نیستید."
+    message = "فقط مدیرعامل مجاز به تایید یا رد اطلاعات است."
 
     def has_permission(self, request, view):
         u = request.user
@@ -86,12 +86,7 @@ class ApprovalPermission(BasePermission):
 
     def has_object_permission(self, request, view, obj):
         u = request.user
-        if u.is_superuser or u.role == "executive":
-            return True
-        dept = getattr(view, "entry_department", None)
-        if dept is None:
-            dept = CHANNEL_DEPARTMENT.get(getattr(obj, "channel", None))
-        return u.department == dept
+        return bool(u.is_superuser or u.role == "executive")
 
 
 class IsExecutiveOrAdmin(BasePermission):

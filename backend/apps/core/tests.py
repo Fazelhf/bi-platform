@@ -120,6 +120,17 @@ class WorkflowSideEffectTests(APITestCase):
             Notification.objects.filter(recipient=self.manager, verb="approved").exists()
         )
 
+    def test_department_manager_cannot_approve(self):
+        """Only the CEO decides — a section manager gets 403 on approve/reject."""
+        self.client.force_authenticate(self.manager)
+        self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/submit/")
+        r = self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/approve/")
+        self.assertEqual(r.status_code, 403)
+        self.fact.refresh_from_db()
+        self.assertNotEqual(self.fact.status, ApprovalStatus.APPROVED)
+        r2 = self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/reject/")
+        self.assertEqual(r2.status_code, 403)
+
     def test_request_revision_flow(self):
         self.client.force_authenticate(self.manager)
         self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/submit/")

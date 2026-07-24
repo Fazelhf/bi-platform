@@ -31,7 +31,11 @@ def _notify(recipients, actor, verb: str, detail: str, instance) -> int:
 
 
 def notify_submitted(actor, instance, department: str, detail: str) -> int:
-    """New pending record: tell the CEO(s) and the section's other managers."""
+    """New pending record: tell the CEO(s) — the only approver in the workflow.
+
+    `department` is kept for signature compatibility but no longer scopes the
+    recipients, since department managers can no longer approve.
+    """
     approvers = User.objects.filter(is_active=True).filter(
         models_q_approvers(department)
     ).distinct()
@@ -49,6 +53,6 @@ def notify_decision(actor, instance, verb: str, detail: str) -> int:
 def models_q_approvers(department: str):
     from django.db.models import Q
 
-    return Q(role="executive") | Q(is_superuser=True) | Q(
-        role="manager", department=department
-    )
+    # Only the CEO (executive) or a superuser approves, so only they are
+    # notified of a new submission. Department managers are not approvers.
+    return Q(role="executive") | Q(is_superuser=True)
