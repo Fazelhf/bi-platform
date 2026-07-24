@@ -30,12 +30,13 @@ function select(key: string) {
   <div class="space-y-4">
     <h1 class="text-xl font-bold text-ink">تنظیمات سایت</h1>
 
-    <!-- Sub-tabs (all the former admin items live here now) -->
-    <div class="flex flex-wrap gap-1 bg-white rounded-2xl shadow-soft p-1.5 w-fit">
+    <!-- Sub-tabs (all the former admin items live here now).
+         Scrolls horizontally on narrow screens instead of wrapping. -->
+    <div class="flex gap-1 bg-white rounded-2xl shadow-soft p-1.5 max-w-full overflow-x-auto md:w-fit">
       <button
         v-for="t in tabs"
         :key="t.key"
-        class="px-4 py-2 rounded-xl text-sm transition"
+        class="px-4 py-2 rounded-xl text-sm transition whitespace-nowrap shrink-0"
         :class="active === t.key ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100'"
         @click="select(t.key)"
       >{{ t.label }}</button>

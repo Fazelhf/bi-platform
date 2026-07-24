@@ -7,6 +7,11 @@ export const salesApi = {
     return data.results ?? data;
   },
 
+  async employees(): Promise<{ id: number; full_name_fa: string; team_name?: string }[]> {
+    const { data } = await api.get("/sales/employees/", { params: { page_size: 200 } });
+    return data.results ?? data;
+  },
+
   async dashboard(periodId: number, channel = "team"): Promise<DashboardSummary> {
     const { data } = await api.get("/sales/dashboard/summary/", {
       params: { period: periodId, channel },

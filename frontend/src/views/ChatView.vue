@@ -73,8 +73,11 @@ watch(() => route.query.with, (v) => { if (v) openThread(Number(v)); });
 
 <template>
   <div class="bg-white rounded-card shadow-soft overflow-hidden flex" style="height: calc(100vh - 8rem)">
-    <!-- Contacts -->
-    <div class="w-72 border-l border-slate-100 flex flex-col shrink-0">
+    <!-- Contacts — full width on mobile; hidden there once a thread is open -->
+    <div
+      class="w-full md:w-72 border-l border-slate-100 flex-col shrink-0"
+      :class="activeId === null ? 'flex' : 'hidden md:flex'"
+    >
       <div class="p-4 font-bold text-ink border-b border-slate-100">گفتگوها</div>
       <div class="flex-1 overflow-y-auto">
         <button
@@ -97,10 +100,18 @@ watch(() => route.query.with, (v) => { if (v) openThread(Number(v)); });
       </div>
     </div>
 
-    <!-- Thread -->
-    <div class="flex-1 flex flex-col min-w-0">
+    <!-- Thread — full width on mobile; hidden there until a thread is open -->
+    <div
+      class="flex-1 flex-col min-w-0"
+      :class="activeId === null ? 'hidden md:flex' : 'flex'"
+    >
       <template v-if="active">
         <div class="flex items-center gap-3 p-4 border-b border-slate-100">
+          <button
+            class="md:hidden -mr-1 p-1 text-slate-500 hover:text-ink text-xl leading-none shrink-0"
+            title="بازگشت به فهرست"
+            @click="activeId = null"
+          >→</button>
           <UserAvatar :name="active.name" :initials="active.initials" :color="active.avatar_color" :online="active.is_online" :size="40" />
           <div>
             <p class="font-semibold text-ink">{{ active.name }}</p>

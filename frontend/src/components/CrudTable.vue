@@ -154,33 +154,35 @@ function display(row: Record<string, any>, col: CrudColumn): string {
       </template>
     </EmptyState>
 
-    <table v-else class="w-full text-sm">
-      <thead>
-        <tr class="text-slate-400 border-b border-slate-100">
-          <th
-            v-for="c in tableCols"
-            :key="c.key"
-            class="text-right font-medium py-2 px-4 cursor-pointer select-none hover:text-slate-600"
-            @click="sortBy(c.key)"
-          >
-            {{ c.label }}
-            <span v-if="sortKey === c.key">{{ sortDir === 1 ? "▲" : "▼" }}</span>
-          </th>
-          <th class="w-28"></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in paged" :key="row.id" class="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-          <td v-for="c in tableCols" :key="c.key" class="py-2 px-4">
-            {{ display(row, c) }}
-          </td>
-          <td class="py-2 px-4 text-left whitespace-nowrap">
-            <button class="text-brand-600 text-xs hover:underline ml-2" @click="openEdit(row)">ویرایش</button>
-            <button v-if="canDelete !== false" class="text-red-500 text-xs hover:underline" @click="remove(row)">حذف</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else class="overflow-x-auto">
+      <table class="w-full text-sm min-w-[520px]">
+        <thead>
+          <tr class="text-slate-400 border-b border-slate-100">
+            <th
+              v-for="c in tableCols"
+              :key="c.key"
+              class="text-right font-medium py-2 px-4 cursor-pointer select-none hover:text-slate-600 whitespace-nowrap"
+              @click="sortBy(c.key)"
+            >
+              {{ c.label }}
+              <span v-if="sortKey === c.key">{{ sortDir === 1 ? "▲" : "▼" }}</span>
+            </th>
+            <th class="w-28"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in paged" :key="row.id" class="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+            <td v-for="c in tableCols" :key="c.key" class="py-2 px-4">
+              {{ display(row, c) }}
+            </td>
+            <td class="py-2 px-4 text-left whitespace-nowrap">
+              <button class="text-brand-600 text-xs hover:underline ml-2" @click="openEdit(row)">ویرایش</button>
+              <button v-if="canDelete !== false" class="text-red-500 text-xs hover:underline" @click="remove(row)">حذف</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-if="pageCount > 1" class="flex items-center justify-center gap-2 p-3 border-t border-slate-100 text-sm">
       <button class="px-2 py-1 rounded hover:bg-slate-100 disabled:opacity-40" :disabled="page === 1" @click="page--">قبلی</button>

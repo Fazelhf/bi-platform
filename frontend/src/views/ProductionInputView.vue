@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { salesApi } from "@/api/sales";
 import { productionInputApi, type ProdInput } from "@/api/productionInput";
 import { num } from "@/utils/format";
+import MoneyInput from "@/components/MoneyInput.vue";
 
 const periods = ref<{ id: number; label: string }[]>([]);
 const selectedPeriod = ref<number | null>(null);
@@ -140,7 +141,7 @@ watch(selectedPeriod, load);
           </label>
           <label v-for="c in data.costs" :key="c.category" class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">{{ c.category_name }}</span>
-            <input v-model="c.amount_rial" type="number" step="any"
+            <MoneyInput v-model="c.amount_rial"
               class="w-40 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
           </label>
         </div>
