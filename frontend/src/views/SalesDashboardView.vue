@@ -77,6 +77,11 @@ function teamSeries(label: string, key: string) {
   return s;
 }
 
+// B2B is wholesale on credit: tonnage and collection replace call activity,
+// and the counterparty is a company rather than a retail customer.
+const isB2B = computed(() => props.channel === "b2b");
+const buyer = computed(() => (isB2B.value ? "شرکت" : "مشتری"));
+
 // Top provinces with any sales (chart 10) + Tehran highlight (chart 11)
 const topProvinces = computed(() => (data.value?.provinces ?? []).filter((p) => p.sales > 0).slice(0, 12));
 const tehran = computed(() => (data.value?.provinces ?? []).find((p) => p.name.trim() === "تهران"));
@@ -150,7 +155,7 @@ watch([periodA, periodB, compare, () => props.channel], load);
       <template v-else>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           <SeriesChart title="فروش ریالی" :categories="names" :series="peopleSeries('فروش ریالی', 'revenue')" />
-          <SeriesChart title="تعداد مشتری جدید" :categories="names" :series="peopleSeries('مشتری جدید', 'new_customers')" />
+          <SeriesChart :title="`تعداد ${buyer} جدید`" :categories="names" :series="peopleSeries(`${buyer} جدید`, 'new_customers')" />
           <SeriesChart title="سود فروش" :categories="names" :series="peopleSeries('سود فروش', 'profit')" />
           <SeriesChart
             title="درصد از حجم فروش" kind="pie" percent
@@ -164,15 +169,31 @@ watch([periodA, periodB, compare, () => props.channel], load);
             ]"
           />
           <SeriesChart
-            title="تعداد فروش / تعداد مشتری" :categories="names"
+            :title="`تعداد فروش / تعداد ${buyer}`" :categories="names"
             :series="[
-              { name: 'تعداد فاکتور', values: data.salespeople.map(p => p.invoices) },
-              { name: 'مشتری فعال', values: data.salespeople.map(p => p.active_customers) },
+              { name: isB2B ? 'تعداد قرارداد' : 'تعداد فاکتور', values: data.salespeople.map(p => p.invoices) },
+              { name: `${buyer} فعال`, values: data.salespeople.map(p => p.active_customers) },
             ]"
           />
           <SeriesChart title="درصد رسیدن به تارگت" percent :categories="names" :series="peopleSeries('تحقق تارگت', 'target_achievement')" />
-          <SeriesChart title="تعداد تماس" :categories="names" :series="peopleSeries('تعداد تماس', 'calls')" />
-          <SeriesChart title="نرخ تماس موفق" percent :categories="names" :series="peopleSeries('تماس به فروش', 'call_conversion')" />
+
+          <!-- B2B tracks tonnage + collection; the other channels track calls -->
+          <template v-if="isB2B">
+            <SeriesChart title="مقدار فروش (تن)" :categories="names" :series="peopleSeries('تناژ فروش', 'quantity_ton')" />
+            <SeriesChart title="نرخ وصول مطالبات" percent :categories="names" :series="peopleSeries('نرخ وصول', 'collection_rate')" />
+            <SeriesChart
+              title="وصول‌شده / مانده مطالبات" :categories="names"
+              :series="[
+                { name: 'وصول‌شده', values: data.salespeople.map(p => p.collected) },
+                { name: 'مانده مطالبات', values: data.salespeople.map(p => p.receivables) },
+              ]"
+            />
+            <SeriesChart title="میانگین قیمت هر تن" :categories="names" :series="peopleSeries('قیمت هر تن', 'price_per_ton')" />
+          </template>
+          <template v-else>
+            <SeriesChart title="تعداد تماس" :categories="names" :series="peopleSeries('تعداد تماس', 'calls')" />
+            <SeriesChart title="نرخ تماس موفق" percent :categories="names" :series="peopleSeries('تماس به فروش', 'call_conversion')" />
+          </template>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">

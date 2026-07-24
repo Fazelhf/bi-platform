@@ -118,6 +118,24 @@ class FactSalesMonthly(TimeStampedModel):
     target_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     calls = models.PositiveIntegerField(default=0)
 
+    # ---- B2B-only measures -------------------------------------------------
+    # Wholesale to companies works differently from field/bank sales: it is
+    # priced by volume (tonnage of paper) and sold on credit, so what matters
+    # is how much of the invoiced amount was actually collected and how much
+    # is still outstanding. These stay 0 for the team/organizational channels.
+    quantity_ton = models.DecimalField(
+        max_digits=14, decimal_places=3, default=0,
+        help_text="مقدار فروش به تن (فقط B2B)",
+    )
+    collected_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0,
+        help_text="مبلغ وصول‌شده از فروش این ماه (فقط B2B)",
+    )
+    receivables_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0,
+        help_text="مانده مطالبات وصول‌نشده (فقط B2B)",
+    )
+
     # Approval workflow
     status = models.CharField(
         max_length=16, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT

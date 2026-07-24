@@ -290,6 +290,34 @@ SALES_METRIC_ROWS = [
     ("calls", "تعداد تماس"),
 ]
 
+# B2B (فروش شرکت‌به‌شرکت / عمده) is a different business: paper is sold by
+# tonnage to companies on credit terms, so the sheet tracks volume and
+# collection instead of call activity. Its provinces are tracked separately
+# too (FactSalesProvince is channel-scoped).
+B2B_METRIC_ROWS = [
+    ("revenue_rial", "فروش ریالی"),
+    ("quantity_ton", "مقدار فروش (تن)"),
+    ("invoice_count", "تعداد قرارداد / فاکتور"),
+    ("active_customers", "تعداد شرکت فعال"),
+    ("new_customers", "تعداد شرکت جدید"),
+    ("profit_rial", "سود فروش"),
+    ("cost_rial", "هزینه فروش"),
+    ("target_rial", "تارگت فروش"),
+    ("collected_rial", "مبلغ وصول‌شده"),
+    ("receivables_rial", "مانده مطالبات"),
+]
+
+
+def metric_rows_for(channel: str):
+    """The input sheet's rows for a channel — B2B has its own set."""
+    from apps.sales.models import SalesChannel
+
+    return B2B_METRIC_ROWS if channel == SalesChannel.B2B else SALES_METRIC_ROWS
+
+
+def metric_fields_for(channel: str) -> list[str]:
+    return [f for f, _ in metric_rows_for(channel)]
+
 
 class SalesInputView(APIView):
     """
@@ -320,11 +348,12 @@ class SalesInputView(APIView):
             period=period, channel=channel
         ).select_related("employee").order_by("employee__id")
 
+        fields = metric_fields_for(channel)
         columns = [{
             "employee_id": f.employee_id,
             "name": f.employee.full_name_fa,
             "status": f.status,
-            **{m: str(getattr(f, m)) for m in SALES_METRIC_FIELDS},
+            **{m: str(getattr(f, m)) for m in fields},
         } for f in facts]
 
         provinces = [{
@@ -343,7 +372,7 @@ class SalesInputView(APIView):
         return Response({
             "period": PeriodSerializer(period).data,
             "channel": channel,
-            "metric_rows": [{"field": f, "label": l} for f, l in SALES_METRIC_ROWS],
+            "metric_rows": [{"field": f, "label": l} for f, l in metric_rows_for(channel)],
             "columns": columns,
             "provinces": provinces,
             "all_provinces": all_provinces,
@@ -375,7 +404,7 @@ class SalesInputView(APIView):
                 employee = DimEmployee.objects.create(
                     full_name_fa=name, code=f"emp-{uuid.uuid4().hex[:8]}"
                 )
-            values = {m: (row.get(m) or 0) for m in SALES_METRIC_FIELDS}
+            values = {m: (row.get(m) or 0) for m in metric_fields_for(channel)}
             values["status"] = status
             if submit:
                 values["submitted_by"] = user
@@ -450,10 +479,17 @@ class SalesDashboardDetailView(APIView):
                 "cost": float(f.cost_rial),
                 "target": float(f.target_rial),
                 "calls": f.calls,
+                # B2B-only measures (0 elsewhere)
+                "quantity_ton": float(f.quantity_ton),
+                "collected": float(f.collected_rial),
+                "receivables": float(f.receivables_rial),
                 # derived (Sheet3 rows 28-30)
                 "volume_share": _ratio(rev, channel_revenue) and _ratio(rev, channel_revenue) * 100,
                 "target_achievement": _ratio(rev, f.target_rial) and _ratio(rev, f.target_rial) * 100,
                 "call_conversion": _ratio(f.invoice_count, f.calls) and _ratio(f.invoice_count, f.calls) * 100,
+                # derived B2B
+                "collection_rate": _ratio(f.collected_rial, rev) and _ratio(f.collected_rial, rev) * 100,
+                "price_per_ton": _ratio(rev, f.quantity_ton),
             })
 
         # ---- Team block — Sheet3 rows 47-59 ----

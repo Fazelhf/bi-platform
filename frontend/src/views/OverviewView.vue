@@ -24,8 +24,9 @@ const cards = computed(() => {
       kpis: pick(data.value.sales_team.kpis, ["revenue", "target_achievement", "profit_margin"]) },
     { title: "فروش بانکی", color: "#f59e0b", route: "sales-org-dashboard",
       kpis: pick(data.value.sales_org.kpis, ["revenue", "profit_margin", "avg_invoice_value"]) },
+    // B2B sells on credit, so collection rate is the KPI the CEO watches here.
     { title: "فروش B2B", color: "#ec4899", route: "sales-b2b-dashboard",
-      kpis: pick(data.value.sales_b2b.kpis, ["revenue", "target_achievement", "profit_margin"]) },
+      kpis: pick(data.value.sales_b2b.kpis, ["revenue", "target_achievement", "collection_rate"]) },
     { title: "تولید", color: "#10b981", route: "production-dashboard",
       kpis: pick(data.value.production.kpis, ["prod_productivity", "waste_rate", "financial_return"]) },
   ];

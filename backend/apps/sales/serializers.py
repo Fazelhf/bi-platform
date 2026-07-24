@@ -62,6 +62,8 @@ class SalesMonthlySerializer(serializers.ModelSerializer):
             "id", "period", "period_label", "employee", "employee_name", "channel",
             "revenue_rial", "invoice_count", "active_customers", "new_customers",
             "profit_rial", "cost_rial", "target_rial", "calls",
+            # B2B-only measures (0 for the other channels)
+            "quantity_ton", "collected_rial", "receivables_rial",
             "status", "updated_at",
         ]
         read_only_fields = ["status"]

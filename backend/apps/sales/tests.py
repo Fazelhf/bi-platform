@@ -8,6 +8,7 @@ from apps.sales.models import (
     DimEmployee,
     DimTeam,
     FactSalesMonthly,
+    SalesChannel,
 )
 from apps.sales.services.kpi import compute_period_kpis
 
@@ -59,3 +60,107 @@ class KpiEngineTests(TestCase):
         # 8 KPIs x (company + 1 team + 1 employee) = 24 rows.
         self.assertEqual(n, 24)
         self.assertEqual(FactKPI.objects.filter(scope="team").count(), 8)
+
+
+class B2BKpiTests(TestCase):
+    """B2B is wholesale on credit: it tracks tonnage and collection, and its
+    extra KPIs must not leak into the other channels."""
+
+    def setUp(self):
+        self.period = DimPeriod.objects.create(jalali_year=1405, jalali_month=3)
+        self.emp = DimEmployee.objects.create(code="b2b-1", full_name_fa="شرکت الف")
+        FactSalesMonthly.objects.create(
+            period=self.period,
+            employee=self.emp,
+            channel=SalesChannel.B2B,
+            revenue_rial=Decimal("20000000000"),
+            quantity_ton=Decimal("50"),
+            collected_rial=Decimal("15000000000"),
+            receivables_rial=Decimal("5000000000"),
+            status=ApprovalStatus.APPROVED,
+        )
+
+    def test_collection_rate(self):
+        compute_period_kpis(self.period)
+        cr = FactKPI.objects.get(
+            period=self.period, scope="company", kpi__code="collection_rate"
+        )
+        # 15bn collected of 20bn invoiced = 75%
+        self.assertAlmostEqual(float(cr.actual), 75.0, places=3)
+
+    def test_avg_price_per_ton(self):
+        compute_period_kpis(self.period)
+        p = FactKPI.objects.get(
+            period=self.period, scope="company", kpi__code="avg_price_per_ton"
+        )
+        # 20,000,000,000 / 50 ton = 400,000,000 per ton
+        self.assertEqual(p.actual, Decimal("400000000"))
+
+    def test_receivables_ratio(self):
+        compute_period_kpis(self.period)
+        r = FactKPI.objects.get(
+            period=self.period, scope="company", kpi__code="receivables_ratio"
+        )
+        self.assertAlmostEqual(float(r.actual), 25.0, places=3)
+
+    def test_input_api_round_trip(self):
+        """The B2B sheet must offer its own rows and persist the extra fields."""
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        user = get_user_model().objects.create_user(
+            username="b2b-test", password="x", role="manager", department="sales_b2b"
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        got = client.get(f"/api/sales/input/?period={self.period.id}&channel=b2b")
+        self.assertEqual(got.status_code, 200)
+        self.assertEqual(
+            [r["field"] for r in got.data["metric_rows"]],
+            ["revenue_rial", "quantity_ton", "invoice_count", "active_customers",
+             "new_customers", "profit_rial", "cost_rial", "target_rial",
+             "collected_rial", "receivables_rial"],
+        )
+
+        saved = client.post(
+            "/api/sales/input/",
+            {
+                "period": self.period.id,
+                "channel": "b2b",
+                "columns": [{
+                    "employee_id": self.emp.id, "name": "شرکت الف",
+                    "revenue_rial": "30000000000", "quantity_ton": "75",
+                    "collected_rial": "24000000000", "receivables_rial": "6000000000",
+                }],
+            },
+            format="json",
+        )
+        self.assertEqual(saved.status_code, 200)
+
+        fact = FactSalesMonthly.objects.get(
+            period=self.period, employee=self.emp, channel=SalesChannel.B2B
+        )
+        self.assertEqual(fact.quantity_ton, Decimal("75.000"))
+        self.assertEqual(fact.collected_rial, Decimal("24000000000"))
+        self.assertEqual(fact.receivables_rial, Decimal("6000000000"))
+
+    def test_b2b_kpis_do_not_leak_into_other_channels(self):
+        other = DimEmployee.objects.create(code="team-1", full_name_fa="فروشنده همکار")
+        FactSalesMonthly.objects.create(
+            period=self.period, employee=other, channel=SalesChannel.TEAM,
+            revenue_rial=Decimal("1000"), status=ApprovalStatus.APPROVED,
+        )
+        compute_period_kpis(self.period)
+        self.assertFalse(
+            FactKPI.objects.filter(
+                period=self.period, channel=SalesChannel.TEAM,
+                kpi__code__in=["collection_rate", "avg_price_per_ton", "receivables_ratio"],
+            ).exists()
+        )
+        # …but the B2B channel still has them.
+        self.assertTrue(
+            FactKPI.objects.filter(
+                period=self.period, channel=SalesChannel.B2B, kpi__code="collection_rate"
+            ).exists()
+        )

@@ -58,7 +58,19 @@ KPI_CATALOG = [
      "فروش ریالی ÷ تعداد فاکتور. میانگین مبلغ هر فاکتور (ردیف‌های ۳ و ۴ ورودی)."),
     ("new_customer_ratio", "نسبت مشتری جدید", "New-customer ratio", "%", "higher",
      "مشتری جدید ÷ مشتری فعال × ۱۰۰ (ردیف‌های ۶ و ۵ ورودی)."),
+    # ---- B2B-only (computed only for the b2b channel) ----
+    ("collection_rate", "نرخ وصول مطالبات", "Collection rate", "%", "higher",
+     "مبلغ وصول‌شده ÷ فروش ریالی × ۱۰۰. مخصوص فروش B2B که اعتباری است — نشان می‌دهد "
+     "چه سهمی از فروش ماه واقعاً نقد شده است."),
+    ("avg_price_per_ton", "میانگین قیمت هر تن", "Average price per ton", "rial", "higher",
+     "فروش ریالی ÷ مقدار فروش (تن). قیمت مؤثر فروش عمده؛ افت آن یعنی تخفیف بیشتر یا "
+     "ترکیب محصول ارزان‌تر."),
+    ("receivables_ratio", "نسبت مطالبات معوق", "Receivables ratio", "%", "lower",
+     "مانده مطالبات ÷ فروش ریالی × ۱۰۰ (کمتر بهتر). ریسک نقدینگی کانال B2B."),
 ]
+
+# KPI codes that only make sense for the B2B channel.
+B2B_ONLY_KPIS = {"collection_rate", "avg_price_per_ton", "receivables_ratio"}
 
 
 def ensure_kpi_catalog() -> dict[str, DimKPI]:
@@ -88,6 +100,10 @@ class Measures:
     cost: Decimal = Decimal(0)
     target: Decimal = Decimal(0)
     calls: int = 0
+    # B2B-only
+    quantity_ton: Decimal = Decimal(0)
+    collected: Decimal = Decimal(0)
+    receivables: Decimal = Decimal(0)
 
     def add(self, f: FactSalesMonthly) -> None:
         self.revenue += f.revenue_rial
@@ -98,6 +114,9 @@ class Measures:
         self.cost += f.cost_rial
         self.target += f.target_rial
         self.calls += f.calls
+        self.quantity_ton += f.quantity_ton
+        self.collected += f.collected_rial
+        self.receivables += f.receivables_rial
 
 
 def _pct(num, den) -> Decimal | None:
@@ -112,9 +131,18 @@ def _div(num, den) -> Decimal | None:
     return Decimal(num) / Decimal(den)
 
 
-def _kpi_values(m: Measures, company_revenue: Decimal) -> dict[str, Decimal | None]:
-    """Built-in KPI actuals — the fallback when no DB formula is active."""
-    return {
+def _kpi_values(
+    m: Measures, company_revenue: Decimal, channel: str = ""
+) -> dict[str, Decimal | None]:
+    """Built-in KPI actuals — the fallback when no DB formula is active.
+
+    The B2B extras are only emitted for the b2b channel; for the other
+    channels their inputs are always zero and would render as misleading
+    0٪ collection / empty price-per-ton tiles.
+    """
+    from apps.sales.models import SalesChannel
+
+    values = {
         "revenue": m.revenue,
         "target_achievement": _pct(m.revenue, m.target),
         "volume_share": _pct(m.revenue, company_revenue),
@@ -124,6 +152,11 @@ def _kpi_values(m: Measures, company_revenue: Decimal) -> dict[str, Decimal | No
         "avg_invoice_value": _div(m.revenue, m.invoices),
         "new_customer_ratio": _pct(m.new_customers, m.active_customers),
     }
+    if channel == SalesChannel.B2B:
+        values["collection_rate"] = _pct(m.collected, m.revenue)
+        values["avg_price_per_ton"] = _div(m.revenue, m.quantity_ton)
+        values["receivables_ratio"] = _pct(m.receivables, m.revenue)
+    return values
 
 
 def formula_context(m: Measures, company_revenue: Decimal) -> dict[str, object]:
@@ -137,20 +170,24 @@ def formula_context(m: Measures, company_revenue: Decimal) -> dict[str, object]:
         "active_customers": m.active_customers, "new_customers": m.new_customers,
         "profit": m.profit, "cost": m.cost, "target": m.target, "calls": m.calls,
         "company_revenue": company_revenue,
+        "quantity_ton": m.quantity_ton, "collected": m.collected,
+        "receivables": m.receivables,
         # Persian aliases
         "فروش": m.revenue, "تعداد_فاکتور": m.invoices,
         "مشتری_فعال": m.active_customers, "مشتری_جدید": m.new_customers,
         "سود": m.profit, "هزینه": m.cost, "تارگت": m.target, "تماس": m.calls,
         "فروش_کل_شرکت": company_revenue,
+        "تناژ": m.quantity_ton, "وصول": m.collected, "مطالبات": m.receivables,
     }
 
 
 def resolve_kpi_values(
-    m: Measures, company_revenue: Decimal, formulas: dict[tuple[str, str], str]
+    m: Measures, company_revenue: Decimal, formulas: dict[tuple[str, str], str],
+    channel: str = "",
 ) -> dict[str, Decimal | None]:
     """DB formula wins; on any formula error or absence, fall back to the
     built-in calculation so dashboards never go dark from a bad edit."""
-    builtin = _kpi_values(m, company_revenue)
+    builtin = _kpi_values(m, company_revenue, channel)
     ctx = formula_context(m, company_revenue)
     out: dict[str, Decimal | None] = {}
     for code, fallback in builtin.items():
@@ -179,7 +216,7 @@ def _compute_channel(period, catalog, facts, channel, rows, formulas):
     company_revenue = company.revenue
 
     def emit(scope, scope_id, label, measures):
-        values = resolve_kpi_values(measures, company_revenue, formulas)
+        values = resolve_kpi_values(measures, company_revenue, formulas, channel)
         for code, actual in values.items():
             rows.append(
                 FactKPI(

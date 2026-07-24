@@ -207,6 +207,8 @@ watch([selectedPeriod, () => props.channel], load);
         </div>
         <p class="text-xs text-slate-400 mb-4">
           برای هر استان، مبلغ فروش محقق‌شده و مبلغ تارگت (هدف) آن استان را به ریال وارد کنید.
+          این ارقام فقط مربوط به «{{ title.replace("ورود اطلاعات ", "") }}» است و از استان‌های
+          سایر کانال‌های فروش کاملاً جداست.
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
           <div

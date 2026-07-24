@@ -57,6 +57,26 @@ At team/company scope, ratios are computed from **aggregated** numerators &
 denominators (not averaged per-person ratios) — this corrects an inconsistency
 in the source spreadsheet.
 
+### B2B-only KPIs
+
+The B2B channel (فروش شرکت‌به‌شرکت / عمده) is a different business from the
+field and banking channels: paper is sold **by tonnage to companies on credit
+terms**, so the sheet tracks volume and collection instead of call activity.
+Its provincial figures are stored separately too — `FactSalesProvince` is
+channel-scoped, so B2B provinces never mix with the other channels'.
+
+Extra measures on `FactSalesMonthly`: `quantity_ton`, `collected_rial`,
+`receivables_rial` (all zero for the other channels).
+
+| Code | Persian | Formula | Unit | Direction |
+|------|---------|---------|------|-----------|
+| `collection_rate` | نرخ وصول مطالبات | collected / revenue × 100 | % | higher |
+| `avg_price_per_ton` | میانگین قیمت هر تن | revenue / quantity_ton | Rial | higher |
+| `receivables_ratio` | نسبت مطالبات معوق | receivables / revenue × 100 | % | lower |
+
+These three are emitted **only** for the `b2b` channel — for the others their
+inputs are always zero and would render as misleading 0٪ tiles.
+
 ## Data-quality issues found (redesigned, not copied)
 
 - `#REF!` errors in Employee!Sheet3 (R7, R26) and Production!KPI (R7).
