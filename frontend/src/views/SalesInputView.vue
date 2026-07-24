@@ -154,20 +154,33 @@ watch([selectedPeriod, () => props.channel], load);
 
       <!-- Province block -->
       <section class="bg-white rounded-card shadow-soft p-5">
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center justify-between mb-1">
           <h3 class="font-bold text-ink">فروش و تارگت به تفکیک استان</h3>
           <select class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm" @change="addProvince">
             <option value="">+ افزودن استان</option>
             <option v-for="p in addableProvinces" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
-          <div v-for="p in data.provinces" :key="p.province_id" class="grid grid-cols-[1fr_auto_auto] items-center gap-2">
+        <p class="text-xs text-slate-400 mb-4">
+          برای هر استان، مبلغ فروش محقق‌شده و مبلغ تارگت (هدف) آن استان را به ریال وارد کنید.
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+          <div
+            v-for="p in data.provinces"
+            :key="p.province_id"
+            class="grid grid-cols-[1fr_auto_auto] items-center gap-2"
+          >
             <span class="text-sm text-slate-600">{{ p.name }}</span>
-            <input v-model="p.sales_rial" type="number" step="any" placeholder="فروش"
-              class="w-32 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
-            <input v-model="p.target_rial" type="number" step="any" placeholder="تارگت"
-              class="w-32 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
+            <label class="flex flex-col items-start gap-0.5">
+              <span class="text-[11px] text-slate-400">فروش (ریال)</span>
+              <input v-model="p.sales_rial" type="number" step="any" placeholder="مبلغ فروش"
+                class="w-32 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
+            </label>
+            <label class="flex flex-col items-start gap-0.5">
+              <span class="text-[11px] text-slate-400">تارگت (ریال)</span>
+              <input v-model="p.target_rial" type="number" step="any" placeholder="مبلغ تارگت"
+                class="w-32 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
+            </label>
           </div>
         </div>
         <p v-if="!data.provinces.length" class="text-sm text-slate-400 py-3">استانی اضافه نشده.</p>
