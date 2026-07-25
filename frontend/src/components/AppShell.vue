@@ -128,9 +128,7 @@ onMounted(() => {
     >
       <!-- Logo + collapse -->
       <div class="flex items-center gap-3 p-4" :class="collapsed ? 'justify-center' : ''">
-        <div class="w-10 h-10 rounded-2xl bg-panel text-white flex items-center justify-center shrink-0">
-          <NavIcon name="chart" :size="20" />
-        </div>
+        <img src="/apple-touch-icon.png" alt="لوگوی شرکت" class="w-10 h-10 rounded-2xl shrink-0" />
         <span v-if="!collapsed" class="font-bold text-ink flex-1">کاغذ حساس نمابر مهر</span>
         <button
           v-if="!collapsed"
