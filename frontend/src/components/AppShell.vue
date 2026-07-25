@@ -35,6 +35,7 @@ const primary = computed<Item[]>(() => {
       { name: "sales-org-dashboard", label: "فروش بانکی", icon: "chart" },
       { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "chart" },
       { name: "production-dashboard", label: "تولید", icon: "box" },
+      { name: "targets", label: "تارگت", icon: "target" },
     );
   } else if (auth.department === "production") {
     items.push(
@@ -78,7 +79,7 @@ const pageTitle = computed(() => {
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
     "sales-b2b-entry": "ورود فروش B2B",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
-    settings: "تنظیمات سایت",
+    targets: "تعیین تارگت", settings: "تنظیمات سایت",
   };
   return map[route.name as string] ?? "شرکت کاغذ حساس نمابر مهر";
 });

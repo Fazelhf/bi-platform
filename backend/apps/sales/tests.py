@@ -1,13 +1,17 @@
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from rest_framework.test import APITestCase
 
 from apps.core.models import DimPeriod, FactKPI
 from apps.sales.models import (
     ApprovalStatus,
     DimEmployee,
+    DimProvince,
     DimTeam,
     FactSalesMonthly,
+    FactSalesProvince,
     SalesChannel,
 )
 from apps.sales.services.kpi import compute_period_kpis
@@ -120,7 +124,7 @@ class B2BKpiTests(TestCase):
             [r["field"] for r in got.data["metric_rows"]],
             ["revenue_rial", "quantity_ton", "invoice_count", "active_customers",
              "new_customers", "profit_rial", "cost_rial", "target_rial",
-             "collected_rial", "receivables_rial"],
+             "collected_rial", "receivables_rial", "won_invoices_rial"],
         )
 
         saved = client.post(
@@ -164,3 +168,78 @@ class B2BKpiTests(TestCase):
                 period=self.period, channel=SalesChannel.B2B, kpi__code="collection_rate"
             ).exists()
         )
+
+
+class TargetOwnershipTests(APITestCase):
+    """Targets belong to the CEO. A department manager may read them on the
+    entry sheet but must never be able to write them, even by hand-crafting
+    the request."""
+
+    def setUp(self):
+        self.period = DimPeriod.objects.create(jalali_year=1405, jalali_month=4)
+        self.emp = DimEmployee.objects.create(code="t-1", full_name_fa="فروشنده")
+        self.province = DimProvince.objects.create(code="tehran", name_fa="تهران")
+        self.fact = FactSalesMonthly.objects.create(
+            period=self.period, employee=self.emp, channel=SalesChannel.TEAM,
+            revenue_rial=Decimal("100"), target_rial=Decimal("5000"),
+        )
+        U = get_user_model()
+        self.manager = U.objects.create_user(
+            username="tm", password="x", role="manager", department="sales_team"
+        )
+        self.ceo = U.objects.create_user(username="boss", password="x", role="executive")
+
+    def _post_sheet(self, target):
+        return self.client.post("/api/sales/input/", {
+            "period": self.period.id, "channel": "team",
+            "columns": [{
+                "employee_id": self.emp.id, "name": "فروشنده",
+                "revenue_rial": "900", "target_rial": target,
+            }],
+        }, format="json")
+
+    def test_manager_cannot_change_target_via_entry_sheet(self):
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self._post_sheet("999999").status_code, 200)
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.target_rial, Decimal("5000"))  # untouched
+        self.assertEqual(self.fact.revenue_rial, Decimal("900"))  # actuals saved
+
+    def test_manager_sees_targets_as_readonly(self):
+        self.client.force_authenticate(self.manager)
+        r = self.client.get(f"/api/sales/input/?period={self.period.id}&channel=team")
+        self.assertEqual(r.data["readonly_fields"], ["target_rial"])
+        self.assertFalse(r.data["can_edit_targets"])
+
+    def test_manager_cannot_reach_the_targets_endpoint(self):
+        self.client.force_authenticate(self.manager)
+        r = self.client.get(f"/api/sales/targets/?period={self.period.id}&channel=team")
+        self.assertEqual(r.status_code, 403)
+
+    def test_ceo_sets_targets(self):
+        self.client.force_authenticate(self.ceo)
+        r = self.client.post("/api/sales/targets/", {
+            "period": self.period.id, "channel": "team",
+            "people": [{"employee_id": self.emp.id, "target_rial": "7777"}],
+            "provinces": [{"province_id": self.province.id, "target_rial": "4321"}],
+        }, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.target_rial, Decimal("7777"))
+        prov = FactSalesProvince.objects.get(
+            period=self.period, province=self.province, channel=SalesChannel.TEAM
+        )
+        self.assertEqual(prov.target_rial, Decimal("4321"))
+
+    def test_entry_sheet_lists_every_province(self):
+        DimProvince.objects.create(code="fars", name_fa="فارس")
+        self.client.force_authenticate(self.manager)
+        r = self.client.get(f"/api/sales/input/?period={self.period.id}&channel=team")
+        names = [p["name"] for p in r.data["provinces"]]
+        self.assertEqual(sorted(names), sorted(["تهران", "فارس"]))
+        # …and untouched zero rows are not persisted as facts
+        self.client.post("/api/sales/input/", {
+            "period": self.period.id, "channel": "team", "columns": [],
+            "provinces": r.data["provinces"],
+        }, format="json")
+        self.assertEqual(FactSalesProvince.objects.count(), 0)

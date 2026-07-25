@@ -10,6 +10,12 @@ import ExportActions from "@/components/ExportActions.vue";
 // Rial money fields get thousands-grouping while typing; counts stay plain.
 const isMoney = (field: string) => field.endsWith("_rial");
 
+// Targets belong to the CEO's «تارگت» section. Managers see them for context
+// but cannot type in them — the server drops them from a manager's payload
+// regardless, so this is only about not offering a dead input.
+const isLocked = (field: string) =>
+  (data.value?.readonly_fields ?? []).includes(field) && !data.value?.can_edit_targets;
+
 const props = withDefaults(defineProps<{ channel?: string; title?: string }>(), {
   channel: "team",
   title: "ورود اطلاعات فروش",
@@ -80,18 +86,14 @@ async function removeSalesperson(i: number) {
   }
 }
 
-// Province block — add a province row from the catalog.
-const usedProvinceIds = computed(() => new Set((data.value?.provinces ?? []).map((p) => p.province_id)));
-const addableProvinces = computed(() =>
-  (data.value?.all_provinces ?? []).filter((p) => !usedProvinceIds.value.has(p.id)),
-);
-function addProvince(e: Event) {
-  const id = Number((e.target as HTMLSelectElement).value);
-  if (!id) return;
-  const prov = data.value!.all_provinces.find((p) => p.id === id)!;
-  data.value!.provinces.push({ province_id: id, name: prov.name, sales_rial: "0", target_rial: "0" });
-  (e.target as HTMLSelectElement).value = "";
-}
+// Province block — every province is listed from the start, so the only tool
+// needed is a filter to find one quickly among the 31.
+const provinceSearch = ref("");
+const visibleProvinces = computed(() => {
+  const q = provinceSearch.value.trim();
+  const all = data.value?.provinces ?? [];
+  return q ? all.filter((p) => p.name.includes(q)) : all;
+});
 
 async function save(submit: boolean) {
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
@@ -173,10 +175,18 @@ watch([selectedPeriod, () => props.channel], load);
             </thead>
             <tbody>
               <tr v-for="m in data.metric_rows" :key="m.field" class="border-t border-slate-50">
-                <td class="py-1.5 px-3 font-medium whitespace-nowrap sticky right-0 bg-surface z-10">{{ m.label }}</td>
+                <td class="py-1.5 px-3 font-medium whitespace-nowrap sticky right-0 bg-surface z-10">
+                  {{ m.label }}
+                  <span v-if="isLocked(m.field)" class="text-[10px] text-slate-400" title="توسط مدیرعامل تعیین می‌شود">🔒</span>
+                </td>
                 <td v-for="(c, i) in data.columns" :key="i" class="py-1 px-1">
+                  <div
+                    v-if="isLocked(m.field)"
+                    class="w-full px-2 py-1.5 text-center ltr-nums text-slate-500 bg-slate-100/60 rounded-lg cursor-not-allowed"
+                    title="تارگت توسط مدیرعامل تعیین می‌شود"
+                  >{{ num(Number(c[m.field] || 0)) }}</div>
                   <MoneyInput
-                    v-if="isMoney(m.field)"
+                    v-else-if="isMoney(m.field)"
                     v-model="c[m.field]"
                     class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
                   />
@@ -201,20 +211,23 @@ watch([selectedPeriod, () => props.channel], load);
       <!-- Province block -->
       <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center justify-between mb-1">
-          <h3 class="font-bold text-ink">فروش و تارگت به تفکیک استان</h3>
-          <select class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm" @change="addProvince">
-            <option value="">+ افزودن استان</option>
-            <option v-for="p in addableProvinces" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
+          <h3 class="font-bold text-ink">فروش به تفکیک استان</h3>
+          <input
+            v-model="provinceSearch"
+            placeholder="جستجوی استان…"
+            class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
+          />
         </div>
         <p class="text-xs text-slate-400 mb-4">
-          برای هر استان، مبلغ فروش محقق‌شده و مبلغ تارگت (هدف) آن استان را به ریال وارد کنید.
-          این ارقام فقط مربوط به «{{ title.replace("ورود اطلاعات ", "") }}» است و از استان‌های
-          سایر کانال‌های فروش کاملاً جداست.
+          همه‌ی استان‌ها اینجا فهرست شده‌اند — فقط برای استان‌هایی که فروش داشته‌اید مبلغ را
+          وارد کنید و بقیه را صفر بگذارید. این ارقام فقط مربوط به
+          «{{ title.replace("ورود اطلاعات ", "") }}» است و از استان‌های سایر کانال‌های فروش
+          کاملاً جداست.
+          <span v-if="!data.can_edit_targets">تارگت‌ها را مدیرعامل تعیین می‌کند.</span>
         </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
           <div
-            v-for="p in data.provinces"
+            v-for="p in visibleProvinces"
             :key="p.province_id"
             class="grid grid-cols-[1fr_auto_auto] items-center gap-2"
           >
@@ -225,13 +238,21 @@ watch([selectedPeriod, () => props.channel], load);
                 class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
             </label>
             <label class="flex flex-col items-start gap-0.5">
-              <span class="text-[11px] text-slate-400">تارگت (ریال)</span>
-              <MoneyInput v-model="p.target_rial" placeholder="مبلغ تارگت"
+              <span class="text-[11px] text-slate-400">
+                تارگت (ریال)
+                <span v-if="!data.can_edit_targets" title="توسط مدیرعامل تعیین می‌شود">🔒</span>
+              </span>
+              <div
+                v-if="!data.can_edit_targets"
+                class="w-32 px-2 py-1.5 text-left ltr-nums text-slate-500 bg-slate-100/60 rounded-lg cursor-not-allowed"
+                title="تارگت توسط مدیرعامل تعیین می‌شود"
+              >{{ num(Number(p.target_rial || 0)) }}</div>
+              <MoneyInput v-else v-model="p.target_rial" placeholder="مبلغ تارگت"
                 class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
             </label>
           </div>
         </div>
-        <p v-if="!data.provinces.length" class="text-sm text-slate-400 py-3">استانی اضافه نشده.</p>
+        <p v-if="!visibleProvinces.length" class="text-sm text-slate-400 py-3">استانی با این نام پیدا نشد.</p>
       </section>
 
       <!-- Sticky action bar -->

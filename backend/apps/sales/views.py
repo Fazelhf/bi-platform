@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django.db.models import Sum
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import viewsets
@@ -23,6 +25,7 @@ from apps.core.permissions import (
     CHANNEL_DEPARTMENT,
     ApprovalPermission,
     DepartmentEntryPermission,
+    IsExecutiveOrAdmin,
     SalesChannelOwnership,
 )
 from apps.sales.permissions import CanApprove, CanEnterData
@@ -274,12 +277,22 @@ class DashboardSummaryView(APIView):
 # --------------------------------------------------------------------------
 # Combined SALES INPUT — the Excel single-sheet table (salespeople as columns)
 # --------------------------------------------------------------------------
-SALES_METRIC_FIELDS = [
-    "revenue_rial", "invoice_count", "active_customers", "new_customers",
-    "profit_rial", "cost_rial", "target_rial", "calls",
-]
+# Targets are set by the CEO in the «تارگت» section, never by the department
+# manager filling in the month's actuals. They still appear as a row on the
+# sheet (managers need to see what they are aiming at) but read-only, and the
+# server strips them from a non-executive's payload — see TARGET_FIELDS.
+TARGET_FIELDS = {"target_rial"}
+
+
+def _nonzero(value) -> bool:
+    """True when a submitted cell holds a real number other than zero."""
+    try:
+        return Decimal(str(value or 0)) != 0
+    except (InvalidOperation, ValueError):
+        return False
+
 # Row labels, in the exact order of the source workbook.
-SALES_METRIC_ROWS = [
+_BASE_ROWS = [
     ("revenue_rial", "فروش ریالی"),
     ("invoice_count", "تعداد فاکتور فروش"),
     ("active_customers", "تعداد مشتری فعال ماه"),
@@ -290,10 +303,20 @@ SALES_METRIC_ROWS = [
     ("calls", "تعداد تماس"),
 ]
 
+# فروش همکار — the field team quotes before it invoices, so proforma issued
+# vs cancelled is its leading indicator.
+TEAM_METRIC_ROWS = _BASE_ROWS + [
+    ("proforma_issued_rial", "مبلغ پیش‌فاکتورهای صادره"),
+    ("proforma_cancelled_rial", "مبلغ پیش‌فاکتورهای کنسل‌شده"),
+]
+
+# فروش بانکی — the original eight rows, unchanged.
+ORG_METRIC_ROWS = list(_BASE_ROWS)
+
 # B2B (فروش شرکت‌به‌شرکت / عمده) is a different business: paper is sold by
-# tonnage to companies on credit terms, so the sheet tracks volume and
-# collection instead of call activity. Its provinces are tracked separately
-# too (FactSalesProvince is channel-scoped).
+# tonnage to companies on credit terms, so the sheet tracks volume, collection
+# and tender wins instead of call activity. Its provinces are tracked
+# separately too (FactSalesProvince is channel-scoped).
 B2B_METRIC_ROWS = [
     ("revenue_rial", "فروش ریالی"),
     ("quantity_ton", "مقدار فروش (تن)"),
@@ -305,14 +328,23 @@ B2B_METRIC_ROWS = [
     ("target_rial", "تارگت فروش"),
     ("collected_rial", "مبلغ وصول‌شده"),
     ("receivables_rial", "مانده مطالبات"),
+    ("won_invoices_rial", "مبلغ فاکتورهای برنده‌شده"),
 ]
+
+# Kept for backwards compatibility with anything importing the old name.
+SALES_METRIC_ROWS = ORG_METRIC_ROWS
+SALES_METRIC_FIELDS = [f for f, _ in ORG_METRIC_ROWS]
 
 
 def metric_rows_for(channel: str):
-    """The input sheet's rows for a channel — B2B has its own set."""
+    """The input sheet's rows for a channel — each one has its own set."""
     from apps.sales.models import SalesChannel
 
-    return B2B_METRIC_ROWS if channel == SalesChannel.B2B else SALES_METRIC_ROWS
+    if channel == SalesChannel.B2B:
+        return B2B_METRIC_ROWS
+    if channel == SalesChannel.TEAM:
+        return TEAM_METRIC_ROWS
+    return ORG_METRIC_ROWS
 
 
 def metric_fields_for(channel: str) -> list[str]:
@@ -356,16 +388,23 @@ class SalesInputView(APIView):
             **{m: str(getattr(f, m)) for m in fields},
         } for f in facts]
 
-        provinces = [{
-            "province_id": p.province_id,
-            "name": p.province.name_fa,
-            "sales_rial": str(p.sales_rial),
-            "target_rial": str(p.target_rial),
-        } for p in FactSalesProvince.objects.filter(
-            period=period, channel=channel
-        ).select_related("province").order_by("province__id")]
+        # Every province is listed from the start — managers fill in the ones
+        # they sold to instead of hunting for them in an "add" dropdown. Rows
+        # that have no fact yet come back as zeros.
+        saved = {
+            p.province_id: p
+            for p in FactSalesProvince.objects.filter(period=period, channel=channel)
+        }
+        provinces = []
+        for prov in DimProvince.objects.all().order_by("id"):
+            row = saved.get(prov.id)
+            provinces.append({
+                "province_id": prov.id,
+                "name": prov.name_fa,
+                "sales_rial": str(row.sales_rial) if row else "0",
+                "target_rial": str(row.target_rial) if row else "0",
+            })
 
-        # Also expose the full province catalog so managers can add any.
         all_provinces = [{"id": p.id, "name": p.name_fa}
                          for p in DimProvince.objects.all()]
 
@@ -373,6 +412,11 @@ class SalesInputView(APIView):
             "period": PeriodSerializer(period).data,
             "channel": channel,
             "metric_rows": [{"field": f, "label": l} for f, l in metric_rows_for(channel)],
+            # Targets belong to the CEO; the sheet shows them read-only.
+            "readonly_fields": sorted(TARGET_FIELDS),
+            "can_edit_targets": bool(
+                request.user.is_superuser or request.user.role == "executive"
+            ),
             "columns": columns,
             "provinces": provinces,
             "all_provinces": all_provinces,
@@ -386,6 +430,15 @@ class SalesInputView(APIView):
         submit = bool(request.data.get("submit"))
         status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
         user = request.user
+
+        # Targets are the CEO's to set. A department manager's payload may
+        # still carry them (stale form state, or a hand-crafted request), so
+        # drop them here rather than trusting the UI's read-only inputs.
+        may_set_targets = bool(user.is_superuser or user.role == "executive")
+        editable = [
+            f for f in metric_fields_for(channel)
+            if may_set_targets or f not in TARGET_FIELDS
+        ]
 
         kept_employee_ids = set()
         for row in request.data.get("columns", []):
@@ -404,7 +457,7 @@ class SalesInputView(APIView):
                 employee = DimEmployee.objects.create(
                     full_name_fa=name, code=f"emp-{uuid.uuid4().hex[:8]}"
                 )
-            values = {m: (row.get(m) or 0) for m in metric_fields_for(channel)}
+            values = {m: (row.get(m) or 0) for m in editable}
             values["status"] = status
             if submit:
                 values["submitted_by"] = user
@@ -418,14 +471,24 @@ class SalesInputView(APIView):
             employee_id__in=kept_employee_ids
         ).delete()
 
-        # Provinces
+        # Provinces. Every province is sent back, so skip untouched empty rows
+        # to avoid creating 31 zero facts per channel per month. The province
+        # target is the CEO's too.
         for p in request.data.get("provinces", []):
-            if not p.get("province_id"):
+            pid = p.get("province_id")
+            if not pid:
                 continue
+            sales = p.get("sales_rial") or 0
+            existing = FactSalesProvince.objects.filter(
+                period=period, province_id=pid, channel=channel
+            ).first()
+            if existing is None and not _nonzero(sales):
+                continue  # nothing entered for this province — don't store it
+            defaults = {"sales_rial": sales}
+            if may_set_targets:
+                defaults["target_rial"] = p.get("target_rial") or 0
             FactSalesProvince.objects.update_or_create(
-                period=period, province_id=p["province_id"], channel=channel,
-                defaults={"sales_rial": p.get("sales_rial") or 0,
-                          "target_rial": p.get("target_rial") or 0},
+                period=period, province_id=pid, channel=channel, defaults=defaults,
             )
 
         audit_log(user, period, AuditLog.Action.UPDATE,
@@ -438,6 +501,88 @@ class SalesInputView(APIView):
                                  f"فروش {channel} · {period.label}")
 
         return Response({"ok": True, "submitted": submit, "salespeople": len(kept_employee_ids)})
+
+
+# --------------------------------------------------------------------------
+# TARGETS — the CEO's own section (بخش تارگت)
+# --------------------------------------------------------------------------
+class SalesTargetView(APIView):
+    """
+    Set the month's targets for one sales channel: a figure per salesperson
+    and a figure per province. Department managers see these on their entry
+    sheet but cannot change them — only the CEO/admin can write here.
+    """
+
+    permission_classes = [IsExecutiveOrAdmin]
+
+    @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
+                              OpenApiParameter("channel", str)], responses=dict)
+    def get(self, request):
+        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        channel = request.query_params.get("channel", "team")
+
+        people = [{
+            "employee_id": f.employee_id,
+            "name": f.employee.full_name_fa,
+            "target_rial": str(f.target_rial),
+            "revenue_rial": str(f.revenue_rial),  # context: last known actual
+        } for f in FactSalesMonthly.objects.filter(
+            period=period, channel=channel
+        ).select_related("employee").order_by("employee__id")]
+
+        saved = {
+            p.province_id: p
+            for p in FactSalesProvince.objects.filter(period=period, channel=channel)
+        }
+        provinces = []
+        for prov in DimProvince.objects.all().order_by("id"):
+            row = saved.get(prov.id)
+            provinces.append({
+                "province_id": prov.id,
+                "name": prov.name_fa,
+                "target_rial": str(row.target_rial) if row else "0",
+                "sales_rial": str(row.sales_rial) if row else "0",
+            })
+
+        return Response({
+            "period": PeriodSerializer(period).data,
+            "channel": channel,
+            "people": people,
+            "provinces": provinces,
+        })
+
+    def post(self, request):
+        period = DimPeriod.objects.get(pk=request.data.get("period"))
+        channel = request.data.get("channel", "team")
+
+        for row in request.data.get("people", []):
+            emp_id = row.get("employee_id")
+            if not emp_id:
+                continue
+            FactSalesMonthly.objects.filter(
+                period=period, employee_id=emp_id, channel=channel
+            ).update(target_rial=row.get("target_rial") or 0)
+
+        for row in request.data.get("provinces", []):
+            pid = row.get("province_id")
+            if not pid:
+                continue
+            target = row.get("target_rial") or 0
+            existing = FactSalesProvince.objects.filter(
+                period=period, province_id=pid, channel=channel
+            ).first()
+            if existing is None and not _nonzero(target):
+                continue  # no target set and no row yet — nothing to store
+            FactSalesProvince.objects.update_or_create(
+                period=period, province_id=pid, channel=channel,
+                defaults={"target_rial": target},
+            )
+
+        audit_log(request.user, period, AuditLog.Action.UPDATE,
+                  {"targets": {"before": None, "after": f"{channel} · {period.label}"}})
+        # Target changes move تحقق تارگت, so refresh the KPIs.
+        compute_period_kpis(period)
+        return Response({"ok": True})
 
 
 # --------------------------------------------------------------------------

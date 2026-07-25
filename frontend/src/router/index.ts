@@ -63,6 +63,13 @@ const router = createRouter({
           name: "production-dashboard",
           component: () => import("@/views/ProductionDashboardView.vue"),
         },
+        {
+          // Targets are the CEO's to set; managers only ever read them.
+          path: "targets",
+          name: "targets",
+          component: () => import("@/views/TargetsView.vue"),
+          meta: { executive: true },
+        },
 
         // --- Department manager entry (department-guarded) ---
         {

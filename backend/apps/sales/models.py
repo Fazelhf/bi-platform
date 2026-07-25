@@ -118,6 +118,19 @@ class FactSalesMonthly(TimeStampedModel):
     target_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     calls = models.PositiveIntegerField(default=0)
 
+    # ---- Team-channel-only measures ---------------------------------------
+    # The field sales team quotes before it invoices, so how much was quoted
+    # and how much of it fell through is the leading indicator of next
+    # month's revenue. Zero for the other channels.
+    proforma_issued_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0,
+        help_text="مبلغ پیش‌فاکتورهای صادره (فقط فروش همکار)",
+    )
+    proforma_cancelled_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0,
+        help_text="مبلغ پیش‌فاکتورهای کنسل‌شده (فقط فروش همکار)",
+    )
+
     # ---- B2B-only measures -------------------------------------------------
     # Wholesale to companies works differently from field/bank sales: it is
     # priced by volume (tonnage of paper) and sold on credit, so what matters
@@ -134,6 +147,10 @@ class FactSalesMonthly(TimeStampedModel):
     receivables_rial = models.DecimalField(
         max_digits=20, decimal_places=0, default=0,
         help_text="مانده مطالبات وصول‌نشده (فقط B2B)",
+    )
+    won_invoices_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0,
+        help_text="مبلغ فاکتورهای برنده‌شده در مناقصه (فقط B2B)",
     )
 
     # Approval workflow

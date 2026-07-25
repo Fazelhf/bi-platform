@@ -117,14 +117,15 @@ def _sales_workbook(period, channel):
     ws = _sheet(wb, "شرکت‌ها" if is_b2b else "فروشندگان")
     if is_b2b:
         headers = ["شرکت", "فروش ریالی", "مقدار (تن)", "تعداد قرارداد", "شرکت فعال",
-                   "شرکت جدید", "سود", "هزینه", "تارگت", "وصول‌شده", "مانده مطالبات"]
+                   "شرکت جدید", "سود", "هزینه", "تارگت", "وصول‌شده", "مانده مطالبات",
+                   "فاکتورهای برنده‌شده"]
         rows = [[
             f.employee.full_name_fa, float(f.revenue_rial), float(f.quantity_ton),
             f.invoice_count, f.active_customers, f.new_customers, float(f.profit_rial),
             float(f.cost_rial), float(f.target_rial), float(f.collected_rial),
-            float(f.receivables_rial),
+            float(f.receivables_rial), float(f.won_invoices_rial),
         ] for f in facts]
-        fmts = {i: RIAL_FMT for i in [1, 6, 7, 8, 9, 10]}
+        fmts = {i: RIAL_FMT for i in [1, 6, 7, 8, 9, 10, 11]}
     else:
         headers = ["فروشنده", "تیم", "فروش ریالی", "تعداد فاکتور", "مشتری فعال",
                    "مشتری جدید", "سود", "هزینه", "تارگت", "تعداد تماس"]
@@ -136,6 +137,12 @@ def _sales_workbook(period, channel):
             float(f.target_rial), f.calls,
         ] for f in facts]
         fmts = {i: RIAL_FMT for i in [2, 6, 7, 8]}
+        if channel == SalesChannel.TEAM:
+            headers += ["پیش‌فاکتور صادره", "پیش‌فاکتور کنسل‌شده"]
+            for row, f in zip(rows, facts):
+                row += [float(f.proforma_issued_rial), float(f.proforma_cancelled_rial)]
+            fmts[10] = RIAL_FMT
+            fmts[11] = RIAL_FMT
     _write_table(ws, headers, rows, formats=fmts)
 
     ws = _sheet(wb, "استان‌ها")

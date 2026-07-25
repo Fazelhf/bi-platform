@@ -4,6 +4,9 @@ export interface SalesInput {
   period: { id: number; label: string };
   channel: string;
   metric_rows: { field: string; label: string }[];
+  /** Fields the CEO owns (targets) — shown but not editable here. */
+  readonly_fields: string[];
+  can_edit_targets: boolean;
   columns: Record<string, any>[];
   provinces: { province_id: number; name: string; sales_rial: string; target_rial: string }[];
   all_provinces: { id: number; name: string }[];
