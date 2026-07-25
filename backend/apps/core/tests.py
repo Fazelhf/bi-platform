@@ -155,3 +155,45 @@ class WorkflowSideEffectTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         entry = AuditLog.objects.filter(action="update").latest("created_at")
         self.assertEqual(entry.changes["revenue_rial"]["after"], "2000")
+
+
+class NotificationClearingTests(APITestCase):
+    """Users tidy up their own bell — and can never touch anyone else's."""
+
+    def setUp(self):
+        self.me = User.objects.create_user(
+            username="me", password="x", role=Role.MANAGER, department=Department.SALES_TEAM
+        )
+        self.other = User.objects.create_user(username="other", password="x")
+        mk = lambda who, read: Notification.objects.create(
+            recipient=who, verb="submitted", message="m", is_read=read
+        )
+        self.read_one = mk(self.me, True)
+        mk(self.me, True)
+        self.unread_one = mk(self.me, False)
+        self.theirs = mk(self.other, False)
+        self.client.force_authenticate(self.me)
+
+    def test_delete_single(self):
+        r = self.client.delete(f"/api/executive/notifications/{self.unread_one.id}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertFalse(Notification.objects.filter(pk=self.unread_one.pk).exists())
+
+    def test_cannot_delete_someone_elses(self):
+        r = self.client.delete(f"/api/executive/notifications/{self.theirs.id}/")
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(Notification.objects.filter(pk=self.theirs.pk).exists())
+
+    def test_clear_read_keeps_unread(self):
+        r = self.client.post("/api/executive/notifications/clear-read/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["deleted"], 2)
+        mine = Notification.objects.filter(recipient=self.me)
+        self.assertEqual(mine.count(), 1)
+        self.assertFalse(mine.first().is_read)
+
+    def test_clear_all_leaves_other_users_alone(self):
+        r = self.client.post("/api/executive/notifications/clear-all/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(Notification.objects.filter(recipient=self.me).count(), 0)
+        self.assertTrue(Notification.objects.filter(recipient=self.other).exists())

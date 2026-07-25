@@ -41,13 +41,13 @@ watch(actionFilter, load);
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h1 class="text-xl font-bold text-ink">تاریخچه تغییرات (Audit Log)</h1>
-      <select v-model="actionFilter" class="border border-slate-200 rounded-xl px-3 py-1.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
+      <select v-model="actionFilter" class="border border-slate-200 rounded-xl px-3 py-1.5 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
         <option value="">همه اقدامات</option>
         <option v-for="(label, key) in ACTION_FA" :key="key" :value="key">{{ label }}</option>
       </select>
     </div>
 
-    <div v-if="loading" class="bg-white rounded-card shadow-soft divide-y divide-slate-50">
+    <div v-if="loading" class="bg-surface rounded-card shadow-soft divide-y divide-slate-50">
       <div v-for="i in 6" :key="i" class="p-4">
         <div class="flex items-center justify-between gap-4">
           <div class="skeleton h-3.5 flex-1 max-w-md"></div>
@@ -56,7 +56,7 @@ watch(actionFilter, load);
       </div>
     </div>
 
-    <div v-else class="bg-white rounded-card shadow-soft divide-y divide-slate-50">
+    <div v-else class="bg-surface rounded-card shadow-soft divide-y divide-slate-50">
       <div v-if="!rows.length" class="p-6 text-center text-slate-400 text-sm">رکوردی یافت نشد.</div>
       <div v-for="e in rows" :key="e.id" class="p-4 text-sm">
         <div class="flex items-start justify-between gap-3">
@@ -72,7 +72,7 @@ watch(actionFilter, load);
         </div>
         <div v-if="Object.keys(e.changes || {}).length" class="mt-2 bg-slate-50 rounded-lg p-2 space-y-1">
           <div v-for="(c, field) in e.changes" :key="field" class="text-xs flex flex-wrap gap-1 items-center">
-            <code class="bg-white rounded px-1.5 py-0.5 border border-slate-200">{{ field }}</code>
+            <code class="bg-surface rounded px-1.5 py-0.5 border border-slate-200">{{ field }}</code>
             <span class="text-red-500 line-through ltr-nums">{{ c.before ?? "—" }}</span>
             <span class="text-slate-400">←</span>
             <span class="text-green-600 ltr-nums">{{ c.after ?? "—" }}</span>

@@ -32,12 +32,12 @@ function select(key: string) {
 
     <!-- Sub-tabs (all the former admin items live here now).
          Scrolls horizontally on narrow screens instead of wrapping. -->
-    <div class="flex gap-1 bg-white rounded-2xl shadow-soft p-1.5 max-w-full overflow-x-auto md:w-fit">
+    <div class="flex gap-1 bg-surface rounded-2xl shadow-soft p-1.5 max-w-full overflow-x-auto md:w-fit">
       <button
         v-for="t in tabs"
         :key="t.key"
         class="px-4 py-2 rounded-xl text-sm transition whitespace-nowrap shrink-0"
-        :class="active === t.key ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100'"
+        :class="active === t.key ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100'"
         @click="select(t.key)"
       >{{ t.label }}</button>
     </div>

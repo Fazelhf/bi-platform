@@ -138,7 +138,7 @@ onMounted(load);
 
     <template v-else>
       <!-- Sales pending -->
-      <div v-if="visibleSales.length" class="bg-white rounded-card shadow-soft p-4">
+      <div v-if="visibleSales.length" class="bg-surface rounded-card shadow-soft p-4">
         <h2 class="text-sm font-semibold text-ink mb-3">فروش — در انتظار تایید</h2>
         <table class="w-full text-sm">
           <thead>
@@ -191,7 +191,7 @@ onMounted(load);
       </div>
 
       <!-- Production pending -->
-      <div v-if="visibleProduction.length" class="bg-white rounded-card shadow-soft p-4">
+      <div v-if="visibleProduction.length" class="bg-surface rounded-card shadow-soft p-4">
         <h2 class="text-sm font-semibold text-ink mb-3">تولید — در انتظار تایید</h2>
         <table class="w-full text-sm">
           <thead>
@@ -243,7 +243,7 @@ onMounted(load);
         </table>
       </div>
 
-      <div v-if="!totalPending" class="bg-white rounded-card shadow-soft">
+      <div v-if="!totalPending" class="bg-surface rounded-card shadow-soft">
         <EmptyState
           icon="✅"
           title="کارتابل شما خالی است"
@@ -258,7 +258,7 @@ onMounted(load);
       class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4"
       @click.self="preview = null"
     >
-      <div class="bg-white rounded-card shadow-pop w-full max-w-md p-6 animate-pop">
+      <div class="bg-surface rounded-card shadow-pop w-full max-w-md p-6 animate-pop">
         <div class="flex items-start justify-between mb-4">
           <div>
             <h3 class="font-bold text-ink">

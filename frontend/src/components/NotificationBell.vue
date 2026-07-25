@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { notificationsApi } from "@/api/platform";
+import { confirm, toast } from "@/composables/useUi";
 import type { AppNotification } from "@/types";
 
 const open = ref(false);
@@ -34,6 +35,40 @@ async function markAll() {
   await notificationsApi.markAllRead();
   unread.value = 0;
   items.value = items.value.map((n) => ({ ...n, is_read: true }));
+}
+
+const hasRead = computed(() => items.value.some((n) => n.is_read));
+
+/** Remove one notification. Optimistic — the list is cheap to re-fetch. */
+async function remove(n: AppNotification) {
+  items.value = items.value.filter((i) => i.id !== n.id);
+  if (!n.is_read) unread.value = Math.max(0, unread.value - 1);
+  try {
+    await notificationsApi.remove(n.id);
+  } catch {
+    toast.error("حذف نشد.");
+    items.value = await notificationsApi.list();
+    await refreshCount();
+  }
+}
+
+async function clearRead() {
+  const n = await notificationsApi.clearRead();
+  items.value = items.value.filter((i) => !i.is_read);
+  toast.success(n ? `${n} اعلان خوانده‌شده پاک شد.` : "اعلان خوانده‌شده‌ای نبود.");
+}
+
+async function clearAll() {
+  const ok = await confirm({
+    title: "پاک‌کردن همه اعلان‌ها",
+    message: "همه‌ی اعلان‌ها — از جمله خوانده‌نشده‌ها — حذف می‌شوند. مطمئنید؟",
+    danger: true,
+  });
+  if (!ok) return;
+  await notificationsApi.clearAll();
+  items.value = [];
+  unread.value = 0;
+  toast.success("همه اعلان‌ها پاک شد.");
 }
 
 function since(iso: string): string {
@@ -74,13 +109,21 @@ onBeforeUnmount(() => window.clearInterval(timer));
 
     <div
       v-if="open"
-      class="absolute left-0 mt-2 w-96 max-h-[28rem] overflow-auto bg-white rounded-card shadow-pop z-50 animate-pop"
+      class="absolute left-0 mt-2 w-96 max-h-[28rem] overflow-auto bg-surface rounded-card shadow-pop z-50 animate-pop"
     >
-      <div class="flex items-center justify-between px-4 py-2 border-b border-slate-100">
+      <div class="flex items-center justify-between gap-2 px-4 py-2 border-b border-slate-100">
         <span class="text-sm font-semibold text-ink">اعلان‌ها</span>
-        <button class="text-xs text-brand-600 hover:underline" @click="markAll">
-          همه خوانده شد
-        </button>
+        <div class="flex items-center gap-2 text-xs">
+          <button v-if="unread" class="text-brand-600 hover:underline" @click="markAll">
+            همه خوانده شد
+          </button>
+          <button v-if="hasRead" class="text-slate-500 hover:underline" @click="clearRead">
+            پاک‌کردن خوانده‌شده‌ها
+          </button>
+          <button v-if="items.length" class="text-red-500 hover:underline" @click="clearAll">
+            پاک‌کردن همه
+          </button>
+        </div>
       </div>
       <div v-if="!items.length" class="p-6 text-center text-sm text-slate-400">
         اعلانی ندارید.
@@ -88,18 +131,21 @@ onBeforeUnmount(() => window.clearInterval(timer));
       <div
         v-for="n in items"
         :key="n.id"
-        class="px-4 py-3 border-b border-slate-50 text-sm"
-        :class="n.is_read ? 'bg-white' : 'bg-brand-50/50'"
+        class="group flex gap-2 px-4 py-3 border-b border-slate-50 text-sm"
+        :class="n.is_read ? 'bg-surface' : 'bg-brand-50/50'"
       >
-        <div class="flex gap-2">
-          <span>{{ VERB_ICON[n.verb] ?? "🔹" }}</span>
-          <div class="flex-1">
-            <p class="text-slate-700 leading-6">{{ n.message }}</p>
-            <p class="text-xs text-slate-400 mt-1">
-              {{ n.actor_name }} · {{ since(n.created_at) }}
-            </p>
-          </div>
+        <span>{{ VERB_ICON[n.verb] ?? "🔹" }}</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-slate-700 leading-6">{{ n.message }}</p>
+          <p class="text-xs text-slate-400 mt-1">
+            {{ n.actor_name }} · {{ since(n.created_at) }}
+          </p>
         </div>
+        <button
+          class="shrink-0 self-start w-6 h-6 rounded-full text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors leading-none"
+          title="حذف این اعلان"
+          @click="remove(n)"
+        >✕</button>
       </div>
     </div>
   </div>

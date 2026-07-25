@@ -129,7 +129,7 @@ watch(active, load);
         v-for="t in tabs"
         :key="t.key"
         class="px-3 py-1.5 rounded-lg text-sm"
-        :class="active === t.key ? 'bg-brand-600 text-white' : 'bg-white border border-slate-200 hover:bg-slate-50'"
+        :class="active === t.key ? 'bg-brand-600 text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50'"
         @click="active = t.key"
       >{{ t.label }}</button>
     </div>

@@ -114,7 +114,7 @@ function display(row: Record<string, any>, col: CrudColumn): string {
 </script>
 
 <template>
-  <div class="bg-white rounded-card shadow-soft">
+  <div class="bg-surface rounded-card shadow-soft">
     <div class="flex items-center justify-between gap-3 p-4 border-b border-slate-100">
       <h2 class="font-semibold text-ink">{{ title }}</h2>
       <div class="flex items-center gap-2">
@@ -192,7 +192,7 @@ function display(row: Record<string, any>, col: CrudColumn): string {
 
     <!-- Modal -->
     <div v-if="showModal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="showModal = false">
-      <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+      <div class="bg-surface rounded-2xl shadow-xl w-full max-w-md p-6">
         <h3 class="font-bold text-ink mb-4">
           {{ editingId == null ? "افزودن" : "ویرایش" }} — {{ title }}
         </h3>
@@ -202,7 +202,7 @@ function display(row: Record<string, any>, col: CrudColumn): string {
             <select
               v-if="c.type === 'select'"
               v-model="form[c.key]"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-surface"
             >
               <option v-for="o in c.options" :key="String(o.value)" :value="o.value">{{ o.label }}</option>
             </select>

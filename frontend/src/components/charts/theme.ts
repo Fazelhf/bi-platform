@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import { graphic } from "@/lib/echarts";
 import { paletteByKey, type Palette } from "./palettes";
 
@@ -9,11 +10,16 @@ export function activePalette(): Palette {
   return paletteByKey(localStorage.getItem("chartTheme") || "modern");
 }
 
+/** True when the app is in dark mode — charts read this at render time. */
+export function isDark(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
 /** Back-compat colour accessor used by chart components. */
 export const COLORS = new Proxy({} as Record<string, string>, {
   get(_t, key: string) {
     const p = activePalette();
-    if (key === "ink") return "#1c1c1e";
+    if (key === "ink") return isDark() ? "#ececee" : "#1c1c1e";
     return (p as any)[key] ?? "#3b6fed";
   },
 });
@@ -38,27 +44,64 @@ export function seriesColor(i: number): string {
   return s[i % s.length];
 }
 
+/**
+ * Bumped whenever the light/dark theme flips. AXIS and TOOLTIP read it inside
+ * getters, so any computed chart option that spreads them registers a
+ * dependency and rebuilds itself on toggle — no page reload needed.
+ */
+const themeTick = ref(0);
+export function bumpChartTheme() {
+  themeTick.value++;
+}
+
 export const AXIS = {
-  category: {
-    type: "category" as const,
-    axisLine: { show: false },
-    axisTick: { show: false },
-    axisLabel: { color: "#64748b", fontSize: 11 },
+  get category() {
+    themeTick.value;
+    return {
+      type: "category" as const,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: isDark() ? "#a3a3ad" : "#64748b", fontSize: 11 },
+    };
   },
-  value: {
-    type: "value" as const,
-    axisLine: { show: false },
-    axisTick: { show: false },
-    axisLabel: { color: "#94a3b8", fontSize: 10 },
-    splitLine: { lineStyle: { color: "#eef0f2", type: "dashed" as const } },
+  get value() {
+    themeTick.value;
+    const dark = isDark();
+    return {
+      type: "value" as const,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: dark ? "#8d8d97" : "#94a3b8", fontSize: 10 },
+      splitLine: {
+        lineStyle: { color: dark ? "#33333a" : "#eef0f2", type: "dashed" as const },
+      },
+    };
   },
 };
 
+// Property getters (not a plain object) so `{ ...TOOLTIP }` re-reads them.
 export const TOOLTIP = {
-  backgroundColor: "#1c1c1e",
+  get backgroundColor() {
+    themeTick.value;
+    return isDark() ? "#3b3b44" : "#1c1c1e";
+  },
   borderWidth: 0,
-  textStyle: { color: "#fff", fontSize: 12 },
+  get textStyle() {
+    themeTick.value;
+    return { color: "#fff", fontSize: 12 };
+  },
   padding: [6, 10],
+  // ECharts' default shadow pointer is a light grey band, which reads as a
+  // glaring white block behind the hovered label in dark mode.
+  get axisPointer() {
+    themeTick.value;
+    return {
+      type: "shadow" as const,
+      shadowStyle: {
+        color: isDark() ? "rgba(255,255,255,0.06)" : "rgba(150,150,150,0.15)",
+      },
+    };
+  },
 };
 
 /** Compact number for labels/axes (K/M/B). */

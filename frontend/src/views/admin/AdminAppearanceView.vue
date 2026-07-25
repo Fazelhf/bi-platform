@@ -44,7 +44,7 @@ onMounted(() => ui.fetch());
       <div
         v-for="p in PALETTES"
         :key="p.key"
-        class="rounded-card border-2 transition cursor-pointer bg-white p-3"
+        class="rounded-card border-2 transition cursor-pointer bg-surface p-3"
         :class="ui.chartTheme === p.key ? 'border-accent-500 shadow-pop' : 'border-transparent shadow-soft hover:border-slate-200'"
         @click="pick(p.key)"
       >

@@ -33,7 +33,7 @@ async function submit() {
     <div class="pointer-events-none absolute -bottom-24 -left-24 w-80 h-80 rounded-full bg-accent-500/10 blur-3xl"></div>
 
     <form
-      class="relative bg-white p-8 rounded-card shadow-pop w-full max-w-sm space-y-5 animate-pop"
+      class="relative bg-surface p-8 rounded-card shadow-pop w-full max-w-sm space-y-5 animate-pop"
       @submit.prevent="submit"
     >
       <!-- Brand mark -->

@@ -134,7 +134,7 @@ watch(() => route.params.id, load);
   <div v-if="loading" class="text-slate-400">در حال بارگذاری…</div>
   <div v-else-if="member" class="max-w-3xl space-y-4">
     <!-- Header card -->
-    <div class="bg-white rounded-card shadow-soft p-6 flex items-center gap-5">
+    <div class="bg-surface rounded-card shadow-soft p-6 flex items-center gap-5">
       <UserAvatar :name="member.name" :initials="member.initials" :color="member.avatar_color" :image="member.avatar_image" :online="member.is_online" :size="80" />
       <div class="flex-1">
         <h1 class="text-xl font-bold text-ink">{{ member.name }}</h1>
@@ -145,7 +145,7 @@ watch(() => route.params.id, load);
       </div>
       <div class="flex gap-2">
         <template v-if="!isMe">
-          <button class="px-4 py-2 rounded-xl bg-ink text-white text-sm hover:bg-ink-soft" @click="openChat">💬 گفتگو</button>
+          <button class="px-4 py-2 rounded-xl bg-panel text-white text-sm hover:bg-panel-soft" @click="openChat">💬 گفتگو</button>
           <a
             v-if="member.phone"
             :href="`tel:${member.phone}`"
@@ -167,7 +167,7 @@ watch(() => route.params.id, load);
 
     <!-- Edit-profile modal -->
     <div v-if="editing" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50" @click.self="editing = false">
-      <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+      <div class="bg-surface rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
         <h3 class="font-bold text-ink mb-1">ویرایش پروفایل</h3>
 
         <!-- Photo -->
@@ -215,26 +215,26 @@ watch(() => route.params.id, load);
 
     <!-- Details -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      <div class="bg-white rounded-card shadow-soft p-4">
+      <div class="bg-surface rounded-card shadow-soft p-4">
         <p class="text-xs text-slate-400 mb-1">نقش</p>
         <p class="font-medium text-ink">{{ member.role }}</p>
       </div>
-      <div class="bg-white rounded-card shadow-soft p-4">
+      <div class="bg-surface rounded-card shadow-soft p-4">
         <p class="text-xs text-slate-400 mb-1">بخش</p>
         <p class="font-medium text-ink">{{ member.department_label }}</p>
       </div>
-      <div class="bg-white rounded-card shadow-soft p-4">
+      <div class="bg-surface rounded-card shadow-soft p-4">
         <p class="text-xs text-slate-400 mb-1">تلفن</p>
         <p class="font-medium text-ink ltr-nums">{{ member.phone || "—" }}</p>
       </div>
-      <div class="bg-white rounded-card shadow-soft p-4">
+      <div class="bg-surface rounded-card shadow-soft p-4">
         <p class="text-xs text-slate-400 mb-1">نام کاربری</p>
         <p class="font-medium text-ink ltr-nums">{{ member.username }}</p>
       </div>
     </div>
 
     <!-- Notes about this person (only on colleagues) -->
-    <div v-if="!isMe" class="bg-ink text-white rounded-card shadow-soft p-5">
+    <div v-if="!isMe" class="bg-panel text-white rounded-card shadow-soft p-5">
       <h2 class="font-bold mb-3">یادداشت‌های من درباره‌ی {{ member.name }}</h2>
       <div class="flex gap-2 mb-3">
         <input

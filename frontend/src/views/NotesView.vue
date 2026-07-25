@@ -39,7 +39,7 @@ function fmt(iso: string) {
 <template>
   <div class="max-w-2xl">
     <!-- Dark card, like the mockup's یادداشت‌ها -->
-    <div class="bg-ink text-white rounded-card shadow-soft p-5">
+    <div class="bg-panel text-white rounded-card shadow-soft p-5">
       <div class="flex items-center justify-between mb-4">
         <h2 class="font-bold">یادداشت‌ها</h2>
         <button

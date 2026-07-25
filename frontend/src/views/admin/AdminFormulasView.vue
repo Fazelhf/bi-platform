@@ -121,7 +121,7 @@ watch(selectedKpi, loadFormulas);
           v-for="d in (['sales', 'production'] as const)"
           :key="d"
           class="px-3 py-1.5 rounded-lg text-sm"
-          :class="domain === d ? 'bg-brand-600 text-white' : 'bg-white border border-slate-200'"
+          :class="domain === d ? 'bg-brand-600 text-white' : 'bg-surface border border-slate-200'"
           @click="domain = d"
         >{{ d === "sales" ? "فروش" : "تولید" }}</button>
       </div>
@@ -135,7 +135,7 @@ watch(selectedKpi, loadFormulas);
 
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
       <!-- KPI list -->
-      <div class="bg-white rounded-card shadow-soft p-3 space-y-1 h-fit">
+      <div class="bg-surface rounded-card shadow-soft p-3 space-y-1 h-fit">
         <button
           v-for="k in kpis"
           :key="k.id"
@@ -151,7 +151,7 @@ watch(selectedKpi, loadFormulas);
       <!-- Formula panels -->
       <div class="lg:col-span-3 space-y-4">
         <!-- Variables vocabulary -->
-        <div class="bg-white rounded-card shadow-soft p-4">
+        <div class="bg-surface rounded-card shadow-soft p-4">
           <h3 class="text-sm font-semibold text-ink mb-2">متغیرهای مجاز</h3>
           <div class="flex flex-wrap gap-1.5">
             <code
@@ -174,7 +174,7 @@ watch(selectedKpi, loadFormulas);
           v-for="s in slots"
           v-show="!loading"
           :key="s.key"
-          class="bg-white rounded-card shadow-soft p-4 space-y-3"
+          class="bg-surface rounded-card shadow-soft p-4 space-y-3"
         >
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-semibold text-ink">

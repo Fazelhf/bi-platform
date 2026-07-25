@@ -4,6 +4,7 @@ import { salesApi } from "@/api/sales";
 import { productionInputApi, type ProdInput } from "@/api/productionInput";
 import { num } from "@/utils/format";
 import MoneyInput from "@/components/MoneyInput.vue";
+import ExportActions from "@/components/ExportActions.vue";
 
 const periods = ref<{ id: number; label: string }[]>([]);
 const selectedPeriod = ref<number | null>(null);
@@ -88,7 +89,8 @@ watch(selectedPeriod, load);
       </div>
       <div class="flex items-center gap-3">
         <span class="text-sm" :class="saving.startsWith('خطا') ? 'text-red-500' : 'text-accent-600'">{{ saving }}</span>
-        <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
+        <ExportActions :excel="false" />
+        <select v-model.number="selectedPeriod" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>
       </div>
@@ -98,9 +100,9 @@ watch(selectedPeriod, load);
 
     <template v-else>
       <!-- Table 1: cutting lines -->
-      <section class="bg-white rounded-card shadow-soft p-5">
+      <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center gap-2 mb-4">
-          <span class="w-7 h-7 rounded-lg bg-ink text-white text-xs flex items-center justify-center font-bold">۱</span>
+          <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۱</span>
           <h3 class="font-bold text-ink">خطوط برش</h3>
         </div>
         <div class="overflow-x-auto">
@@ -118,7 +120,7 @@ watch(selectedPeriod, load);
                   <input
                     v-model="m[c.key]"
                     type="number" step="any"
-                    class="w-full bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
+                    class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
                   />
                 </td>
               </tr>
@@ -128,21 +130,21 @@ watch(selectedPeriod, load);
       </section>
 
       <!-- Table 2: resources & costs -->
-      <section class="bg-white rounded-card shadow-soft p-5">
+      <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center gap-2 mb-4">
-          <span class="w-7 h-7 rounded-lg bg-ink text-white text-xs flex items-center justify-center font-bold">۲</span>
+          <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۲</span>
           <h3 class="font-bold text-ink">منابع و هزینه‌ها</h3>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
           <label class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">تعداد کل نیروی انسانی (نفرروز)</span>
             <input v-model.number="data.benchmark.total_headcount" type="number"
-              class="w-40 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+              class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
           </label>
           <label v-for="c in data.costs" :key="c.category" class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">{{ c.category_name }}</span>
             <MoneyInput v-model="c.amount_rial"
-              class="w-40 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+              class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
           </label>
         </div>
         <div class="mt-4 pt-3 border-t border-slate-100 flex justify-between text-sm">
@@ -153,21 +155,21 @@ watch(selectedPeriod, load);
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- Table 3: print by colour -->
-        <section class="bg-white rounded-card shadow-soft p-5">
+        <section class="bg-surface rounded-card shadow-soft p-5">
           <div class="flex items-center gap-2 mb-4">
-            <span class="w-7 h-7 rounded-lg bg-ink text-white text-xs flex items-center justify-center font-bold">۳</span>
+            <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۳</span>
             <h3 class="font-bold text-ink">چاپ (متراژ به تفکیک رنگ)</h3>
           </div>
           <div class="space-y-2">
             <label v-for="c in data.print_colors" :key="c.color_count" class="flex items-center justify-between gap-3">
               <span class="text-sm text-slate-600">{{ COLOR_FA[c.color_count] }} (متر مربع)</span>
               <input v-model="c.area_sqm" type="number" step="any"
-                class="w-40 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+                class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
             </label>
             <label v-if="data.print" class="flex items-center justify-between gap-3 pt-1">
               <span class="text-sm text-slate-600">تعداد شیفت چاپ</span>
               <input v-model="data.print.active_shifts" type="number" step="any"
-                class="w-40 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+                class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
             </label>
           </div>
           <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
@@ -177,9 +179,9 @@ watch(selectedPeriod, load);
         </section>
 
         <!-- Table 4: roll counts -->
-        <section class="bg-white rounded-card shadow-soft p-5">
+        <section class="bg-surface rounded-card shadow-soft p-5">
           <div class="flex items-center gap-2 mb-4">
-            <span class="w-7 h-7 rounded-lg bg-ink text-white text-xs flex items-center justify-center font-bold">۴</span>
+            <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۴</span>
             <h3 class="font-bold text-ink">تعداد رول‌ها</h3>
           </div>
           <div class="space-y-2">
@@ -189,7 +191,7 @@ watch(selectedPeriod, load);
                 <span class="text-xs text-slate-400 ltr-nums">(اجرت {{ num(r.piece_rate_rial) }})</span>
               </span>
               <input v-model="r.quantity" type="number" step="any"
-                class="w-32 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+                class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
             </label>
           </div>
           <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
@@ -200,7 +202,7 @@ watch(selectedPeriod, load);
       </div>
 
       <!-- Sticky action bar -->
-      <div class="sticky bottom-4 bg-ink text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+      <div class="sticky bottom-4 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
         <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm" @click="save(false)">ذخیره پیش‌نویس</button>

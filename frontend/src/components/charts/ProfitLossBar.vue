@@ -26,7 +26,7 @@ useChart(el, option);
 </script>
 
 <template>
-  <div class="bg-white rounded-card shadow-soft p-4">
+  <div class="bg-surface rounded-card shadow-soft p-4">
     <h3 class="text-sm font-semibold text-ink mb-1 text-center">سود و زیان (درآمد در برابر هزینه)</h3>
     <div ref="el" style="height: 150px"></div>
   </div>

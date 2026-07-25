@@ -29,6 +29,17 @@ export const notificationsApi = {
   async markAllRead() {
     await api.post("/executive/notifications/mark_all_read/");
   },
+  async remove(id: number) {
+    await api.delete(`/executive/notifications/${id}/`);
+  },
+  async clearRead(): Promise<number> {
+    const { data } = await api.post("/executive/notifications/clear-read/");
+    return data.deleted;
+  },
+  async clearAll(): Promise<number> {
+    const { data } = await api.post("/executive/notifications/clear-all/");
+    return data.deleted;
+  },
 };
 
 // ---------------- Formulas ----------------

@@ -28,7 +28,7 @@ function cancel() {
       <div
         v-for="t in state.toasts"
         :key="t.id"
-        class="pointer-events-auto bg-white shadow-pop rounded-2xl px-4 py-3 flex items-center gap-3 min-w-[240px] max-w-[92vw]"
+        class="pointer-events-auto bg-surface shadow-pop rounded-2xl px-4 py-3 flex items-center gap-3 min-w-[240px] max-w-[92vw]"
         :class="RING[t.type]"
       >
         <span
@@ -44,7 +44,7 @@ function cancel() {
   <transition name="fade">
     <div v-if="state.dialog.open" class="fixed inset-0 z-[110] flex items-center justify-center p-4" dir="rtl">
       <div class="absolute inset-0 bg-black/40" @click="cancel"></div>
-      <div class="relative bg-white rounded-3xl shadow-pop w-full max-w-sm p-6 animate-pop">
+      <div class="relative bg-surface rounded-3xl shadow-pop w-full max-w-sm p-6 animate-pop">
         <h3 v-if="state.dialog.title" class="font-bold text-ink text-lg mb-2">{{ state.dialog.title }}</h3>
         <p v-if="state.dialog.message" class="text-sm text-slate-500 mb-4 leading-6">{{ state.dialog.message }}</p>
         <input

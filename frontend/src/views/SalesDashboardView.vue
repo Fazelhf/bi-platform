@@ -6,6 +6,7 @@ import { salesApi } from "@/api/sales";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import ExportActions from "@/components/ExportActions.vue";
 import { rial } from "@/utils/format";
 
 /**
@@ -111,16 +112,17 @@ watch([periodA, periodB, compare, () => props.channel], load);
         </p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
-        <select v-model.number="periodA" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
+        <ExportActions :section="channel" :period="periodA" />
+        <select v-model.number="periodA" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>
-        <label class="flex items-center gap-1.5 text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-1.5 cursor-pointer hover:bg-slate-50 transition-colors">
+        <label class="flex items-center gap-1.5 text-sm text-slate-500 bg-surface border border-slate-200 rounded-xl px-3 py-1.5 cursor-pointer hover:bg-slate-50 transition-colors">
           <input v-model="compare" type="checkbox" class="rounded accent-brand-600" /> مقایسه با ماه دیگر
         </label>
         <select
           v-if="compare"
           v-model.number="periodB"
-          class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm"
+          class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm"
         >
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>
@@ -131,12 +133,12 @@ watch([periodA, periodB, compare, () => props.channel], load);
     <div class="flex gap-1">
       <button
         class="px-4 py-1.5 rounded-xl text-sm"
-        :class="tab === 'people' ? 'bg-ink text-white' : 'bg-white border border-slate-200 hover:bg-slate-50'"
+        :class="tab === 'people' ? 'bg-panel text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50'"
         @click="tab = 'people'"
       >داشبورد فروشنده</button>
       <button
         class="px-4 py-1.5 rounded-xl text-sm"
-        :class="tab === 'teams' ? 'bg-ink text-white' : 'bg-white border border-slate-200 hover:bg-slate-50'"
+        :class="tab === 'teams' ? 'bg-panel text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50'"
         @click="tab = 'teams'"
       >داشبورد تیم</button>
     </div>
@@ -145,7 +147,7 @@ watch([periodA, periodB, compare, () => props.channel], load);
 
     <!-- ========== داشبورد فروشنده — 11 charts ========== -->
     <template v-else-if="tab === 'people'">
-      <div v-if="!data.salespeople.length" class="bg-white rounded-card shadow-soft">
+      <div v-if="!data.salespeople.length" class="bg-surface rounded-card shadow-soft">
         <EmptyState
           icon="📊"
           title="داده‌ای برای این ماه نیست"
@@ -220,7 +222,7 @@ watch([periodA, periodB, compare, () => props.channel], load);
 
     <!-- ========== داشبورد تیم — 9 charts ========== -->
     <template v-else>
-      <div v-if="!data.teams.length" class="bg-white rounded-card shadow-soft">
+      <div v-if="!data.teams.length" class="bg-surface rounded-card shadow-soft">
         <EmptyState
           icon="📊"
           title="داده‌ای برای این ماه نیست"

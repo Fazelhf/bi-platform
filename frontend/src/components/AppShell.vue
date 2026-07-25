@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useUiStore } from "@/stores/ui";
 import { usePresence } from "@/composables/usePresence";
 import { socialApi } from "@/api/social";
 import { inboxApi } from "@/api/platform";
@@ -10,6 +11,7 @@ import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
 
 const auth = useAuthStore();
+const ui = useUiStore();
 const route = useRoute();
 const router = useRouter();
 
@@ -115,7 +117,7 @@ onMounted(() => {
 
     <!-- ============ Sidebar (right in RTL) ============ -->
     <aside
-      class="bg-white shadow-soft flex flex-col shrink-0 transition-transform duration-200
+      class="bg-surface shadow-soft flex flex-col shrink-0 transition-transform duration-200
              fixed inset-y-0 right-0 z-50 w-64 rounded-none h-screen
              md:sticky md:top-4 md:z-auto md:rounded-card md:h-[calc(100vh-2rem)]"
       :class="[
@@ -125,7 +127,7 @@ onMounted(() => {
     >
       <!-- Logo + collapse -->
       <div class="flex items-center gap-3 p-4" :class="collapsed ? 'justify-center' : ''">
-        <div class="w-10 h-10 rounded-2xl bg-ink text-white flex items-center justify-center shrink-0">
+        <div class="w-10 h-10 rounded-2xl bg-panel text-white flex items-center justify-center shrink-0">
           <NavIcon name="chart" :size="20" />
         </div>
         <span v-if="!collapsed" class="font-bold text-ink flex-1">کاغذ حساس نمابر مهر</span>
@@ -148,7 +150,7 @@ onMounted(() => {
           :key="it.name"
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition group relative"
           :class="[
-            route.name === it.name ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100',
+            route.name === it.name ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
             collapsed ? 'justify-center' : '',
           ]"
           :title="collapsed ? it.label : ''"
@@ -179,7 +181,7 @@ onMounted(() => {
           v-if="auth.isExecutive"
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
           :class="[
-            route.name === 'settings' ? 'bg-ink text-white' : 'text-slate-500 hover:bg-slate-100',
+            route.name === 'settings' ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
             collapsed ? 'justify-center' : '',
           ]"
           :title="collapsed ? 'تنظیمات سایت' : ''"
@@ -202,7 +204,7 @@ onMounted(() => {
     <!-- ============ Main ============ -->
     <div class="flex-1 min-w-0 flex flex-col gap-4 p-3 md:p-0">
       <!-- Topbar -->
-      <header class="bg-white rounded-card shadow-soft px-4 md:px-5 py-3 flex items-center justify-between gap-2">
+      <header class="bg-surface rounded-card shadow-soft px-4 md:px-5 py-3 flex items-center justify-between gap-2">
         <!-- Title (right) + hamburger -->
         <div class="flex items-center gap-2 min-w-0">
           <button
@@ -221,6 +223,27 @@ onMounted(() => {
             <NavIcon name="search" :size="16" />
             <input v-model="search" placeholder="جستجو" class="bg-transparent outline-none w-32 text-ink" />
           </div>
+          <button
+            class="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-ink transition-colors no-print"
+            :title="ui.dark ? 'حالت روشن' : 'حالت شب'"
+            :aria-label="ui.dark ? 'حالت روشن' : 'حالت شب'"
+            @click="ui.toggleDark()"
+          >
+            <!-- sun when dark (click → go light), moon when light -->
+            <svg
+              v-if="ui.dark" class="w-5 h-5" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg
+              v-else class="w-5 h-5" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+          </button>
           <NotificationBell />
           <div class="relative">
             <button class="flex items-center gap-2" @click="userMenu = !userMenu">
@@ -235,7 +258,7 @@ onMounted(() => {
             </button>
             <div
               v-if="userMenu"
-              class="absolute left-0 mt-2 w-48 bg-white rounded-2xl shadow-pop border border-slate-100 p-2 z-50 animate-pop"
+              class="absolute left-0 mt-2 w-48 bg-surface rounded-2xl shadow-pop border border-slate-100 p-2 z-50 animate-pop"
               @mouseleave="userMenu = false"
             >
               <div class="px-3 py-2">

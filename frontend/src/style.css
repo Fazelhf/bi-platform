@@ -2,8 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------ */
+/* Design tokens. Values are space-separated RGB channels so Tailwind's */
+/* <alpha-value> keeps working (bg-white/50, text-slate-400/70).        */
+/* ------------------------------------------------------------------ */
 :root {
   color-scheme: light;
+
+  --c-canvas: 233 232 228;   /* warm light-gray page background */
+  --c-surface: 255 255 255;  /* card surface */
+  --c-ink: 28 28 30;         /* primary text */
+  --c-ink-soft: 42 42 45;
+  --c-panel: 28 28 30;       /* always-dark hero cards / sticky bars */
+  --c-panel-soft: 42 42 45;
+  --c-brand-50: 238 244 255;
+  --c-accent-50: 231 248 239;
+
+  --c-slate-50: 248 250 252;
+  --c-slate-100: 241 245 249;
+  --c-slate-200: 226 232 240;
+  --c-slate-300: 203 213 225;
+  --c-slate-400: 148 163 184;
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 71 85 105;
+  --c-slate-700: 51 65 85;
+  --c-slate-800: 30 41 59;
+  --c-slate-900: 15 23 42;
+
+  --c-scrollbar: 205 204 199;
+
+  /* The live «جمع» column in the entry sheets — an accent-tinted sticky cell. */
+  --c-sum-bg: 236 253 245;
+  --c-sum-fg: 4 120 87;
+}
+
+/* Dark theme. The slate scale is inverted so muted text stays muted and
+   subtle borders stay subtle — the same utilities just read correctly. */
+.dark {
+  color-scheme: dark;
+
+  --c-canvas: 18 18 20;
+  --c-surface: 30 30 34;
+  --c-ink: 236 236 238;
+  --c-ink-soft: 210 210 214;
+  --c-panel: 44 44 50;       /* lighter than the surface so heroes still pop */
+  --c-panel-soft: 56 56 63;
+  --c-brand-50: 30 41 70;
+  --c-accent-50: 22 55 43;
+
+  --c-slate-50: 39 39 43;
+  --c-slate-100: 48 48 53;
+  --c-slate-200: 62 62 68;
+  --c-slate-300: 85 85 93;
+  --c-slate-400: 143 143 153;
+  --c-slate-500: 168 168 178;
+  --c-slate-600: 192 192 201;
+  --c-slate-700: 212 212 219;
+  --c-slate-800: 230 230 236;
+  --c-slate-900: 245 245 248;
+
+  --c-scrollbar: 72 72 80;
+
+  --c-sum-bg: 20 52 41;
+  --c-sum-fg: 52 211 153;
+}
+
+/* Sticky total column — inline colours here would defeat theming. */
+.sum-cell {
+  background: rgb(var(--c-sum-bg));
+  color: rgb(var(--c-sum-fg));
 }
 
 body {
@@ -19,14 +86,14 @@ body {
 /* Thin, unobtrusive scrollbars to match the clean mockup. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbcbc6 transparent;
+  scrollbar-color: rgb(var(--c-scrollbar)) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #cdccc7;
+  background: rgb(var(--c-scrollbar));
   border-radius: 999px;
 }
 
@@ -45,7 +112,7 @@ body {
 .skeleton {
   position: relative;
   overflow: hidden;
-  background: #dedcd6;
+  background: rgb(var(--c-slate-200));
   border-radius: 0.5rem;
 }
 .skeleton::after {
@@ -75,4 +142,67 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .skeleton::after { animation: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Print — the board wants paper. Strip the app chrome, keep the data. */
+/* ------------------------------------------------------------------ */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+
+  /* Never print on a dark background — always ink on white paper. */
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* App chrome: nav, sidebars, toasts, action buttons, the bell. */
+  .no-print,
+  nav, header, aside,
+  .sticky,
+  button {
+    display: none !important;
+  }
+
+  /* Cards become plain bordered blocks — shadows waste toner. */
+  .shadow-soft, .shadow-pop {
+    box-shadow: none !important;
+  }
+  .rounded-card, .rounded-xl, .rounded-2xl {
+    border: 1px solid #d4d4d4 !important;
+    border-radius: 6px !important;
+  }
+
+  /* Let the page use the full sheet width. */
+  main, .max-w-7xl {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Keep a card/chart from being sliced across two pages. */
+  .rounded-card, table, .print-keep {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Tables read better with visible rules on paper. */
+  table { width: 100% !important; border-collapse: collapse !important; }
+  th, td {
+    border: 1px solid #d4d4d4 !important;
+    padding: 4px 6px !important;
+    font-size: 10pt !important;
+  }
+  thead { display: table-header-group; }  /* repeat headers on each page */
+
+  /* Charts are canvas — make sure they aren't clipped. */
+  canvas { max-width: 100% !important; height: auto !important; }
+
+  /* Anything the app scrolls should print in full. */
+  .overflow-x-auto, .overflow-y-auto, .overflow-auto {
+    overflow: visible !important;
+  }
 }

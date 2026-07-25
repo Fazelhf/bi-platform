@@ -72,7 +72,7 @@ watch(() => route.query.with, (v) => { if (v) openThread(Number(v)); });
 </script>
 
 <template>
-  <div class="bg-white rounded-card shadow-soft overflow-hidden flex" style="height: calc(100vh - 8rem)">
+  <div class="bg-surface rounded-card shadow-soft overflow-hidden flex" style="height: calc(100vh - 8rem)">
     <!-- Contacts — full width on mobile; hidden there once a thread is open -->
     <div
       class="w-full md:w-72 border-l border-slate-100 flex-col shrink-0"
@@ -133,7 +133,7 @@ watch(() => route.query.with, (v) => { if (v) openThread(Number(v)); });
           >
             <div
               class="max-w-[70%] rounded-2xl px-4 py-2 text-sm"
-              :class="m.sender === myId ? 'bg-ink text-white rounded-tl-md' : 'bg-white shadow-soft text-ink rounded-tr-md'"
+              :class="m.sender === myId ? 'bg-panel text-white rounded-tl-md' : 'bg-surface shadow-soft text-ink rounded-tr-md'"
             >
               <p class="leading-6 whitespace-pre-wrap">{{ m.body }}</p>
               <p class="text-[10px] mt-1 opacity-60 ltr-nums">{{ fmt(m.created_at) }}</p>

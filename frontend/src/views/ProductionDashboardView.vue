@@ -10,6 +10,7 @@ import StackedMachineBar from "@/components/charts/StackedMachineBar.vue";
 import ProfitLossBar from "@/components/charts/ProfitLossBar.vue";
 import BarChart from "@/components/BarChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
+import ExportActions from "@/components/ExportActions.vue";
 import { kpiValue, num, rial } from "@/utils/format";
 
 const periods = ref<Period[]>([]);
@@ -67,9 +68,12 @@ function fmtCell(v: string | null, unit: string) {
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold text-ink">داشبورد مدیریتی تولید</h2>
-      <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
+      <div class="flex items-center gap-2">
+      <ExportActions section="production" :period="selectedPeriod" />
+      <select v-model.number="selectedPeriod" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
         <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
       </select>
+      </div>
     </div>
 
     <DashboardSkeleton v-if="loading || !data" :cards="3" :charts="4" />
@@ -77,15 +81,15 @@ function fmtCell(v: string | null, unit: string) {
     <template v-else>
       <!-- Financial summary cards (درآمد / هزینه / کارکرد) -->
       <div class="grid grid-cols-3 gap-4">
-        <div class="bg-white rounded-card shadow-soft p-4 text-center">
+        <div class="bg-surface rounded-card shadow-soft p-4 text-center">
           <p class="text-xs text-slate-400 mb-1">درآمد</p>
           <p class="text-xl font-bold ltr-nums text-accent-600">{{ rial(data.financials.revenue) }}</p>
         </div>
-        <div class="bg-white rounded-card shadow-soft p-4 text-center">
+        <div class="bg-surface rounded-card shadow-soft p-4 text-center">
           <p class="text-xs text-slate-400 mb-1">هزینه</p>
           <p class="text-xl font-bold ltr-nums text-pink-500">{{ rial(data.financials.cost) }}</p>
         </div>
-        <div class="bg-white rounded-card shadow-soft p-4 text-center">
+        <div class="bg-surface rounded-card shadow-soft p-4 text-center">
           <p class="text-xs text-slate-400 mb-1">کارکرد (سود)</p>
           <p class="text-xl font-bold ltr-nums" :class="data.financials.net >= 0 ? 'text-brand-600' : 'text-red-600'">
             {{ rial(data.financials.net) }}
@@ -117,7 +121,7 @@ function fmtCell(v: string | null, unit: string) {
       <ProfitLossBar :revenue="data.financials.revenue" :cost="data.financials.cost" />
 
       <!-- The KPI comparison table (exactly like the workbook) -->
-      <div class="bg-white rounded-card shadow-soft p-5 overflow-x-auto">
+      <div class="bg-surface rounded-card shadow-soft p-5 overflow-x-auto">
         <h3 class="font-bold text-ink mb-3">جدول شاخص‌های تولید</h3>
         <table class="w-full text-sm min-w-[640px]">
           <thead>

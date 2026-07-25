@@ -11,5 +11,6 @@ router.register("notifications", views.NotificationViewSet, basename="notificati
 urlpatterns = [
     path("site-settings/", views.SiteSettingView.as_view(), name="site-settings"),
     path("overview/", views.ExecutiveOverviewView.as_view(), name="executive-overview"),
+    path("export/", views.DashboardExportView.as_view(), name="dashboard-export"),
     path("", include(router.urls)),
 ]

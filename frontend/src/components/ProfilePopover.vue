@@ -22,7 +22,7 @@ function call() {
 
 <template>
   <!-- Dark rounded card, exactly like the mockup's hover popover -->
-  <div class="bg-ink text-white rounded-card shadow-pop p-3 w-64 animate-pop">
+  <div class="bg-panel text-white rounded-card shadow-pop p-3 w-64 animate-pop">
     <div class="flex items-center gap-3 mb-3">
       <UserAvatar
         :name="member.name"

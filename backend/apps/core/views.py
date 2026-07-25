@@ -12,7 +12,10 @@ They are different measures of different things and are deliberately NOT
 summed. The response exposes them as separate figures.
 """
 from django.db.models import Max, Sum
+from django.http import HttpResponse
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import mixins
 from rest_framework import status as http_status
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -280,7 +283,15 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 # --------------------------------------------------------------------------
 # Notifications API — the bell
 # --------------------------------------------------------------------------
-class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+class NotificationViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Read + delete. The queryset is always scoped to the signed-in user, so
+    nobody can read or delete somebody else's notifications."""
+
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ["is_read", "verb"]
@@ -305,6 +316,59 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     def mark_all_read(self, request):
         updated = self.get_queryset().filter(is_read=False).update(is_read=True)
         return Response({"marked": updated})
+
+    @action(detail=False, methods=["post"], url_path="clear-read")
+    def clear_read(self, request):
+        """Delete the ones already read — the everyday tidy-up."""
+        deleted, _ = self.get_queryset().filter(is_read=True).delete()
+        return Response({"deleted": deleted})
+
+    @action(detail=False, methods=["post"], url_path="clear-all")
+    def clear_all(self, request):
+        """Delete every notification of this user, read or not."""
+        deleted, _ = self.get_queryset().delete()
+        return Response({"deleted": deleted})
+
+
+# --------------------------------------------------------------------------
+# Excel export — the CEO's one-click board report
+# --------------------------------------------------------------------------
+class DashboardExportView(APIView):
+    """Download one dashboard section as .xlsx. Executive/admin only."""
+
+    permission_classes = [IsExecutiveOrAdmin]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("period", int, required=True),
+            OpenApiParameter(
+                "section", str, required=True,
+                description="team | organizational | b2b | production",
+            ),
+        ],
+        responses={200: OpenApiTypes.BINARY},
+    )
+    def get(self, request):
+        from urllib.parse import quote
+
+        from apps.core.export import build_workbook
+
+        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        section = request.query_params.get("section", "team")
+        try:
+            stream, filename = build_workbook(period, section)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        response = HttpResponse(
+            stream.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        # Persian filenames must be RFC 5987 encoded to survive the header.
+        response["Content-Disposition"] = (
+            f"attachment; filename=export.xlsx; filename*=UTF-8''{quote(filename)}"
+        )
+        return response
 
 
 # --------------------------------------------------------------------------

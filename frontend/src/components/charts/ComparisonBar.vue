@@ -17,7 +17,7 @@ const el = ref<HTMLElement | null>(null);
 
 const option = computed<EChartsOption>(() => ({
   grid: { top: 28, right: 14, bottom: 26, left: 42 },
-  tooltip: { ...TOOLTIP, trigger: "axis", axisPointer: { type: "shadow" },
+  tooltip: { ...TOOLTIP, trigger: "axis",
     valueFormatter: (v) => compact(Number(v)) },
   xAxis: { ...AXIS.category, data: ["واقعی", "مطلوب", "ایده‌آل"] },
   yAxis: { ...AXIS.value, axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => compact(v) } },
@@ -41,7 +41,7 @@ useChart(el, option);
 </script>
 
 <template>
-  <div class="bg-white rounded-card shadow-soft p-4">
+  <div class="bg-surface rounded-card shadow-soft p-4">
     <h3 class="text-sm font-semibold text-ink mb-1 text-center">{{ title }}</h3>
     <div ref="el" style="height: 210px"></div>
   </div>

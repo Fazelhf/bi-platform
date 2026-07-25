@@ -15,7 +15,7 @@ withDefaults(
       <div
         v-for="i in cards"
         :key="i"
-        class="bg-white rounded-card shadow-soft p-4"
+        class="bg-surface rounded-card shadow-soft p-4"
       >
         <Skeleton class="h-3.5 w-24 mb-3" />
         <Skeleton class="h-7 w-28 mb-2" />
@@ -28,7 +28,7 @@ withDefaults(
       <div
         v-for="i in charts"
         :key="i"
-        class="bg-white rounded-card shadow-soft p-4"
+        class="bg-surface rounded-card shadow-soft p-4"
       >
         <Skeleton class="h-3.5 w-40 mb-4" />
         <Skeleton class="h-48 w-full" rounded="rounded-xl" />
@@ -36,7 +36,7 @@ withDefaults(
     </div>
 
     <!-- Table -->
-    <div v-if="table" class="bg-white rounded-card shadow-soft p-4">
+    <div v-if="table" class="bg-surface rounded-card shadow-soft p-4">
       <Skeleton class="h-3.5 w-48 mb-4" />
       <div class="space-y-3">
         <div v-for="i in rows" :key="i" class="flex items-center gap-4">

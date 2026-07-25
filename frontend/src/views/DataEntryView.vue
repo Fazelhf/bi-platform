@@ -143,7 +143,7 @@ watch([selectedPeriod, () => props.channel], load);
         <span class="text-sm text-slate-500">{{ saving }}</span>
         <select
           v-model.number="selectedPeriod"
-          class="border border-slate-200 rounded-xl px-3 py-1.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
+          class="border border-slate-200 rounded-xl px-3 py-1.5 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
         >
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>

@@ -1,6 +1,19 @@
 /** @type {import('tailwindcss').Config} */
+
+// Every themeable colour is a CSS variable holding space-separated RGB
+// channels, so `<alpha-value>` keeps working (bg-surface/50, text-slate-400/70).
+// Light and dark values live in src/style.css. Overriding the whole `slate`
+// scale is deliberate: it makes the ~260 existing slate utilities (muted text,
+// hairline borders, hover fills) theme-aware without touching a component.
+//
+// `white` stays literally white on purpose — it is only used for text and
+// translucent overlays that sit on top of dark panels, which must not flip.
+// Card backgrounds use `surface` instead.
+const v = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+
 export default {
   content: ["./index.html", "./src/**/*.{vue,ts}"],
+  darkMode: "class",
   theme: {
     extend: {
       fontFamily: {
@@ -8,19 +21,39 @@ export default {
       },
       colors: {
         brand: {
-          50: "#eef4ff",
+          50: v("c-brand-50"),
           500: "#3b6fed",
           600: "#2b57d4",
           700: "#2244ab",
         },
         // Design tokens taken from the reference mockup.
+        surface: v("c-surface"), // card background — dark grey in dark mode
+        canvas: v("c-canvas"), // page background
         ink: {
-          DEFAULT: "#1c1c1e", // near-black active / dark cards
-          soft: "#2a2a2d",
+          DEFAULT: v("c-ink"), // primary text — flips light in dark mode
+          soft: v("c-ink-soft"),
         },
-        canvas: "#e9e8e4", // warm light-gray page background
+        // Always-dark surface (hero cards, sticky action bars, active tabs).
+        // Kept separate from `ink` because in dark mode `text-ink` must go
+        // light while these panels must stay dark.
+        panel: {
+          DEFAULT: v("c-panel"),
+          soft: v("c-panel-soft"),
+        },
+        slate: {
+          50: v("c-slate-50"),
+          100: v("c-slate-100"),
+          200: v("c-slate-200"),
+          300: v("c-slate-300"),
+          400: v("c-slate-400"),
+          500: v("c-slate-500"),
+          600: v("c-slate-600"),
+          700: v("c-slate-700"),
+          800: v("c-slate-800"),
+          900: v("c-slate-900"),
+        },
         accent: {
-          50: "#e7f8ef",
+          50: v("c-accent-50"),
           500: "#10b981", // green — online, success, primary actions
           600: "#059669",
         },

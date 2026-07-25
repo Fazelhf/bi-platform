@@ -78,7 +78,7 @@ watch([selectedPeriod, () => props.channel], load);
       <h1 class="text-xl font-bold text-ink">{{ title }}</h1>
       <select
         v-model.number="selectedPeriod"
-        class="border border-slate-200 rounded-xl px-3 py-1.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
+        class="border border-slate-200 rounded-xl px-3 py-1.5 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
       >
         <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
       </select>
@@ -112,7 +112,7 @@ watch([selectedPeriod, () => props.channel], load);
       <!-- Bank collections (organizational channel) -->
       <div
         v-if="collections.length"
-        class="bg-white rounded-card shadow-soft p-4"
+        class="bg-surface rounded-card shadow-soft p-4"
       >
         <h3 class="text-sm font-semibold text-ink mb-3">وصول بانکی</h3>
         <table class="w-full text-sm">
@@ -126,7 +126,7 @@ watch([selectedPeriod, () => props.channel], load);
       </div>
 
       <!-- Leaderboard -->
-      <div class="bg-white rounded-card shadow-soft p-4">
+      <div class="bg-surface rounded-card shadow-soft p-4">
         <h3 class="text-sm font-semibold text-ink mb-3">
           رتبه‌بندی فروشندگان بر اساس تحقق تارگت
         </h3>

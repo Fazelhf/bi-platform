@@ -36,7 +36,7 @@ onBeforeUnmount(() => window.clearInterval(timer));
       <div
         v-for="i in 8"
         :key="i"
-        class="bg-white rounded-card shadow-soft p-5 flex flex-col items-center"
+        class="bg-surface rounded-card shadow-soft p-5 flex flex-col items-center"
       >
         <div class="skeleton rounded-full w-16 h-16 mb-3"></div>
         <div class="skeleton h-3.5 w-24 mb-2"></div>
@@ -48,7 +48,7 @@ onBeforeUnmount(() => window.clearInterval(timer));
       <div
         v-for="m in members"
         :key="m.id"
-        class="relative bg-white rounded-card shadow-soft p-5 flex flex-col items-center text-center hover:shadow-pop transition cursor-pointer"
+        class="relative bg-surface rounded-card shadow-soft p-5 flex flex-col items-center text-center hover:shadow-pop transition cursor-pointer"
         @click="openId = openId === m.id ? null : m.id"
       >
         <UserAvatar :name="m.name" :initials="m.initials" :color="m.avatar_color" :online="m.is_online" :size="64" />

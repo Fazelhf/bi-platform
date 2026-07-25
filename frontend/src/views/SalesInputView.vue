@@ -5,6 +5,7 @@ import { salesInputApi, type SalesInput } from "@/api/salesInput";
 import { toast, confirm } from "@/composables/useUi";
 import { num } from "@/utils/format";
 import MoneyInput from "@/components/MoneyInput.vue";
+import ExportActions from "@/components/ExportActions.vue";
 
 // Rial money fields get thousands-grouping while typing; counts stay plain.
 const isMoney = (field: string) => field.endsWith("_rial");
@@ -135,7 +136,8 @@ watch([selectedPeriod, () => props.channel], load);
       </div>
       <div class="flex items-center gap-3">
         <span class="text-sm" :class="saving.startsWith('خطا') ? 'text-red-500' : 'text-accent-600'">{{ saving }}</span>
-        <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
+        <ExportActions :excel="false" />
+        <select v-model.number="selectedPeriod" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>
       </div>
@@ -145,7 +147,7 @@ watch([selectedPeriod, () => props.channel], load);
 
     <template v-else>
       <!-- Main table: metrics as rows, salespeople as columns -->
-      <section class="bg-white rounded-card shadow-soft p-5">
+      <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center justify-between mb-4">
           <h3 class="font-bold text-ink">جدول عملکرد فروشندگان</h3>
           <button class="text-sm bg-accent-500 hover:bg-accent-600 text-white rounded-xl px-3 py-1.5 transition-colors" @click="openAddPicker">
@@ -156,35 +158,35 @@ watch([selectedPeriod, () => props.channel], load);
           <table class="text-sm border-separate" style="border-spacing: 0">
             <thead>
               <tr>
-                <th class="text-right font-medium text-slate-500 py-2 px-3 sticky right-0 bg-white z-10 min-w-[150px]">شاخص</th>
+                <th class="text-right font-medium text-slate-500 py-2 px-3 sticky right-0 bg-surface z-10 min-w-[150px]">شاخص</th>
                 <th v-for="(c, i) in data.columns" :key="i" class="font-medium py-2 px-2 min-w-[130px]">
                   <div class="flex items-center justify-center gap-1">
                     <input
                       v-model="c.name"
-                      class="w-24 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1 text-center text-xs outline-none"
+                      class="w-24 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1 text-center text-xs outline-none"
                     />
                     <button class="text-red-400 hover:text-red-600 text-xs" title="حذف ستون" @click="removeSalesperson(i)">✕</button>
                   </div>
                 </th>
-                <th class="font-medium py-2 px-3 text-accent-600 min-w-[130px] sticky left-0 bg-white z-20 border-r border-slate-100">جمع</th>
+                <th class="font-medium py-2 px-3 text-accent-600 min-w-[130px] sticky left-0 bg-surface z-20 border-r border-slate-100">جمع</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="m in data.metric_rows" :key="m.field" class="border-t border-slate-50">
-                <td class="py-1.5 px-3 font-medium whitespace-nowrap sticky right-0 bg-white z-10">{{ m.label }}</td>
+                <td class="py-1.5 px-3 font-medium whitespace-nowrap sticky right-0 bg-surface z-10">{{ m.label }}</td>
                 <td v-for="(c, i) in data.columns" :key="i" class="py-1 px-1">
                   <MoneyInput
                     v-if="isMoney(m.field)"
                     v-model="c[m.field]"
-                    class="w-full bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
+                    class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
                   />
                   <input
                     v-else
                     v-model="c[m.field]" type="number" step="any"
-                    class="w-full bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
+                    class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
                   />
                 </td>
-                <td class="py-1.5 px-3 text-center font-bold ltr-nums text-accent-700 sticky left-0 z-20 border-r border-slate-100" style="background:#ecfdf5">
+                <td class="sum-cell py-1.5 px-3 text-center font-bold ltr-nums sticky left-0 z-20 border-r border-slate-100">
                   {{ num(rowTotal(m.field)) }}
                 </td>
               </tr>
@@ -197,7 +199,7 @@ watch([selectedPeriod, () => props.channel], load);
       </section>
 
       <!-- Province block -->
-      <section class="bg-white rounded-card shadow-soft p-5">
+      <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center justify-between mb-1">
           <h3 class="font-bold text-ink">فروش و تارگت به تفکیک استان</h3>
           <select class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm" @change="addProvince">
@@ -220,12 +222,12 @@ watch([selectedPeriod, () => props.channel], load);
             <label class="flex flex-col items-start gap-0.5">
               <span class="text-[11px] text-slate-400">فروش (ریال)</span>
               <MoneyInput v-model="p.sales_rial" placeholder="مبلغ فروش"
-                class="w-32 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
+                class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
             </label>
             <label class="flex flex-col items-start gap-0.5">
               <span class="text-[11px] text-slate-400">تارگت (ریال)</span>
               <MoneyInput v-model="p.target_rial" placeholder="مبلغ تارگت"
-                class="w-32 bg-slate-50 focus:bg-white border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
+                class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
             </label>
           </div>
         </div>
@@ -233,7 +235,7 @@ watch([selectedPeriod, () => props.channel], load);
       </section>
 
       <!-- Sticky action bar -->
-      <div class="sticky bottom-4 bg-ink text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+      <div class="sticky bottom-4 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
         <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm transition-colors" @click="save(false)">ذخیره پیش‌نویس</button>
@@ -248,13 +250,13 @@ watch([selectedPeriod, () => props.channel], load);
       class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4"
       @click.self="showAdd = false"
     >
-      <div class="bg-white rounded-card shadow-pop w-full max-w-sm p-6 animate-pop">
+      <div class="bg-surface rounded-card shadow-pop w-full max-w-sm p-6 animate-pop">
         <h3 class="font-bold text-ink mb-4">افزودن فروشنده</h3>
 
         <label class="block text-xs text-slate-500 mb-1">انتخاب از فروشندگان موجود</label>
         <select
           v-model="pickId"
-          class="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition mb-3"
+          class="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition mb-3"
         >
           <option value="">— یک فروشنده را انتخاب کنید —</option>
           <option v-for="e in pickableEmployees" :key="e.id" :value="e.id">

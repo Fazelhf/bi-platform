@@ -27,7 +27,7 @@ const barWidth = computed(() => {
 </script>
 
 <template>
-  <div class="bg-white rounded-card shadow-soft p-4 hover:shadow-pop transition-shadow duration-200">
+  <div class="bg-surface rounded-card shadow-soft p-4 hover:shadow-pop transition-shadow duration-200">
     <div class="text-sm text-slate-500 mb-1">{{ kpi.kpi_name_fa }}</div>
     <div class="text-2xl font-bold ltr-nums text-ink">
       {{ kpiValue(kpi.actual, kpi.unit) }}

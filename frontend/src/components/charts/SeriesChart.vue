@@ -45,7 +45,7 @@ const option = computed<EChartsOption>(() => {
   const multi = props.series.length > 1;
   return {
     grid: { top: multi ? 34 : 26, right: 14, bottom: 46, left: 46 },
-    tooltip: { ...TOOLTIP, trigger: "axis", axisPointer: { type: "shadow" },
+    tooltip: { ...TOOLTIP, trigger: "axis",
       valueFormatter: (v) => fmt(Number(v)) },
     legend: multi
       ? { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: "#64748b" } }
@@ -70,7 +70,7 @@ useChart(el, option);
 </script>
 
 <template>
-  <div class="bg-white rounded-card shadow-soft p-4">
+  <div class="bg-surface rounded-card shadow-soft p-4">
     <h3 class="text-sm font-semibold text-ink mb-1 text-center">{{ title }}</h3>
     <div ref="el" :style="{ height: height + 'px' }"></div>
   </div>

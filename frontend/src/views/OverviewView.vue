@@ -7,6 +7,7 @@ import { defaultPeriodId } from "@/types";
 import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, rial } from "@/utils/format";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
+import ExportActions from "@/components/ExportActions.vue";
 
 const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
@@ -54,16 +55,19 @@ watch(selectedPeriod, load);
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold text-ink">نمای کلی سازمان</h2>
-      <select v-model.number="selectedPeriod" class="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
+      <div class="flex items-center gap-2">
+      <ExportActions :excel="false" />
+      <select v-model.number="selectedPeriod" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
         <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
       </select>
+      </div>
     </div>
 
     <DashboardSkeleton v-if="loading" :cards="4" :charts="0" :rows="4" />
 
     <template v-else-if="data">
       <!-- Hero: total company sales -->
-      <div class="bg-ink text-white rounded-card shadow-soft p-6">
+      <div class="bg-panel text-white rounded-card shadow-soft p-6">
         <p class="text-sm text-white/60 mb-1">فروش کل شرکت (همکار + بانکی + B2B)</p>
         <p class="text-4xl font-extrabold ltr-nums">{{ rial(data.combined.total_sales_revenue) }}</p>
         <div class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-white/50 mt-2 ltr-nums">
@@ -75,7 +79,7 @@ watch(selectedPeriod, load);
 
       <!-- 4 domain cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div v-for="c in cards" :key="c.title" class="bg-white rounded-card shadow-soft p-5 hover:shadow-pop transition-shadow duration-200">
+        <div v-for="c in cards" :key="c.title" class="bg-surface rounded-card shadow-soft p-5 hover:shadow-pop transition-shadow duration-200">
           <div class="flex items-center gap-2 mb-4">
             <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: c.color }"></span>
             <h3 class="font-bold text-ink">{{ c.title }}</h3>
@@ -93,7 +97,7 @@ watch(selectedPeriod, load);
       </div>
 
       <!-- Combined financials -->
-      <div class="bg-white rounded-card shadow-soft p-5">
+      <div class="bg-surface rounded-card shadow-soft p-5">
         <h3 class="font-bold text-ink mb-4">تصویر مالی تلفیقی</h3>
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
