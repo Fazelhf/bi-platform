@@ -113,13 +113,22 @@ class CustomerDetailSerializer(CustomerListSerializer):
 class CustomerWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customer
+        # `id` is echoed back so the client can navigate straight to the
+        # record it just created.
         fields = (
-            "code", "name_fa", "kind", "status", "group", "province", "city",
+            "id", "code", "name_fa", "kind", "status", "group", "province", "city",
             "lead_source", "owner", "tags", "contact_name", "phone", "mobile",
             "email", "address", "national_id", "note", "first_contact_at",
             "channel",
         )
-        extra_kwargs = {"code": {"required": False}}
+        read_only_fields = ("id",)
+        extra_kwargs = {
+            "code": {"required": False},
+            # Defaults to "now" in the viewset — asking a rep for the first
+            # contact date of a customer they are adding mid-call is friction
+            # for no gain.
+            "first_contact_at": {"required": False},
+        }
 
 
 # --------------------------------------------------------------------------
@@ -188,16 +197,92 @@ class DealDetailSerializer(DealListSerializer):
         fields = DealListSerializer.Meta.fields + ("items", "tags")
 
 
+class DealItemWriteSerializer(serializers.ModelSerializer):
+    """A line inside a deal-create/update payload."""
+
+    class Meta:
+        model = DealItem
+        fields = ("product", "quantity", "unit_price_rial", "unit_cost_rial", "discount_pct")
+        extra_kwargs = {"unit_cost_rial": {"required": False}}
+
+
 class DealWriteSerializer(serializers.ModelSerializer):
+    """
+    Deals are written together with their lines. Saving the header first and
+    the lines afterwards would leave a zero-value deal visible in reports for
+    as long as the second request takes — and forever if it fails.
+    """
+
+    items = DealItemWriteSerializer(many=True, required=False)
+
     class Meta:
         model = Deal
+        # `status` is deliberately NOT writable: it is derived from the stage.
+        # Accepting both let a caller save a deal sitting in "پیگیری تایید"
+        # while flagged won — two fields disagreeing about the same fact, and
+        # every report picking a different one.
         fields = (
-            "code", "title", "customer", "owner", "stage", "status",
-            "lead_source", "lost_reason", "lost_note", "tags",
+            "id", "code", "title", "customer", "owner", "stage",
+            "lead_source", "lost_reason", "lost_note", "tags", "items",
             "discount_rial", "shipping_cost_rial", "other_cost_rial",
             "opened_at", "expected_close_date", "closed_at", "channel",
         )
-        extra_kwargs = {"code": {"required": False}, "opened_at": {"required": False}}
+        read_only_fields = ("id",)
+        extra_kwargs = {
+            "code": {"required": False},
+            "opened_at": {"required": False},
+            "title": {"required": False},
+        }
+
+    def validate(self, attrs):
+        # A lost deal without a reason is the one thing that would quietly
+        # corrupt the "دلایل از دست رفتن" report, so it is rejected here as
+        # well as in the pipeline board's prompt.
+        stage = attrs.get("stage", getattr(self.instance, "stage", None))
+        reason = attrs.get("lost_reason", getattr(self.instance, "lost_reason", None))
+        if stage and stage.kind == PipelineStage.Kind.LOST and not reason:
+            raise serializers.ValidationError(
+                {"lost_reason": "برای ثبت فرصت از دست رفته، انتخاب دلیل الزامی است."}
+            )
+        return attrs
+
+    def _write_items(self, deal, items):
+        deal.items.all().delete()
+        for row in items:
+            product = row["product"]
+            DealItem.objects.create(
+                deal=deal,
+                product=product,
+                quantity=row.get("quantity") or 1,
+                unit_price_rial=row.get("unit_price_rial") or product.list_price_rial,
+                # Cost is snapshotted from the product unless given, so history
+                # survives later price-list changes.
+                unit_cost_rial=row.get("unit_cost_rial") or product.unit_cost_rial,
+                discount_pct=row.get("discount_pct") or 0,
+            )
+
+    def create(self, validated_data):
+        items = validated_data.pop("items", [])
+        tags = validated_data.pop("tags", [])
+        deal = Deal.objects.create(**validated_data)
+        if tags:
+            deal.tags.set(tags)
+        self._write_items(deal, items)
+        deal.recalculate()
+        return deal
+
+    def update(self, instance, validated_data):
+        items = validated_data.pop("items", None)
+        tags = validated_data.pop("tags", None)
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        if tags is not None:
+            instance.tags.set(tags)
+        if items is not None:
+            self._write_items(instance, items)
+        instance.recalculate()
+        return instance
 
 
 class DealStageEventSerializer(serializers.ModelSerializer):

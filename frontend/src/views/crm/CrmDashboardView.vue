@@ -6,11 +6,14 @@ import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import CrmChart from "@/components/crm/CrmChart.vue";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import CustomerForm from "@/components/crm/CustomerForm.vue";
+import DealForm from "@/components/crm/DealForm.vue";
+import ActivityForm from "@/components/crm/ActivityForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
 /**
- * نشانگر CRM — the home screen.
+ * داشبورد CRM — the home screen.
  *
  * Every tile and every bar is clickable: the click opens the records behind
  * the figure. That is the whole difference from the tool this replaces, where
@@ -121,10 +124,39 @@ const groupSeries = computed(() => [
 ]);
 
 const card = "bg-surface rounded-card shadow-soft p-4";
+
+// Quick entry straight from the home screen.
+const modal = ref<"customer" | "deal" | "activity" | null>(null);
+async function onSaved(id?: number) {
+  const kind = modal.value;
+  modal.value = null;
+  if (kind === "deal" && id) {
+    router.push({ name: "crm-deal", params: { id } });
+    return;
+  }
+  if (kind === "customer" && id) {
+    router.push({ name: "crm-customer", params: { id } });
+    return;
+  }
+  await load();
+}
 </script>
 
 <template>
   <div class="space-y-4">
+    <div v-if="crm.canEdit" class="flex flex-wrap items-center gap-2 no-print">
+      <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="modal = 'activity'">ثبت فعالیت</button>
+      <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'deal'">+ فرصت فروش</button>
+      <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'customer'">+ مشتری</button>
+      <span class="text-xs text-slate-400">
+        {{ crm.me?.employee_name ? `ثبت به نام ${crm.me.employee_name}` : "" }}
+      </span>
+    </div>
+
+    <CustomerForm v-if="modal === 'customer'" @close="modal = null" @saved="onSaved" />
+    <DealForm v-if="modal === 'deal'" @close="modal = null" @saved="onSaved" />
+    <ActivityForm v-if="modal === 'activity'" @close="modal = null" @saved="onSaved" />
+
     <CrmFilterBar />
 
     <!-- ============ KPI tiles ============ -->
@@ -166,10 +198,10 @@ const card = "bg-surface rounded-card shadow-soft p-4";
         />
       </div>
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">معاملات ورودی به تفکیک وضعیت</h3>
+        <h3 class="text-sm font-semibold text-ink mb-2">فرصت‌های جدید به تفکیک وضعیت</h3>
         <CrmChart
           :categories="incomingCats" :series="incomingSeries" format="count" :height="270"
-          @pick="(i) => openRow(data!.incoming_trend, i, 'معاملات ورودی')"
+          @pick="(i) => openRow(data!.incoming_trend, i, 'فرصت‌های جدید')"
         />
       </div>
     </div>
@@ -185,13 +217,13 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">معاملات در مراحل کاریز</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">قیف فروش</h3>
         <div v-if="!funnelRows.length" class="text-xs text-slate-400">داده‌ای نیست</div>
         <div v-else class="space-y-2">
           <button
             v-for="s in funnelRows" :key="String(s.id)"
             class="w-full text-right group"
-            @click="crm.openDrill(s.drill!, `کاریز — ${s.label}`)"
+            @click="crm.openDrill(s.drill!, `مرحله فروش — ${s.label}`)"
           >
             <div class="flex items-center justify-between text-xs mb-1">
               <span class="text-slate-500 truncate">{{ s.label }}</span>
@@ -211,11 +243,11 @@ const card = "bg-surface rounded-card shadow-soft p-4";
     <!-- ============ Lost reasons / activities / sources ============ -->
     <div class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">اصلی‌ترین دلایل شکست</h3>
+        <h3 class="text-sm font-semibold text-ink mb-2">اصلی‌ترین دلایل از دست رفتن</h3>
         <CrmChart
           v-if="lostCats.length" :categories="lostCats" :series="lostSeries"
           format="count" :height="230" horizontal
-          @pick="(i) => openRow(data!.lost_reasons, i, 'دلیل شکست')"
+          @pick="(i) => openRow(data!.lost_reasons, i, 'دلیل از دست رفتن')"
         />
         <EmptyState v-else title="معامله شکست‌خورده‌ای نیست" />
       </div>
@@ -229,7 +261,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">بهترین شیوه‌های آشنایی</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">بهترین منابع سرنخ</h3>
         <table class="w-full text-xs">
           <thead>
             <tr class="text-slate-400">
@@ -242,7 +274,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             <tr
               v-for="s in data?.sources" :key="String(s.id)"
               class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
-              @click="crm.openDrill(s.drill!, `شیوه آشنایی — ${s.label}`)"
+              @click="crm.openDrill(s.drill!, `منبع سرنخ — ${s.label}`)"
             >
               <td class="py-2 text-slate-600">{{ s.label }}</td>
               <td class="py-2 text-left text-ink whitespace-nowrap">{{ rial(s.amount) }}</td>
@@ -258,7 +290,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
     <!-- ============ People ============ -->
     <div class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">فعال‌ترین همکاران</h3>
+        <h3 class="text-sm font-semibold text-ink mb-2">فعال‌ترین کارشناسان</h3>
         <CrmChart
           :categories="activeCats" :series="activeSeries" format="count" :height="220" horizontal
           @pick="(i) => openRow(data!.top_active, i, 'فعالیت‌های')"
@@ -274,7 +306,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">رضایت مشتری از همکاران</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">رضایت مشتری از کارشناسان</h3>
         <table class="w-full text-xs">
           <thead>
             <tr class="text-slate-400">

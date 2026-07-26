@@ -197,9 +197,47 @@ function clean(p: Params = {}): Params {
   return out;
 }
 
+export interface CrmMe {
+  /** False for anyone outside فروش همکار — the UI hides every create/edit
+   *  affordance rather than letting them fill a form and hit a 403. */
+  can_edit: boolean;
+  employee: number | null;
+  employee_name: string;
+  team: string;
+  is_manager: boolean;
+}
+
+/** Payload for creating/updating a deal, lines included. */
+export interface DealInput {
+  customer: number;
+  title?: string;
+  owner?: number | null;
+  stage?: number | null;
+  lead_source?: number | null;
+  lost_reason?: number | null;
+  lost_note?: string;
+  discount_rial?: string | number;
+  shipping_cost_rial?: string | number;
+  other_cost_rial?: string | number;
+  expected_close_date?: string | null;
+  opened_at?: string;
+  items: {
+    product: number;
+    quantity: string | number;
+    unit_price_rial: string | number;
+    unit_cost_rial?: string | number;
+    discount_pct?: string | number;
+  }[];
+}
+
 export const crmApi = {
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
+    return data;
+  },
+
+  async me(): Promise<CrmMe> {
+    const { data } = await api.get("/crm/me/");
     return data;
   },
 
@@ -287,6 +325,51 @@ export const crmApi = {
   async completeTask(id: number) {
     const { data } = await api.post(`/crm/tasks/${id}/complete/`);
     return data;
+  },
+
+  // ---- writes ----------------------------------------------------------
+  async saveCustomer(payload: Record<string, any>, id?: number) {
+    const { data } = id
+      ? await api.patch(`/crm/customers/${id}/`, payload)
+      : await api.post("/crm/customers/", payload);
+    return data as CrmCustomer & { id: number };
+  },
+
+  async deleteCustomer(id: number) {
+    await api.delete(`/crm/customers/${id}/`);
+  },
+
+  async saveDeal(payload: DealInput | Record<string, any>, id?: number) {
+    const { data } = id
+      ? await api.patch(`/crm/deals/${id}/`, payload)
+      : await api.post("/crm/deals/", payload);
+    return data as { id: number };
+  },
+
+  async deleteDeal(id: number) {
+    await api.delete(`/crm/deals/${id}/`);
+  },
+
+  async saveActivity(payload: Record<string, any>, id?: number) {
+    const { data } = id
+      ? await api.patch(`/crm/activities/${id}/`, payload)
+      : await api.post("/crm/activities/", payload);
+    return data as CrmActivity;
+  },
+
+  async deleteActivity(id: number) {
+    await api.delete(`/crm/activities/${id}/`);
+  },
+
+  async saveTask(payload: Record<string, any>, id?: number) {
+    const { data } = id
+      ? await api.patch(`/crm/tasks/${id}/`, payload)
+      : await api.post("/crm/tasks/", payload);
+    return data;
+  },
+
+  async deleteTask(id: number) {
+    await api.delete(`/crm/tasks/${id}/`);
   },
 
   /** Fetch the records behind an aggregate row. */

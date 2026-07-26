@@ -1,11 +1,11 @@
 import { defineStore } from "pinia";
-import { crmApi, type CrmOptions, type Drill } from "@/api/crm";
+import { crmApi, type CrmMe, type CrmOptions, type Drill } from "@/api/crm";
 
 /**
  * Shared CRM state: the filter bar and the lookup lists.
  *
  * The filter lives in the store rather than in each page so moving between
- * نشانگر → گزارش‌ها → کاریز keeps the same window and the same rep selected.
+ * داشبورد → گزارش‌ها → مراحل فروش keeps the same window and the same rep selected.
  * Losing the filter on every navigation was the single most annoying thing
  * about the tool this replaces.
  */
@@ -25,6 +25,7 @@ interface Filters {
 export const useCrmStore = defineStore("crm", {
   state: () => ({
     options: null as CrmOptions | null,
+    me: null as CrmMe | null,
     loading: false,
     filters: {
       range: "last6",
@@ -87,6 +88,8 @@ export const useCrmStore = defineStore("crm", {
 
     employeeName: (state) => (id: number | null) =>
       state.options?.employees.find((e) => e.id === id)?.name ?? "—",
+
+    canEdit: (state) => !!state.me?.can_edit,
   },
 
   actions: {
@@ -94,7 +97,9 @@ export const useCrmStore = defineStore("crm", {
       if (this.options && !force) return this.options;
       this.loading = true;
       try {
-        this.options = await crmApi.options();
+        const [options, me] = await Promise.all([crmApi.options(), crmApi.me()]);
+        this.options = options;
+        this.me = me;
         if (!this.filters.month && this.options.months?.length) {
           this.filters.month = this.options.months[0].key;
         }

@@ -56,7 +56,7 @@ const sel = "bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none bor
     </select>
 
     <select v-model="crm.filters.source" :class="sel" @change="changed">
-      <option value="">همه شیوه‌های آشنایی</option>
+      <option value="">همه منابع سرنخ</option>
       <option v-for="s in sources" :key="s.id" :value="s.id">{{ s.name_fa }}</option>
     </select>
 

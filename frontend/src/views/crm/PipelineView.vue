@@ -5,10 +5,11 @@ import { crmApi, type Deal, type PipelineColumn } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, rial } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import DealForm from "@/components/crm/DealForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 
 /**
- * کاریز فروش — the kanban board.
+ * مراحل فروش — the kanban board.
  *
  * Cards are draggable between stages; the drop calls /deals/<id>/move/, which
  * is also what writes the stage-event log the funnel and velocity reports are
@@ -59,7 +60,7 @@ async function onDrop(col: PipelineColumn) {
   dragging.value = null;
   if (!deal || deal.stage === col.id) return;
 
-  // Losing a deal without a reason would quietly poison the "دلایل شکست"
+  // Losing a deal without a reason would quietly poison the "دلایل از دست رفتن"
   // report, so the reason is asked for at the moment of the drop.
   if (col.kind === "lost") {
     lostPrompt.value = { deal, stage: col.id };
@@ -83,6 +84,20 @@ async function confirmLost() {
 
 const stageColor = (kind: string) =>
   kind === "won" ? "#22c55e" : kind === "lost" ? "#ef4444" : "#8b5cf6";
+
+// Adding straight into a column is the natural gesture on a board, so the
+// form opens pre-set to that stage.
+const newDealStage = ref<number | null>(null);
+const showForm = ref(false);
+
+function addTo(stageId: number) {
+  newDealStage.value = stageId;
+  showForm.value = true;
+}
+async function onSaved() {
+  showForm.value = false;
+  await load();
+}
 </script>
 
 <template>
@@ -96,7 +111,7 @@ const stageColor = (kind: string) =>
         <p class="text-lg font-bold text-ink">{{ num(totals.count) }}</p>
       </div>
       <div>
-        <p class="text-xs text-slate-400">ارزش کاریز</p>
+        <p class="text-xs text-slate-400">ارزش فرصت‌های باز</p>
         <p class="text-lg font-bold text-ink">{{ rial(totals.amount) }}</p>
       </div>
       <div>
@@ -105,10 +120,20 @@ const stageColor = (kind: string) =>
       </div>
       <span class="flex-1"></span>
       <input
-        v-model="search" placeholder="جستجوی معامله یا مشتری…"
+        v-model="search" placeholder="جستجوی فرصت یا مشتری…"
         class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-slate-300 w-56"
       />
+      <button
+        v-if="crm.canEdit"
+        class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"
+        @click="addTo(columns.find((c) => c.kind === 'open')?.id ?? 0)"
+      >+ فرصت فروش جدید</button>
     </div>
+
+    <DealForm
+      v-if="showForm" :stage-id="newDealStage"
+      @close="showForm = false" @saved="onSaved"
+    />
 
     <!-- Board -->
     <div v-if="loading" class="flex gap-3 overflow-x-auto pb-2">
@@ -161,8 +186,14 @@ const stageColor = (kind: string) =>
             </div>
           </article>
 
-          <p v-if="!col.deals.length" class="text-xs text-slate-300 text-center py-8">
-            معامله‌ای در این مرحله نیست
+          <button
+            v-if="crm.canEdit && col.kind === 'open'"
+            class="w-full text-xs text-slate-400 hover:text-ink hover:bg-slate-100 rounded-xl py-2 border border-dashed border-slate-200"
+            @click="addTo(col.id)"
+          >+ افزودن فرصت</button>
+
+          <p v-if="!col.deals.length" class="text-xs text-slate-300 text-center py-6">
+            فرصتی در این مرحله نیست
           </p>
         </div>
       </section>
@@ -172,10 +203,10 @@ const stageColor = (kind: string) =>
     <Teleport to="body">
       <div v-if="lostPrompt" class="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" dir="rtl">
         <div class="bg-surface rounded-card shadow-pop w-full max-w-md p-5">
-          <h3 class="font-bold text-ink">ثبت شکست معامله</h3>
+          <h3 class="font-bold text-ink">ثبت از دست رفتن فرصت</h3>
           <p class="text-xs text-slate-400 mt-1">{{ lostPrompt.deal.title }}</p>
 
-          <label class="block text-xs text-slate-500 mt-4 mb-1">دلیل شکست</label>
+          <label class="block text-xs text-slate-500 mt-4 mb-1">دلیل از دست رفتن</label>
           <select v-model="lostReason" class="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none">
             <option value="">— انتخاب کنید —</option>
             <option v-for="r in crm.options?.reasons" :key="r.id" :value="r.id">{{ r.name_fa }}</option>

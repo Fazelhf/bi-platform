@@ -262,9 +262,9 @@ DEAL_AXES: dict[str, Axis] = {
     "user": Axis("user", "کاربر", "owner_id", "owner__full_name_fa", "owner"),
     "province": Axis("province", "استان", "customer__province_id", "customer__province__name_fa", "province"),
     "group": Axis("group", "گروه مشتری", "customer__group_id", "customer__group__name_fa", "group"),
-    "source": Axis("source", "شیوه آشنایی", "lead_source_id", "lead_source__name_fa", "source"),
-    "stage": Axis("stage", "مرحله کاریز", "stage_id", "stage__name_fa", "stage"),
-    "reason": Axis("reason", "دلیل شکست", "lost_reason_id", "lost_reason__name_fa", "lost_reason"),
+    "source": Axis("source", "منبع سرنخ", "lead_source_id", "lead_source__name_fa", "source"),
+    "stage": Axis("stage", "مرحله فروش", "stage_id", "stage__name_fa", "stage"),
+    "reason": Axis("reason", "دلیل از دست رفتن", "lost_reason_id", "lost_reason__name_fa", "lost_reason"),
     "customer": Axis("customer", "مشتری", "customer_id", "customer__name_fa", "customer"),
     "team": Axis("team", "تیم", "owner__team_id", "owner__team__name_fa", "team"),
 }
@@ -395,7 +395,7 @@ def report_profit(f: Filters, axis_key: str) -> dict:
 
 def report_incoming(f: Filters, axis_key: str) -> dict:
     """
-    معاملات ورودی — deals *created* in the window, split جاری/موفق/ناموفق.
+    فرصت‌های جدید — deals *created* in the window, split جاری/موفق/ناموفق.
     Deliberately measured on `opened_at`, unlike the sales report.
     """
     qs = f.deals("opened_at")
@@ -433,7 +433,7 @@ def report_incoming(f: Filters, axis_key: str) -> dict:
 
 
 def report_lost(f: Filters, axis_key: str) -> dict:
-    """دلایل شکست فروش."""
+    """دلایل از دست رفتن فرصت."""
     qs = f.deals("closed_at").filter(status=Deal.Status.LOST)
     measures = {"count": Count("id", distinct=True), "amount": _money(Sum("amount_rial"))}
     drill = {"status": "lost"}
@@ -478,7 +478,7 @@ def report_lost(f: Filters, axis_key: str) -> dict:
 
 def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
     """
-    معاملات در مراحل کاریز. Two different questions, both answered:
+    قیف فروش. Two different questions, both answered:
       • `count`/`amount` — what is sitting in each stage right now
       • `ever`           — how many deals ever reached the stage (from the
         stage-event log), which is the only honest way to compute drop-off.
@@ -526,7 +526,7 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
 
 def report_conversion(f: Filters, axis_key: str) -> dict:
     """
-    نرخ تبدیل و سرعت تبدیل.
+    نرخ تبدیل و چرخه فروش.
       rate     = won / (won + lost), on deals closed in the window
       velocity = average days from opened_at to closed_at
     Reported per axis so the manager can see who converts, and how fast.
@@ -819,7 +819,7 @@ def report_provinces(f: Filters, _axis_key: str = "province") -> dict:
 
 
 def report_satisfaction(f: Filters, axis_key: str = "user") -> dict:
-    """تعداد مشتری ناراضی از همکاران."""
+    """تعداد مشتری ناراضی از کارشناسان."""
     qs = CustomerFeedback.objects.filter(customer__channel=f.channel)
     if f.start:
         qs = qs.filter(at__gte=_aware(f.start))
@@ -859,7 +859,7 @@ def report_satisfaction(f: Filters, axis_key: str = "user") -> dict:
 
 def report_sources(f: Filters, _axis_key: str = "source") -> dict:
     """
-    بهترین شیوه‌های آشنایی — not just which source brings the most leads, but
+    بهترین منابع سرنخ — not just which source brings the most leads, but
     which one brings the most *revenue*, which is a very different ranking.
     """
     opened = f.deals("opened_at")
@@ -902,23 +902,23 @@ def report_sources(f: Filters, _axis_key: str = "source") -> dict:
 REPORTS = {
     "sales": (report_sales, "گزارش کلی فروش", ["time", "user", "product", "province", "group", "source", "customer"]),
     "profit": (report_profit, "سود فروش", ["user", "time", "product", "group", "customer", "province"]),
-    "incoming": (report_incoming, "معاملات ورودی", ["time", "user", "source", "group", "province"]),
-    "lost": (report_lost, "دلایل شکست فروش", ["reason", "time", "user", "product", "stage"]),
-    "funnel": (report_funnel, "معاملات در مراحل کاریز", ["stage"]),
-    "conversion": (report_conversion, "نرخ و سرعت تبدیل", ["time", "user", "source", "group"]),
+    "incoming": (report_incoming, "فرصت‌های جدید", ["time", "user", "source", "group", "province"]),
+    "lost": (report_lost, "دلایل از دست رفتن فرصت", ["reason", "time", "user", "product", "stage"]),
+    "funnel": (report_funnel, "قیف فروش", ["stage"]),
+    "conversion": (report_conversion, "نرخ تبدیل و چرخه فروش", ["time", "user", "source", "group"]),
     "new_customers": (report_new_customers, "مشتریان جدید", ["time", "user", "province", "group", "source"]),
     "activities": (report_activities, "فعالیت‌های انجام شده", ["time", "user", "kind", "customer"]),
     "calls": (report_calls, "نرخ تماس موفق", ["user", "time", "customer"]),
     "products": (report_products, "فروش بر محور محصول", ["product"]),
     "provinces": (report_provinces, "فروش و تارگت استان", ["province"]),
     "satisfaction": (report_satisfaction, "رضایت مشتری", ["user"]),
-    "sources": (report_sources, "بهترین شیوه‌های آشنایی", ["source"]),
+    "sources": (report_sources, "بهترین منابع سرنخ", ["source"]),
 }
 
 AXIS_LABELS = {
     "time": "بر محور زمان", "user": "بر محور کاربر", "product": "بر محور محصول",
-    "province": "بر محور استان", "group": "بر محور گروه", "source": "بر محور شیوه آشنایی",
-    "stage": "بر محور مراحل کاریز", "reason": "بر محور دلایل", "customer": "بر محور مشتری",
+    "province": "بر محور استان", "group": "بر محور گروه", "source": "بر محور منبع سرنخ",
+    "stage": "بر محور مرحله فروش", "reason": "بر محور دلایل", "customer": "بر محور مشتری",
     "kind": "بر محور فعالیت", "team": "بر محور تیم",
 }
 
@@ -985,7 +985,7 @@ def run_report(key: str, f: Filters, axis: str) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Dashboard (نشانگر) — the widget set, in one round-trip
+# Dashboard (داشبورد) — the widget set, in one round-trip
 # --------------------------------------------------------------------------
 def dashboard(f: Filters) -> dict:
     """
@@ -1044,7 +1044,7 @@ def dashboard(f: Filters) -> dict:
         }
 
     cards = [
-        card("incoming", "معاملات ورودی", _num(in_agg["n"]), "count", "deals",
+        card("incoming", "فرصت‌های جدید", _num(in_agg["n"]), "count", "deals",
              {"date_basis": "opened"}, {"amount": _num(in_agg["amount"])}),
         card("won", "فروش موفق", _num(won_agg["n"]), "count", "deals",
              {"status": "won"}, {"amount": _num(won_agg["amount"])}),
@@ -1053,12 +1053,12 @@ def dashboard(f: Filters) -> dict:
         card("profit", "سود فروش", _num(won_agg["profit"]), "rial", "deals",
              {"status": "won"},
              {"margin_pct": _pct(won_agg["profit"], won_agg["amount"])}),
-        card("pipeline", "کاریز باز", _num(pipeline_agg["amount"]), "rial", "deals",
+        card("pipeline", "فروش در جریان", _num(pipeline_agg["amount"]), "rial", "deals",
              {"status": "open"},
              {"count": _num(pipeline_agg["n"]), "weighted": float(weighted)}),
         card("conversion", "نرخ تبدیل", _pct(won_agg["n"], closed_n), "percent", None, None,
              {"won": _num(won_agg["n"]), "closed": closed_n}),
-        card("velocity", "سرعت تبدیل",
+        card("velocity", "چرخه فروش",
              round(sum(win_days) / len(win_days), 1) if win_days else 0, "days"),
         card("new_customers", "مشتریان جدید", new_customers, "count", "customers",
              {"date_basis": "first_won"}),

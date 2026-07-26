@@ -32,8 +32,8 @@ interface Item { name: string; label: string; icon: string; badge?: () => number
  * فروش همکار is the only channel it covers today.
  */
 const crmItems: Item[] = [
-  { name: "crm-dashboard", label: "نشانگر CRM", icon: "grid" },
-  { name: "crm-pipeline", label: "کاریز فروش", icon: "target" },
+  { name: "crm-dashboard", label: "داشبورد CRM", icon: "grid" },
+  { name: "crm-pipeline", label: "مراحل فروش", icon: "target" },
   { name: "crm-deals", label: "معاملات", icon: "box" },
   { name: "crm-customers", label: "مشتریان", icon: "team" },
   { name: "crm-activities", label: "فعالیت‌ها", icon: "notes" },
@@ -104,7 +104,7 @@ const pageTitle = computed(() => {
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
     inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "تیم",
-    "crm-dashboard": "نشانگر CRM", "crm-pipeline": "کاریز فروش",
+    "crm-dashboard": "داشبورد CRM", "crm-pipeline": "مراحل فروش",
     "crm-deals": "معاملات", "crm-deal": "پرونده معامله",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
     "crm-activities": "فعالیت‌ها و کارها", "crm-reports": "گزارش‌های CRM",

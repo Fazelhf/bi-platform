@@ -63,23 +63,23 @@ class Tag(TimeStampedModel):
 
 
 class LeadSource(TimeStampedModel):
-    """شیوه آشنایی — how the customer first found us. Drives the
-    "بهترین شیوه‌های آشنایی" report: which channels actually convert."""
+    """منبع سرنخ — how the customer first found us. Drives the
+    "بهترین منابع سرنخ" report: which channels actually convert."""
 
     code = models.SlugField(unique=True)
     name_fa = models.CharField(max_length=100)
 
     class Meta:
         ordering = ("name_fa",)
-        verbose_name = "شیوه آشنایی"
+        verbose_name = "منبع سرنخ"
 
     def __str__(self) -> str:
         return self.name_fa
 
 
 class LostReason(TimeStampedModel):
-    """دلیل شکست — why a deal was lost. Required when a deal is marked lost,
-    which is what makes the "دلایل شکست فروش" report trustworthy."""
+    """دلیل از دست رفتن — why a deal was lost. Required when a deal is marked lost,
+    which is what makes the "دلایل از دست رفتن فرصت" report trustworthy."""
 
     code = models.SlugField(unique=True)
     name_fa = models.CharField(max_length=120)
@@ -91,7 +91,7 @@ class LostReason(TimeStampedModel):
 
     class Meta:
         ordering = ("name_fa",)
-        verbose_name = "دلیل شکست"
+        verbose_name = "دلیل از دست رفتن"
 
     def __str__(self) -> str:
         return self.name_fa
@@ -153,7 +153,7 @@ class Product(TimeStampedModel):
 
 class PipelineStage(TimeStampedModel):
     """
-    مرحله کاریز — one column of the sales pipeline board.
+    مرحله فروش — one column of the sales pipeline board.
 
     `kind` is what the reports key on, not the name: a stage is either still
     in play (OPEN), a win (WON) or a loss (LOST). That way the pipeline can be
@@ -175,7 +175,7 @@ class PipelineStage(TimeStampedModel):
 
     class Meta:
         ordering = ("order", "id")
-        verbose_name = "مرحله کاریز"
+        verbose_name = "مرحله فروش"
 
     def __str__(self) -> str:
         return self.name_fa
@@ -261,7 +261,7 @@ class Customer(TimeStampedModel):
 
 class CustomerFeedback(TimeStampedModel):
     """
-    نظرسنجی رضایت — feeds the "تعداد مشتری ناراضی از همکاران" widget. Score is
+    نظرسنجی رضایت — feeds the "تعداد مشتری ناراضی از کارشناسان" widget. Score is
     1..5; anything <= 2 counts as unhappy, and the rep it is about is stored
     explicitly so the complaint follows the person, not just the account.
     """
@@ -354,7 +354,7 @@ class Deal(TimeStampedModel):
     expected_close_date = models.DateField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
-    # Two periods, deliberately: "معاملات ورودی" is counted in the month the
+    # Two periods, deliberately: "فرصت‌های جدید" is counted in the month the
     # deal was *created*, "فروش موفق" in the month it was *won*. Reporting on
     # a single period would silently mix the two, which is the single most
     # common CRM reporting mistake.
@@ -460,7 +460,7 @@ class DealStageEvent(TimeStampedModel):
     Every movement of a deal between pipeline stages. Two reports need it and
     neither can be reconstructed from the deal alone: the funnel (how many
     deals ever reached each stage, not just how many sit there now) and
-    "سرعت تبدیل" (days from creation to win/loss).
+    "چرخه فروش" (days from creation to win/loss).
     """
 
     deal = models.ForeignKey(

@@ -4,6 +4,9 @@ import { useRoute, useRouter } from "vue-router";
 import { crmApi, type Deal } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
+import DealForm from "@/components/crm/DealForm.vue";
+import ActivityForm from "@/components/crm/ActivityForm.vue";
+import TaskForm from "@/components/crm/TaskForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 
 /**
@@ -41,11 +44,51 @@ async function load() {
 onMounted(async () => { await crm.loadOptions(); await load(); });
 watch(() => route.params.id, load);
 
+const modal = ref<"deal" | "activity" | "task" | null>(null);
+
+async function onSaved(id?: number) {
+  const wasEdit = modal.value === "deal";
+  modal.value = null;
+  if (wasEdit && id === 0) {
+    router.push({ name: "crm-deals" });
+    return;
+  }
+  await load();
+}
+
+const lostPrompt = ref<number | null>(null);
+const lostReason = ref<number | "">("");
+const lostNote = ref("");
+
 async function moveTo(stageId: number) {
   if (!deal.value) return;
+  const stage = crm.options?.stages.find((s) => s.id === stageId);
+  // Marking a deal lost always asks why — the reason is what the loss report
+  // is made of, so it is collected at the moment of the decision.
+  if (stage?.kind === "lost") {
+    lostPrompt.value = stageId;
+    lostReason.value = "";
+    lostNote.value = "";
+    return;
+  }
   moving.value = true;
   try {
     await crmApi.moveDeal(deal.value.id, stageId);
+    await load();
+  } finally {
+    moving.value = false;
+  }
+}
+
+async function confirmLost() {
+  if (!deal.value || !lostPrompt.value) return;
+  moving.value = true;
+  try {
+    await crmApi.moveDeal(deal.value.id, lostPrompt.value, {
+      lost_reason: lostReason.value || undefined,
+      lost_note: lostNote.value,
+    });
+    lostPrompt.value = null;
     await load();
   } finally {
     moving.value = false;
@@ -78,7 +121,25 @@ const card = "bg-surface rounded-card shadow-soft p-4";
 
 <template>
   <div class="space-y-4">
-    <button class="text-sm text-slate-400 hover:text-ink no-print" @click="router.back()">‹ بازگشت</button>
+    <div class="flex items-center gap-2 no-print">
+      <button class="text-sm text-slate-400 hover:text-ink" @click="router.back()">‹ بازگشت</button>
+      <span class="flex-1"></span>
+      <template v-if="crm.canEdit && deal">
+        <button class="text-sm bg-panel text-white rounded-xl px-3 py-1.5" @click="modal = 'activity'">ثبت فعالیت</button>
+        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'task'">کار جدید</button>
+        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'deal'">ویرایش فرصت</button>
+      </template>
+    </div>
+
+    <DealForm v-if="modal === 'deal'" :deal="deal" @close="modal = null" @saved="onSaved" />
+    <ActivityForm
+      v-if="modal === 'activity'" :customer-id="deal!.customer" :customer-label="deal!.customer_name"
+      :deal-id="deal!.id" @close="modal = null" @saved="onSaved"
+    />
+    <TaskForm
+      v-if="modal === 'task'" :customer-id="deal!.customer" :customer-label="deal!.customer_name"
+      :deal-id="deal!.id" @close="modal = null" @saved="onSaved"
+    />
 
     <div v-if="loading" class="space-y-3">
       <Skeleton class="h-28 rounded-card" />
@@ -100,10 +161,10 @@ const card = "bg-surface rounded-card shadow-soft p-4";
               @click="router.push({ name: 'crm-customer', params: { id: deal.customer } })"
             >{{ deal.customer_name }} ›</button>
             <p class="text-xs text-white/60 mt-2">
-              کارشناس {{ deal.owner_name }} · {{ deal.province_name }} · شیوه آشنایی {{ deal.source_name }}
+              کارشناس {{ deal.owner_name }} · {{ deal.province_name }} · منبع سرنخ {{ deal.source_name }}
             </p>
             <p v-if="deal.reason_name" class="text-xs text-red-300 mt-1">
-              دلیل شکست: {{ deal.reason_name }}<span v-if="deal.lost_note"> — {{ deal.lost_note }}</span>
+              دلیل از دست رفتن: {{ deal.reason_name }}<span v-if="deal.lost_note"> — {{ deal.lost_note }}</span>
             </p>
           </div>
           <div class="text-left">
@@ -117,7 +178,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       </div>
 
       <!-- Stage mover -->
-      <div class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-1.5 no-print">
+      <div v-if="crm.canEdit" class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-1.5 no-print">
         <span class="text-xs text-slate-400 px-2">انتقال به مرحله:</span>
         <button
           v-for="s in crm.options?.stages" :key="s.id"
@@ -127,6 +188,33 @@ const card = "bg-surface rounded-card shadow-soft p-4";
           @click="moveTo(s.id)"
         >{{ s.name_fa }}</button>
       </div>
+
+      <!-- Lost-reason prompt -->
+      <Teleport to="body">
+        <div v-if="lostPrompt" class="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" dir="rtl">
+          <div class="bg-surface rounded-card shadow-pop w-full max-w-md p-5">
+            <h3 class="font-bold text-ink">ثبت از دست رفتن فرصت</h3>
+            <p class="text-xs text-slate-400 mt-1">{{ deal.title }}</p>
+
+            <label class="block text-xs text-slate-500 mt-4 mb-1">دلیل از دست رفتن</label>
+            <select v-model="lostReason" class="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none">
+              <option value="">— انتخاب کنید —</option>
+              <option v-for="r in crm.options?.reasons" :key="r.id" :value="r.id">{{ r.name_fa }}</option>
+            </select>
+
+            <label class="block text-xs text-slate-500 mt-3 mb-1">توضیح (اختیاری)</label>
+            <textarea v-model="lostNote" rows="2" class="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none"></textarea>
+
+            <div class="flex gap-2 mt-4">
+              <button
+                class="flex-1 bg-red-500 text-white rounded-xl py-2 text-sm disabled:opacity-50"
+                :disabled="!lostReason || moving" @click="confirmLost"
+              >ثبت</button>
+              <button class="px-4 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm" @click="lostPrompt = null">انصراف</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
 
       <div class="grid lg:grid-cols-3 gap-4">
         <!-- Lines + margin -->
@@ -214,7 +302,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
           </div>
 
           <div :class="card">
-            <h3 class="text-sm font-semibold text-ink mb-3">مسیر کاریز</h3>
+            <h3 class="text-sm font-semibold text-ink mb-3">مسیر مراحل فروش</h3>
             <ol class="relative border-r-2 border-slate-100 pr-4 space-y-3">
               <li v-for="h in history" :key="h.id" class="relative">
                 <span class="absolute -right-[21px] top-1.5 w-2.5 h-2.5 rounded-full bg-violet-500 ring-2 ring-white"></span>

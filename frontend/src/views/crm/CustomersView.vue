@@ -5,6 +5,7 @@ import { crmApi, type CrmCustomer } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import CustomerForm from "@/components/crm/CustomerForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -46,6 +47,12 @@ watch(search, () => { window.clearTimeout(t); t = window.setTimeout(() => { page
 
 const pages = computed(() => Math.max(Math.ceil(total.value / PAGE_SIZE), 1));
 
+const showForm = ref(false);
+function onSaved() {
+  showForm.value = false;
+  load();
+}
+
 const statusClass: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-700",
   lead: "bg-sky-100 text-sky-700",
@@ -71,7 +78,14 @@ const statusClass: Record<string, string> = {
         <option value="lost">از دست رفته</option>
       </select>
       <span class="text-xs text-slate-400 px-2">{{ num(total) }} مشتری</span>
+      <button
+        v-if="crm.canEdit"
+        class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"
+        @click="showForm = true"
+      >+ مشتری جدید</button>
     </div>
+
+    <CustomerForm v-if="showForm" @close="showForm = false" @saved="onSaved" />
 
     <div v-if="loading" class="space-y-2">
       <Skeleton v-for="i in 10" :key="i" class="h-12 rounded-xl" />
@@ -88,7 +102,7 @@ const statusClass: Record<string, string> = {
               <th class="text-right font-medium px-3">گروه</th>
               <th class="text-right font-medium px-3">استان</th>
               <th class="text-right font-medium px-3">کارشناس</th>
-              <th class="text-right font-medium px-3">شیوه آشنایی</th>
+              <th class="text-right font-medium px-3">منبع سرنخ</th>
               <th class="text-right font-medium px-3">وضعیت</th>
               <th class="text-right font-medium px-4">اولین خرید</th>
             </tr>

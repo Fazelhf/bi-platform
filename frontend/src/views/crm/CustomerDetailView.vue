@@ -2,13 +2,19 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { crmApi, type CrmActivity, type CrmCustomer, type Deal } from "@/api/crm";
+import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
+import CustomerForm from "@/components/crm/CustomerForm.vue";
+import DealForm from "@/components/crm/DealForm.vue";
+import ActivityForm from "@/components/crm/ActivityForm.vue";
+import TaskForm from "@/components/crm/TaskForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
 /** پرونده مشتری — the 360° view: who they are, what they bought, every touch. */
 const route = useRoute();
 const router = useRouter();
+const crm = useCrmStore();
 
 const customer = ref<CrmCustomer | null>(null);
 const deals = ref<Deal[]>([]);
@@ -29,8 +35,22 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(async () => { await crm.loadOptions(); await load(); });
 watch(() => route.params.id, load);
+
+// Entry forms opened from this page — all pre-bound to this customer.
+const modal = ref<"customer" | "deal" | "activity" | "task" | null>(null);
+
+async function onSaved(id?: number) {
+  const wasEdit = modal.value === "customer";
+  modal.value = null;
+  // A deleted customer has nowhere to go back to.
+  if (wasEdit && id === 0) {
+    router.push({ name: "crm-customers" });
+    return;
+  }
+  await load();
+}
 
 const stats = computed(() => customer.value?.stats ?? {});
 const winRate = computed(() => {
@@ -54,7 +74,27 @@ const card = "bg-surface rounded-card shadow-soft p-4";
 
 <template>
   <div class="space-y-4">
-    <button class="text-sm text-slate-400 hover:text-ink no-print" @click="router.back()">‹ بازگشت</button>
+    <div class="flex items-center gap-2 no-print">
+      <button class="text-sm text-slate-400 hover:text-ink" @click="router.back()">‹ بازگشت</button>
+      <span class="flex-1"></span>
+      <template v-if="crm.canEdit && customer">
+        <button class="text-sm bg-panel text-white rounded-xl px-3 py-1.5" @click="modal = 'activity'">ثبت فعالیت</button>
+        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'deal'">فرصت فروش جدید</button>
+        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'task'">کار جدید</button>
+        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'customer'">ویرایش</button>
+      </template>
+    </div>
+
+    <CustomerForm v-if="modal === 'customer'" :customer="customer" @close="modal = null" @saved="onSaved" />
+    <DealForm v-if="modal === 'deal'" :customer-id="customer!.id" @close="modal = null" @saved="onSaved" />
+    <ActivityForm
+      v-if="modal === 'activity'" :customer-id="customer!.id" :customer-label="customer!.name_fa"
+      @close="modal = null" @saved="onSaved"
+    />
+    <TaskForm
+      v-if="modal === 'task'" :customer-id="customer!.id" :customer-label="customer!.name_fa"
+      @close="modal = null" @saved="onSaved"
+    />
 
     <div v-if="loading" class="space-y-3">
       <Skeleton class="h-32 rounded-card" />
@@ -72,7 +112,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
               <span v-if="customer.city"> · {{ customer.city }}</span>
             </p>
             <p class="text-xs text-white/60 mt-2">
-              کارشناس: {{ customer.owner_name }} · شیوه آشنایی: {{ customer.source_name }}
+              کارشناس: {{ customer.owner_name }} · منبع سرنخ: {{ customer.source_name }}
             </p>
           </div>
           <div class="text-sm text-white/80 space-y-0.5 text-left">

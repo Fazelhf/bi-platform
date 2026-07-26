@@ -5,6 +5,8 @@ import { crmApi, type CrmActivity } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import ActivityForm from "@/components/crm/ActivityForm.vue";
+import TaskForm from "@/components/crm/TaskForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -63,6 +65,24 @@ async function complete(id: number) {
   await load();
 }
 
+// Entry + editing. Clicking a row opens it; the buttons create new ones.
+const modal = ref<"activity" | "task" | null>(null);
+const editing = ref<any | null>(null);
+
+function openNew(kind: "activity" | "task") {
+  editing.value = null;
+  modal.value = kind;
+}
+function openExisting(kind: "activity" | "task", row: any) {
+  editing.value = row;
+  modal.value = kind;
+}
+async function onSaved() {
+  modal.value = null;
+  editing.value = null;
+  await load();
+}
+
 const resultClass: Record<string, string> = {
   success: "bg-emerald-100 text-emerald-700",
   no_answer: "bg-slate-200 text-slate-600",
@@ -111,7 +131,16 @@ function isOverdue(t: any) {
       </template>
 
       <span class="text-xs text-slate-400 px-2">{{ num(total) }} رکورد</span>
+      <span class="flex-1"></span>
+      <button
+        v-if="crm.canEdit"
+        class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"
+        @click="openNew(tab === 'tasks' ? 'task' : 'activity')"
+      >{{ tab === "tasks" ? "+ کار جدید" : "+ ثبت فعالیت" }}</button>
     </div>
+
+    <ActivityForm v-if="modal === 'activity'" :activity="editing" @close="modal = null" @saved="onSaved" />
+    <TaskForm v-if="modal === 'task'" :task="editing" @close="modal = null" @saved="onSaved" />
 
     <div v-if="summary && tab === 'activities'" class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="bg-surface rounded-card shadow-soft p-4"><p class="text-xs text-slate-400">تعداد</p><p class="text-lg font-bold text-ink mt-1">{{ num(summary.count) }}</p></div>
@@ -141,13 +170,18 @@ function isOverdue(t: any) {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="a in rows" :key="a.id" class="border-t border-slate-100 hover:bg-slate-50">
+              <tr
+                v-for="a in rows" :key="a.id"
+                class="border-t border-slate-100 hover:bg-slate-50"
+                :class="crm.canEdit ? 'cursor-pointer' : ''"
+                @click="crm.canEdit && openExisting('activity', a)"
+              >
                 <td class="px-4 py-2.5">
                   <p class="text-ink">{{ a.kind_display }}</p>
                   <p v-if="a.note" class="text-xs text-slate-400">{{ a.note }}</p>
                 </td>
                 <td class="px-3">
-                  <button class="text-slate-600 hover:text-ink hover:underline" @click="router.push({ name: 'crm-customer', params: { id: a.customer } })">
+                  <button class="text-slate-600 hover:text-ink hover:underline" @click.stop="router.push({ name: 'crm-customer', params: { id: a.customer } })">
                     {{ a.customer_name }}
                   </button>
                 </td>
@@ -171,13 +205,18 @@ function isOverdue(t: any) {
     <template v-else>
       <EmptyState v-if="!tasks.length" title="کاری ثبت نشده" />
       <div v-else class="bg-surface rounded-card shadow-soft divide-y divide-slate-100">
-        <div v-for="t2 in tasks" :key="t2.id" class="p-3 flex items-center gap-3 hover:bg-slate-50">
+        <div
+          v-for="t2 in tasks" :key="t2.id"
+          class="p-3 flex items-center gap-3 hover:bg-slate-50"
+          :class="crm.canEdit ? 'cursor-pointer' : ''"
+          @click="crm.canEdit && openExisting('task', t2)"
+        >
           <button
             class="w-5 h-5 rounded-full border-2 shrink-0 transition"
             :class="t2.is_done ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 hover:border-emerald-500'"
             :disabled="t2.is_done"
             :title="t2.is_done ? 'انجام شده' : 'علامت‌گذاری به عنوان انجام‌شده'"
-            @click="complete(t2.id)"
+            @click.stop="complete(t2.id)"
           ></button>
           <div class="min-w-0 flex-1">
             <p class="text-sm text-ink" :class="t2.is_done ? 'line-through text-slate-400' : ''">{{ t2.title }}</p>

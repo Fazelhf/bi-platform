@@ -5,6 +5,7 @@ import { crmApi, type Deal } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import DealForm from "@/components/crm/DealForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -55,6 +56,13 @@ watch(search, () => { window.clearTimeout(t); t = window.setTimeout(() => { page
 
 const pages = computed(() => Math.max(Math.ceil(total.value / PAGE_SIZE), 1));
 
+const showForm = ref(false);
+function onSaved(id: number) {
+  showForm.value = false;
+  if (id) router.push({ name: "crm-deal", params: { id } });
+  else load();
+}
+
 const TABS = [
   { key: "won", label: "موفق" },
   { key: "open", label: "جاری" },
@@ -85,7 +93,14 @@ const statusClass: Record<string, string> = {
         v-model="search" placeholder="جستجوی معامله یا مشتری…"
         class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-slate-300 flex-1 min-w-[180px]"
       />
+      <button
+        v-if="crm.canEdit"
+        class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"
+        @click="showForm = true"
+      >+ فرصت فروش جدید</button>
     </div>
+
+    <DealForm v-if="showForm" @close="showForm = false" @saved="onSaved" />
 
     <!-- Totals -->
     <div v-if="summary" class="grid grid-cols-2 md:grid-cols-4 gap-3">

@@ -43,6 +43,20 @@ from apps.crm.serializers import (
 from apps.sales.models import DimEmployee, DimProvince
 
 
+def employee_for(user) -> DimEmployee | None:
+    """The salesperson record behind a login, or None for staff who are not
+    in the sales team (the CEO, admins)."""
+    return DimEmployee.objects.filter(user=user).first()
+
+
+def can_write_crm(user) -> bool:
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.role == "executive" or user.department == "sales_team")
+    )
+
+
 class CrmWritePermission(BasePermission):
     """Read: any authenticated user. Write: the sales-team department, the
     CEO, or a superuser — CRM records belong to فروش همکار."""
@@ -55,9 +69,7 @@ class CrmWritePermission(BasePermission):
             return False
         if request.method in SAFE_METHODS:
             return True
-        return bool(
-            u.is_superuser or u.role == "executive" or u.department == "sales_team"
-        )
+        return can_write_crm(u)
 
 
 # --------------------------------------------------------------------------
@@ -121,6 +133,8 @@ class CustomerViewSet(_Base):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        if self.detail:  # a lookup by id is never a time slice — see DealViewSet
+            return qs
         q = self.request.query_params
         f = rpt.Filters.from_query(q)
 
@@ -162,7 +176,16 @@ class CustomerViewSet(_Base):
         return qs.distinct()
 
     def perform_create(self, serializer):
-        obj = serializer.save()
+        # A rep adding a customer should not have to fill in "who owns this"
+        # or "when did we first talk" — it is them, and it is now.
+        extra = {}
+        if not serializer.validated_data.get("owner"):
+            mine = employee_for(self.request.user)
+            if mine:
+                extra["owner"] = mine
+        if not serializer.validated_data.get("first_contact_at"):
+            extra["first_contact_at"] = timezone.now()
+        obj = serializer.save(**extra)
         if not obj.code:
             obj.code = f"cust-{obj.pk}"
             obj.save(update_fields=["code"])
@@ -204,6 +227,8 @@ class CustomerFeedbackViewSet(_Base):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        if self.detail:
+            return qs
         f = rpt.Filters.from_query(self.request.query_params)
         if f.start:
             qs = qs.filter(at__gte=rpt._aware(f.start))
@@ -239,8 +264,14 @@ class DealViewSet(_Base):
         """
         Accepts the exact params a report row's `drill.params` carries.
         `date_basis` selects which date the window filters on: deals *created*
-        in a month (معاملات ورودی) vs deals *closed* in it (فروش موفق).
+        in a month (فرصت‌های جدید) vs deals *closed* in it (فروش موفق).
         """
+        # Only list-style requests are a slice of time. Applying the window to
+        # a lookup by id made every open deal's page 404, because an open deal
+        # has no closed_at to fall inside the window.
+        if self.detail:
+            return super().get_queryset()
+
         q = self.request.query_params
         f = rpt.Filters.from_query(q)
         basis = q.get("date_basis") or (
@@ -265,17 +296,91 @@ class DealViewSet(_Base):
         ).distinct()
 
     def perform_create(self, serializer):
-        obj = serializer.save()
-        if not obj.opened_at:
-            obj.opened_at = timezone.now()
-        if not obj.code:
-            obj.code = f"deal-{obj.pk}"
+        data = serializer.validated_data
+        extra = {}
+        if not data.get("owner"):
+            mine = employee_for(self.request.user)
+            if mine:
+                extra["owner"] = mine
+        if not data.get("opened_at"):
+            extra["opened_at"] = timezone.now()
+        if not data.get("stage"):
+            # Default to the first open stage so a new deal always appears on
+            # the board rather than in a stage-less limbo.
+            first = PipelineStage.objects.filter(
+                is_active=True, kind=PipelineStage.Kind.OPEN
+            ).order_by("order").first()
+            if first:
+                extra["stage"] = first
+        if not data.get("lead_source") and data.get("customer"):
+            extra["lead_source"] = data["customer"].lead_source
+        if not data.get("title") and data.get("customer"):
+            extra["title"] = f"فروش به {data['customer'].name_fa}"
+
+        obj = serializer.save(**extra)
+        obj.code = obj.code or f"deal-{obj.pk}"
         obj.period = period_for(obj.opened_at)
-        obj.save(update_fields=["code", "opened_at", "period"])
+        self._sync_close(obj)
+        obj.save()
         DealStageEvent.objects.create(
             deal=obj, from_stage=None, to_stage=obj.stage,
             at=obj.opened_at, by=self.request.user,
         )
+
+    def perform_update(self, serializer):
+        """
+        Editing a deal can change its stage just as a board drag can, so the
+        same stage-event has to be written here. Without it the funnel and
+        cycle-time reports would silently miss every transition made from the
+        edit form.
+        """
+        before = self.get_object()
+        previous_stage, previous_status = before.stage, before.status
+        obj = serializer.save()
+        self._sync_close(obj)
+        obj.save()
+
+        if obj.stage_id != (previous_stage.id if previous_stage else None):
+            last = obj.stage_events.order_by("-at").first()
+            now = timezone.now()
+            DealStageEvent.objects.create(
+                deal=obj, from_stage=previous_stage, to_stage=obj.stage, at=now,
+                by=self.request.user,
+                days_in_previous=max((now - (last.at if last else obj.opened_at)).days, 0),
+            )
+        if obj.status == Deal.Status.WON and previous_status != Deal.Status.WON:
+            self._mark_customer_won(obj)
+
+    @staticmethod
+    def _sync_close(deal: Deal) -> None:
+        """
+        The stage is the single source of truth: status and the close date are
+        derived from it. A won deal with no `closed_at` would vanish from every
+        report that measures on the closing date, and a deal moved back to an
+        open stage while still flagged won would be counted as revenue twice.
+        """
+        if deal.stage:
+            deal.status = {
+                PipelineStage.Kind.WON: Deal.Status.WON,
+                PipelineStage.Kind.LOST: Deal.Status.LOST,
+            }.get(deal.stage.kind, Deal.Status.OPEN)
+
+        if deal.status == Deal.Status.OPEN:
+            deal.closed_at, deal.close_period = None, None
+        else:
+            deal.closed_at = deal.closed_at or timezone.now()
+            deal.close_period = period_for(deal.closed_at)
+        if deal.status != Deal.Status.LOST:
+            deal.lost_reason, deal.lost_note = None, ""
+
+    @staticmethod
+    def _mark_customer_won(deal: Deal) -> None:
+        cust = deal.customer
+        won_at = deal.closed_at or timezone.now()
+        if not cust.first_deal_won_at or won_at < cust.first_deal_won_at:
+            cust.first_deal_won_at = won_at
+        cust.status = Customer.Status.ACTIVE
+        cust.save(update_fields=["first_deal_won_at", "status"])
 
     # ---- Actions ---------------------------------------------------------
     @action(detail=True, methods=["post"])
@@ -290,6 +395,14 @@ class DealViewSet(_Base):
         stage = PipelineStage.objects.filter(pk=request.data.get("stage")).first()
         if not stage:
             return Response({"detail": "مرحله نامعتبر است."}, status=400)
+        # Same rule as the edit form: a loss with no reason would leave a hole
+        # in the "دلایل از دست رفتن" report, and every path into that state
+        # has to enforce it — not just the one with a nice prompt attached.
+        if stage.kind == PipelineStage.Kind.LOST and not request.data.get("lost_reason"):
+            return Response(
+                {"lost_reason": "برای ثبت فرصت از دست رفته، انتخاب دلیل الزامی است."},
+                status=400,
+            )
 
         previous = deal.stage
         now = timezone.now()
@@ -302,11 +415,7 @@ class DealViewSet(_Base):
             deal.closed_at = now
             deal.close_period = period_for(now)
             deal.lost_reason = None
-            cust = deal.customer
-            if not cust.first_deal_won_at:
-                cust.first_deal_won_at = now
-                cust.status = Customer.Status.ACTIVE
-                cust.save(update_fields=["first_deal_won_at", "status"])
+            self._mark_customer_won(deal)
         elif stage.kind == PipelineStage.Kind.LOST:
             deal.status = Deal.Status.LOST
             deal.closed_at = now
@@ -384,6 +493,8 @@ class ActivityViewSet(_Base):
     serializer_class = ActivitySerializer
 
     def get_queryset(self):
+        if self.detail:
+            return super().get_queryset()
         q = self.request.query_params
         f = rpt.Filters.from_query(q)
         # Filters already understands the pseudo-kind "call" (both directions).
@@ -394,10 +505,22 @@ class ActivityViewSet(_Base):
         return qs.select_related("customer", "owner", "deal")
 
     def perform_create(self, serializer):
-        obj = serializer.save()
+        extra = {}
+        if not serializer.validated_data.get("owner"):
+            mine = employee_for(self.request.user)
+            if mine:
+                extra["owner"] = mine
+        if not serializer.validated_data.get("at"):
+            extra["at"] = timezone.now()
+        obj = serializer.save(**extra)
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
         Customer.objects.filter(pk=obj.customer_id).update(last_activity_at=obj.at)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        obj.period = period_for(obj.at)
+        obj.save(update_fields=["period"])
 
     @action(detail=False, methods=["get"])
     def summary(self, request):
@@ -429,6 +552,14 @@ class TaskViewSet(_Base):
             qs = qs.filter(done_at__isnull=False)
         return qs
 
+    def perform_create(self, serializer):
+        extra = {}
+        if not serializer.validated_data.get("owner"):
+            mine = employee_for(self.request.user)
+            if mine:
+                extra["owner"] = mine
+        serializer.save(**extra)
+
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
         task = self.get_object()
@@ -441,7 +572,7 @@ class TaskViewSet(_Base):
 # Analytics
 # --------------------------------------------------------------------------
 class CrmDashboardView(APIView):
-    """نشانگر — every widget of the CRM home screen in one response."""
+    """داشبورد — every widget of the CRM home screen in one response."""
 
     @extend_schema(
         parameters=[
@@ -492,7 +623,7 @@ class CrmReportIndexView(APIView):
 
 
 class PipelineBoardView(APIView):
-    """کاریز فروش — the kanban board: stages with their open deals."""
+    """مراحل فروش — the kanban board: stages with their open deals."""
 
     def get(self, request):
         f = rpt.Filters.from_query(request.query_params)
@@ -529,6 +660,29 @@ class PipelineBoardView(APIView):
                 "deals": DealListSerializer(deals, many=True).data,
             })
         return Response({"columns": columns})
+
+
+class CrmMeView(APIView):
+    """
+    Who the caller is *as a salesperson*, and what they may do.
+
+    The UI needs both: it hides the create/edit affordances when the user
+    cannot write (rather than letting them fill in a form and hit a 403), and
+    it pre-selects them as the owner of anything they add.
+    """
+
+    def get(self, request):
+        emp = employee_for(request.user)
+        return Response({
+            "can_edit": can_write_crm(request.user),
+            "employee": emp.id if emp else None,
+            "employee_name": emp.full_name_fa if emp else "",
+            "team": emp.team.name_fa if emp and emp.team else "",
+            "is_manager": bool(
+                request.user.is_superuser
+                or request.user.role in {"executive", "manager"}
+            ),
+        })
 
 
 class CrmOptionsView(APIView):
