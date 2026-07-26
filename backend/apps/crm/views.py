@@ -25,7 +25,7 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.crm import reports as rpt
+from apps.crm import gate, reports as rpt
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label, period_for
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
@@ -72,11 +72,63 @@ class CrmWritePermission(BasePermission):
         return can_write_crm(u)
 
 
+class GatedAPIView(APIView):
+    """Base for the CRM's non-viewset endpoints — all behind the demo lock."""
+
+    permission_classes = [gate.CrmUnlocked]
+
+
+class CrmGateView(APIView):
+    """
+    The demo lock: the only CRM endpoint reachable without a grant.
+
+    GET  — is my current key still valid? (so a refresh does not re-prompt)
+    POST — exchange the demo password for a key
+    DELETE — throw the key away (lock it again)
+    """
+
+    def get(self, request):
+        token = request.META.get(gate.HEADER, "")
+        return Response({
+            "unlocked": gate.verify(token, request.user),
+            "configured": bool(gate.demo_password()),
+        })
+
+    def post(self, request):
+        if not gate.demo_password():
+            return Response(
+                {"detail": "دمو CRM غیرفعال است."}, status=status.HTTP_403_FORBIDDEN
+            )
+        # Brute force is the obvious attack on a single shared password, so
+        # attempts are budgeted per user before the comparison happens.
+        if gate.attempts_left(request.user) <= 0:
+            return Response(
+                {"detail": "تعداد تلاش‌های ناموفق زیاد بود. کمی بعد دوباره امتحان کنید."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        if not gate.check_password(request.data.get("password", "")):
+            left = gate.record_failure(request.user)
+            return Response(
+                {"detail": "رمز دمو نادرست است.", "attempts_left": left},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        gate.clear_failures(request.user)
+        return Response({
+            "key": gate.issue(request.user),
+            "expires_in": gate.TTL_SECONDS,
+        })
+
+    def delete(self, request):
+        return Response({"unlocked": False})
+
+
 # --------------------------------------------------------------------------
 # Lookup viewsets
 # --------------------------------------------------------------------------
 class _Base(viewsets.ModelViewSet):
-    permission_classes = [CrmWritePermission]
+    # Two gates, deliberately: the demo lock decides whether CRM is visible at
+    # all, the write permission decides who may change it.
+    permission_classes = [gate.CrmUnlocked, CrmWritePermission]
 
 
 class CustomerGroupViewSet(_Base):
@@ -571,7 +623,7 @@ class TaskViewSet(_Base):
 # --------------------------------------------------------------------------
 # Analytics
 # --------------------------------------------------------------------------
-class CrmDashboardView(APIView):
+class CrmDashboardView(GatedAPIView):
     """داشبورد — every widget of the CRM home screen in one response."""
 
     @extend_schema(
@@ -590,7 +642,7 @@ class CrmDashboardView(APIView):
         return Response(data)
 
 
-class CrmReportView(APIView):
+class CrmReportView(GatedAPIView):
     """گزارش‌ها — /api/crm/reports/<key>/?axis=time|user|product|…"""
 
     def get(self, request, key: str):
@@ -610,7 +662,7 @@ class CrmReportView(APIView):
         return Response(data)
 
 
-class CrmReportIndexView(APIView):
+class CrmReportIndexView(GatedAPIView):
     """The report catalogue, so the UI builds its menu from the server."""
 
     def get(self, request):
@@ -622,7 +674,7 @@ class CrmReportIndexView(APIView):
         })
 
 
-class PipelineBoardView(APIView):
+class PipelineBoardView(GatedAPIView):
     """مراحل فروش — the kanban board: stages with their open deals."""
 
     def get(self, request):
@@ -662,7 +714,7 @@ class PipelineBoardView(APIView):
         return Response({"columns": columns})
 
 
-class CrmMeView(APIView):
+class CrmMeView(GatedAPIView):
     """
     Who the caller is *as a salesperson*, and what they may do.
 
@@ -685,7 +737,7 @@ class CrmMeView(APIView):
         })
 
 
-class CrmOptionsView(APIView):
+class CrmOptionsView(GatedAPIView):
     """Every filter dropdown the CRM UI needs, in one request."""
 
     def get(self, request):

@@ -24,9 +24,13 @@ const FIELD_LABELS: Record<string, string> = {
   mobile: "موبایل",
   email: "ایمیل",
   code: "کد",
+  attempts_left: "تلاش باقی‌مانده",
   detail: "",
   non_field_errors: "",
 };
+
+const FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+const toFa = (s: string) => s.replace(/\d/g, (d) => FA_DIGITS[Number(d)]);
 
 export function apiError(e: any): string {
   const data = e?.response?.data;
@@ -43,7 +47,9 @@ export function apiError(e: any): string {
         walk(v, name ? (label ? `${label} · ${name}` : name) : label);
       }
     } else if (value !== null && value !== undefined && value !== "") {
-      lines.push(label ? `${label}: ${value}` : String(value));
+      // Persian digits: a message that mixes ۶ and 6 reads as a bug.
+      const text = typeof value === "number" ? toFa(String(value)) : String(value);
+      lines.push(label ? `${label}: ${text}` : text);
     }
   };
   walk(data, "");

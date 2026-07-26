@@ -71,48 +71,62 @@ const router = createRouter({
           meta: { executive: true },
         },
 
-        // --- CRM (فروش همکار) ---
-        // Every CRM figure is drillable, so these pages are readable by any
-        // authenticated user; writing is gated by the API, not the router.
+        // --- CRM (فروش همکار) — locked demo ---
+        // Everything under /crm needs the demo password. `meta.crm` marks the
+        // pages the guard protects; the API enforces the same lock, so this
+        // is convenience, not the security boundary.
+        {
+          path: "crm/unlock",
+          name: "crm-unlock",
+          component: () => import("@/views/crm/CrmLockView.vue"),
+        },
         {
           path: "crm",
           name: "crm-dashboard",
           component: () => import("@/views/crm/CrmDashboardView.vue"),
+          meta: { crm: true },
         },
         {
           path: "crm/pipeline",
           name: "crm-pipeline",
           component: () => import("@/views/crm/PipelineView.vue"),
+          meta: { crm: true },
         },
         {
           path: "crm/deals",
           name: "crm-deals",
           component: () => import("@/views/crm/DealsView.vue"),
+          meta: { crm: true },
         },
         {
           path: "crm/deals/:id",
           name: "crm-deal",
           component: () => import("@/views/crm/DealDetailView.vue"),
+          meta: { crm: true },
         },
         {
           path: "crm/customers",
           name: "crm-customers",
           component: () => import("@/views/crm/CustomersView.vue"),
+          meta: { crm: true },
         },
         {
           path: "crm/customers/:id",
           name: "crm-customer",
           component: () => import("@/views/crm/CustomerDetailView.vue"),
+          meta: { crm: true },
         },
         {
           path: "crm/activities",
           name: "crm-activities",
           component: () => import("@/views/crm/ActivitiesView.vue"),
+          meta: { crm: true },
         },
         {
           path: "crm/reports",
           name: "crm-reports",
           component: () => import("@/views/crm/CrmReportsView.vue"),
+          meta: { crm: true },
         },
 
         // --- Department manager entry (department-guarded) ---
@@ -171,7 +185,7 @@ const router = createRouter({
   ],
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: "login" };
   if (to.name === "login" && auth.isAuthenticated) {
@@ -189,6 +203,14 @@ router.beforeEach((to) => {
   // Inbox: approvers only.
   if (to.meta.approver && !auth.me?.can_approve && !auth.me?.is_superuser) {
     return { name: homeRouteFor(auth.department) };
+  }
+  // CRM demo: locked until its own password is entered. `next` is carried so
+  // a deep link (a drill-down URL someone was sent) survives the prompt.
+  if (to.meta.crm) {
+    const { useCrmStore } = await import("@/stores/crm");
+    if (!(await useCrmStore().checkGate())) {
+      return { name: "crm-unlock", query: { next: to.fullPath } };
+    }
   }
 });
 

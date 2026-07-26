@@ -21,6 +21,12 @@ env = environ.Env(
 environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="dev-insecure-change-me")
+
+# Password for the locked «دمو CRM» section — deliberately separate from any
+# login password, so the CRM demo can be shown to someone without giving them
+# an account (or handed to a colleague without sharing yours). Set
+# CRM_DEMO_PASSWORD in .env; empty means the demo stays closed for everyone.
+CRM_DEMO_PASSWORD = env("CRM_DEMO_PASSWORD", default="ntp-crm-1405")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 

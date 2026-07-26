@@ -1,5 +1,8 @@
 import { defineStore } from "pinia";
 import { crmApi, type CrmMe, type CrmOptions, type Drill } from "@/api/crm";
+import { CRM_KEY } from "@/api/client";
+import { store as storage } from "@/lib/storage";
+import { apiError } from "@/components/crm/formError";
 
 /**
  * Shared CRM state: the filter bar and the lookup lists.
@@ -27,6 +30,10 @@ export const useCrmStore = defineStore("crm", {
     options: null as CrmOptions | null,
     me: null as CrmMe | null,
     loading: false,
+    // Demo lock. `unlocked === null` means "not checked yet" — distinct from
+    // a confirmed false, so the guard can tell "ask the server" from "locked".
+    unlocked: null as boolean | null,
+    gateChecking: false,
     filters: {
       range: "last6",
       month: "",
@@ -93,6 +100,52 @@ export const useCrmStore = defineStore("crm", {
   },
 
   actions: {
+    /**
+     * Ask the server whether the stored key still opens the demo. The client
+     * cannot judge that itself — the key is signed and expires — so the
+     * answer always comes from /crm/gate/.
+     */
+    async checkGate(force = false): Promise<boolean> {
+      if (this.unlocked !== null && !force) return this.unlocked;
+      if (!storage.get(CRM_KEY)) {
+        this.unlocked = false;
+        return false;
+      }
+      this.gateChecking = true;
+      try {
+        this.unlocked = (await crmApi.gateStatus()).unlocked;
+      } catch {
+        this.unlocked = false;
+      } finally {
+        this.gateChecking = false;
+      }
+      if (!this.unlocked) storage.remove(CRM_KEY);
+      return this.unlocked;
+    },
+
+    /** Exchange the demo password for a key. Returns "" on success. */
+    async unlock(password: string): Promise<string> {
+      try {
+        const { key } = await crmApi.unlock(password);
+        storage.set(CRM_KEY, key);
+        this.unlocked = true;
+        return "";
+      } catch (e) {
+        this.unlocked = false;
+        storage.remove(CRM_KEY);
+        return apiError(e);
+      }
+    },
+
+    lock() {
+      storage.remove(CRM_KEY);
+      this.unlocked = false;
+      // Drop everything the demo loaded, so locking really closes it.
+      this.options = null;
+      this.me = null;
+      this.drill = null;
+    },
+
     async loadOptions(force = false) {
       if (this.options && !force) return this.options;
       this.loading = true;
