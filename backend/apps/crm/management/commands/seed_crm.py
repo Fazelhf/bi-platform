@@ -273,22 +273,33 @@ class Command(BaseCommand):
         ]
 
     def _reps(self):
-        """The real salespeople, weighted by their profile."""
-        out = []
-        for emp in DimEmployee.objects.filter(is_active=True):
-            profile = REP_PROFILE.get(emp.full_name_fa)
-            if profile:
-                out.append((emp, *profile))
+        """
+        The real salespeople, weighted by their profile.
+
+        Ordered by REP_PROFILE, not by whatever order the database hands back.
+        Every draw below is made against this list, so a different row order on
+        another machine would silently produce a different dataset from the
+        same seed — and "the same demo as my laptop" would stop being true.
+        """
+        by_name = {
+            e.full_name_fa: e for e in DimEmployee.objects.filter(is_active=True)
+        }
+        out = [
+            (by_name[name], *profile)
+            for name, profile in REP_PROFILE.items()
+            if name in by_name
+        ]
         if not out:  # safety net if the employee dimension is empty
-            emp = DimEmployee.objects.first()
+            emp = DimEmployee.objects.order_by("code").first()
             out = [(emp, 1.0, 0.45, 1.0, 5.0)]
         return out
 
     def _provinces(self):
-        rows = []
-        for p in DimProvince.objects.all():
-            rows.append((p, PROVINCE_WEIGHTS.get(p.name_fa, 1)))
-        return rows
+        # Sorted by name for the same reason as _reps().
+        return [
+            (p, PROVINCE_WEIGHTS.get(p.name_fa, 1))
+            for p in DimProvince.objects.order_by("name_fa")
+        ]
 
     # ---- time ------------------------------------------------------------
     def _month_range(self, count: int) -> list[tuple[int, int, dt.date, dt.date]]:
@@ -759,7 +770,7 @@ class Command(BaseCommand):
         # so its first_deal_won_at values are all still None.
         pool = list(
             Customer.objects.filter(first_deal_won_at__isnull=False)
-            .select_related("owner")
+            .select_related("owner").order_by("code")
         )
         for customer in rnd.sample(pool, k=min(len(pool), 180)):
             # Score skews positive, but each rep has a different tail.
@@ -785,7 +796,7 @@ class Command(BaseCommand):
         rnd = self.rnd
         rows = []
         now = timezone.now()
-        open_deals = list(Deal.objects.filter(status="open").select_related("customer")[:400])
+        open_deals = list(Deal.objects.filter(status="open").select_related("customer").order_by("-opened_at", "code")[:400])
         for deal in open_deals:
             if rnd.random() > 0.55:
                 continue
@@ -820,7 +831,7 @@ class Command(BaseCommand):
         # overwrites them corrupts the live dashboards the moment it is
         # installed beside them. The provinces report prefers the real target
         # and only falls back to these.
-        province_ids = list(DimProvince.objects.values_list("id", flat=True))
+        province_ids = list(DimProvince.objects.order_by("name_fa").values_list("id", flat=True))
         created = 0
         for jy, jm, s, e in months:
             period = period_for(s)

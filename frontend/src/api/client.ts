@@ -41,14 +41,20 @@ api.interceptors.response.use(
   (r) => r,
   async (error) => {
     const original = error.config;
-    // An expired or revoked CRM grant looks like a 403 on a /crm/ call. Drop
-    // the dead key so the UI re-prompts instead of silently showing nothing.
+    // An expired or revoked CRM grant looks like a 403 on a /crm/ call. The
+    // demo lapses after an hour, and it usually lapses while someone is
+    // sitting on a CRM page — so drop the dead key and send them to the
+    // prompt, otherwise the page just stops filling in with no explanation.
     if (
       error.response?.status === 403 &&
       original?.url?.includes("/crm/") &&
       !original.url.includes("/crm/gate/")
     ) {
       store.remove(CRM_KEY);
+      const path = location.pathname;
+      if (path.startsWith("/crm") && !path.startsWith("/crm/unlock")) {
+        location.href = `/crm/unlock?next=${encodeURIComponent(path + location.search)}`;
+      }
     }
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true;

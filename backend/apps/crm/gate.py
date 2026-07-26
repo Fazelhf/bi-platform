@@ -28,8 +28,11 @@ from rest_framework.permissions import BasePermission
 SALT = "crm.demo.gate"
 HEADER = "HTTP_X_CRM_KEY"
 
-#: How long one unlock lasts. A demo session, not a login.
-TTL_SECONDS = 8 * 60 * 60
+#: How long one unlock lasts. A demo session, not a login — every user enters
+#: the password themselves (the grant is bound to them, so it cannot be passed
+#: around), and after an hour it lapses and they enter it again. Short on
+#: purpose: a demo left open on an unattended screen closes itself.
+TTL_SECONDS = 60 * 60
 
 #: Brute-force budget per user per window.
 MAX_ATTEMPTS = 8
