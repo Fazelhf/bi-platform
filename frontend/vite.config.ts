@@ -25,10 +25,12 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // v2 (CRM) runs alongside v1 — different ports so both can be up at once.
+    port: 5174,
+    strictPort: true,
     proxy: {
       // Dev: proxy API to Django so there are no CORS surprises.
-      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/api": { target: "http://127.0.0.1:8001", changeOrigin: true },
     },
   },
 });
