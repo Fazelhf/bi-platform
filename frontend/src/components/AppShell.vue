@@ -9,6 +9,7 @@ import { inboxApi } from "@/api/platform";
 import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import DrillDrawer from "@/components/crm/DrillDrawer.vue";
 
 const auth = useAuthStore();
 const ui = useUiStore();
@@ -25,6 +26,33 @@ const userMenu = ref(false);
 const search = ref("");
 
 interface Item { name: string; label: string; icon: string; badge?: () => number }
+
+/**
+ * CRM section — visible to the CEO and to the sales_team department, since
+ * فروش همکار is the only channel it covers today.
+ */
+const crmItems: Item[] = [
+  { name: "crm-dashboard", label: "نشانگر CRM", icon: "grid" },
+  { name: "crm-pipeline", label: "کاریز فروش", icon: "target" },
+  { name: "crm-deals", label: "معاملات", icon: "box" },
+  { name: "crm-customers", label: "مشتریان", icon: "team" },
+  { name: "crm-activities", label: "فعالیت‌ها", icon: "notes" },
+  { name: "crm-reports", label: "گزارش‌های CRM", icon: "chart" },
+];
+
+const showCrm = computed(
+  () => auth.isExecutive || auth.department === "sales_team" || !!auth.me?.is_superuser,
+);
+
+// Detail pages keep their list item highlighted.
+const CRM_PARENT: Record<string, string> = {
+  "crm-deal": "crm-deals",
+  "crm-customer": "crm-customers",
+};
+function crmActive(name: string): boolean {
+  const current = String(route.name ?? "");
+  return current === name || CRM_PARENT[current] === name;
+}
 
 const primary = computed<Item[]>(() => {
   const items: Item[] = [];
@@ -76,6 +104,10 @@ const pageTitle = computed(() => {
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
     inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "تیم",
+    "crm-dashboard": "نشانگر CRM", "crm-pipeline": "کاریز فروش",
+    "crm-deals": "معاملات", "crm-deal": "پرونده معامله",
+    "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
+    "crm-activities": "فعالیت‌ها و کارها", "crm-reports": "گزارش‌های CRM",
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
     "sales-b2b-entry": "ورود فروش B2B",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
@@ -164,6 +196,27 @@ onMounted(() => {
           >{{ it.badge() }}</span>
         </button>
 
+        <!-- CRM section -->
+        <template v-if="showCrm">
+          <div class="pt-3 pb-1 px-3">
+            <p v-if="!collapsed" class="text-[10px] font-semibold text-slate-300 tracking-wide">CRM · فروش همکار</p>
+            <div v-else class="h-px bg-slate-200 mx-1"></div>
+          </div>
+          <button
+            v-for="it in crmItems"
+            :key="it.name"
+            class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
+            :class="[
+              crmActive(it.name) ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
+              collapsed ? 'justify-center' : '',
+            ]"
+            :title="collapsed ? it.label : ''"
+            @click="go(it.name)"
+          >
+            <NavIcon :name="it.icon" :size="20" />
+            <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
+          </button>
+        </template>
       </nav>
 
       <!-- Bottom: profile, settings (admin+CEO only), logout -->
@@ -276,6 +329,9 @@ onMounted(() => {
       <main class="flex-1 min-w-0">
         <RouterView />
       </main>
+
+      <!-- CRM drill-down panel — mounted once, opened from any CRM page -->
+      <DrillDrawer v-if="showCrm" />
 
       <!-- Footer -->
       <footer class="text-center text-xs text-slate-400 py-3">

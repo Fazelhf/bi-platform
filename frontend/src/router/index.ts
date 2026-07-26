@@ -71,6 +71,50 @@ const router = createRouter({
           meta: { executive: true },
         },
 
+        // --- CRM (فروش همکار) ---
+        // Every CRM figure is drillable, so these pages are readable by any
+        // authenticated user; writing is gated by the API, not the router.
+        {
+          path: "crm",
+          name: "crm-dashboard",
+          component: () => import("@/views/crm/CrmDashboardView.vue"),
+        },
+        {
+          path: "crm/pipeline",
+          name: "crm-pipeline",
+          component: () => import("@/views/crm/PipelineView.vue"),
+        },
+        {
+          path: "crm/deals",
+          name: "crm-deals",
+          component: () => import("@/views/crm/DealsView.vue"),
+        },
+        {
+          path: "crm/deals/:id",
+          name: "crm-deal",
+          component: () => import("@/views/crm/DealDetailView.vue"),
+        },
+        {
+          path: "crm/customers",
+          name: "crm-customers",
+          component: () => import("@/views/crm/CustomersView.vue"),
+        },
+        {
+          path: "crm/customers/:id",
+          name: "crm-customer",
+          component: () => import("@/views/crm/CustomerDetailView.vue"),
+        },
+        {
+          path: "crm/activities",
+          name: "crm-activities",
+          component: () => import("@/views/crm/ActivitiesView.vue"),
+        },
+        {
+          path: "crm/reports",
+          name: "crm-reports",
+          component: () => import("@/views/crm/CrmReportsView.vue"),
+        },
+
         // --- Department manager entry (department-guarded) ---
         {
           path: "sales/entry",
