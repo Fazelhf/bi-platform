@@ -197,3 +197,207 @@ class NotificationClearingTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(Notification.objects.filter(recipient=self.me).count(), 0)
         self.assertTrue(Notification.objects.filter(recipient=self.other).exists())
+
+
+class JalaliCalendarTests(TestCase):
+    """The calendar is the foundation — if it drifts, every period is wrong."""
+
+    def test_khordad_1405_raw_weeks_match_the_calendar(self):
+        from apps.core.jalali import WEEKDAYS_FA, split_month_into_weeks, to_gregorian, weekday
+
+        # خرداد 1405 starts on a Friday, so day 1 is a one-day tail week.
+        self.assertEqual(WEEKDAYS_FA[weekday(to_gregorian(1405, 3, 1))], "جمعه")
+        self.assertEqual(
+            split_month_into_weeks(1405, 3, min_days=1),
+            [(1, 1), (2, 8), (9, 15), (16, 22), (23, 29), (30, 31)],
+        )
+
+    def test_short_edge_weeks_are_merged(self):
+        from apps.core.jalali import split_month_into_weeks
+
+        self.assertEqual(
+            split_month_into_weeks(1405, 3),
+            [(1, 8), (9, 15), (16, 22), (23, 31)],
+        )
+
+    def test_weeks_tile_every_month_exactly(self):
+        from apps.core.jalali import month_days, split_month_into_weeks
+
+        for jy in range(1400, 1421):
+            for jm in range(1, 13):
+                spans = split_month_into_weeks(jy, jm)
+                covered = [d for a, b in spans for d in range(a, b + 1)]
+                self.assertEqual(
+                    covered, list(range(1, month_days(jy, jm) + 1)),
+                    f"{jy}/{jm} does not tile exactly: {spans}",
+                )
+                self.assertTrue(all(b - a + 1 >= 3 for a, b in spans))
+
+    def test_gregorian_round_trip(self):
+        from datetime import date, timedelta
+
+        from apps.core.jalali import from_gregorian, to_gregorian
+
+        d = date(2024, 1, 1)
+        for _ in range(1500):
+            jy, jm, jd = from_gregorian(d)
+            self.assertEqual(to_gregorian(jy, jm, jd), d)
+            d += timedelta(days=1)
+
+    def test_leap_years(self):
+        from apps.core.jalali import month_days
+
+        self.assertEqual(month_days(1403, 12), 30)  # کبیسه
+        self.assertEqual(month_days(1405, 12), 29)
+
+
+class PeriodRollupTests(TestCase):
+    """A month must equal the sum of its weeks — and ratios must be derived
+    from those sums, never averaged across weeks."""
+
+    def setUp(self):
+        from apps.core import jalali
+        from apps.core.periods import ensure_weeks
+
+        self.month = DimPeriod.objects.create(
+            jalali_year=1405, jalali_month=3, kind="month", seq=3, code="1405.03",
+            start_date=jalali.to_gregorian(1405, 3, 1),
+            end_date=jalali.to_gregorian(1405, 3, 31),
+        )
+        self.weeks = ensure_weeks(self.month)
+        self.emp = DimEmployee.objects.create(code="w-1", full_name_fa="فروشنده")
+
+    def _week_fact(self, week, revenue, profit):
+        return FactSalesMonthly.objects.create(
+            period=week, employee=self.emp, channel=SalesChannel.TEAM,
+            revenue_rial=Decimal(revenue), profit_rial=Decimal(profit),
+            status=ApprovalStatus.APPROVED,
+        )
+
+    def test_month_has_four_weeks_covering_31_days(self):
+        self.assertEqual(len(self.weeks), 4)
+        self.assertEqual(sum(w.days for w in self.weeks), 31)
+
+    def test_month_revenue_is_the_sum_of_its_weeks(self):
+        for wk, rev in zip(self.weeks, [100, 200, 300, 400]):
+            self._week_fact(wk, rev, rev // 10)
+        compute_period_kpis(self.month)
+        total = FactKPI.objects.get(
+            period=self.month, scope="company", kpi__code="revenue",
+            channel=SalesChannel.TEAM,
+        )
+        self.assertEqual(total.actual, Decimal("1000"))
+
+    def test_month_margin_is_not_the_average_of_weekly_margins(self):
+        # Week A: 100 revenue / 50 profit = 50%.  Week B: 900 / 90 = 10%.
+        # Averaging gives 30%; the truth is 140/1000 = 14%.
+        self._week_fact(self.weeks[0], 100, 50)
+        self._week_fact(self.weeks[1], 900, 90)
+        compute_period_kpis(self.month)
+        margin = FactKPI.objects.get(
+            period=self.month, scope="company", kpi__code="profit_margin",
+            channel=SalesChannel.TEAM,
+        )
+        self.assertAlmostEqual(float(margin.actual), 14.0, places=6)
+
+    def test_approving_a_week_cascades_to_the_month(self):
+        self._week_fact(self.weeks[0], 500, 50)
+        compute_period_kpis(self.weeks[0])  # cascade=True by default
+        month_total = FactKPI.objects.get(
+            period=self.month, scope="company", kpi__code="revenue",
+            channel=SalesChannel.TEAM,
+        )
+        self.assertEqual(month_total.actual, Decimal("500"))
+
+    def test_a_month_with_facts_cannot_be_split(self):
+        from apps.core.periods import ensure_weeks
+
+        other = DimEmployee.objects.create(code="w-2", full_name_fa="دیگری")
+        solo = DimPeriod.objects.create(jalali_year=1405, jalali_month=5, code="1405.05")
+        FactSalesMonthly.objects.create(
+            period=solo, employee=other, channel=SalesChannel.TEAM,
+            revenue_rial=Decimal("5"),
+        )
+        with self.assertRaises(ValueError):
+            ensure_weeks(solo)
+
+    def test_monthly_target_is_not_multiplied_by_the_number_of_weeks(self):
+        """The bug the separate target table exists to prevent: a plan of 1000
+        set once on the month must stay 1000, not 4000 across four weeks."""
+        from apps.sales.models import SalesTarget
+
+        for wk in self.weeks:
+            self._week_fact(wk, 250, 25)
+        SalesTarget.objects.create(
+            period=self.month, channel=SalesChannel.TEAM,
+            employee=self.emp, target_rial=Decimal("1000"),
+        )
+        compute_period_kpis(self.month)
+        achievement = FactKPI.objects.get(
+            period=self.month, scope="employee", kpi__code="target_achievement",
+            channel=SalesChannel.TEAM,
+        )
+        # 1000 sold against a 1000 plan = 100%, not 25%.
+        self.assertAlmostEqual(float(achievement.actual), 100.0, places=6)
+
+    def test_a_week_inherits_its_months_plan(self):
+        from apps.sales.models import SalesTarget
+
+        self._week_fact(self.weeks[0], 500, 50)
+        SalesTarget.objects.create(
+            period=self.month, channel=SalesChannel.TEAM,
+            employee=self.emp, target_rial=Decimal("1000"),
+        )
+        compute_period_kpis(self.weeks[0], cascade=False)
+        wk = FactKPI.objects.get(
+            period=self.weeks[0], scope="employee", kpi__code="target_achievement",
+            channel=SalesChannel.TEAM,
+        )
+        self.assertAlmostEqual(float(wk.actual), 50.0, places=6)
+
+    def test_writing_to_a_split_month_is_rejected(self):
+        """The one structural way جمع هفته‌ها could stop equalling the month."""
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        user = get_user_model().objects.create_user(
+            username="rec-mgr", password="x", role="manager", department="sales_team"
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+        r = client.post("/api/sales/input/", {
+            "period": self.month.id, "channel": "team",
+            "columns": [{"employee_id": self.emp.id, "name": "فروشنده",
+                         "revenue_rial": "999"}],
+            "provinces": [],
+        }, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(
+            FactSalesMonthly.objects.filter(period=self.month).exists()
+        )
+
+    def test_reconciliation_reports_weeks_equal_month(self):
+        from apps.core.periods import reconciliation
+
+        for wk, rev in zip(self.weeks, [100, 200, 300, 400]):
+            self._week_fact(wk, rev, 0)
+        compute_period_kpis(self.month)
+        for wk in self.weeks:
+            compute_period_kpis(wk, cascade=False)
+
+        rec = reconciliation(self.month)
+        self.assertTrue(rec["balanced"])
+        self.assertEqual(rec["month_total"], rec["weeks_total"])
+        self.assertEqual(Decimal(rec["weeks_total"]), Decimal("1000"))
+        self.assertFalse(rec["month_holds_own_figures"])
+
+    def test_calendar_covers_every_day_exactly_once(self):
+        from apps.core.periods import calendar
+
+        cal = calendar(self.month)
+        self.assertEqual(len(cal["days"]), 31)
+        # every day belongs to exactly one week
+        self.assertTrue(all(d["week_seq"] is not None for d in cal["days"]))
+        self.assertEqual(sum(w["days"] for w in cal["weeks"]), 31)
+        # week 1 of خرداد 1405 runs 1..8 after the short-edge merge
+        self.assertEqual((cal["weeks"][0]["first_day"], cal["weeks"][0]["last_day"]), (1, 8))

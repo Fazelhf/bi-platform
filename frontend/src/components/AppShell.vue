@@ -4,6 +4,7 @@ import { RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { usePresence } from "@/composables/usePresence";
+import { useClickOutside } from "@/composables/useClickOutside";
 import { socialApi } from "@/api/social";
 import { inboxApi } from "@/api/platform";
 import NavIcon from "@/components/NavIcon.vue";
@@ -21,7 +22,11 @@ const collapsed = ref(false);
 const mobileOpen = ref(false); // drawer state on phones
 const inboxCount = ref(0);
 const chatCount = ref(0);
+// The avatar menu closes on any click elsewhere or Escape — mouseleave used
+// to close it, which snapped it shut whenever the pointer merely drifted off.
 const userMenu = ref(false);
+const userMenuRoot = ref<HTMLElement | null>(null);
+useClickOutside(userMenuRoot, () => (userMenu.value = false));
 const search = ref("");
 
 interface Item { name: string; label: string; icon: string; badge?: () => number }
@@ -244,7 +249,7 @@ onMounted(() => {
             </svg>
           </button>
           <NotificationBell />
-          <div class="relative">
+          <div ref="userMenuRoot" class="relative">
             <button class="flex items-center gap-2" @click="userMenu = !userMenu">
               <UserAvatar
                 :name="auth.me?.display_name_fa"
@@ -258,7 +263,6 @@ onMounted(() => {
             <div
               v-if="userMenu"
               class="absolute left-0 mt-2 w-48 bg-surface rounded-2xl shadow-pop border border-slate-100 p-2 z-50 animate-pop"
-              @mouseleave="userMenu = false"
             >
               <div class="px-3 py-2">
                 <p class="text-sm font-semibold text-ink">{{ auth.username }}</p>

@@ -1,5 +1,5 @@
 import api from "./client";
-import type { DashboardSummary, Period, SalesMonthly } from "@/types";
+import type { DashboardSummary, MonthProgress, Period, SalesMonthly } from "@/types";
 
 export const salesApi = {
   async periods(): Promise<Period[]> {
@@ -10,6 +10,18 @@ export const salesApi = {
   async employees(): Promise<{ id: number; full_name_fa: string; team_name?: string }[]> {
     const { data } = await api.get("/sales/employees/", { params: { page_size: 200 } });
     return data.results ?? data;
+  },
+
+  /** A month's weeks plus how much of it has been filled in. */
+  async monthProgress(monthId: number): Promise<MonthProgress> {
+    const { data } = await api.get(`/sales/periods/${monthId}/weeks/`);
+    return data;
+  },
+
+  /** Cut a month into weeks (CEO only; refused once the month has figures). */
+  async splitIntoWeeks(monthId: number): Promise<Period[]> {
+    const { data } = await api.post(`/sales/periods/${monthId}/split/`);
+    return data;
   },
 
   async dashboard(periodId: number, channel = "team"): Promise<DashboardSummary> {

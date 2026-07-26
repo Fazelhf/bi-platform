@@ -49,6 +49,17 @@ function onInput(e: Event) {
 
   emit("update:modelValue", raw);
 }
+
+/**
+ * Most cells start at 0. Without this, clicking one and typing 5 leaves "05"
+ * — the zero is a placeholder, not a digit anyone meant to keep. Selecting it
+ * on focus makes the first keystroke replace it, while a field with a real
+ * value is left alone so it can still be edited in place.
+ */
+function onFocus(e: FocusEvent) {
+  const el = e.target as HTMLInputElement;
+  if (Number(props.modelValue ?? 0) === 0) el.select();
+}
 </script>
 
 <template>
@@ -58,5 +69,6 @@ function onInput(e: Event) {
     inputmode="decimal"
     dir="ltr"
     @input="onInput"
+    @focus="onFocus"
   />
 </template>

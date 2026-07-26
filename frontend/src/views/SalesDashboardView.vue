@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defaultPeriodId, type Period } from "@/types";
+import { defaultPeriodId, type MonthProgress, type Period } from "@/types";
 import { computed, onMounted, ref, watch } from "vue";
 import api from "@/api/client";
 import { salesApi } from "@/api/sales";
@@ -7,6 +7,9 @@ import SeriesChart from "@/components/charts/SeriesChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import ExportActions from "@/components/ExportActions.vue";
+import WeekProgress from "@/components/WeekProgress.vue";
+import PeriodCalendar from "@/components/PeriodCalendar.vue";
+import ReconcilePanel from "@/components/ReconcilePanel.vue";
 import { rial } from "@/utils/format";
 
 /**
@@ -35,6 +38,13 @@ const dataB = ref<Detail | null>(null);
 const tab = ref<"people" | "teams">("people");
 const loading = ref(false);
 
+// When a week is picked from the strip the charts show just that week;
+// otherwise they show the whole month (its weeks rolled up).
+const weekId = ref<number | null>(null);
+const progress = ref<MonthProgress | null>(null);
+const showBreakdown = ref(false);
+const viewedPeriod = computed(() => weekId.value ?? periodA.value);
+
 async function fetchDetail(pid: number): Promise<Detail> {
   const { data } = await api.get("/sales/dashboard/detail/", {
     params: { period: pid, channel: props.channel },
@@ -42,15 +52,28 @@ async function fetchDetail(pid: number): Promise<Detail> {
   return data;
 }
 
-async function load() {
+async function loadProgress() {
   if (!periodA.value) return;
+  try {
+    progress.value = await salesApi.monthProgress(periodA.value);
+  } catch {
+    progress.value = null; // months that were never split have no strip
+  }
+}
+
+async function load() {
+  if (!viewedPeriod.value) return;
   loading.value = true;
   try {
-    data.value = await fetchDetail(periodA.value);
+    data.value = await fetchDetail(viewedPeriod.value);
     dataB.value = compare.value && periodB.value ? await fetchDetail(periodB.value) : null;
   } finally {
     loading.value = false;
   }
+}
+
+function pickWeek(id: number | null) {
+  weekId.value = id;
 }
 
 // ---- helpers to build a chart series (with optional comparison month) ----
@@ -96,9 +119,14 @@ onMounted(async () => {
   // Main period = latest month that has data; comparison starts unset.
   periodA.value = defaultPeriodId(periods.value);
   periodB.value = null;
-  await load();
+  await Promise.all([load(), loadProgress()]);
 });
-watch([periodA, periodB, compare, () => props.channel], load);
+watch([periodA, periodB, compare, weekId, () => props.channel], load);
+// Changing the month reloads the strip and drops any week drill-down.
+watch([periodA, () => props.channel], () => {
+  weekId.value = null;
+  loadProgress();
+});
 </script>
 
 <template>
@@ -126,6 +154,32 @@ watch([periodA, periodB, compare, () => props.channel], load);
         >
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
         </select>
+      </div>
+    </div>
+
+    <!-- Week strip: progress through the month + drill-down -->
+    <div class="flex items-center gap-3 flex-wrap">
+      <WeekProgress :progress="progress" :selected="weekId" @pick="pickWeek" />
+      <button
+        v-if="(progress?.weeks.length ?? 0) > 1"
+        class="text-xs text-brand-600 hover:underline no-print"
+        @click="showBreakdown = !showBreakdown"
+      >{{ showBreakdown ? "بستن تفکیک هفته‌ها" : "تفکیک هفته‌ها و تقویم" }}</button>
+    </div>
+
+    <!-- Calendar + the proof that the weeks add up to the month -->
+    <div
+      v-if="showBreakdown && progress"
+      class="bg-surface rounded-card shadow-soft p-5 grid grid-cols-1 lg:grid-cols-2 gap-6"
+    >
+      <PeriodCalendar
+        :calendar="progress.calendar"
+        :selected-week="progress.weeks.find(w => w.id === weekId)?.seq ?? null"
+        @pick="(seq) => pickWeek(progress!.weeks.find(w => w.seq === seq)?.id ?? null)"
+      />
+      <div>
+        <h4 class="font-semibold text-ink text-sm mb-3">کنترل مغایرت</h4>
+        <ReconcilePanel :recon="progress.reconciliation" />
       </div>
     </div>
 

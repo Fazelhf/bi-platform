@@ -112,8 +112,10 @@ class Measures:
         self.new_customers += f.new_customers
         self.profit += f.profit_rial
         self.cost += f.cost_rial
-        self.target += f.target_rial
         self.calls += f.calls
+        # NOTE: `target` is deliberately not summed from facts. Targets live
+        # on the month in SalesTarget; adding them per leaf would multiply a
+        # monthly plan by the number of weeks.
         self.quantity_ton += f.quantity_ton
         self.collected += f.collected_rial
         self.receivables += f.receivables_rial
@@ -202,16 +204,43 @@ def resolve_kpi_values(
     return out
 
 
+def _employee_targets(period, channel) -> dict[int, Decimal]:
+    """{employee_id: monthly target}. Read from the month that owns this
+    period, so a week inherits the plan set for its month."""
+    from apps.sales.models import SalesTarget
+
+    month = period.parent or period
+    return {
+        t.employee_id: t.target_rial
+        for t in SalesTarget.objects.filter(
+            period=month, channel=channel, province__isnull=True
+        ).exclude(employee=None)
+    }
+
+
 def _compute_channel(period, catalog, facts, channel, rows, formulas):
     """Aggregate one channel's facts into company/team/employee KPI rows."""
     company = Measures()
     by_employee: dict[int, Measures] = {}
     by_team: dict[int, Measures] = {}
+    team_of: dict[int, int] = {}
     for f in facts:
         company.add(f)
         by_employee.setdefault(f.employee_id, Measures()).add(f)
         if f.employee.team_id:
+            team_of[f.employee_id] = f.employee.team_id
             by_team.setdefault(f.employee.team_id, Measures()).add(f)
+
+    # Overlay the month's plan. Aggregating targets the same way as measures
+    # keeps «تحقق تارگت» meaningful at team and company scope.
+    targets = _employee_targets(period, channel)
+    for emp_id, m in by_employee.items():
+        m.target = targets.get(emp_id, Decimal(0))
+    for team_id, m in by_team.items():
+        m.target = sum(
+            (t for e, t in targets.items() if team_of.get(e) == team_id), Decimal(0)
+        )
+    company.target = sum(targets.values(), Decimal(0))
 
     company_revenue = company.revenue
 
@@ -242,19 +271,31 @@ def _compute_channel(period, catalog, facts, channel, rows, formulas):
 
 
 @transaction.atomic
-def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int:
+def compute_period_kpis(
+    period: DimPeriod, *, only_approved: bool = True, cascade: bool = True
+) -> int:
     """
-    (Re)compute all sales KPIs for a period, separately per channel (team vs
-    organizational). Returns the number of FactKPI rows written. Idempotent —
-    replaces this period's sales KPI rows without touching production.
+    (Re)compute all sales KPIs for a period, separately per channel.
+    Returns the number of FactKPI rows written. Idempotent — replaces this
+    period's sales KPI rows without touching production.
+
+    Facts live only on leaf periods, so a month reads its weeks' rows. The
+    ratios stay correct for free: every KPI here is derived from *summed*
+    numerators and denominators, never from averaged per-period ratios — so
+    a month's profit margin is total profit ÷ total revenue, not the mean of
+    four weekly margins.
+
+    With `cascade`, recomputing a week also refreshes the month above it, so
+    approving one week updates the monthly dashboard immediately.
     """
+    from apps.core.periods import leaf_ids_for
     from apps.sales.models import SalesChannel
 
     catalog = ensure_kpi_catalog()
 
-    base = FactSalesMonthly.objects.filter(period=period).select_related(
-        "employee", "employee__team"
-    )
+    base = FactSalesMonthly.objects.filter(
+        period_id__in=leaf_ids_for(period)
+    ).select_related("employee", "employee__team")
     if only_approved:
         base = base.filter(status=ApprovalStatus.APPROVED)
 
@@ -270,4 +311,11 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
             _compute_channel(period, catalog, facts, channel, rows, formulas)
 
     FactKPI.objects.bulk_create(rows)
+
+    # A week's numbers change its month's totals too.
+    if cascade and period.parent_id:
+        compute_period_kpis(
+            period.parent, only_approved=only_approved, cascade=True
+        )
+
     return len(rows)

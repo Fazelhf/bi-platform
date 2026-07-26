@@ -202,6 +202,53 @@ class FactSalesProvince(TimeStampedModel):
         return f"{self.province} · {self.period}"
 
 
+class SalesTarget(TimeStampedModel):
+    """
+    The CEO's plan, always at MONTH grain.
+
+    Kept out of the fact tables on purpose: a target is a plan, not a
+    measurement. It is set once a month by the CEO, while actuals are
+    recorded per week by department managers. Once entry moved to weeks,
+    leaving targets on the fact rows would have meant either duplicating the
+    monthly figure across four weeks or losing it entirely.
+
+    Exactly one of `employee` / `province` is set — the same plan expressed
+    against either dimension.
+    """
+
+    period = models.ForeignKey(
+        DimPeriod, on_delete=models.CASCADE, related_name="sales_targets"
+    )
+    channel = models.CharField(
+        max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM
+    )
+    employee = models.ForeignKey(
+        DimEmployee, null=True, blank=True, on_delete=models.CASCADE, related_name="targets"
+    )
+    province = models.ForeignKey(
+        DimProvince, null=True, blank=True, on_delete=models.CASCADE, related_name="targets"
+    )
+    target_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["period", "channel", "employee"],
+                condition=models.Q(province=None),
+                name="uniq_employee_target",
+            ),
+            models.UniqueConstraint(
+                fields=["period", "channel", "province"],
+                condition=models.Q(employee=None),
+                name="uniq_province_target",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        who = self.employee or self.province
+        return f"تارگت {who} · {self.period}"
+
+
 class FactCollection(TimeStampedModel):
     """Grain: bank x period. Amounts collected through each bank/PSP."""
 

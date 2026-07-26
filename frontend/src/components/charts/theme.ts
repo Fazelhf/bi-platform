@@ -54,6 +54,25 @@ export function bumpChartTheme() {
   themeTick.value++;
 }
 
+/** The card colour a chart sits on — pie slice gaps must match it, not be
+ *  hardcoded white (which turns into glaring outlines in dark mode). */
+export function surfaceColor(): string {
+  themeTick.value;
+  return isDark() ? "#1e1e22" : "#ffffff";
+}
+
+/** Legend / secondary chart text. */
+export function mutedColor(): string {
+  themeTick.value;
+  return isDark() ? "#a3a3ad" : "#64748b";
+}
+
+/** Data labels drawn outside the chart body. */
+export function labelColor(): string {
+  themeTick.value;
+  return isDark() ? "#d6d6dd" : "#334155";
+}
+
 export const AXIS = {
   get category() {
     themeTick.value;

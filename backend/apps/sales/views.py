@@ -2,6 +2,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.db.models import Sum
 from drf_spectacular.utils import extend_schema, OpenApiParameter
+from rest_framework import status as http_status
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -29,7 +30,7 @@ from apps.core.permissions import (
     SalesChannelOwnership,
 )
 from apps.sales.permissions import CanApprove, CanEnterData
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.sales.serializers import (
     BankSerializer,
     CollectionSerializer,
@@ -47,8 +48,101 @@ from apps.sales.services.kpi import compute_period_kpis
 
 # -------------------- Dimensions (read-mostly) --------------------
 class PeriodViewSet(viewsets.ModelViewSet):
+    """Months by default — the dropdowns everywhere expect months, so weeks
+    must not leak into them. Pass ?kind=week to list the children instead."""
+
+    # Kept so the router can still derive a basename; the real filtering
+    # happens in get_queryset().
     queryset = DimPeriod.objects.all()
     serializer_class = PeriodSerializer
+
+    def get_queryset(self):
+        kind = self.request.query_params.get("kind", "month")
+        qs = DimPeriod.objects.all()
+        return qs if kind == "all" else qs.filter(kind=kind)
+
+    @action(detail=True, methods=["get"])
+    def weeks(self, request, pk=None):
+        """
+        The month's weeks plus how far through it we are — this is what draws
+        the progress dots and the «داده تا …» / «ماه کامل نشده» badge.
+        """
+        from apps.core.periods import progress
+
+        from apps.core.periods import calendar, reconciliation
+
+        month = self.get_object()
+        data = progress(month)
+        data["period"] = self.get_serializer(month).data
+        # The calendar lets the UI show which days each week covers, and the
+        # reconciliation proves جمع هفته‌ها == ماه instead of just claiming it.
+        data["calendar"] = calendar(month)
+        data["reconciliation"] = reconciliation(month)
+        return Response(data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsExecutiveOrAdmin])
+    def split(self, request, pk=None):
+        """Cut a month into weeks. Executive-only, and refused once the month
+        holds figures — see the invariant on DimPeriod."""
+        from apps.core.models import SiteSetting
+        from apps.core.periods import ensure_weeks
+
+        month = self.get_object()
+        try:
+            weeks = ensure_weeks(month, min_days=SiteSetting.get().min_week_days)
+        except ValueError as exc:
+            return Response({"detail": str(exc)},
+                            status=http_status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(weeks, many=True).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsExecutiveOrAdmin])
+    def unsplit(self, request, pk=None):
+        """Back to monthly entry. Refused while any week still holds data."""
+        from apps.core.periods import unsplit
+
+        try:
+            removed = unsplit(self.get_object())
+        except ValueError as exc:
+            return Response({"detail": str(exc)},
+                            status=http_status.HTTP_400_BAD_REQUEST)
+        return Response({"removed": removed})
+
+    @action(detail=False, methods=["get"], url_path="year-grain")
+    def year_grain(self, request):
+        """
+        Every month of a year with its current grain and whether it can be
+        changed — this is what the CEO's «دوره‌ها» panel renders.
+        """
+        from apps.core.periods import has_facts
+
+        year = int(request.query_params.get("year") or 0)
+        months = DimPeriod.objects.filter(kind="month")
+        if year:
+            months = months.filter(jalali_year=year)
+
+        out = []
+        for m in months.order_by("jalali_year", "jalali_month"):
+            weeks = list(m.children.order_by("seq"))
+            month_has_facts = has_facts(m)
+            filled_weeks = [w.seq for w in weeks if has_facts(w)]
+            out.append({
+                "id": m.id,
+                "label": m.label,
+                "jalali_year": m.jalali_year,
+                "jalali_month": m.jalali_month,
+                "grain": "week" if weeks else "month",
+                "week_count": len(weeks),
+                "days": m.days,
+                # Why a switch is unavailable, so the UI can explain itself.
+                "can_go_weekly": not weeks and not month_has_facts,
+                "can_go_monthly": bool(weeks) and not filled_weeks,
+                "blocked_reason": (
+                    "این ماه داده‌ی ماهانه دارد" if month_has_facts and not weeks
+                    else f"هفته‌های {'، '.join(map(str, filled_weeks))} داده دارند"
+                    if filled_weeks else ""
+                ),
+            })
+        return Response(out)
 
 
 class TeamViewSet(viewsets.ModelViewSet):
@@ -380,12 +474,31 @@ class SalesInputView(APIView):
             period=period, channel=channel
         ).select_related("employee").order_by("employee__id")
 
+        from apps.sales.models import SalesTarget
+
+        # Targets are the CEO's monthly plan and live in their own table now;
+        # the sheet shows them read-only for context.
+        month = period.parent or period
+        plans = {
+            t.employee_id: t.target_rial
+            for t in SalesTarget.objects.filter(
+                period=month, channel=channel, province__isnull=True
+            )
+        }
+        prov_plans = {
+            t.province_id: t.target_rial
+            for t in SalesTarget.objects.filter(
+                period=month, channel=channel, employee__isnull=True
+            )
+        }
+
         fields = metric_fields_for(channel)
         columns = [{
             "employee_id": f.employee_id,
             "name": f.employee.full_name_fa,
             "status": f.status,
             **{m: str(getattr(f, m)) for m in fields},
+            "target_rial": str(plans.get(f.employee_id, 0)),
         } for f in facts]
 
         # Every province is listed from the start — managers fill in the ones
@@ -402,7 +515,7 @@ class SalesInputView(APIView):
                 "province_id": prov.id,
                 "name": prov.name_fa,
                 "sales_rial": str(row.sales_rial) if row else "0",
-                "target_rial": str(row.target_rial) if row else "0",
+                "target_rial": str(prov_plans.get(prov.id, 0)),
             })
 
         all_provinces = [{"id": p.id, "name": p.name_fa}
@@ -427,18 +540,24 @@ class SalesInputView(APIView):
         period = DimPeriod.objects.get(pk=request.data.get("period"))
         channel = self._channel(request)
         self._assert_owner(request, channel)
+
+        # Hard stop: never write figures to a period that has children. If a
+        # month held its own numbers *and* its weeks held theirs, the two
+        # would drift apart and every total would be ambiguous. Weekly months
+        # are filled in week by week — that is what keeps جمع هفته‌ها == ماه
+        # true by construction rather than by hope.
+        if period.children.exists():
+            raise ValidationError(
+                "این ماه به هفته تقسیم شده است؛ اطلاعات باید در هر هفته جداگانه "
+                "وارد شود، نه روی خود ماه."
+            )
         submit = bool(request.data.get("submit"))
         status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
         user = request.user
 
-        # Targets are the CEO's to set. A department manager's payload may
-        # still carry them (stale form state, or a hand-crafted request), so
-        # drop them here rather than trusting the UI's read-only inputs.
-        may_set_targets = bool(user.is_superuser or user.role == "executive")
-        editable = [
-            f for f in metric_fields_for(channel)
-            if may_set_targets or f not in TARGET_FIELDS
-        ]
+        # Targets live in SalesTarget at month grain and are set only in the
+        # «تارگت» section — never through this sheet, whoever is posting.
+        editable = [f for f in metric_fields_for(channel) if f not in TARGET_FIELDS]
 
         kept_employee_ids = set()
         for row in request.data.get("columns", []):
@@ -484,11 +603,9 @@ class SalesInputView(APIView):
             ).first()
             if existing is None and not _nonzero(sales):
                 continue  # nothing entered for this province — don't store it
-            defaults = {"sales_rial": sales}
-            if may_set_targets:
-                defaults["target_rial"] = p.get("target_rial") or 0
             FactSalesProvince.objects.update_or_create(
-                period=period, province_id=pid, channel=channel, defaults=defaults,
+                period=period, province_id=pid, channel=channel,
+                defaults={"sales_rial": sales},
             )
 
         audit_log(user, period, AuditLog.Action.UPDATE,
@@ -518,70 +635,97 @@ class SalesTargetView(APIView):
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
                               OpenApiParameter("channel", str)], responses=dict)
     def get(self, request):
+        from apps.core.periods import leaf_ids_for
+        from apps.sales.models import SalesTarget
+
         period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        month = period.parent or period  # plans are always held on the month
         channel = request.query_params.get("channel", "team")
+        leaves = leaf_ids_for(month)
+
+        plans = {
+            (t.employee_id, t.province_id): t.target_rial
+            for t in SalesTarget.objects.filter(period=month, channel=channel)
+        }
+
+        # Actuals come from the leaves so the CEO sees month-to-date beside
+        # the plan, whatever grain the month is recorded at.
+        actual_by_emp: dict[int, Decimal] = {}
+        names: dict[int, str] = {}
+        for f in FactSalesMonthly.objects.filter(
+            period_id__in=leaves, channel=channel
+        ).select_related("employee"):
+            actual_by_emp[f.employee_id] = (
+                actual_by_emp.get(f.employee_id, Decimal(0)) + f.revenue_rial
+            )
+            names[f.employee_id] = f.employee.full_name_fa
 
         people = [{
-            "employee_id": f.employee_id,
-            "name": f.employee.full_name_fa,
-            "target_rial": str(f.target_rial),
-            "revenue_rial": str(f.revenue_rial),  # context: last known actual
-        } for f in FactSalesMonthly.objects.filter(
-            period=period, channel=channel
-        ).select_related("employee").order_by("employee__id")]
+            "employee_id": emp_id,
+            "name": names[emp_id],
+            "target_rial": str(plans.get((emp_id, None), 0)),
+            "revenue_rial": str(actual_by_emp[emp_id]),
+        } for emp_id in sorted(actual_by_emp)]
 
-        saved = {
-            p.province_id: p
-            for p in FactSalesProvince.objects.filter(period=period, channel=channel)
-        }
-        provinces = []
-        for prov in DimProvince.objects.all().order_by("id"):
-            row = saved.get(prov.id)
-            provinces.append({
-                "province_id": prov.id,
-                "name": prov.name_fa,
-                "target_rial": str(row.target_rial) if row else "0",
-                "sales_rial": str(row.sales_rial) if row else "0",
-            })
+        actual_by_prov: dict[int, Decimal] = {}
+        for p in FactSalesProvince.objects.filter(
+            period_id__in=leaves, channel=channel
+        ):
+            actual_by_prov[p.province_id] = (
+                actual_by_prov.get(p.province_id, Decimal(0)) + p.sales_rial
+            )
+
+        provinces = [{
+            "province_id": prov.id,
+            "name": prov.name_fa,
+            "target_rial": str(plans.get((None, prov.id), 0)),
+            "sales_rial": str(actual_by_prov.get(prov.id, 0)),
+        } for prov in DimProvince.objects.all().order_by("id")]
 
         return Response({
-            "period": PeriodSerializer(period).data,
+            "period": PeriodSerializer(month).data,
             "channel": channel,
             "people": people,
             "provinces": provinces,
         })
 
     def post(self, request):
+        from apps.sales.models import SalesTarget
+
         period = DimPeriod.objects.get(pk=request.data.get("period"))
+        month = period.parent or period
         channel = request.data.get("channel", "team")
 
         for row in request.data.get("people", []):
             emp_id = row.get("employee_id")
             if not emp_id:
                 continue
-            FactSalesMonthly.objects.filter(
-                period=period, employee_id=emp_id, channel=channel
-            ).update(target_rial=row.get("target_rial") or 0)
+            SalesTarget.objects.update_or_create(
+                period=month, channel=channel, employee_id=emp_id, province=None,
+                defaults={"target_rial": row.get("target_rial") or 0},
+            )
 
         for row in request.data.get("provinces", []):
             pid = row.get("province_id")
             if not pid:
                 continue
             target = row.get("target_rial") or 0
-            existing = FactSalesProvince.objects.filter(
-                period=period, province_id=pid, channel=channel
-            ).first()
-            if existing is None and not _nonzero(target):
-                continue  # no target set and no row yet — nothing to store
-            FactSalesProvince.objects.update_or_create(
-                period=period, province_id=pid, channel=channel,
+            exists = SalesTarget.objects.filter(
+                period=month, channel=channel, province_id=pid
+            ).exists()
+            if not exists and not _nonzero(target):
+                continue  # no plan set and none stored — nothing to do
+            SalesTarget.objects.update_or_create(
+                period=month, channel=channel, province_id=pid, employee=None,
                 defaults={"target_rial": target},
             )
 
-        audit_log(request.user, period, AuditLog.Action.UPDATE,
-                  {"targets": {"before": None, "after": f"{channel} · {period.label}"}})
-        # Target changes move تحقق تارگت, so refresh the KPIs.
-        compute_period_kpis(period)
+        audit_log(request.user, month, AuditLog.Action.UPDATE,
+                  {"targets": {"before": None, "after": f"{channel} · {month.label}"}})
+        # Target changes move تحقق تارگت everywhere under this month.
+        compute_period_kpis(month)
+        for wk in month.children.all():
+            compute_period_kpis(wk, cascade=False)
         return Response({"ok": True})
 
 
