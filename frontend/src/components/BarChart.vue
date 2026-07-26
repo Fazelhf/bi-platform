@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
 import { rial } from "@/utils/format";
-import { AXIS, COLORS, TOOLTIP, barGradient, compact } from "./charts/theme";
+import { AXIS, COLORS, TOOLTIP, barGradient, compact, mutedColor } from "./charts/theme";
 
 const props = defineProps<{
   title: string;
@@ -48,7 +48,7 @@ const option = computed<EChartsOption>(() => {
     tooltip: { ...TOOLTIP, trigger: "axis",
       valueFormatter: (v) => rial(Number(v)) },
     legend: props.second
-      ? { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: "#64748b" } }
+      ? { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: mutedColor() } }
       : undefined,
     xAxis: props.horizontal ? val : { ...cat, axisLabel: { ...cat.axisLabel, rotate: 40 } },
     yAxis: props.horizontal ? cat : val,

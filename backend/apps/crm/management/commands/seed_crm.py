@@ -30,10 +30,10 @@ from django.utils import timezone
 from apps.crm.jalali import jalali_to_gregorian, month_bounds, period_for
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
-    DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
-    ProductCategory, Tag, Task,
+    DealStageEvent, DemoProvinceTarget, LeadSource, LostReason, PipelineStage,
+    Product, ProductCategory, Tag, Task,
 )
-from apps.sales.models import DimEmployee, DimProvince, FactSalesProvince
+from apps.sales.models import DimEmployee, DimProvince
 
 # --------------------------------------------------------------------------
 # Reference data
@@ -188,7 +188,7 @@ class Command(BaseCommand):
         if opts["fresh"]:
             self.stdout.write("پاک‌سازی داده‌های قبلی CRM …")
             for model in (Activity, Task, DealStageEvent, DealItem, Deal,
-                          CustomerFeedback, Customer):
+                          CustomerFeedback, Customer, DemoProvinceTarget):
                 model.objects.all().delete()
 
         stages = self._seed_stages()
@@ -815,11 +815,11 @@ class Command(BaseCommand):
         rnd = self.rnd
         from django.db.models import Sum
 
-        # Every province/month pair is rewritten, not just the ones with wins.
-        # The database already carried team-channel rows from the v1 seed, and
-        # leaving them in place made the achievement column nonsense: CRM
-        # actuals were being compared against targets from unrelated data
-        # (Isfahan showed 22% because of a target CRM never generated).
+        # Written to the CRM's OWN table, never to sales.FactSalesProvince or
+        # sales.SalesTarget. Those hold the company's real plan; a demo that
+        # overwrites them corrupts the live dashboards the moment it is
+        # installed beside them. The provinces report prefers the real target
+        # and only falls back to these.
         province_ids = list(DimProvince.objects.values_list("id", flat=True))
         created = 0
         for jy, jm, s, e in months:
@@ -842,9 +842,9 @@ class Command(BaseCommand):
                     if sold
                     else Decimal(rnd.randrange(500_000_000, 3_000_000_000, 100_000_000))
                 )
-                FactSalesProvince.objects.update_or_create(
+                DemoProvinceTarget.objects.update_or_create(
                     period=period, province_id=pid, channel="team",
-                    defaults={"sales_rial": sold, "target_rial": target.quantize(Decimal(1))},
+                    defaults={"target_rial": target.quantize(Decimal(1))},
                 )
                 created += 1
-        self.stdout.write(f"  · {created} ردیف تارگت استانی")
+        self.stdout.write(f"  · {created} ردیف تارگت استانی (جدول دمو)")

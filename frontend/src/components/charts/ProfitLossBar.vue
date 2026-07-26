@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
-import { AXIS, COLORS, TOOLTIP, barGradient, compact } from "./theme";
+import { AXIS, COLORS, TOOLTIP, barGradient, compact, mutedColor } from "./theme";
 import { rial } from "@/utils/format";
 
 // سود و زیان — درآمد (green) vs هزینه (rose) as horizontal bars.
@@ -12,7 +12,7 @@ const el = ref<HTMLElement | null>(null);
 const option = computed<EChartsOption>(() => ({
   grid: { top: 28, right: 24, bottom: 16, left: 66 },
   tooltip: { ...TOOLTIP, trigger: "axis", valueFormatter: (v) => rial(Number(v)) },
-  legend: { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: "#64748b" } },
+  legend: { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: mutedColor() } },
   xAxis: { ...AXIS.value, axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => compact(v) } },
   yAxis: { ...AXIS.category, data: [""], axisLabel: { show: false } },
   series: [

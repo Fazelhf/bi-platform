@@ -259,6 +259,41 @@ class Customer(TimeStampedModel):
         return self.name_fa
 
 
+class DemoProvinceTarget(TimeStampedModel):
+    """
+    Province targets **for the demo only**.
+
+    The provinces report compares CRM sales against the CEO's plan, which
+    lives in `sales.SalesTarget`. Real targets are read from there and must
+    never be written by the demo — an earlier version of the seed wrote its
+    generated numbers straight into the platform's province facts, which is
+    exactly the kind of contamination that makes a demo dangerous to install
+    next to production data.
+
+    So the seed fills this table instead, and the report falls back to it only
+    where no real target exists. Deleting every row here removes every trace
+    of the demo's targets.
+    """
+
+    period = models.ForeignKey(
+        DimPeriod, on_delete=models.CASCADE, related_name="crm_demo_targets"
+    )
+    province = models.ForeignKey(
+        DimProvince, on_delete=models.CASCADE, related_name="crm_demo_targets"
+    )
+    channel = models.CharField(
+        max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM
+    )
+    target_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+
+    class Meta:
+        unique_together = ("period", "province", "channel")
+        verbose_name = "تارگت استانی (دمو)"
+
+    def __str__(self) -> str:
+        return f"{self.province} · {self.period} (دمو)"
+
+
 class CustomerFeedback(TimeStampedModel):
     """
     نظرسنجی رضایت — feeds the "تعداد مشتری ناراضی از کارشناسان" widget. Score is

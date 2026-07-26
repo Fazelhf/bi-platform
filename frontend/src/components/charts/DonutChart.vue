@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
-import { COLORS, TOOLTIP } from "./theme";
+import { COLORS, TOOLTIP, surfaceColor } from "./theme";
 
 // درصد بهره‌وری — value (green) vs remaining gap (light), colour-cued by level.
 const props = defineProps<{ title: string; value: number | null }>();
@@ -18,7 +18,7 @@ const option = computed<EChartsOption>(() => ({
       type: "pie",
       radius: ["62%", "84%"],
       avoidLabelOverlap: false,
-      itemStyle: { borderRadius: 8, borderColor: "#fff", borderWidth: 3 },
+      itemStyle: { borderRadius: 8, borderColor: surfaceColor(), borderWidth: 3 },
       label: {
         show: true, position: "center",
         formatter: () => `${pct.value.toFixed(1)}٪`,

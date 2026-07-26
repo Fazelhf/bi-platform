@@ -14,11 +14,15 @@ from apps.sales.models import (
 
 class PeriodSerializer(serializers.ModelSerializer):
     label = serializers.CharField(read_only=True)
+    days = serializers.IntegerField(read_only=True)
     has_data = serializers.SerializerMethodField()
 
     class Meta:
         model = DimPeriod
-        fields = ["id", "jalali_year", "jalali_month", "label", "has_data"]
+        fields = [
+            "id", "jalali_year", "jalali_month", "label", "has_data",
+            "kind", "seq", "code", "start_date", "end_date", "days", "parent",
+        ]
 
     def get_has_data(self, obj) -> bool:
         # A period "has data" if any computed KPI exists for it — this drives

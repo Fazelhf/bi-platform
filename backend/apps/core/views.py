@@ -389,17 +389,31 @@ class SiteSettingView(APIView):
             "chart_theme": s.chart_theme,
             "company_name": s.company_name,
             "themes": [{"key": k, "label": v} for k, v in SiteSetting.THEMES],
+            "sales_grain": s.sales_grain,
+            "sales_grains": [{"key": k, "label": v} for k, v in SiteSetting.SALES_GRAINS],
+            "min_week_days": s.min_week_days,
         })
 
     def patch(self, request):
         from apps.core.models import SiteSetting
         s = SiteSetting.get()
-        before = s.chart_theme
+        before = {"chart_theme": s.chart_theme, "sales_grain": s.sales_grain}
         if "chart_theme" in request.data:
             s.chart_theme = request.data["chart_theme"]
         if "company_name" in request.data:
             s.company_name = request.data["company_name"]
+        if "sales_grain" in request.data:
+            s.sales_grain = request.data["sales_grain"]
+        if "min_week_days" in request.data:
+            s.min_week_days = int(request.data["min_week_days"])
         s.save()
-        audit_log(request.user, s, AuditLog.Action.UPDATE,
-                  {"chart_theme": {"before": before, "after": s.chart_theme}})
-        return Response({"chart_theme": s.chart_theme, "company_name": s.company_name})
+        audit_log(request.user, s, AuditLog.Action.UPDATE, {
+            "chart_theme": {"before": before["chart_theme"], "after": s.chart_theme},
+            "sales_grain": {"before": before["sales_grain"], "after": s.sales_grain},
+        })
+        return Response({
+            "chart_theme": s.chart_theme,
+            "company_name": s.company_name,
+            "sales_grain": s.sales_grain,
+            "min_week_days": s.min_week_days,
+        })

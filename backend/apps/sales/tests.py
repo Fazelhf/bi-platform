@@ -13,6 +13,7 @@ from apps.sales.models import (
     FactSalesMonthly,
     FactSalesProvince,
     SalesChannel,
+    SalesTarget,
 )
 from apps.sales.services.kpi import compute_period_kpis
 
@@ -33,9 +34,13 @@ class KpiEngineTests(TestCase):
             new_customers=1,
             profit_rial=Decimal("1318675512"),
             cost_rial=0,
-            target_rial=Decimal("100000000000"),
             calls=47,
             status=ApprovalStatus.APPROVED,
+        )
+        # The plan lives beside the facts now, at month grain.
+        SalesTarget.objects.create(
+            period=self.period, channel=SalesChannel.TEAM, employee=self.emp,
+            target_rial=Decimal("100000000000"),
         )
 
     def test_only_approved_rows_count(self):
@@ -181,7 +186,11 @@ class TargetOwnershipTests(APITestCase):
         self.province = DimProvince.objects.create(code="tehran", name_fa="تهران")
         self.fact = FactSalesMonthly.objects.create(
             period=self.period, employee=self.emp, channel=SalesChannel.TEAM,
-            revenue_rial=Decimal("100"), target_rial=Decimal("5000"),
+            revenue_rial=Decimal("100"),
+        )
+        self.plan = SalesTarget.objects.create(
+            period=self.period, channel=SalesChannel.TEAM, employee=self.emp,
+            target_rial=Decimal("5000"),
         )
         U = get_user_model()
         self.manager = U.objects.create_user(
@@ -201,8 +210,9 @@ class TargetOwnershipTests(APITestCase):
     def test_manager_cannot_change_target_via_entry_sheet(self):
         self.client.force_authenticate(self.manager)
         self.assertEqual(self._post_sheet("999999").status_code, 200)
+        self.plan.refresh_from_db()
         self.fact.refresh_from_db()
-        self.assertEqual(self.fact.target_rial, Decimal("5000"))  # untouched
+        self.assertEqual(self.plan.target_rial, Decimal("5000"))  # untouched
         self.assertEqual(self.fact.revenue_rial, Decimal("900"))  # actuals saved
 
     def test_manager_sees_targets_as_readonly(self):
@@ -224,12 +234,15 @@ class TargetOwnershipTests(APITestCase):
             "provinces": [{"province_id": self.province.id, "target_rial": "4321"}],
         }, format="json")
         self.assertEqual(r.status_code, 200)
-        self.fact.refresh_from_db()
-        self.assertEqual(self.fact.target_rial, Decimal("7777"))
-        prov = FactSalesProvince.objects.get(
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.target_rial, Decimal("7777"))
+        prov_plan = SalesTarget.objects.get(
             period=self.period, province=self.province, channel=SalesChannel.TEAM
         )
-        self.assertEqual(prov.target_rial, Decimal("4321"))
+        self.assertEqual(prov_plan.target_rial, Decimal("4321"))
+        # The plan must never leak back onto the fact rows.
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.target_rial, Decimal("0"))
 
     def test_entry_sheet_lists_every_province(self):
         DimProvince.objects.create(code="fars", name_fa="فارس")

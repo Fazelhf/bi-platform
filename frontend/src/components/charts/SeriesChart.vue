@@ -3,7 +3,10 @@ import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
 import { useUiStore } from "@/stores/ui";
-import { AXIS, TOOLTIP, barGradient, barRadius, compact, seriesColor } from "./theme";
+import {
+  AXIS, TOOLTIP, barGradient, barRadius, compact, labelColor, mutedColor,
+  seriesColor, surfaceColor,
+} from "./theme";
 
 /**
  * One chart for the workbook's chart sheets: 1..n series over shared
@@ -27,16 +30,40 @@ const option = computed<EChartsOption>(() => {
   const fmt = (v: number) => (props.percent ? `${Math.round(v * 10) / 10}٪` : compact(v));
 
   if (props.kind === "pie") {
+    // Slices worth nothing still drew a label ("پارسا مروتی ۰٪") that collided
+    // with its neighbours, and the names were already in the legend below —
+    // so the labels now carry only the value and the legend names them.
+    const slices = props.categories
+      .map((name, i) => ({ name, value: Number(props.series[0]?.values[i] ?? 0), i }))
+      .filter((s) => s.value > 0);
+
     return {
       tooltip: { ...TOOLTIP, trigger: "item", formatter: (p: any) => `${p.name}: ${fmt(p.value)}` },
-      legend: { bottom: 0, itemWidth: 9, itemHeight: 9, textStyle: { fontSize: 10, color: "#64748b" } },
+      legend: {
+        type: "scroll",
+        bottom: 0,
+        itemWidth: 9,
+        itemHeight: 9,
+        textStyle: { fontSize: 10, color: mutedColor() },
+        pageTextStyle: { color: mutedColor() },
+      },
       series: [{
-        type: "pie", radius: ["45%", "70%"], center: ["50%", "44%"],
-        itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 2 },
-        label: { fontSize: 10, formatter: (p: any) => `${p.name}\n${fmt(p.value)}` },
-        data: props.categories.map((c, i) => ({
-          name: c, value: props.series[0]?.values[i] ?? 0,
-          itemStyle: { color: seriesColor(i) },
+        type: "pie",
+        radius: ["45%", "68%"],
+        center: ["50%", "42%"],
+        minAngle: 4,             // a 1% slice stays clickable
+        avoidLabelOverlap: true,
+        itemStyle: {
+          borderRadius: 6,
+          // Match the card, not white — otherwise dark mode gets bright seams.
+          borderColor: surfaceColor(),
+          borderWidth: 2,
+        },
+        label: { fontSize: 10, color: labelColor(), formatter: (p: any) => fmt(p.value) },
+        labelLine: { length: 6, length2: 6, lineStyle: { color: mutedColor() } },
+        data: slices.map((s) => ({
+          name: s.name, value: s.value,
+          itemStyle: { color: seriesColor(s.i) },
         })),
       }],
     };
@@ -48,7 +75,7 @@ const option = computed<EChartsOption>(() => {
     tooltip: { ...TOOLTIP, trigger: "axis",
       valueFormatter: (v) => fmt(Number(v)) },
     legend: multi
-      ? { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: "#64748b" } }
+      ? { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: mutedColor() } }
       : undefined,
     xAxis: { ...AXIS.category, data: props.categories,
       axisLabel: { ...AXIS.category.axisLabel, rotate: 38, fontSize: 10 } },

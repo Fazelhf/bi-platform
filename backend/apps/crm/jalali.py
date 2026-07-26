@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import datetime as _dt
 
-from apps.core.models import JALALI_MONTHS, DimPeriod
+from apps.core.models import JALALI_MONTHS, DimPeriod, PeriodKind
 
 _G_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
 _J_DAYS = [0, 31, 62, 93, 124, 155, 186, 216, 246, 276, 306, 336]
@@ -115,11 +115,36 @@ def month_label(jy: int, jm: int) -> str:
 
 
 def period_for(date: _dt.date | _dt.datetime) -> DimPeriod:
-    """Get-or-create the DimPeriod a real date belongs to, so CRM facts share
-    one calendar with the monthly sales/production facts."""
+    """
+    Get-or-create the MONTH period a real date belongs to, so CRM facts share
+    one calendar with the monthly sales/production facts.
+
+    `kind="month"` is not optional. Periods are a tree now — a month's weeks
+    carry the same jalali_year/jalali_month — so an unfiltered get_or_create
+    would match several rows and raise, or invent a kind-less duplicate month.
+    """
     jy, jm = jalali_month_of(date)
-    period, _ = DimPeriod.objects.get_or_create(jalali_year=jy, jalali_month=jm)
+    start, end = month_bounds(jy, jm)
+    period, _ = DimPeriod.objects.get_or_create(
+        jalali_year=jy,
+        jalali_month=jm,
+        kind=PeriodKind.MONTH,
+        defaults={
+            "parent": None,
+            "seq": 0,
+            "start_date": start,
+            "end_date": end - _dt.timedelta(days=1),  # stored bounds are inclusive
+            "code": f"{jy}.{jm:02d}",
+        },
+    )
     return period
+
+
+def month_period(jy: int, jm: int) -> DimPeriod | None:
+    """The existing month row for a Jalali month, if any. Read-only lookup."""
+    return DimPeriod.objects.filter(
+        jalali_year=jy, jalali_month=jm, kind=PeriodKind.MONTH
+    ).first()
 
 
 def month_bounds(jy: int, jm: int) -> tuple[_dt.date, _dt.date]:

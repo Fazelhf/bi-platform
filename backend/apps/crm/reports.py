@@ -25,12 +25,13 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from apps.core.models import DimPeriod
+from apps.core.models import DimPeriod, PeriodKind
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label
 from apps.crm.models import (
-    Activity, Customer, CustomerFeedback, Deal, DealItem, PipelineStage,
+    Activity, Customer, CustomerFeedback, Deal, DealItem, DemoProvinceTarget,
+    PipelineStage,
 )
-from apps.sales.models import FactSalesProvince
+from apps.sales.models import FactSalesProvince, SalesTarget
 
 ZERO = Value(0, output_field=DecimalField(max_digits=20, decimal_places=0))
 
@@ -106,6 +107,8 @@ class Filters:
             if f.end:
                 f.end = f.end + dt.timedelta(days=1)  # inclusive end
         elif num("period"):
+            # Works for a week period too: its jalali_year/jalali_month still
+            # name the month, which is the CRM's reporting grain.
             p = DimPeriod.objects.filter(pk=num("period")).first()
             if p:
                 f.start, f.end = month_bounds(p.jalali_year, p.jalali_month)
@@ -769,17 +772,34 @@ def report_provinces(f: Filters, _axis_key: str = "province") -> dict:
         .order_by()
     )
 
-    # Targets for every Jalali month the window touches.
+    # Targets for every Jalali month the window touches. Only MONTH rows —
+    # a month's weeks share its jalali_year/jalali_month, so an unfiltered
+    # lookup would count the same target once per week.
     months = Q(pk__in=[])
     for jy, jm, _, _ in _time_buckets(f):
         months |= Q(jalali_year=jy, jalali_month=jm)
-    period_ids = list(DimPeriod.objects.filter(months).values_list("id", flat=True))
-    targets = {
-        r["province_id"]: _num(r["t"])
-        for r in FactSalesProvince.objects.filter(
-            period_id__in=period_ids, channel=f.channel
-        ).values("province_id").annotate(t=Sum("target_rial"))
-    }
+    period_ids = list(
+        DimPeriod.objects.filter(months, kind=PeriodKind.MONTH).values_list("id", flat=True)
+    )
+
+    # The CEO's real plan wins. `SalesTarget` is where it lives since targets
+    # moved off the fact rows; `FactSalesProvince.target_rial` is the legacy
+    # column, still populated for older months. The demo's own generated
+    # targets are only a fallback, so installing the demo never makes a real
+    # province look like it is missing plan.
+    targets: dict[int, float] = {}
+    for source, field in (
+        (DemoProvinceTarget.objects, "target_rial"),
+        (FactSalesProvince.objects, "target_rial"),
+        (SalesTarget.objects.exclude(province=None), "target_rial"),
+    ):
+        for r in (
+            source.filter(period_id__in=period_ids, channel=f.channel)
+            .values("province_id")
+            .annotate(t=Sum(field))
+        ):
+            if r["province_id"] and _num(r["t"]):
+                targets[r["province_id"]] = _num(r["t"])
 
     # Who works each province: the reps owning customers there, ranked by sales.
     owners: dict[int, list[dict]] = {}
