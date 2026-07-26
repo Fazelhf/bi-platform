@@ -1,13 +1,14 @@
 import { ref } from "vue";
 import { graphic } from "@/lib/echarts";
 import { paletteByKey, type Palette } from "./palettes";
+import { store } from "@/lib/storage";
 
 /**
  * Live chart theme. Reads the palette the CEO selected (stored in the ui
  * store / localStorage) so every chart in every section changes together.
  */
 export function activePalette(): Palette {
-  return paletteByKey(localStorage.getItem("chartTheme") || "modern");
+  return paletteByKey(store.get("chartTheme") || "modern");
 }
 
 /** True when the app is in dark mode — charts read this at render time. */

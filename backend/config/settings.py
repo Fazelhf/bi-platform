@@ -106,7 +106,15 @@ TIME_ZONE = "Asia/Tehran"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "/static/"
+# --- Mount point -----------------------------------------------------------
+# Empty for a subdomain (crm.ntpbi.ir), or "/crm" to run under a path of an
+# existing domain (ntpbi.ir/crm). Everything URL-shaped below is derived from
+# it, so switching between the two is an env-var change, not a code change.
+# Must match the frontend's build-time base (VITE_BASE) exactly.
+FORCE_SCRIPT_NAME = env("FORCE_SCRIPT_NAME", default="") or None
+URL_PREFIX = (FORCE_SCRIPT_NAME or "").rstrip("/")
+
+STATIC_URL = f"{URL_PREFIX}/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 # Compressed, cache-busted static serving via WhiteNoise (production).
 STORAGES = {
