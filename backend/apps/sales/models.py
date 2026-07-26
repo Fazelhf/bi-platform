@@ -35,6 +35,16 @@ class DimEmployee(TimeStampedModel):
         DimTeam, null=True, blank=True, on_delete=models.SET_NULL, related_name="members"
     )
     is_active = models.BooleanField(default=True)
+    # Login account for this salesperson. The dimension existed only to label
+    # imported spreadsheet columns, so nobody could *be* an employee — which
+    # is fine for reading a dashboard and useless the moment a rep has to
+    # record their own call. Nullable: not every row is a system user.
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="employee",
+    )
 
     def __str__(self) -> str:
         return self.full_name_fa

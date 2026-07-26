@@ -21,6 +21,16 @@ env = environ.Env(
 environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="dev-insecure-change-me")
+
+# Password for the locked «دمو CRM» section — separate from any login
+# password, so the demo can be shown to someone without giving them an account.
+#
+# The default is a deliberately simple gate, not a secret: it keeps the demo
+# out of the way of everyday users of the platform, and it ships in the source,
+# so anyone who can read the repository can open the demo. Override
+# CRM_DEMO_PASSWORD in backend/.env (gitignored) if that ever stops being
+# acceptable. Setting it to an empty string closes the demo for everyone.
+CRM_DEMO_PASSWORD = env("CRM_DEMO_PASSWORD", default="1484")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
@@ -42,6 +52,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.sales",
     "apps.production",
+    "apps.crm",
 ]
 
 MIDDLEWARE = [
@@ -105,7 +116,15 @@ TIME_ZONE = "Asia/Tehran"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "/static/"
+# --- Mount point -----------------------------------------------------------
+# Empty for a subdomain (crm.ntpbi.ir), or "/crm" to run under a path of an
+# existing domain (ntpbi.ir/crm). Everything URL-shaped below is derived from
+# it, so switching between the two is an env-var change, not a code change.
+# Must match the frontend's build-time base (VITE_BASE) exactly.
+FORCE_SCRIPT_NAME = env("FORCE_SCRIPT_NAME", default="") or None
+URL_PREFIX = (FORCE_SCRIPT_NAME or "").rstrip("/")
+
+STATIC_URL = f"{URL_PREFIX}/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 # Compressed, cache-busted static serving via WhiteNoise (production).
 STORAGES = {

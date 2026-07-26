@@ -20,6 +20,7 @@ urlpatterns = [
     # --- Domain APIs ---
     path("api/sales/", include("apps.sales.urls")),
     path("api/production/", include("apps.production.urls")),
+    path("api/crm/", include("apps.crm.urls")),
     path("api/executive/", include("apps.core.urls")),
     # --- API docs ---
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

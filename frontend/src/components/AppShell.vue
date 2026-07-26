@@ -10,6 +10,8 @@ import { inboxApi } from "@/api/platform";
 import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import DrillDrawer from "@/components/crm/DrillDrawer.vue";
+import { useCrmStore } from "@/stores/crm";
 
 const auth = useAuthStore();
 const ui = useUiStore();
@@ -30,6 +32,38 @@ useClickOutside(userMenuRoot, () => (userMenu.value = false));
 const search = ref("");
 
 interface Item { name: string; label: string; icon: string; badge?: () => number }
+
+/**
+ * CRM ships as a locked demo: until its separate password is entered the
+ * sidebar shows a single «دمو CRM» entry, and the real section only appears
+ * afterwards. The list below is what unlocking reveals.
+ */
+const crmItems: Item[] = [
+  { name: "crm-dashboard", label: "داشبورد CRM", icon: "grid" },
+  { name: "crm-pipeline", label: "مراحل فروش", icon: "target" },
+  { name: "crm-deals", label: "فرصت‌های فروش", icon: "box" },
+  { name: "crm-customers", label: "مشتریان", icon: "team" },
+  { name: "crm-activities", label: "فعالیت‌ها", icon: "notes" },
+  { name: "crm-reports", label: "گزارش‌های CRM", icon: "chart" },
+];
+
+const crm = useCrmStore();
+
+/** Who even sees the demo entry. */
+const showCrm = computed(
+  () => auth.isExecutive || auth.department === "sales_team" || !!auth.me?.is_superuser,
+);
+const crmUnlocked = computed(() => crm.unlocked === true);
+
+// Detail pages keep their list item highlighted.
+const CRM_PARENT: Record<string, string> = {
+  "crm-deal": "crm-deals",
+  "crm-customer": "crm-customers",
+};
+function crmActive(name: string): boolean {
+  const current = String(route.name ?? "");
+  return current === name || CRM_PARENT[current] === name;
+}
 
 const primary = computed<Item[]>(() => {
   const items: Item[] = [];
@@ -81,6 +115,11 @@ const pageTitle = computed(() => {
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
     inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "تیم",
+    "crm-dashboard": "داشبورد CRM", "crm-pipeline": "مراحل فروش",
+    "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
+    "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
+    "crm-activities": "فعالیت‌ها و کارها", "crm-reports": "گزارش‌های CRM",
+    "crm-unlock": "دمو CRM",
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
     "sales-b2b-entry": "ورود فروش B2B",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
@@ -104,11 +143,19 @@ async function refreshBadges() {
 }
 
 function go(name: string) { router.push({ name }); mobileOpen.value = false; }
+
+function lockCrm() {
+  crm.lock();
+  if (String(route.name ?? "").startsWith("crm")) router.push({ name: "home" });
+}
 function logout() { auth.logout(); router.push({ name: "login" }); }
 
 onMounted(() => {
   refreshBadges();
   window.setInterval(refreshBadges, 30_000);
+  // Resolve the demo lock once, so a reload on any page shows the sidebar in
+  // the state it is actually in rather than always starting locked.
+  if (showCrm.value) crm.checkGate();
 });
 </script>
 
@@ -169,6 +216,55 @@ onMounted(() => {
           >{{ it.badge() }}</span>
         </button>
 
+        <!-- CRM — one locked entry until the demo password is entered -->
+        <template v-if="showCrm">
+          <button
+            v-if="!crmUnlocked"
+            class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2"
+            :class="[
+              route.name === 'crm-unlock' ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
+              collapsed ? 'justify-center' : '',
+            ]"
+            title="دمو CRM — رمز جداگانه دارد"
+            @click="go('crm-unlock')"
+          >
+            <NavIcon name="chart" :size="20" />
+            <template v-if="!collapsed">
+              <span class="flex-1 text-right">دمو CRM</span>
+              <svg class="w-3.5 h-3.5 opacity-50 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </template>
+          </button>
+
+          <template v-else>
+            <div class="pt-3 pb-1 px-3 flex items-center gap-2">
+              <p v-if="!collapsed" class="text-[10px] font-semibold text-slate-300 tracking-wide flex-1">دمو CRM</p>
+              <button
+                v-if="!collapsed"
+                class="text-[10px] text-slate-300 hover:text-red-500"
+                title="بستن دمو"
+                @click="lockCrm"
+              >قفل</button>
+              <div v-if="collapsed" class="h-px bg-slate-200 mx-1 flex-1"></div>
+            </div>
+            <button
+              v-for="it in crmItems"
+              :key="it.name"
+              class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
+              :class="[
+                crmActive(it.name) ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
+                collapsed ? 'justify-center' : '',
+              ]"
+              :title="collapsed ? it.label : ''"
+              @click="go(it.name)"
+            >
+              <NavIcon :name="it.icon" :size="20" />
+              <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
+            </button>
+          </template>
+        </template>
       </nav>
 
       <!-- Bottom: profile, settings (admin+CEO only), logout -->
@@ -280,6 +376,9 @@ onMounted(() => {
       <main class="flex-1 min-w-0">
         <RouterView />
       </main>
+
+      <!-- CRM drill-down panel — mounted once, opened from any CRM page -->
+      <DrillDrawer v-if="crmUnlocked" />
 
       <!-- Footer -->
       <footer class="text-center text-xs text-slate-400 py-3">
