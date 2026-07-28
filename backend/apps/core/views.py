@@ -13,6 +13,7 @@ summed. The response exposes them as separate figures.
 """
 from django.db.models import Max, Sum
 from django.http import HttpResponse
+from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins
@@ -32,6 +33,7 @@ from apps.core.models import (
     KPIFormula,
     KPIScope,
     Notification,
+    PeriodKind,
 )
 from apps.core.permissions import IsExecutiveOrAdmin
 from apps.core.serializers import (
@@ -53,6 +55,92 @@ def _kpi_map(period, domain, channel=""):
             kpi__domain=domain, channel=channel,
         ).select_related("kpi")
     }
+
+
+class ExecutiveTrendView(APIView):
+    """
+    The whole year in one payload: sales per channel per month, plus plan.
+
+    The overview page previously showed a single month with nothing to judge it
+    against — a bare figure cannot answer "is this good?", which is the only
+    question an executive summary exists to answer. One request rather than
+    twelve, because the page needs the shape of the year before it can draw
+    anything.
+
+    Figures are read from the LEAF periods of each month, so a month that has
+    been split into weeks totals its weeks and a month that has not totals
+    itself. Reading the month row directly would return zero for every split
+    month.
+    """
+
+    @extend_schema(parameters=[OpenApiParameter("year", int)], responses=dict)
+    def get(self, request):
+        from apps.core.periods import leaf_ids_for
+        from apps.sales.models import SalesChannel, SalesTarget
+
+        year = int(request.query_params.get("year") or 0)
+        if not year:
+            from apps.core.jalali import from_gregorian
+
+            year = from_gregorian(timezone.localdate())[0]
+
+        months = list(
+            DimPeriod.objects.filter(jalali_year=year, kind=PeriodKind.MONTH)
+            .order_by("jalali_month")
+            .prefetch_related("children")
+        )
+
+        # One query per fact table rather than per month.
+        leaf_map = {m.id: leaf_ids_for(m) for m in months}
+        all_leaves = [i for ids in leaf_map.values() for i in ids]
+
+        revenue_rows = (
+            FactSalesMonthly.objects.filter(
+                period_id__in=all_leaves, status=ApprovalStatus.APPROVED
+            )
+            .values("period_id", "channel")
+            .annotate(total=Sum("revenue_rial"), profit=Sum("profit_rial"))
+        )
+        by_leaf: dict[int, dict[str, dict]] = {}
+        for r in revenue_rows:
+            by_leaf.setdefault(r["period_id"], {})[r["channel"]] = r
+
+        target_rows = (
+            SalesTarget.objects.filter(period__in=months, employee__isnull=False)
+            .values("period_id")
+            .annotate(total=Sum("target_rial"))
+        )
+        targets = {r["period_id"]: float(r["total"] or 0) for r in target_rows}
+
+        cost_rows = (
+            FactProductionCost.objects.filter(period_id__in=all_leaves)
+            .values("period_id").annotate(total=Sum("amount_rial"))
+        )
+        costs = {r["period_id"]: float(r["total"] or 0) for r in cost_rows}
+
+        out = []
+        for m in months:
+            leaves = leaf_map[m.id]
+            channels = {c: 0.0 for c, _ in SalesChannel.choices}
+            profit = 0.0
+            for leaf in leaves:
+                for channel, row in by_leaf.get(leaf, {}).items():
+                    channels[channel] = channels.get(channel, 0.0) + float(row["total"] or 0)
+                    profit += float(row["profit"] or 0)
+            total = sum(channels.values())
+            target = targets.get(m.id, 0.0)
+            out.append({
+                "period": m.id,
+                "label": m.label,
+                "month": m.jalali_month,
+                "total": total,
+                "profit": profit,
+                "target": target,
+                "achievement": round(total / target * 100, 1) if target else 0.0,
+                "production_cost": sum(costs.get(l, 0.0) for l in leaves),
+                **{f"channel_{c}": v for c, v in channels.items()},
+            })
+        return Response({"year": year, "months": out})
 
 
 class ExecutiveOverviewView(APIView):

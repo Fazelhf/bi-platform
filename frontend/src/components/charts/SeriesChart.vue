@@ -12,6 +12,16 @@ import {
  * One chart for the workbook's chart sheets: 1..n series over shared
  * categories, as bars or a pie. Styling follows the CEO's chosen theme.
  */
+/**
+ * What this chart measures, so it can be re-drawn across several months in a
+ * close-up. A chart without a `compare` spec simply shows no compare button —
+ * the pie of volume share, for instance, has no single metric to line up.
+ */
+export interface CompareSpec {
+  scope: "people" | "teams" | "provinces";
+  metrics: { key: string; label: string; percent?: boolean }[];
+}
+
 const props = withDefaults(defineProps<{
   title: string;
   categories: string[];
@@ -19,7 +29,10 @@ const props = withDefaults(defineProps<{
   kind?: "bar" | "pie";
   height?: number;
   percent?: boolean;
-}>(), { kind: "bar", height: 240, percent: false });
+  compare?: CompareSpec | null;
+}>(), { kind: "bar", height: 240, percent: false, compare: null });
+
+const emit = defineEmits<{ (e: "compare", spec: CompareSpec, title: string): void }>();
 
 const ui = useUiStore();
 const el = ref<HTMLElement | null>(null);
@@ -97,8 +110,20 @@ useChart(el, option);
 </script>
 
 <template>
-  <div class="bg-surface rounded-card shadow-soft p-4">
+  <div class="bg-surface rounded-card shadow-soft p-4 relative group">
     <h3 class="text-sm font-semibold text-ink mb-1 text-center">{{ title }}</h3>
+
+    <!-- Opens this one chart across several months. Kept quiet until hover so
+         twenty cards do not each shout a button. -->
+    <button
+      v-if="compare"
+      class="absolute top-3 left-3 text-[11px] rounded-lg px-2 py-1 bg-slate-100 text-slate-500
+             opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-slate-200 hover:text-ink
+             transition-opacity no-print"
+      title="مقایسه این نمودار در چند ماه"
+      @click="emit('compare', compare, title)"
+    >مقایسه ماه‌ها</button>
+
     <div ref="el" :style="{ height: height + 'px' }"></div>
   </div>
 </template>
