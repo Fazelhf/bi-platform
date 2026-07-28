@@ -4,7 +4,7 @@ import { salesApi } from "@/api/sales";
 import { salesInputApi, type SalesInput } from "@/api/salesInput";
 import type { MonthProgress } from "@/types";
 import { toast, confirm } from "@/composables/useUi";
-import { num } from "@/utils/format";
+import { num, pct, rial } from "@/utils/format";
 import { selectIfZero } from "@/utils/inputs";
 import MoneyInput from "@/components/MoneyInput.vue";
 import ExportActions from "@/components/ExportActions.vue";
@@ -130,14 +130,46 @@ async function removeSalesperson(i: number) {
   }
 }
 
-// Province block — every province is listed from the start, so the only tool
-// needed is a filter to find one quickly among the 31.
+// ---- Province block -------------------------------------------------------
+// All 31 provinces are always listed, because any of them may get its first
+// sale this month. The previous layout repeated the "فروش (ریال)" and
+// "تارگت ماهانه" captions once per province — 62 labels and a 2,200px wall to
+// scroll past. They are column headers, so they are written once, and the
+// list is split across two aligned tables to halve the height.
 const provinceSearch = ref("");
+const onlyWithSales = ref(false);
+
 const visibleProvinces = computed(() => {
   const q = provinceSearch.value.trim();
-  const all = data.value?.provinces ?? [];
-  return q ? all.filter((p) => p.name.includes(q)) : all;
+  let all = data.value?.provinces ?? [];
+  if (q) all = all.filter((p) => p.name.includes(q));
+  if (onlyWithSales.value) all = all.filter((p) => Number(p.sales_rial || 0) > 0);
+  return all;
 });
+
+/** Two balanced columns, so the section is half as tall on a wide screen. */
+const provinceColumns = computed(() => {
+  const list = visibleProvinces.value;
+  const half = Math.ceil(list.length / 2);
+  return [list.slice(0, half), list.slice(half)].filter((c) => c.length);
+});
+
+const provinceTotals = computed(() => {
+  const all = data.value?.provinces ?? [];
+  const sales = all.reduce((s, p) => s + Number(p.sales_rial || 0), 0);
+  const target = all.reduce((s, p) => s + Number(p.target_rial || 0), 0);
+  return {
+    sales,
+    target,
+    filled: all.filter((p) => Number(p.sales_rial || 0) > 0).length,
+    achievement: target ? (sales / target) * 100 : 0,
+  };
+});
+
+function provinceAchievement(p: { sales_rial: any; target_rial: any }): number | null {
+  const t = Number(p.target_rial || 0);
+  return t ? (Number(p.sales_rial || 0) / t) * 100 : null;
+}
 
 async function save(submit: boolean) {
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
@@ -325,44 +357,99 @@ watch(selectedWeek, load);
 
       <!-- Province block -->
       <section class="bg-surface rounded-card shadow-soft p-5">
-        <div class="flex items-center justify-between mb-1">
-          <h3 class="font-bold text-ink">فروش به تفکیک استان</h3>
-          <input
-            v-model="provinceSearch"
-            placeholder="جستجوی استان…"
-            class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
-          />
-        </div>
-        <p class="text-xs text-slate-400 mb-4">
-          همه‌ی استان‌ها اینجا فهرست شده‌اند — فقط برای استان‌هایی که فروش داشته‌اید مبلغ را
-          وارد کنید و بقیه را صفر بگذارید. این ارقام فقط مربوط به
-          «{{ title.replace("ورود اطلاعات ", "") }}» است و از استان‌های سایر کانال‌های فروش
-          کاملاً جداست. تارگت‌ها ماهانه‌اند و در بخش «تارگت» تعیین می‌شوند.
-        </p>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-          <div
-            v-for="p in visibleProvinces"
-            :key="p.province_id"
-            class="grid grid-cols-[1fr_auto_auto] items-center gap-2"
-          >
-            <span class="text-sm text-slate-600">{{ p.name }}</span>
-            <label class="flex flex-col items-start gap-0.5">
-              <span class="text-[11px] text-slate-400">فروش (ریال)</span>
-              <MoneyInput v-model="p.sales_rial" placeholder="مبلغ فروش"
-                class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none" />
-            </label>
-            <label class="flex flex-col items-start gap-0.5">
-              <span class="text-[11px] text-slate-400">
-                تارگت ماهانه (ریال)
-              </span>
-              <div
-                class="w-32 px-2 py-1.5 text-left ltr-nums text-slate-500 bg-slate-100/60 rounded-lg cursor-not-allowed"
-                title="تارگت ماهانه است و در بخش «تارگت» تعیین می‌شود"
-              >{{ num(Number(p.target_rial || 0)) }}</div>
-            </label>
+        <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <h3 class="font-bold text-ink">فروش به تفکیک استان</h3>
+            <p class="text-xs text-slate-400 mt-1 max-w-xl leading-5">
+              فقط برای استان‌هایی که فروش داشته‌اید مبلغ وارد کنید؛ بقیه صفر بماند.
+              این ارقام فقط مربوط به «{{ title.replace("ورود اطلاعات ", "") }}» است و از
+              سایر کانال‌های فروش جداست. تارگت ماهانه است و در بخش «تارگت» تعیین می‌شود.
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              class="text-xs rounded-xl px-3 py-1.5 border transition-colors"
+              :class="onlyWithSales
+                ? 'bg-panel text-white border-panel'
+                : 'bg-surface text-slate-500 border-slate-200 hover:bg-slate-50'"
+              @click="onlyWithSales = !onlyWithSales"
+            >فقط دارای فروش</button>
+            <input
+              v-model="provinceSearch"
+              placeholder="جستجوی استان…"
+              class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
+            />
           </div>
         </div>
-        <p v-if="!visibleProvinces.length" class="text-sm text-slate-400 py-3">استانی با این نام پیدا نشد.</p>
+
+        <!-- Running totals: what has been entered, against the CEO's plan -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <div class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">مجموع فروش واردشده</p>
+            <p class="text-sm font-bold text-ink ltr-nums">{{ rial(provinceTotals.sales) }}</p>
+          </div>
+          <div class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">مجموع تارگت</p>
+            <p class="text-sm font-bold text-slate-500 ltr-nums">{{ rial(provinceTotals.target) }}</p>
+          </div>
+          <div class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">تحقق</p>
+            <p
+              class="text-sm font-bold ltr-nums"
+              :class="provinceTotals.achievement >= 100 ? 'text-green-600'
+                : provinceTotals.achievement >= 70 ? 'text-amber-600' : 'text-red-500'"
+            >{{ pct(provinceTotals.achievement) }}</p>
+          </div>
+          <div class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">استان‌های پرشده</p>
+            <p class="text-sm font-bold text-ink ltr-nums">{{ num(provinceTotals.filled) }} از {{ num(data.provinces.length) }}</p>
+          </div>
+        </div>
+
+        <!-- Two aligned tables: the captions are column headers, written once.
+             lg, not xl: the sidebar eats 256px, so on a 1440px laptop the
+             content is ~1150px and an xl breakpoint would never fire. -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-2">
+          <table v-for="(col, ci) in provinceColumns" :key="ci" class="w-full text-sm">
+            <thead>
+              <tr class="text-[11px] text-slate-400 border-b border-slate-100">
+                <th class="text-right font-medium pb-2">استان</th>
+                <th class="text-left font-medium pb-2 w-36">فروش (ریال)</th>
+                <th class="text-left font-medium pb-2 w-32">تارگت ماهانه</th>
+                <th class="text-left font-medium pb-2 w-16">تحقق</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="p in col" :key="p.province_id"
+                class="border-b border-slate-50 last:border-0"
+                :class="Number(p.sales_rial || 0) > 0 ? 'bg-accent-500/5' : ''"
+              >
+                <td class="py-1 text-slate-600 whitespace-nowrap">{{ p.name }}</td>
+                <td class="py-1">
+                  <MoneyInput
+                    v-model="p.sales_rial" placeholder="۰"
+                    class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none"
+                  />
+                </td>
+                <td class="py-1 text-left ltr-nums text-slate-400 px-2" title="در بخش «تارگت» تعیین می‌شود">
+                  {{ num(Number(p.target_rial || 0)) }}
+                </td>
+                <td class="py-1 text-left ltr-nums px-1">
+                  <span
+                    v-if="provinceAchievement(p) !== null"
+                    :class="provinceAchievement(p)! >= 100 ? 'text-green-600'
+                      : provinceAchievement(p)! >= 70 ? 'text-amber-600' : 'text-red-500'"
+                  >{{ pct(provinceAchievement(p)!) }}</span>
+                  <span v-else class="text-slate-300">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="!visibleProvinces.length" class="text-sm text-slate-400 py-3">
+          {{ onlyWithSales ? "هنوز برای هیچ استانی فروش وارد نشده است." : "استانی با این نام پیدا نشد." }}
+        </p>
       </section>
 
       <!-- Sticky action bar -->
