@@ -6,7 +6,6 @@ import { executiveApi, type TrendMonth } from "@/api/executive";
 import { defaultPeriodId } from "@/types";
 import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, num, pct, rial } from "@/utils/format";
-import SeriesChart from "@/components/charts/SeriesChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
 
@@ -92,18 +91,6 @@ const margin = computed(() => {
 /** Only months that have been reported — a flat zero tail is noise, not data. */
 const reported = computed(() => trend.value.filter((m) => m.total > 0 || m.target > 0));
 
-const trendCategories = computed(() => reported.value.map((m) => m.label));
-const trendSeries = computed(() => [
-  { name: "فروش", values: reported.value.map((m) => m.total) },
-  { name: "تارگت", values: reported.value.map((m) => m.target) },
-]);
-
-const channelSeries = computed(() => [
-  { name: "همکار", values: reported.value.map((m) => m.channel_team) },
-  { name: "بانکی", values: reported.value.map((m) => m.channel_organizational) },
-  { name: "B2B", values: reported.value.map((m) => m.channel_b2b) },
-]);
-
 // ---- the four domains, each with its own movement -------------------------
 const channels = computed(() => {
   const d = data.value;
@@ -188,7 +175,7 @@ const card = "bg-surface rounded-card shadow-soft";
       </div>
     </div>
 
-    <DashboardSkeleton v-if="loading" :cards="4" :charts="2" :rows="4" />
+    <DashboardSkeleton v-if="loading" :cards="4" :charts="0" :rows="4" />
 
     <template v-else-if="data">
       <!-- ===== Hero: the month, judged ===== -->
@@ -263,16 +250,51 @@ const card = "bg-surface rounded-card shadow-soft";
         </div>
       </div>
 
-      <!-- ===== The year's shape ===== -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SeriesChart
-          title="فروش در برابر تارگت — روند سال"
-          :categories="trendCategories" :series="trendSeries" :height="260"
-        />
-        <SeriesChart
-          title="ترکیب کانال‌های فروش در ماه‌های سال"
-          :categories="trendCategories" :series="channelSeries" :height="260"
-        />
+      <!-- ===== The year so far, as figures ===== -->
+      <!-- Deliberately a table, not a chart: this page is read at a glance and
+           the charts belong on the dashboards each row links to. -->
+      <div :class="card" class="overflow-hidden">
+        <h3 class="font-bold text-ink px-5 pt-5 pb-3">روند سال — فروش در برابر تارگت</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm min-w-[640px]">
+            <thead>
+              <tr class="text-xs text-slate-400 bg-slate-50">
+                <th class="text-right font-medium px-5 py-2.5">ماه</th>
+                <th class="text-left font-medium px-3">فروش</th>
+                <th class="text-left font-medium px-3">تارگت</th>
+                <th class="text-left font-medium px-3">تحقق</th>
+                <th class="text-left font-medium px-3">سود</th>
+                <th class="text-left font-medium px-5">تغییر</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(m, i) in reported" :key="m.period"
+                class="border-t border-slate-100 cursor-pointer transition-colors"
+                :class="m.period === selectedPeriod ? 'bg-brand-500/5' : 'hover:bg-slate-50'"
+                @click="selectedPeriod = m.period"
+              >
+                <td class="px-5 py-2.5 text-ink font-medium whitespace-nowrap">{{ m.label }}</td>
+                <td class="px-3 text-left ltr-nums text-ink whitespace-nowrap">{{ rial(m.total) }}</td>
+                <td class="px-3 text-left ltr-nums text-slate-400 whitespace-nowrap">{{ rial(m.target) }}</td>
+                <td class="px-3 text-left ltr-nums font-medium"
+                    :class="m.achievement >= 100 ? 'text-green-600' : m.achievement >= 70 ? 'text-amber-600' : 'text-red-500'">
+                  {{ m.target ? pct(m.achievement) : "—" }}
+                </td>
+                <td class="px-3 text-left ltr-nums text-slate-600 whitespace-nowrap">{{ rial(m.profit) }}</td>
+                <td class="px-5 text-left ltr-nums whitespace-nowrap">
+                  <span v-if="i > 0 && delta(m.total, reported[i - 1].total) !== null"
+                        :class="delta(m.total, reported[i - 1].total)! >= 0 ? 'text-green-600' : 'text-red-500'">
+                    {{ delta(m.total, reported[i - 1].total)! >= 0 ? "▲" : "▼" }}
+                    {{ deltaText(delta(m.total, reported[i - 1].total)) }}
+                  </span>
+                  <span v-else class="text-slate-300">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="!reported.length" class="text-sm text-slate-400 px-5 py-4">هنوز برای هیچ ماهی داده‌ای ثبت نشده است.</p>
       </div>
 
       <!-- ===== Channels ===== -->
