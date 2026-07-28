@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db.models import Sum
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status as http_status
 from rest_framework import viewsets
@@ -8,7 +9,13 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.jalali import from_gregorian
 from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope
+
+
+def current_jalali_year() -> int:
+    """The Jalali year we are in right now."""
+    return from_gregorian(timezone.localdate())[0]
 from apps.sales.models import (
     ApprovalStatus,
     DimBank,
@@ -48,8 +55,21 @@ from apps.sales.services.kpi import compute_period_kpis
 
 # -------------------- Dimensions (read-mostly) --------------------
 class PeriodViewSet(viewsets.ModelViewSet):
-    """Months by default — the dropdowns everywhere expect months, so weeks
-    must not leak into them. Pass ?kind=week to list the children instead."""
+    """
+    Months by default — the dropdowns everywhere expect months, so weeks must
+    not leak into them. Pass ?kind=week to list the children instead.
+
+    Also scoped to the CURRENT Jalali year by default. Every dashboard and
+    entry sheet reads this one endpoint, so last year's months were appearing
+    in nine different dropdowns and burying the months anyone actually works
+    in. Scoped to the current year rather than pinned to 1405, otherwise the
+    dashboards would keep showing 1405 and hide the new year the moment
+    Nowruz passes — the exact opposite of what the scoping is for.
+
+    `?year=1404` reads a specific year and `?year=all` reads every year, so
+    nothing is unreachable; the CEO's «دوره‌ها» panel uses its own year-grain
+    action and is unaffected.
+    """
 
     # Kept so the router can still derive a basename; the real filtering
     # happens in get_queryset().
@@ -57,9 +77,24 @@ class PeriodViewSet(viewsets.ModelViewSet):
     serializer_class = PeriodSerializer
 
     def get_queryset(self):
-        kind = self.request.query_params.get("kind", "month")
+        params = self.request.query_params
         qs = DimPeriod.objects.all()
-        return qs if kind == "all" else qs.filter(kind=kind)
+
+        kind = params.get("kind", "month")
+        if kind != "all":
+            qs = qs.filter(kind=kind)
+
+        # Detail routes (and writes) must reach any period, whatever year it
+        # is in — the year scope is a listing convenience, not a permission.
+        if self.detail:
+            return qs
+
+        year = (params.get("year") or "").strip()
+        if year == "all":
+            return qs
+        if year.isdigit():
+            return qs.filter(jalali_year=int(year))
+        return qs.filter(jalali_year=current_jalali_year())
 
     @action(detail=True, methods=["get"])
     def weeks(self, request, pk=None):
