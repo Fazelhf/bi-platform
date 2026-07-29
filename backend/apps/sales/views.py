@@ -11,11 +11,7 @@ from rest_framework.views import APIView
 
 from apps.core.jalali import from_gregorian
 from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope
-
-
-def current_jalali_year() -> int:
-    """The Jalali year we are in right now."""
-    return from_gregorian(timezone.localdate())[0]
+from apps.core.periods import month_of
 from apps.sales.models import (
     ApprovalStatus,
     DimBank,
@@ -53,6 +49,11 @@ from apps.sales.serializers import (
 from apps.sales.services.kpi import compute_period_kpis
 
 
+def current_jalali_year() -> int:
+    """The Jalali year we are in right now."""
+    return from_gregorian(timezone.localdate())[0]
+
+
 # -------------------- Dimensions (read-mostly) --------------------
 class PeriodViewSet(viewsets.ModelViewSet):
     """
@@ -80,14 +81,16 @@ class PeriodViewSet(viewsets.ModelViewSet):
         params = self.request.query_params
         qs = DimPeriod.objects.all()
 
+        # Detail routes (and writes) must reach ANY period — any kind, any
+        # year. Both filters below are listing conveniences, not permissions:
+        # leaving the kind filter in place made /periods/<week>/unsplit/ and
+        # every day-level action return 404, because the default kind is month.
+        if self.detail:
+            return qs
+
         kind = params.get("kind", "month")
         if kind != "all":
             qs = qs.filter(kind=kind)
-
-        # Detail routes (and writes) must reach any period, whatever year it
-        # is in — the year scope is a listing convenience, not a permission.
-        if self.detail:
-            return qs
 
         year = (params.get("year") or "").strip()
         if year == "all":
@@ -117,18 +120,54 @@ class PeriodViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsExecutiveOrAdmin])
     def split(self, request, pk=None):
-        """Cut a month into weeks. Executive-only, and refused once the month
-        holds figures — see the invariant on DimPeriod."""
-        from apps.core.models import SiteSetting
-        from apps.core.periods import ensure_weeks
+        """
+        Cut a period one level finer: a month into weeks, a week into days.
+        Executive-only, and refused once the period holds figures — see the
+        invariant on DimPeriod.
+        """
+        from apps.core.models import PeriodKind, SiteSetting
+        from apps.core.periods import ensure_days, ensure_weeks
 
-        month = self.get_object()
+        period = self.get_object()
         try:
-            weeks = ensure_weeks(month, min_days=SiteSetting.get().min_week_days)
+            if period.kind == PeriodKind.WEEK:
+                children = ensure_days(period)
+            else:
+                children = ensure_weeks(period, min_days=SiteSetting.get().min_week_days)
         except ValueError as exc:
             return Response({"detail": str(exc)},
                             status=http_status.HTTP_400_BAD_REQUEST)
-        return Response(self.get_serializer(weeks, many=True).data)
+        return Response(self.get_serializer(children, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="split-days",
+            permission_classes=[IsExecutiveOrAdmin])
+    def split_days(self, request, pk=None):
+        """
+        Put a whole month onto daily entry in one action — split it into weeks
+        if needed, then split every week into days. Doing it week by week from
+        the UI would be six clicks for one decision.
+        """
+        from apps.core.models import PeriodKind, SiteSetting
+        from apps.core.periods import ensure_days, ensure_weeks
+
+        month = self.get_object()
+        if month.kind != PeriodKind.MONTH:
+            return Response({"detail": "فقط یک ماه را می‌توان روزانه کرد."},
+                            status=http_status.HTTP_400_BAD_REQUEST)
+        try:
+            weeks = list(month.children.order_by("seq")) or ensure_weeks(
+                month, min_days=SiteSetting.get().min_week_days
+            )
+            days = []
+            for w in weeks:
+                if w.kind != PeriodKind.WEEK:
+                    continue
+                days.extend(ensure_days(w) if not w.children.exists()
+                            else list(w.children.order_by("seq")))
+        except ValueError as exc:
+            return Response({"detail": str(exc)},
+                            status=http_status.HTTP_400_BAD_REQUEST)
+        return Response({"weeks": len(weeks), "days": len(days)})
 
     @action(detail=True, methods=["post"], permission_classes=[IsExecutiveOrAdmin])
     def unsplit(self, request, pk=None):
@@ -148,7 +187,7 @@ class PeriodViewSet(viewsets.ModelViewSet):
         Every month of a year with its current grain and whether it can be
         changed — this is what the CEO's «دوره‌ها» panel renders.
         """
-        from apps.core.periods import has_facts
+        from apps.core.periods import has_facts, leaves_of
 
         year = int(request.query_params.get("year") or 0)
         months = DimPeriod.objects.filter(kind="month")
@@ -158,19 +197,41 @@ class PeriodViewSet(viewsets.ModelViewSet):
         out = []
         for m in months.order_by("jalali_year", "jalali_month"):
             weeks = list(m.children.order_by("seq"))
+            day_count = sum(w.children.count() for w in weeks)
             month_has_facts = has_facts(m)
-            filled_weeks = [w.seq for w in weeks if has_facts(w)]
+            # A week counts as filled if anything under it holds figures, so a
+            # week whose days have data still blocks going back to weekly.
+            filled_weeks = [
+                w.seq for w in weeks if any(has_facts(l) for l in leaves_of(w))
+            ]
+            filled_days = [
+                w.seq for w in weeks
+                if w.children.exists() and any(has_facts(d) for d in w.children.all())
+            ]
+
+            grain = "month"
+            if day_count:
+                grain = "day"
+            elif weeks:
+                grain = "week"
+
             out.append({
                 "id": m.id,
                 "label": m.label,
                 "jalali_year": m.jalali_year,
                 "jalali_month": m.jalali_month,
-                "grain": "week" if weeks else "month",
+                "grain": grain,
                 "week_count": len(weeks),
+                "day_count": day_count,
                 "days": m.days,
                 # Why a switch is unavailable, so the UI can explain itself.
-                "can_go_weekly": not weeks and not month_has_facts,
+                "can_go_weekly": (
+                    (not weeks and not month_has_facts)          # from monthly
+                    or (grain == "day" and not filled_days)      # back from daily
+                ),
                 "can_go_monthly": bool(weeks) and not filled_weeks,
+                "can_go_daily": bool(weeks) and grain != "day" and not filled_weeks
+                                or (not weeks and not month_has_facts),
                 "blocked_reason": (
                     "این ماه داده‌ی ماهانه دارد" if month_has_facts and not weeks
                     else f"هفته‌های {'، '.join(map(str, filled_weeks))} داده دارند"
@@ -513,7 +574,9 @@ class SalesInputView(APIView):
 
         # Targets are the CEO's monthly plan and live in their own table now;
         # the sheet shows them read-only for context.
-        month = period.parent or period
+        # month_of, not `parent`: a day's parent is its week, so `parent`
+        # would look targets up against a week and find none.
+        month = month_of(period)
         plans = {
             t.employee_id: t.target_rial
             for t in SalesTarget.objects.filter(
@@ -674,7 +737,7 @@ class SalesTargetView(APIView):
         from apps.sales.models import SalesTarget
 
         period = DimPeriod.objects.get(pk=request.query_params.get("period"))
-        month = period.parent or period  # plans are always held on the month
+        month = month_of(period)  # plans are always held on the month
         channel = request.query_params.get("channel", "team")
         leaves = leaf_ids_for(month)
 
@@ -728,7 +791,7 @@ class SalesTargetView(APIView):
         from apps.sales.models import SalesTarget
 
         period = DimPeriod.objects.get(pk=request.data.get("period"))
-        month = period.parent or period
+        month = month_of(period)
         channel = request.data.get("channel", "team")
 
         for row in request.data.get("people", []):

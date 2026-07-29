@@ -35,12 +35,25 @@ const saving = ref("");
 // time; the month itself then holds no figures of its own.
 const progress = ref<MonthProgress | null>(null);
 const selectedWeek = ref<number | null>(null);
+const selectedDay = ref<number | null>(null);
 const weeks = computed(() => progress.value?.weeks ?? []);
 const isWeekly = computed(() => weeks.value.length > 1);
-// The period the sheet actually reads and writes.
-const selectedPeriod = computed(() =>
-  isWeekly.value ? selectedWeek.value : selectedMonth.value,
+
+/** The days of the week being filled in — empty unless this month is daily. */
+const days = computed(
+  () => weeks.value.find((w) => w.id === selectedWeek.value)?.day_periods ?? [],
 );
+const isDaily = computed(() => days.value.length > 0);
+
+/**
+ * The period the sheet actually reads and writes: figures live on leaves, so
+ * it is the day when the month is daily, the week when it is weekly, and the
+ * month itself otherwise.
+ */
+const selectedPeriod = computed(() => {
+  if (isDaily.value) return selectedDay.value;
+  return isWeekly.value ? selectedWeek.value : selectedMonth.value;
+});
 
 const showCalendar = ref(false);
 const selectedWeekSeq = computed(
@@ -85,6 +98,17 @@ async function loadMonth() {
   } else {
     selectedWeek.value = null;
   }
+  pickFirstUnfilledDay();
+}
+
+/** Same idea one level down: open on the first day still to be entered. */
+function pickFirstUnfilledDay() {
+  if (!days.value.length) {
+    selectedDay.value = null;
+    return;
+  }
+  const next = days.value.find((d) => d.state === "empty") ?? days.value[days.value.length - 1];
+  selectedDay.value = next?.id ?? null;
 }
 
 async function load() {
@@ -207,7 +231,8 @@ watch([selectedMonth, () => props.channel], async () => {
   await loadMonth();
   await load();
 });
-watch(selectedWeek, load);
+watch(selectedWeek, () => { pickFirstUnfilledDay(); if (!isDaily.value) load(); });
+watch(selectedDay, load);
 </script>
 
 <template>
@@ -260,6 +285,36 @@ watch(selectedWeek, load);
         class="text-xs text-brand-600 hover:underline"
         @click="showCalendar = !showCalendar"
       >{{ showCalendar ? "بستن تقویم" : "نمایش تقویم" }}</button>
+     </div>
+
+     <!-- Day picker: one level below the week, when this month is daily.
+          Figures live on the day, so this is the row actually being written. -->
+     <div v-if="isDaily" class="flex items-center gap-1.5 flex-wrap border-t border-slate-100 pt-3">
+       <span class="text-xs text-slate-500 px-1">روز:</span>
+       <button
+         v-for="d in days"
+         :key="d.id"
+         class="w-9 h-9 rounded-xl text-xs transition-colors relative flex items-center justify-center"
+         :class="selectedDay === d.id
+           ? 'bg-panel text-white'
+           : 'bg-slate-50 hover:bg-slate-100 text-slate-600'"
+         :title="d.label"
+         @click="selectedDay = d.id"
+       >
+         {{ d.jalali_day }}
+         <span
+           class="absolute bottom-1 w-1.5 h-1.5 rounded-full"
+           :class="{
+             'bg-accent-500': d.state === 'approved',
+             'bg-amber-400': d.state === 'submitted',
+             'bg-brand-500': d.state === 'draft',
+             'bg-transparent': d.state === 'empty',
+           }"
+         ></span>
+       </button>
+       <span class="text-xs text-slate-400 mr-auto">
+         {{ days.filter(d => d.state !== "empty").length }} از {{ days.length }} روز ثبت شده
+       </span>
      </div>
 
      <!-- Which days does the selected week actually cover? -->

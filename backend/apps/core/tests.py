@@ -401,3 +401,142 @@ class PeriodRollupTests(TestCase):
         self.assertEqual(sum(w["days"] for w in cal["weeks"]), 31)
         # week 1 of خرداد 1405 runs 1..8 after the short-edge merge
         self.assertEqual((cal["weeks"][0]["first_day"], cal["weeks"][0]["last_day"]), (1, 8))
+
+
+class DailyGrainTests(TestCase):
+    """
+    The day layer: months → weeks → days.
+
+    Days hang under weeks so everything built for weekly reporting keeps
+    working. The invariant is unchanged and now has to hold at two levels —
+    a month equals its weeks, and each week equals its days.
+    """
+
+    def setUp(self):
+        from apps.core import jalali
+        from apps.core.periods import ensure_days, ensure_weeks
+
+        self.month = DimPeriod.objects.create(
+            jalali_year=1405, jalali_month=3, kind="month", seq=3, code="1405.03",
+            start_date=jalali.to_gregorian(1405, 3, 1),
+            end_date=jalali.to_gregorian(1405, 3, 31),
+        )
+        self.weeks = ensure_weeks(self.month)
+        self.days = [d for w in self.weeks for d in ensure_days(w)]
+        self.emp = DimEmployee.objects.create(code="d-1", full_name_fa="فروشنده روزانه")
+
+    def _day_fact(self, day, revenue, profit=0):
+        return FactSalesMonthly.objects.create(
+            period=day, employee=self.emp, channel=SalesChannel.TEAM,
+            revenue_rial=Decimal(revenue), profit_rial=Decimal(profit),
+            status=ApprovalStatus.APPROVED,
+        )
+
+    def test_days_cover_the_month_exactly_once(self):
+        from datetime import timedelta
+
+        from apps.core.periods import leaves_of
+
+        self.assertEqual(len(self.days), 31)
+        leaves = leaves_of(self.month)
+        self.assertEqual(len(leaves), 31)
+        # one row per calendar day, no gaps and no repeats
+        dates = [d.start_date for d in leaves]
+        self.assertEqual(len(set(dates)), 31)
+        self.assertEqual(max(dates) - min(dates), timedelta(days=30))
+
+    def test_a_day_is_a_single_date(self):
+        for d in self.days:
+            self.assertEqual(d.start_date, d.end_date)
+            self.assertEqual(d.days, 1)
+
+    def test_month_revenue_is_the_sum_of_its_days(self):
+        for i, day in enumerate(self.days):
+            self._day_fact(day, 100 + i)
+        compute_period_kpis(self.month)
+        total = FactKPI.objects.get(
+            period=self.month, scope="company", kpi__code="revenue",
+            channel=SalesChannel.TEAM,
+        )
+        expected = sum(100 + i for i in range(31))
+        self.assertEqual(total.actual, Decimal(expected))
+
+    def test_each_week_equals_its_own_days(self):
+        from apps.core.periods import reconciliation
+
+        for day in self.days:
+            self._day_fact(day, 10)
+        compute_period_kpis(self.month)
+        for wk in self.weeks:
+            compute_period_kpis(wk, cascade=False)
+            for d in wk.children.all():
+                compute_period_kpis(d, cascade=False)
+
+        rec = reconciliation(self.month)
+        self.assertTrue(rec["balanced"])
+        self.assertEqual(len(rec["day_checks"]), 4)
+        for check in rec["day_checks"]:
+            self.assertTrue(check["balanced"])
+            self.assertEqual(check["week_total"], check["days_total"])
+
+    def test_a_week_with_facts_cannot_be_split_into_days(self):
+        from apps.core.periods import ensure_days, ensure_weeks
+
+        month = DimPeriod.objects.create(
+            jalali_year=1405, jalali_month=7, kind="month", seq=7, code="1405.07",
+        )
+        week = ensure_weeks(month)[0]
+        FactSalesMonthly.objects.create(
+            period=week, employee=self.emp, channel=SalesChannel.TEAM,
+            revenue_rial=Decimal("5"),
+        )
+        with self.assertRaises(ValueError):
+            ensure_days(week)
+
+    def test_a_month_cannot_be_collapsed_while_a_day_holds_figures(self):
+        """The deep check: the week row itself is empty, but its day is not."""
+        from apps.core.periods import unsplit
+
+        self._day_fact(self.days[0], 1)
+        with self.assertRaises(ValueError):
+            unsplit(self.month)
+
+    def test_month_of_walks_past_the_week_to_the_month(self):
+        """Targets are monthly, and a day's parent is a week — so `parent`
+        alone would look them up against the wrong period."""
+        from apps.core.periods import month_of
+
+        day = self.days[10]
+        self.assertEqual(day.parent.kind, "week")
+        self.assertEqual(month_of(day), self.month)
+        self.assertEqual(month_of(self.weeks[0]), self.month)
+        self.assertEqual(month_of(self.month), self.month)
+
+    def test_week_state_comes_from_its_days(self):
+        """A week split into days holds no rows of its own, so reading its own
+        row would report every daily week as empty."""
+        from apps.core.periods import progress
+
+        self._day_fact(self.days[0], 42)
+        data = progress(self.month)
+        self.assertEqual(data["weeks"][0]["state"], "approved")
+        self.assertEqual(len(data["weeks"][0]["day_periods"]), 8)
+        self.assertEqual(data["weeks"][0]["day_periods"][0]["state"], "approved")
+        self.assertEqual(data["weeks"][1]["state"], "empty")
+
+    def test_monthly_target_is_not_multiplied_by_the_number_of_days(self):
+        from apps.sales.models import SalesTarget
+
+        for day in self.days:
+            self._day_fact(day, 100)
+        SalesTarget.objects.create(
+            period=self.month, channel=SalesChannel.TEAM,
+            employee=self.emp, target_rial=Decimal("1000"),
+        )
+        compute_period_kpis(self.month)
+        achievement = FactKPI.objects.get(
+            period=self.month, scope="company", kpi__code="target_achievement",
+            channel=SalesChannel.TEAM,
+        )
+        # 3100 sold against a plan of 1000 — not against 31 × 1000.
+        self.assertAlmostEqual(float(achievement.actual), 310.0, places=4)
