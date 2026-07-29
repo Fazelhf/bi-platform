@@ -98,6 +98,13 @@ class DimPeriod(TimeStampedModel):
             return base
         if self.kind == PeriodKind.WEEK:
             return f"{base} · هفته {self.seq}"
+        # `seq` for a day is its position inside its week, so "روز ۱" of week 2
+        # is really the 9th of the month — useless on a tab. Show the date.
+        if self.start_date:
+            from apps.core import jalali
+
+            _, _, jd = jalali.from_gregorian(self.start_date)
+            return f"{jd} {self.month_name_fa} {self.jalali_year}"
         return f"{base} · روز {self.seq}"
 
     @property
@@ -319,6 +326,7 @@ class SiteSetting(TimeStampedModel):
     SALES_GRAINS = [
         ("month", "ماهانه"),
         ("week", "هفتگی"),
+        ("day", "روزانه"),
     ]
 
     singleton = models.BooleanField(default=True, unique=True, editable=False)

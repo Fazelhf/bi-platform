@@ -15,12 +15,26 @@ export interface Period {
 }
 
 /** One week of a month plus how far its data entry has got. */
+export type EntryState = "empty" | "draft" | "submitted" | "approved";
+
+/** One day of a week, present only when that week is entered day by day. */
+export interface DaySlot {
+  id: number;
+  seq: number;
+  label: string;
+  date: string | null;
+  jalali_day: number | null;
+  state: EntryState;
+}
+
 export interface WeekSlot {
   id: number;
   seq: number;
   label: string;
   days: number;
-  state: "empty" | "draft" | "submitted" | "approved";
+  state: EntryState;
+  /** Empty unless this week is split into days. */
+  day_periods: DaySlot[];
 }
 
 /** One day in the month calendar. `week_seq` is null before a month is split. */
@@ -47,6 +61,16 @@ export interface Reconciliation {
   balanced: boolean;
   month_holds_own_figures: boolean;
   weeks: { seq: number; label: string; revenue: string }[];
+  /** Week-vs-days check, present only where a week is entered daily. */
+  day_checks: {
+    week_seq: number;
+    week_label: string;
+    week_total: string;
+    days_total: string;
+    difference: string;
+    balanced: boolean;
+    day_count: number;
+  }[];
 }
 
 /** What `/sales/periods/<id>/weeks/` returns — drives the progress strip. */

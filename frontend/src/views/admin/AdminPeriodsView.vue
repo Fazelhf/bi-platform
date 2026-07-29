@@ -8,7 +8,11 @@ import type { MonthCalendar } from "@/types";
 
 /**
  * The CEO decides, month by month, whether data is recorded once for the
- * whole month or week by week.
+ * whole month, week by week, or day by day.
+ *
+ * Days live under weeks rather than directly under the month, so everything
+ * built for weekly reporting keeps working and the day layer sits one level
+ * below it.
  *
  * A switch is only offered when it is safe: a month that already holds
  * figures cannot be cut into weeks, and weeks that hold figures cannot be
@@ -20,11 +24,13 @@ interface MonthRow {
   label: string;
   jalali_year: number;
   jalali_month: number;
-  grain: "month" | "week";
+  grain: "month" | "week" | "day";
   week_count: number;
+  day_count: number;
   days: number;
   can_go_weekly: boolean;
   can_go_monthly: boolean;
+  can_go_daily: boolean;
   blocked_reason: string;
 }
 
@@ -36,6 +42,9 @@ const calendar = ref<MonthCalendar | null>(null);
 
 const years = computed(() => [...new Set(rows.value.map((r) => r.jalali_year))]);
 const weeklyCount = computed(() => rows.value.filter((r) => r.grain === "week").length);
+const dailyCount = computed(() => rows.value.filter((r) => r.grain === "day").length);
+
+const GRAIN_LABEL: Record<string, string> = { month: "ماهانه", week: "هفتگی", day: "روزانه" };
 
 async function load() {
   loading.value = true;
@@ -47,23 +56,44 @@ async function load() {
   }
 }
 
-async function setGrain(row: MonthRow, grain: "month" | "week") {
+async function setGrain(row: MonthRow, grain: "month" | "week" | "day") {
   if (row.grain === grain) return;
-  if (grain === "month") {
+
+  // Going coarser throws period rows away, so it is always confirmed.
+  if (grain !== "day" && row.grain === "day") {
+    const ok = await confirm({
+      title: "بازگشت از ثبت روزانه",
+      message: `روزهای «${row.label}» حذف می‌شوند و ثبت ${GRAIN_LABEL[grain]} خواهد شد. ادامه می‌دهید؟`,
+    });
+    if (!ok) return;
+  } else if (grain === "month") {
     const ok = await confirm({
       title: "بازگشت به ثبت ماهانه",
       message: `هفته‌های «${row.label}» حذف می‌شوند و اطلاعات یک‌جا برای کل ماه وارد خواهد شد. ادامه می‌دهید؟`,
     });
     if (!ok) return;
   }
+
   busy.value = row.id;
   try {
-    await api.post(`/sales/periods/${row.id}/${grain === "week" ? "split" : "unsplit"}/`);
-    toast.success(
-      grain === "week"
-        ? `«${row.label}» هفتگی شد.`
-        : `«${row.label}» به ثبت ماهانه بازگشت.`,
-    );
+    if (grain === "day") {
+      // One action for the whole month; splitting week by week from here
+      // would be six clicks for a single decision.
+      await api.post(`/sales/periods/${row.id}/split-days/`);
+    } else if (grain === "week") {
+      if (row.grain === "day") {
+        // Drop the days from each week, keeping the weeks themselves.
+        const progress = await salesApi.monthProgress(row.id);
+        for (const w of progress.weeks) {
+          await api.post(`/sales/periods/${w.id}/unsplit/`);
+        }
+      } else {
+        await api.post(`/sales/periods/${row.id}/split/`);
+      }
+    } else {
+      await api.post(`/sales/periods/${row.id}/unsplit/`);
+    }
+    toast.success(`«${row.label}» ${GRAIN_LABEL[grain]} شد.`);
     await load();
     if (openMonth.value === row.id) await showCalendar(row);
   } catch (e: any) {
@@ -117,12 +147,12 @@ async function weeklyFromHere(row: MonthRow) {
       <div>
         <h2 class="font-bold text-ink">دوره‌های ثبت اطلاعات</h2>
         <p class="text-xs text-slate-400 mt-1 leading-6">
-          برای هر ماه تعیین کنید اطلاعات یک‌بار برای کل ماه ثبت شود یا هفته‌به‌هفته.
-          تارگت‌ها در هر دو حالت ماهانه‌اند.
+          برای هر ماه تعیین کنید اطلاعات یک‌بار برای کل ماه ثبت شود، هفته‌به‌هفته یا روزبه‌روز.
+          تارگت‌ها در هر سه حالت ماهانه‌اند.
         </p>
       </div>
       <span class="text-xs text-slate-400 ltr-nums">
-        {{ weeklyCount }} از {{ rows.length }} ماه هفتگی
+        {{ weeklyCount }} ماه هفتگی · {{ dailyCount }} ماه روزانه · از {{ rows.length }}
       </span>
     </div>
 
@@ -142,18 +172,22 @@ async function weeklyFromHere(row: MonthRow) {
           <!-- Grain switch -->
           <div class="flex bg-slate-100 rounded-xl p-0.5">
             <button
-              v-for="opt in (['month', 'week'] as const)"
+              v-for="opt in (['month', 'week', 'day'] as const)"
               :key="opt"
               class="px-3 py-1 rounded-lg text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               :class="row.grain === opt ? 'bg-surface shadow-soft text-ink font-medium' : 'text-slate-500 hover:text-ink'"
               :disabled="busy === row.id
                 || (opt === 'week' && row.grain !== 'week' && !row.can_go_weekly)
-                || (opt === 'month' && row.grain !== 'month' && !row.can_go_monthly)"
+                || (opt === 'month' && row.grain !== 'month' && !row.can_go_monthly)
+                || (opt === 'day' && row.grain !== 'day' && !row.can_go_daily)"
               @click="setGrain(row, opt)"
-            >{{ opt === "month" ? "ماهانه" : "هفتگی" }}</button>
+            >{{ GRAIN_LABEL[opt] }}</button>
           </div>
 
-          <span v-if="row.grain === 'week'" class="text-xs text-slate-400 ltr-nums">
+          <span v-if="row.grain === 'day'" class="text-xs text-slate-400 ltr-nums">
+            {{ row.week_count }} هفته · {{ row.day_count }} روز ثبت
+          </span>
+          <span v-else-if="row.grain === 'week'" class="text-xs text-slate-400 ltr-nums">
             {{ row.week_count }} هفته · {{ row.days }} روز
           </span>
           <span v-else class="text-xs text-slate-400 ltr-nums">{{ row.days }} روز</span>
@@ -169,7 +203,7 @@ async function weeklyFromHere(row: MonthRow) {
               @click="weeklyFromHere(row)"
             >هفتگی از این ماه به بعد</button>
             <button
-              v-if="row.grain === 'week'"
+              v-if="row.grain !== 'month'"
               class="text-xs text-brand-600 hover:underline"
               @click="showCalendar(row)"
             >{{ openMonth === row.id ? "بستن تقویم" : "تقویم" }}</button>
