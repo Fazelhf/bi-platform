@@ -758,12 +758,34 @@ class SalesTargetView(APIView):
             )
             names[f.employee_id] = f.employee.full_name_fa
 
+        # Every salesperson, not only the ones already on the entry sheet.
+        # Building this list from the month's facts meant the CEO could not
+        # set a plan until the sales manager had added that person — plans are
+        # made before the month starts, so the list has to come from the
+        # employee dimension, exactly as the province list does.
+        #
+        # Union rather than a plain filter: someone deactivated mid-year who
+        # still has figures or a plan for this month must not vanish from it.
+        employees = list(
+            DimEmployee.objects.filter(is_active=True)
+            .exclude(full_name_fa__in=["", "0"])
+            .select_related("team")
+        )
+        seen = {e.id for e in employees}
+        extra_ids = (set(actual_by_emp) | {e for e, p in plans if e and p is None}) - seen
+        employees += list(
+            DimEmployee.objects.filter(id__in=extra_ids).select_related("team")
+        )
+        employees.sort(key=lambda e: e.id)
+
         people = [{
-            "employee_id": emp_id,
-            "name": names[emp_id],
-            "target_rial": str(plans.get((emp_id, None), 0)),
-            "revenue_rial": str(actual_by_emp[emp_id]),
-        } for emp_id in sorted(actual_by_emp)]
+            "employee_id": e.id,
+            "name": e.full_name_fa,
+            "team": e.team.name_fa if e.team else "",
+            "is_active": e.is_active,
+            "target_rial": str(plans.get((e.id, None), 0)),
+            "revenue_rial": str(actual_by_emp.get(e.id, 0)),
+        } for e in employees]
 
         actual_by_prov: dict[int, Decimal] = {}
         for p in FactSalesProvince.objects.filter(
@@ -820,10 +842,13 @@ class SalesTargetView(APIView):
 
         audit_log(request.user, month, AuditLog.Action.UPDATE,
                   {"targets": {"before": None, "after": f"{channel} · {month.label}"}})
-        # Target changes move تحقق تارگت everywhere under this month.
+        # Target changes move تحقق تارگت everywhere under this month — every
+        # level of the tree, not just the weeks, now that days exist.
         compute_period_kpis(month)
         for wk in month.children.all():
             compute_period_kpis(wk, cascade=False)
+            for day in wk.children.all():
+                compute_period_kpis(day, cascade=False)
         return Response({"ok": True})
 
 
