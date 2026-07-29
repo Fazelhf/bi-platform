@@ -35,12 +35,25 @@ const saving = ref("");
 // time; the month itself then holds no figures of its own.
 const progress = ref<MonthProgress | null>(null);
 const selectedWeek = ref<number | null>(null);
+const selectedDay = ref<number | null>(null);
 const weeks = computed(() => progress.value?.weeks ?? []);
 const isWeekly = computed(() => weeks.value.length > 1);
-// The period the sheet actually reads and writes.
-const selectedPeriod = computed(() =>
-  isWeekly.value ? selectedWeek.value : selectedMonth.value,
+
+/** The days of the week being filled in — empty unless this month is daily. */
+const days = computed(
+  () => weeks.value.find((w) => w.id === selectedWeek.value)?.day_periods ?? [],
 );
+const isDaily = computed(() => days.value.length > 0);
+
+/**
+ * The period the sheet actually reads and writes: figures live on leaves, so
+ * it is the day when the month is daily, the week when it is weekly, and the
+ * month itself otherwise.
+ */
+const selectedPeriod = computed(() => {
+  if (isDaily.value) return selectedDay.value;
+  return isWeekly.value ? selectedWeek.value : selectedMonth.value;
+});
 
 const showCalendar = ref(false);
 const selectedWeekSeq = computed(
@@ -71,13 +84,18 @@ function rowTotal(field: string): number {
   return (data.value?.columns ?? []).reduce((s, c) => s + Number(c[field] || 0), 0);
 }
 
-async function loadMonth() {
+/** Re-read the strip WITHOUT moving the person to another week or day. */
+async function refreshProgress() {
   if (!selectedMonth.value) return;
   try {
     progress.value = await salesApi.monthProgress(selectedMonth.value);
   } catch {
     progress.value = null;
   }
+}
+
+async function loadMonth() {
+  await refreshProgress();
   // Land on the first week that still needs filling in, else the last one.
   if (isWeekly.value) {
     const next = weeks.value.find((w) => w.state === "empty") ?? weeks.value[weeks.value.length - 1];
@@ -85,6 +103,17 @@ async function loadMonth() {
   } else {
     selectedWeek.value = null;
   }
+  pickFirstUnfilledDay();
+}
+
+/** Same idea one level down: open on the first day still to be entered. */
+function pickFirstUnfilledDay() {
+  if (!days.value.length) {
+    selectedDay.value = null;
+    return;
+  }
+  const next = days.value.find((d) => d.state === "empty") ?? days.value[days.value.length - 1];
+  selectedDay.value = next?.id ?? null;
 }
 
 async function load() {
@@ -109,7 +138,7 @@ function addColumn(employeeId: number | null, name: string) {
   data.value!.columns.push(blank);
 }
 
-function confirmAdd() {
+async function confirmAdd() {
   if (pickId.value === "new") {
     if (!newName.value.trim()) return;
     addColumn(null, newName.value);
@@ -121,12 +150,45 @@ function confirmAdd() {
     return; // nothing chosen
   }
   showAdd.value = false;
+  // Persist straight away. Adding a column used to live only in the browser
+  // until someone remembered to press ذخیره — so a reload, a week switch or a
+  // closed tab silently threw the new salesperson away.
+  await autoSave("فروشنده اضافه شد.");
 }
 
 async function removeSalesperson(i: number) {
   const c = data.value!.columns[i];
   if (await confirm({ title: "حذف فروشنده", message: `ستون «${c.name}» از این دوره حذف شود؟`, danger: true })) {
     data.value!.columns.splice(i, 1);
+    await autoSave("فروشنده حذف شد.");
+  }
+}
+
+/**
+ * Save without leaving the sheet — used for structural edits (adding or
+ * removing a salesperson) so the table on screen is always what is stored.
+ * Figures typed into cells still wait for the explicit ذخیره, because
+ * saving on every keystroke would fight the person typing.
+ */
+async function autoSave(message: string) {
+  if (!selectedPeriod.value || !data.value) return;
+  saving.value = "در حال ذخیره…";
+  try {
+    await salesInputApi.save({
+      period: selectedPeriod.value,
+      channel: props.channel,
+      submit: false,
+      columns: data.value.columns,
+      provinces: data.value.provinces,
+    });
+    saving.value = "";
+    toast.success(message);
+    // Refresh the dots, but stay on the day being worked on — loadMonth()
+    // would jump to the first unfilled one and throw the view away.
+    await Promise.all([refreshProgress(), load()]);
+  } catch (e: any) {
+    saving.value = "";
+    toast.error(e?.response?.status === 403 ? "دسترسی ندارید." : "ذخیره نشد.");
   }
 }
 
@@ -207,7 +269,8 @@ watch([selectedMonth, () => props.channel], async () => {
   await loadMonth();
   await load();
 });
-watch(selectedWeek, load);
+watch(selectedWeek, () => { pickFirstUnfilledDay(); if (!isDaily.value) load(); });
+watch(selectedDay, load);
 </script>
 
 <template>
@@ -260,6 +323,36 @@ watch(selectedWeek, load);
         class="text-xs text-brand-600 hover:underline"
         @click="showCalendar = !showCalendar"
       >{{ showCalendar ? "بستن تقویم" : "نمایش تقویم" }}</button>
+     </div>
+
+     <!-- Day picker: one level below the week, when this month is daily.
+          Figures live on the day, so this is the row actually being written. -->
+     <div v-if="isDaily" class="flex items-center gap-1.5 flex-wrap border-t border-slate-100 pt-3">
+       <span class="text-xs text-slate-500 px-1">روز:</span>
+       <button
+         v-for="d in days"
+         :key="d.id"
+         class="w-9 h-9 rounded-xl text-xs transition-colors relative flex items-center justify-center"
+         :class="selectedDay === d.id
+           ? 'bg-panel text-white'
+           : 'bg-slate-50 hover:bg-slate-100 text-slate-600'"
+         :title="d.label"
+         @click="selectedDay = d.id"
+       >
+         {{ d.jalali_day }}
+         <span
+           class="absolute bottom-1 w-1.5 h-1.5 rounded-full"
+           :class="{
+             'bg-accent-500': d.state === 'approved',
+             'bg-amber-400': d.state === 'submitted',
+             'bg-brand-500': d.state === 'draft',
+             'bg-transparent': d.state === 'empty',
+           }"
+         ></span>
+       </button>
+       <span class="text-xs text-slate-400 mr-auto">
+         {{ days.filter(d => d.state !== "empty").length }} از {{ days.length }} روز ثبت شده
+       </span>
      </div>
 
      <!-- Which days does the selected week actually cover? -->
@@ -453,7 +546,9 @@ watch(selectedWeek, load);
       </section>
 
       <!-- Sticky action bar -->
-      <div class="sticky bottom-4 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+      <!-- z-30: the table's frozen first/last columns are z-10/z-20, so without
+           this the sheet scrolled over the save buttons. -->
+      <div class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
         <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm transition-colors" @click="save(false)">ذخیره پیش‌نویس</button>
