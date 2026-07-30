@@ -105,6 +105,46 @@ class SalesChannel(models.TextChoices):
     B2B = "b2b", "فروش B2B"
 
 
+class EmployeeChannel(TimeStampedModel):
+    """
+    Which sales channel a کارشناس belongs to — the roster a department manager
+    owns.
+
+    Nothing recorded this before. The entry sheet built its columns from
+    whatever fact rows already existed for that period, so a salesperson only
+    appeared once they had figures, and every new month started blank: the
+    manager re-typed the same names, and a person who sold nothing in a month
+    silently vanished from the sheet rather than showing a zero.
+
+    It is a separate table rather than a field on DimEmployee because the same
+    person can work more than one channel — the model has said so since the
+    beginning ("the same person can appear in both workbooks"). `team`, which
+    DimEmployee already has, is a different thing: a regional grouping
+    (بانکی، ایران غرب، …), not the department that owns the data.
+    """
+
+    employee = models.ForeignKey(
+        "DimEmployee", on_delete=models.CASCADE, related_name="memberships"
+    )
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices)
+    is_active = models.BooleanField(
+        default=True,
+        help_text="کارشناسی که دیگر در این بخش کار نمی‌کند غیرفعال می‌شود، نه حذف — "
+                  "تا سابقه فروشش در گزارش‌های قبلی باقی بماند.",
+    )
+    joined_at = models.DateField(null=True, blank=True)
+    left_at = models.DateField(null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        unique_together = ("employee", "channel")
+        ordering = ("-is_active", "employee__full_name_fa")
+        verbose_name = "عضویت کارشناس در بخش"
+
+    def __str__(self) -> str:
+        return f"{self.employee} · {self.get_channel_display()}"
+
+
 class FactSalesMonthly(TimeStampedModel):
     """
     Grain: one salesperson x one period x one channel. The 8 manually-entered

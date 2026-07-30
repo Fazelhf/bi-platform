@@ -44,18 +44,21 @@ const router = createRouter({
           path: "sales",
           name: "sales-dashboard",
           component: () => import("@/views/SalesDashboardView.vue"),
+          meta: { salesChannel: "team" },
           props: { channel: "team", title: "داشبورد فروش همکار" },
         },
         {
           path: "sales-org",
           name: "sales-org-dashboard",
           component: () => import("@/views/SalesDashboardView.vue"),
+          meta: { salesChannel: "organizational" },
           props: { channel: "organizational", title: "داشبورد فروش بانکی" },
         },
         {
           path: "sales-b2b",
           name: "sales-b2b-dashboard",
           component: () => import("@/views/SalesDashboardView.vue"),
+          meta: { salesChannel: "b2b" },
           props: { channel: "b2b", title: "داشبورد فروش B2B" },
         },
         {
@@ -158,6 +161,14 @@ const router = createRouter({
           meta: { department: "production" },
         },
 
+        // --- منابع انسانی: each department's own roster ---
+        {
+          path: "roster",
+          name: "roster",
+          component: () => import("@/views/RosterView.vue"),
+          meta: { roster: true },
+        },
+
         // --- Approval inbox (کارتابل) — anyone who can approve ---
         {
           path: "inbox",
@@ -203,6 +214,22 @@ router.beforeEach(async (to) => {
   // Inbox: approvers only.
   if (to.meta.approver && !auth.me?.can_approve && !auth.me?.is_superuser) {
     return { name: homeRouteFor(auth.department) };
+  }
+  // A sales channel belongs to the department that owns it. The sidebar
+  // already only offered your own, but the URL was still reachable — and the
+  // API now refuses, so without this the page would just show an error.
+  const salesChannel = to.meta.salesChannel as string | undefined;
+  if (salesChannel && !auth.isExecutive && !auth.me?.is_superuser) {
+    const owner = { team: "sales_team", organizational: "sales_org", b2b: "sales_b2b" }[salesChannel];
+    if (auth.department !== owner) return { name: homeRouteFor(auth.department) };
+  }
+  // Roster: department managers (their own section) and the CEO.
+  if (to.meta.roster) {
+    const canRoster =
+      auth.isExecutive ||
+      !!auth.me?.is_superuser ||
+      ["sales_team", "sales_org", "sales_b2b"].includes(auth.department);
+    if (!canRoster) return { name: homeRouteFor(auth.department) };
   }
   // CRM demo: locked until its own password is entered. `next` is carried so
   // a deep link (a drill-down URL someone was sent) survives the prompt.
