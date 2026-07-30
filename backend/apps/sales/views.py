@@ -1,21 +1,23 @@
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Sum
+from django.db.models import Count, Max, Sum
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status as http_status
 from rest_framework import viewsets
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.jalali import from_gregorian
-from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope
+from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope, PeriodKind
 from apps.core.periods import month_of
 from apps.sales.models import (
     ApprovalStatus,
     DimBank,
     DimEmployee,
+    EmployeeChannel,
     DimProvince,
     DimTeam,
     FactCollection,
@@ -42,11 +44,34 @@ from apps.sales.serializers import (
     KPIResultSerializer,
     PeriodSerializer,
     ProvinceSerializer,
+    RosterMemberSerializer,
     SalesMonthlySerializer,
     SalesProvinceSerializer,
     TeamSerializer,
 )
 from apps.sales.services.kpi import compute_period_kpis
+
+
+def assert_channel_visible(user, channel: str) -> None:
+    """
+    A sales channel is only visible to the department that owns it.
+
+    Reads were wide open: any signed-in user could pull فروش بانکی or B2B
+    figures by changing `?channel=` or typing the dashboard URL, even though
+    the sidebar only ever offered them their own. The menu was the whole
+    boundary, which is no boundary at all.
+
+    The CEO, executives and superusers still see every channel — that is the
+    point of the overview.
+    """
+    if not (user and user.is_authenticated):
+        raise PermissionDenied("وارد نشده‌اید.")
+    if user.is_superuser or user.role == "executive":
+        return
+    owner = CHANNEL_DEPARTMENT.get(channel)
+    if owner and user.department == owner:
+        return
+    raise PermissionDenied("این بخش فروش متعلق به شما نیست.")
 
 
 def current_jalali_year() -> int:
@@ -147,23 +172,42 @@ class PeriodViewSet(viewsets.ModelViewSet):
         if needed, then split every week into days. Doing it week by week from
         the UI would be six clicks for one decision.
         """
+        from django.db import transaction
+
         from apps.core.models import PeriodKind, SiteSetting
-        from apps.core.periods import ensure_days, ensure_weeks
+        from apps.core.periods import ensure_days, ensure_weeks, has_facts
 
         month = self.get_object()
         if month.kind != PeriodKind.MONTH:
             return Response({"detail": "فقط یک ماه را می‌توان روزانه کرد."},
                             status=http_status.HTTP_400_BAD_REQUEST)
         try:
-            weeks = list(month.children.order_by("seq")) or ensure_weeks(
-                month, min_days=SiteSetting.get().min_week_days
-            )
-            days = []
-            for w in weeks:
-                if w.kind != PeriodKind.WEEK:
-                    continue
-                days.extend(ensure_days(w) if not w.children.exists()
-                            else list(w.children.order_by("seq")))
+            # All or nothing. ensure_days() is atomic per week, but this walks
+            # several of them: without an outer transaction a month whose third
+            # week held figures came back 400 having already converted the
+            # first two — a refusal that half-applied.
+            with transaction.atomic():
+                weeks = list(month.children.order_by("seq")) or ensure_weeks(
+                    month, min_days=SiteSetting.get().min_week_days
+                )
+                # Name every blocking week up front, rather than stopping at the
+                # first: the manager needs to know what to clear, not to
+                # discover it one refusal at a time.
+                blocked = [
+                    w for w in weeks
+                    if w.kind == PeriodKind.WEEK and not w.children.exists() and has_facts(w)
+                ]
+                if blocked:
+                    raise ValueError(
+                        "این هفته‌ها داده‌ی ثبت‌شده دارند و باید اول پاک شوند: "
+                        + "، ".join(f"هفته {w.seq}" for w in blocked)
+                    )
+                days = []
+                for w in weeks:
+                    if w.kind != PeriodKind.WEEK:
+                        continue
+                    days.extend(ensure_days(w) if not w.children.exists()
+                                else list(w.children.order_by("seq")))
         except ValueError as exc:
             return Response({"detail": str(exc)},
                             status=http_status.HTTP_400_BAD_REQUEST)
@@ -241,9 +285,57 @@ class PeriodViewSet(viewsets.ModelViewSet):
         return Response(out)
 
 
+class TeamManagePermission(BasePermission):
+    """Read for anyone signed in; only the CEO, an admin or a sales department
+    manager may reshape the teams themselves."""
+
+    message = "شما مجاز به تغییر تیم‌ها نیستید."
+
+    def has_permission(self, request, view):
+        u = request.user
+        if not (u and u.is_authenticated):
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return bool(
+            u.is_superuser
+            or u.role == "executive"
+            or u.department in CHANNEL_DEPARTMENT.values()
+        )
+
+
 class TeamViewSet(viewsets.ModelViewSet):
-    queryset = DimTeam.objects.all()
+    """
+    گروه‌های فروش (ایران غرب، تهران، …) — now editable from «تیم من» rather
+    than only through the Django admin.
+    """
+
+    queryset = DimTeam.objects.all().order_by("name_fa")
     serializer_class = TeamSerializer
+    permission_classes = [TeamManagePermission]
+
+    def perform_create(self, serializer):
+        # `code` is a slug nobody wants to invent when adding «ایران غرب».
+        import uuid
+
+        code = (serializer.validated_data.get("code") or "").strip()
+        serializer.save(code=code or f"team-{uuid.uuid4().hex[:8]}")
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Refused while anyone is still in the team. `team` is SET_NULL, so
+        deleting it would quietly strip the grouping off every member and the
+        team dashboards would lose a column with no warning.
+        """
+        team = self.get_object()
+        members = DimEmployee.objects.filter(team=team)
+        if members.exists():
+            names = "، ".join(members.values_list("full_name_fa", flat=True)[:5])
+            return Response(
+                {"detail": f"این تیم {members.count()} عضو دارد و حذف نمی‌شود: {names}"},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):
@@ -409,6 +501,7 @@ class DashboardSummaryView(APIView):
         period_id = request.query_params.get("period")
         period = DimPeriod.objects.get(pk=period_id)
         channel = request.query_params.get("channel", SalesChannel.TEAM)
+        assert_channel_visible(request.user, channel)
 
         company_kpis = FactKPI.objects.filter(
             period=period, scope=KPIScope.COMPANY, kpi__domain="sales", channel=channel
@@ -566,6 +659,9 @@ class SalesInputView(APIView):
     def get(self, request):
         period = DimPeriod.objects.get(pk=request.query_params.get("period"))
         channel = self._channel(request)
+        # Only POST used to be checked, so another department's sheet — names,
+        # figures and all — could simply be read.
+        self._assert_owner(request, channel)
         facts = FactSalesMonthly.objects.filter(
             period=period, channel=channel
         ).select_related("employee").order_by("employee__id")
@@ -598,6 +694,29 @@ class SalesInputView(APIView):
             **{m: str(getattr(f, m)) for m in fields},
             "target_rial": str(plans.get(f.employee_id, 0)),
         } for f in facts]
+
+        # Then everyone on the roster who has no row yet, as blank columns.
+        #
+        # The sheet used to be built from the facts alone, so a new period
+        # opened empty and the manager retyped the same names every time —
+        # and anyone who sold nothing simply disappeared instead of showing a
+        # zero, which is a different statement entirely.
+        entered = {c["employee_id"] for c in columns}
+        roster = (
+            EmployeeChannel.objects.filter(channel=channel, is_active=True)
+            .select_related("employee")
+            .order_by("employee__full_name_fa")
+        )
+        for member in roster:
+            if member.employee_id in entered:
+                continue
+            columns.append({
+                "employee_id": member.employee_id,
+                "name": member.employee.full_name_fa,
+                "status": ApprovalStatus.DRAFT,
+                **{m: "0" for m in fields},
+                "target_rial": str(plans.get(member.employee_id, 0)),
+            })
 
         # Every province is listed from the start — managers fill in the ones
         # they sold to instead of hunting for them in an "add" dropdown. Rows
@@ -869,6 +988,7 @@ class SalesDashboardDetailView(APIView):
     def get(self, request):
         period = DimPeriod.objects.get(pk=request.query_params.get("period"))
         channel = request.query_params.get("channel", "team")
+        assert_channel_visible(request.user, channel)
 
         # ---- Salesperson block (channel-scoped) — Sheet3 rows 18-30 ----
         facts = list(
@@ -966,3 +1086,206 @@ class SalesDashboardDetailView(APIView):
             "teams": teams,
             "provinces": provinces,
         })
+
+
+class RosterViewSet(viewsets.ModelViewSet):
+    """
+    «کارشناسان بخش» — each department manager's own roster.
+
+    Until now nothing said which salespeople belong to a channel: the entry
+    sheet listed whoever already had figures, so a new month opened blank and
+    a rep who sold nothing simply disappeared. This is the list the manager
+    maintains, and the entry sheet is built from it.
+
+    Scoped by channel, and a manager only ever sees and edits their own —
+    the CEO and superusers see any of them.
+    """
+
+    serializer_class = RosterMemberSerializer
+    permission_classes = [SalesChannelOwnership]
+    queryset = EmployeeChannel.objects.select_related("employee", "employee__team", "employee__user")
+
+    def _channel(self):
+        return (
+            self.request.query_params.get("channel")
+            or self.request.data.get("channel")
+            or self._own_channel()
+            or "team"
+        )
+
+    def _own_channel(self):
+        """The channel this user's department owns, if any."""
+        dept = getattr(self.request.user, "department", "")
+        for channel, d in CHANNEL_DEPARTMENT.items():
+            if d == dept:
+                return channel
+        return None
+
+    def _assert_owner(self, channel):
+        u = self.request.user
+        if u.is_superuser or u.role == "executive":
+            return
+        if u.department != CHANNEL_DEPARTMENT.get(channel):
+            raise PermissionDenied("این بخش متعلق به شما نیست.")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.detail:
+            return qs
+        channel = self._channel()
+        self._assert_owner(channel)
+        qs = qs.filter(channel=channel)
+        if self.request.query_params.get("active") == "1":
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        members = list(self.filter_queryset(self.get_queryset()))
+        channel = self._channel()
+
+        # One pass over the facts instead of three queries per member.
+        stats = (
+            FactSalesMonthly.objects.filter(
+                channel=channel, employee_id__in=[m.employee_id for m in members]
+            )
+            .values("employee_id")
+            .annotate(
+                periods_filled=Count("id", distinct=True),
+                total_revenue=Sum("revenue_rial"),
+                last_seen=Max("period__end_date"),
+            )
+        )
+        by_employee = {s["employee_id"]: s for s in stats}
+
+        # Resolve "last month with data" by DATE RANGE, not by matching the
+        # end date to a month row. Figures live on leaves, so once a month is
+        # entered weekly or daily the latest fact sits on a week or a day and
+        # would never line up with any month's end date — the column just came
+        # back empty for exactly the people who report most often.
+        months = list(
+            DimPeriod.objects.filter(kind=PeriodKind.MONTH)
+            .exclude(start_date=None).exclude(end_date=None)
+            .order_by("start_date")
+        )
+
+        def month_label_for(day):
+            if not day:
+                return ""
+            for p in months:
+                if p.start_date <= day <= p.end_date:
+                    return p.label
+            return ""
+
+        for m in members:
+            s = by_employee.get(m.employee_id, {})
+            m.periods_filled = s.get("periods_filled", 0)
+            m.total_revenue = s.get("total_revenue") or 0
+            m.last_period = month_label_for(s.get("last_seen"))
+
+        return Response(self.get_serializer(members, many=True).data)
+
+    def create(self, request, *args, **kwargs):
+        """
+        Add someone to this roster — an existing کارشناس by id, or a new one by
+        name. Re-adding a person who was deactivated revives that membership
+        instead of failing on the unique constraint.
+        """
+        import uuid
+
+        channel = self._channel()
+        self._assert_owner(channel)
+
+        employee_id = request.data.get("employee")
+        name = (request.data.get("name") or "").strip()
+
+        if employee_id:
+            employee = DimEmployee.objects.filter(pk=employee_id).first()
+            if not employee:
+                return Response({"detail": "کارشناس پیدا نشد."},
+                                status=http_status.HTTP_400_BAD_REQUEST)
+        elif name:
+            employee = DimEmployee.objects.filter(full_name_fa=name).first()
+            if not employee:
+                employee = DimEmployee.objects.create(
+                    code=f"emp-{uuid.uuid4().hex[:8]}", full_name_fa=name,
+                )
+        else:
+            return Response({"detail": "نام کارشناس را وارد کنید."},
+                            status=http_status.HTTP_400_BAD_REQUEST)
+
+        if request.data.get("team"):
+            employee.team_id = request.data["team"]
+            employee.save(update_fields=["team"])
+
+        member, created = EmployeeChannel.objects.get_or_create(
+            employee=employee, channel=channel,
+            defaults={"note": request.data.get("note", "")},
+        )
+        if not created and not member.is_active:
+            member.is_active = True
+            member.left_at = None
+            member.save(update_fields=["is_active", "left_at"])
+        return Response(self.get_serializer(member).data,
+                        status=http_status.HTTP_201_CREATED if created else http_status.HTTP_200_OK)
+
+    def perform_update(self, serializer):
+        self._assert_owner(serializer.instance.channel)
+        member = serializer.save()
+        # The name and team live on the employee, not the membership, but the
+        # manager edits them from this one screen.
+        emp = member.employee
+        changed = []
+        name = (self.request.data.get("employee_name") or "").strip()
+        if name and name != emp.full_name_fa:
+            emp.full_name_fa = name
+            changed.append("full_name_fa")
+        if "team" in self.request.data:
+            emp.team_id = self.request.data["team"] or None
+            changed.append("team")
+        if changed:
+            emp.save(update_fields=changed)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Remove from the roster — but only while the person has no figures in
+        this channel. Deleting someone who has sold would strip their history
+        out of every past dashboard, so they are deactivated instead: gone
+        from the sheet, still in the reports they earned.
+        """
+        member = self.get_object()
+        self._assert_owner(member.channel)
+        if FactSalesMonthly.objects.filter(
+            employee_id=member.employee_id, channel=member.channel
+        ).exists():
+            member.is_active = False
+            member.left_at = member.left_at or timezone.localdate()
+            member.save(update_fields=["is_active", "left_at"])
+            return Response(
+                {"detail": "این کارشناس سابقه فروش دارد؛ به‌جای حذف، غیرفعال شد.",
+                 "deactivated": True},
+                status=http_status.HTTP_200_OK,
+            )
+        member.delete()
+        return Response(status=http_status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=["get"], url_path="available")
+    def available(self, request):
+        """کارشناسانی که در این بخش نیستند — برای افزودن از میان افراد موجود."""
+        channel = self._channel()
+        self._assert_owner(channel)
+        taken = EmployeeChannel.objects.filter(channel=channel).values_list("employee_id", flat=True)
+        rows = (
+            DimEmployee.objects.filter(is_active=True)
+            .exclude(id__in=taken)
+            .exclude(full_name_fa__in=["", "0"])
+            .select_related("team")
+            .order_by("full_name_fa")
+        )
+        return Response([
+            {"id": e.id, "name": e.full_name_fa,
+             "team": e.team_id, "team_name": e.team.name_fa if e.team else "",
+             "channels": list(
+                 EmployeeChannel.objects.filter(employee=e).values_list("channel", flat=True)
+             )}
+            for e in rows
+        ])

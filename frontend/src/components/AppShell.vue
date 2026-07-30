@@ -65,6 +65,9 @@ function crmActive(name: string): boolean {
   return current === name || CRM_PARENT[current] === name;
 }
 
+/** The CEO oversees every section, so «تیم من» would be the wrong word. */
+const rosterLabel = computed(() => (auth.isExecutive ? "تیم فروش" : "تیم من"));
+
 const primary = computed<Item[]>(() => {
   const items: Item[] = [];
   if (auth.isExecutive) {
@@ -100,10 +103,14 @@ const primary = computed<Item[]>(() => {
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
   }
+  // Each department manager keeps their own list of کارشناسان; the CEO sees all.
+  if (auth.isExecutive || ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)) {
+    items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
+  }
   items.push(
     { name: "chat", label: "پیام‌ها", icon: "chat", badge: () => chatCount.value },
     { name: "notes", label: "یادداشت‌ها", icon: "notes" },
-    { name: "team", label: "تیم", icon: "team" },
+    { name: "team", label: "همکاران", icon: "team" },
   );
   return items;
 });
@@ -114,7 +121,7 @@ const pageTitle = computed(() => {
     overview: "نمای کلی", "sales-dashboard": "داشبورد فروش همکار",
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
-    inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "تیم",
+    inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
     "crm-dashboard": "داشبورد CRM", "crm-pipeline": "مراحل فروش",
     "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
@@ -125,6 +132,7 @@ const pageTitle = computed(() => {
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
     targets: "تعیین تارگت", settings: "تنظیمات سایت",
   };
+  if (route.name === "roster") return rosterLabel.value;
   return map[route.name as string] ?? "شرکت کاغذ حساس نمابر مهر";
 });
 
