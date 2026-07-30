@@ -147,23 +147,42 @@ class PeriodViewSet(viewsets.ModelViewSet):
         if needed, then split every week into days. Doing it week by week from
         the UI would be six clicks for one decision.
         """
+        from django.db import transaction
+
         from apps.core.models import PeriodKind, SiteSetting
-        from apps.core.periods import ensure_days, ensure_weeks
+        from apps.core.periods import ensure_days, ensure_weeks, has_facts
 
         month = self.get_object()
         if month.kind != PeriodKind.MONTH:
             return Response({"detail": "فقط یک ماه را می‌توان روزانه کرد."},
                             status=http_status.HTTP_400_BAD_REQUEST)
         try:
-            weeks = list(month.children.order_by("seq")) or ensure_weeks(
-                month, min_days=SiteSetting.get().min_week_days
-            )
-            days = []
-            for w in weeks:
-                if w.kind != PeriodKind.WEEK:
-                    continue
-                days.extend(ensure_days(w) if not w.children.exists()
-                            else list(w.children.order_by("seq")))
+            # All or nothing. ensure_days() is atomic per week, but this walks
+            # several of them: without an outer transaction a month whose third
+            # week held figures came back 400 having already converted the
+            # first two — a refusal that half-applied.
+            with transaction.atomic():
+                weeks = list(month.children.order_by("seq")) or ensure_weeks(
+                    month, min_days=SiteSetting.get().min_week_days
+                )
+                # Name every blocking week up front, rather than stopping at the
+                # first: the manager needs to know what to clear, not to
+                # discover it one refusal at a time.
+                blocked = [
+                    w for w in weeks
+                    if w.kind == PeriodKind.WEEK and not w.children.exists() and has_facts(w)
+                ]
+                if blocked:
+                    raise ValueError(
+                        "این هفته‌ها داده‌ی ثبت‌شده دارند و باید اول پاک شوند: "
+                        + "، ".join(f"هفته {w.seq}" for w in blocked)
+                    )
+                days = []
+                for w in weeks:
+                    if w.kind != PeriodKind.WEEK:
+                        continue
+                    days.extend(ensure_days(w) if not w.children.exists()
+                                else list(w.children.order_by("seq")))
         except ValueError as exc:
             return Response({"detail": str(exc)},
                             status=http_status.HTTP_400_BAD_REQUEST)
