@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "backend-django",
-      "runtimeExecutable": "C:/Users/Asus/bi-platform/backend/.venv/Scripts/python.exe",
+      "runtimeExecutable": "C:/Users/Asus/bi-platform-v2/backend/.venv/Scripts/python.exe",
       "runtimeArgs": [
-        "C:/Users/Asus/bi-platform/backend/manage.py",
+        "C:/Users/Asus/bi-platform-v2/.claude/worktrees/bi-platform-help-3dd5e6/backend/manage.py",
         "runserver",
         "127.0.0.1:8000"
       ],
@@ -16,7 +16,7 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "--prefix",
-        "C:/Users/Asus/bi-platform/frontend",
+        "C:/Users/Asus/bi-platform-v2/.claude/worktrees/bi-platform-help-3dd5e6/frontend",
         "run",
         "dev"
       ],
