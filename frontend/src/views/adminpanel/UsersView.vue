@@ -263,6 +263,11 @@ async function openActivity(user: AdminUser) {
   } catch (e) { toast.error(apiError(e)); }
 }
 
+/** Your own row: the panel never offers actions that would sign you out. */
+function isSelf(row: AdminUser): boolean {
+  return row.id === admin.user?.id;
+}
+
 async function copyPassword() {
   if (!newPassword.value) return;
   try {
@@ -376,32 +381,38 @@ const activityTimeline = computed(() =>
         <span class="text-xs text-slate-500">{{ row.last_login ? timeAgo(row.last_login) : "—" }}</span>
       </template>
 
+      <!-- Actions that would lock you out of the panel you are standing in
+           (password reset, lock, deactivate, force-logout, delete) are simply
+           not offered on your own row — the API refuses them too. -->
       <template #actions="{ row }">
         <div class="flex items-center gap-1.5 text-xs">
           <button class="text-slate-400 hover:text-ink" title="فعالیت کاربر" @click="openActivity(row)">تاریخچه</button>
           <button v-if="admin.can('users.edit')" class="text-brand-600 hover:underline" @click="openEdit(row)">ویرایش</button>
-          <button
-            v-if="admin.can('users.password')"
-            class="text-slate-500 hover:text-ink" title="بازنشانی رمز"
-            @click="resetPassword(row)"
-          >رمز</button>
-          <button
-            v-if="admin.can('users.lock')"
-            :class="row.is_locked ? 'text-accent-600' : 'text-amber-600'"
-            class="hover:underline"
-            @click="toggleLock(row)"
-          >{{ row.is_locked ? "بازکردن" : "قفل" }}</button>
-          <button
-            v-if="admin.can('users.edit')"
-            class="text-slate-500 hover:text-ink"
-            @click="toggleActive(row)"
-          >{{ row.is_active ? "غیرفعال" : "فعال" }}</button>
-          <button
-            v-if="admin.can('security.sessions')"
-            class="text-slate-400 hover:text-ink" title="پایان نشست‌ها"
-            @click="forceLogout(row)"
-          >خروج</button>
-          <button v-if="admin.can('users.delete')" class="text-red-500 hover:underline" @click="remove(row)">حذف</button>
+          <template v-if="!isSelf(row)">
+            <button
+              v-if="admin.can('users.password')"
+              class="text-slate-500 hover:text-ink" title="بازنشانی رمز"
+              @click="resetPassword(row)"
+            >رمز</button>
+            <button
+              v-if="admin.can('users.lock')"
+              :class="row.is_locked ? 'text-accent-600' : 'text-amber-600'"
+              class="hover:underline"
+              @click="toggleLock(row)"
+            >{{ row.is_locked ? "بازکردن" : "قفل" }}</button>
+            <button
+              v-if="admin.can('users.edit')"
+              class="text-slate-500 hover:text-ink"
+              @click="toggleActive(row)"
+            >{{ row.is_active ? "غیرفعال" : "فعال" }}</button>
+            <button
+              v-if="admin.can('security.sessions')"
+              class="text-slate-400 hover:text-ink" title="پایان نشست‌ها"
+              @click="forceLogout(row)"
+            >خروج</button>
+            <button v-if="admin.can('users.delete')" class="text-red-500 hover:underline" @click="remove(row)">حذف</button>
+          </template>
+          <span v-else class="text-slate-300" title="روی حساب خودتان در دسترس نیست">حساب شما</span>
         </div>
       </template>
     </DataTable>

@@ -157,6 +157,45 @@ class UserManagementTests(AdminPanelTestCase):
         self.assertTrue(self.operator.check_password(response.data["password"]))
         self.assertTrue(UserSecurity.get(self.operator).must_change_password)
 
+    def test_own_password_reset_requires_an_explicit_password(self):
+        """
+        Generating a random password for your own account would show the
+        plaintext once and revoke your session — one missed toast and the
+        administrator is locked out of the panel. So it is refused.
+        """
+        self.as_admin()
+        refused = self.client.post(
+            f"/api/admin/users/{self.admin.id}/reset-password/", {}, format="json"
+        )
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("password", refused.data)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.check_password("Adm1n-pass!"))
+
+        # Naming the password explicitly is fine, and must not sign you out.
+        accepted = self.client.post(
+            f"/api/admin/users/{self.admin.id}/reset-password/",
+            {"password": "Chosen-pass-99"}, format="json",
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.data)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.check_password("Chosen-pass-99"))
+
+        state = UserSecurity.get(self.admin)
+        self.assertIsNone(state.tokens_valid_from)
+        self.assertFalse(state.must_change_password)
+
+    def test_resetting_someone_elses_password_still_generates_and_revokes(self):
+        self.as_admin()
+        response = self.client.post(
+            f"/api/admin/users/{self.operator.id}/reset-password/", {}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["password"])
+        state = UserSecurity.get(self.operator)
+        self.assertIsNotNone(state.tokens_valid_from)
+        self.assertTrue(state.must_change_password)
+
     def test_lock_and_unlock(self):
         self.as_admin()
         self.client.post(

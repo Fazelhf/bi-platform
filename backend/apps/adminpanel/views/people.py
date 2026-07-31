@@ -109,6 +109,18 @@ class AdminUserViewSet(AdminModelViewSet):
             raise PermissionDenied("تغییر رمز ادمین ارشد فقط توسط ادمین ارشد ممکن است.")
 
         password = request.data.get("password") or ""
+        is_self = user.pk == request.user.pk
+        # Generating a random password for YOUR OWN account is a foot-gun: the
+        # plaintext is shown once and every session is revoked, so a missed
+        # toast locks you out of the panel you are standing in. Own-account
+        # resets must therefore name the new password explicitly.
+        if is_self and not password:
+            raise ValidationError({
+                "password": "برای حساب خودتان باید رمز جدید را صریحاً وارد کنید "
+                            "(رمز تصادفی فقط یک بار نمایش داده می‌شود و ممکن است "
+                            "دسترسی خودتان را از دست بدهید).",
+            })
+
         generated = False
         if not password:
             password = secrets.token_urlsafe(9)
@@ -123,12 +135,18 @@ class AdminUserViewSet(AdminModelViewSet):
 
         state = UserSecurity.get(user)
         state.password_changed_at = timezone.now()
-        state.must_change_password = bool(request.data.get("must_change", True))
+        # Someone else's reset should force a change at next login; your own
+        # should not — you just chose it.
+        state.must_change_password = bool(
+            request.data.get("must_change", not is_self)
+        )
         state.failed_attempts = 0
         state.locked_until = None
         state.save()
 
-        if request.data.get("force_logout", True):
+        # Revoking your own tokens would sign you out mid-action; the password
+        # you just chose is the one you know, so there is nothing to protect.
+        if request.data.get("force_logout", True) and not is_self:
             sec_service.force_logout(user)
 
         audit_log(request.user, user, AuditLog.Action.UPDATE,
