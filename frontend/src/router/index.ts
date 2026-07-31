@@ -44,18 +44,21 @@ const router = createRouter({
           path: "sales",
           name: "sales-dashboard",
           component: () => import("@/views/SalesDashboardView.vue"),
+          meta: { salesChannel: "team" },
           props: { channel: "team", title: "داشبورد فروش همکار" },
         },
         {
           path: "sales-org",
           name: "sales-org-dashboard",
           component: () => import("@/views/SalesDashboardView.vue"),
+          meta: { salesChannel: "organizational" },
           props: { channel: "organizational", title: "داشبورد فروش بانکی" },
         },
         {
           path: "sales-b2b",
           name: "sales-b2b-dashboard",
           component: () => import("@/views/SalesDashboardView.vue"),
+          meta: { salesChannel: "b2b" },
           props: { channel: "b2b", title: "داشبورد فروش B2B" },
         },
         {
@@ -69,6 +72,64 @@ const router = createRouter({
           name: "targets",
           component: () => import("@/views/TargetsView.vue"),
           meta: { executive: true },
+        },
+
+        // --- CRM (فروش همکار) — locked demo ---
+        // Everything under /crm needs the demo password. `meta.crm` marks the
+        // pages the guard protects; the API enforces the same lock, so this
+        // is convenience, not the security boundary.
+        {
+          path: "crm/unlock",
+          name: "crm-unlock",
+          component: () => import("@/views/crm/CrmLockView.vue"),
+        },
+        {
+          path: "crm",
+          name: "crm-dashboard",
+          component: () => import("@/views/crm/CrmDashboardView.vue"),
+          meta: { crm: true },
+        },
+        {
+          path: "crm/pipeline",
+          name: "crm-pipeline",
+          component: () => import("@/views/crm/PipelineView.vue"),
+          meta: { crm: true },
+        },
+        {
+          path: "crm/deals",
+          name: "crm-deals",
+          component: () => import("@/views/crm/DealsView.vue"),
+          meta: { crm: true },
+        },
+        {
+          path: "crm/deals/:id",
+          name: "crm-deal",
+          component: () => import("@/views/crm/DealDetailView.vue"),
+          meta: { crm: true },
+        },
+        {
+          path: "crm/customers",
+          name: "crm-customers",
+          component: () => import("@/views/crm/CustomersView.vue"),
+          meta: { crm: true },
+        },
+        {
+          path: "crm/customers/:id",
+          name: "crm-customer",
+          component: () => import("@/views/crm/CustomerDetailView.vue"),
+          meta: { crm: true },
+        },
+        {
+          path: "crm/activities",
+          name: "crm-activities",
+          component: () => import("@/views/crm/ActivitiesView.vue"),
+          meta: { crm: true },
+        },
+        {
+          path: "crm/reports",
+          name: "crm-reports",
+          component: () => import("@/views/crm/CrmReportsView.vue"),
+          meta: { crm: true },
         },
 
         // --- Department manager entry (department-guarded) ---
@@ -98,6 +159,14 @@ const router = createRouter({
           name: "production-entry",
           component: () => import("@/views/ProductionInputView.vue"),
           meta: { department: "production" },
+        },
+
+        // --- منابع انسانی: each department's own roster ---
+        {
+          path: "roster",
+          name: "roster",
+          component: () => import("@/views/RosterView.vue"),
+          meta: { roster: true },
         },
 
         // --- Approval inbox (کارتابل) — anyone who can approve ---
@@ -155,7 +224,7 @@ const router = createRouter({
   ],
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: "login" };
   if (to.name === "login" && auth.isAuthenticated) {
@@ -178,6 +247,30 @@ router.beforeEach((to) => {
   // Inbox: approvers only.
   if (to.meta.approver && !auth.me?.can_approve && !auth.me?.is_superuser) {
     return { name: homeRouteFor(auth.department) };
+  }
+  // A sales channel belongs to the department that owns it. The sidebar
+  // already only offered your own, but the URL was still reachable — and the
+  // API now refuses, so without this the page would just show an error.
+  const salesChannel = to.meta.salesChannel as string | undefined;
+  if (salesChannel && !auth.isExecutive && !auth.me?.is_superuser) {
+    const owner = { team: "sales_team", organizational: "sales_org", b2b: "sales_b2b" }[salesChannel];
+    if (auth.department !== owner) return { name: homeRouteFor(auth.department) };
+  }
+  // Roster: department managers (their own section) and the CEO.
+  if (to.meta.roster) {
+    const canRoster =
+      auth.isExecutive ||
+      !!auth.me?.is_superuser ||
+      ["sales_team", "sales_org", "sales_b2b"].includes(auth.department);
+    if (!canRoster) return { name: homeRouteFor(auth.department) };
+  }
+  // CRM demo: locked until its own password is entered. `next` is carried so
+  // a deep link (a drill-down URL someone was sent) survives the prompt.
+  if (to.meta.crm) {
+    const { useCrmStore } = await import("@/stores/crm");
+    if (!(await useCrmStore().checkGate())) {
+      return { name: "crm-unlock", query: { next: to.fullPath } };
+    }
   }
 });
 

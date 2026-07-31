@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { store } from "@/lib/storage";
 import api from "@/api/client";
 import { paletteByKey, type Palette } from "@/components/charts/palettes";
 import { bumpChartTheme } from "@/components/charts/theme";
@@ -12,7 +13,7 @@ import { bumpChartTheme } from "@/components/charts/theme";
  *  The default stays the light theme — dark is opt-in, never inherited from
  *  the OS, so the site looks the way it does today until someone asks for it. */
 function initialDark(): boolean {
-  return localStorage.getItem("darkMode") === "1";
+  return store.get("darkMode") === "1";
 }
 
 function applyDark(on: boolean) {
@@ -21,7 +22,7 @@ function applyDark(on: boolean) {
 
 export const useUiStore = defineStore("ui", {
   state: () => ({
-    chartTheme: (localStorage.getItem("chartTheme") || "modern") as string,
+    chartTheme: (store.get("chartTheme") || "modern") as string,
     dark: initialDark(),
     companyName: "شرکت کاغذ حساس نمابر مهر",
     loaded: false,
@@ -38,7 +39,7 @@ export const useUiStore = defineStore("ui", {
     },
     toggleDark() {
       this.dark = !this.dark;
-      localStorage.setItem("darkMode", this.dark ? "1" : "0");
+      store.set("darkMode", this.dark ? "1" : "0");
       applyDark(this.dark);
       bumpChartTheme(); // charts re-read their axis/tooltip colours
     },
@@ -47,7 +48,7 @@ export const useUiStore = defineStore("ui", {
         const { data } = await api.get("/executive/site-settings/");
         this.chartTheme = data.chart_theme;
         this.companyName = data.company_name;
-        localStorage.setItem("chartTheme", data.chart_theme);
+        store.set("chartTheme", data.chart_theme);
       } catch {
         /* not signed in yet — keep the cached value */
       } finally {
@@ -56,7 +57,7 @@ export const useUiStore = defineStore("ui", {
     },
     async setTheme(key: string) {
       this.chartTheme = key;
-      localStorage.setItem("chartTheme", key);
+      store.set("chartTheme", key);
       await api.patch("/executive/site-settings/", { chart_theme: key });
     },
   },

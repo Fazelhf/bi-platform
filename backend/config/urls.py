@@ -21,6 +21,7 @@ urlpatterns = [
     # --- Domain APIs ---
     path("api/sales/", include("apps.sales.urls")),
     path("api/production/", include("apps.production.urls")),
+    path("api/crm/", include("apps.crm.urls")),
     path("api/executive/", include("apps.core.urls")),
     # --- Admin Panel (administrators only) ---
     path("api/admin/", include("apps.adminpanel.urls")),

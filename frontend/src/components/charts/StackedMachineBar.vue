@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
-import { AXIS, COLORS, TOOLTIP, barGradient } from "./theme";
+import { AXIS, COLORS, TOOLTIP, barGradient, mutedColor } from "./theme";
 
 // عملکرد دستگاه‌ها — active (green) vs inactive (neutral) shifts, stacked.
 const props = defineProps<{
@@ -16,7 +16,7 @@ const el = ref<HTMLElement | null>(null);
 const option = computed<EChartsOption>(() => ({
   grid: { top: 34, right: 14, bottom: 24, left: 30 },
   tooltip: { ...TOOLTIP, trigger: "axis" },
-  legend: { top: 2, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: "#64748b" } },
+  legend: { top: 2, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: mutedColor() } },
   xAxis: { ...AXIS.category, data: props.categories },
   yAxis: AXIS.value,
   series: [

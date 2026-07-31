@@ -1,13 +1,14 @@
 import { ref } from "vue";
 import { graphic } from "@/lib/echarts";
 import { paletteByKey, type Palette } from "./palettes";
+import { store } from "@/lib/storage";
 
 /**
  * Live chart theme. Reads the palette the CEO selected (stored in the ui
  * store / localStorage) so every chart in every section changes together.
  */
 export function activePalette(): Palette {
-  return paletteByKey(localStorage.getItem("chartTheme") || "modern");
+  return paletteByKey(store.get("chartTheme") || "modern");
 }
 
 /** True when the app is in dark mode — charts read this at render time. */
@@ -52,6 +53,25 @@ export function seriesColor(i: number): string {
 const themeTick = ref(0);
 export function bumpChartTheme() {
   themeTick.value++;
+}
+
+/** The card colour a chart sits on — pie slice gaps must match it, not be
+ *  hardcoded white (which turns into glaring outlines in dark mode). */
+export function surfaceColor(): string {
+  themeTick.value;
+  return isDark() ? "#1e1e22" : "#ffffff";
+}
+
+/** Legend / secondary chart text. */
+export function mutedColor(): string {
+  themeTick.value;
+  return isDark() ? "#a3a3ad" : "#64748b";
+}
+
+/** Data labels drawn outside the chart body. */
+export function labelColor(): string {
+  themeTick.value;
+  return isDark() ? "#d6d6dd" : "#334155";
 }
 
 export const AXIS = {

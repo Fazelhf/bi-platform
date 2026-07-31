@@ -13,3 +13,8 @@ backend/backups/
 # Node
 **/node_modules/
 **/dist/
+
+# tsc build artifacts (vite.config.js used to shadow vite.config.ts)
+frontend/vite.config.js
+frontend/vite.config.d.ts
+*.tsbuildinfo

@@ -29,19 +29,63 @@ class TimeStampedModel(models.Model):
         abstract = True
 
 
+class PeriodKind(models.TextChoices):
+    MONTH = "month", "ماه"
+    WEEK = "week", "هفته"
+    DAY = "day", "روز"
+
+
 class DimPeriod(TimeStampedModel):
     """
-    The reporting grain is one Jalali (Persian) *month*. Every fact row
-    is stamped with a period so sales and production share one calendar.
+    A reporting period, arranged as a tree: month → week → day.
+
+    THE INVARIANT: facts are stored **only on leaf periods**. A parent's
+    figures are always computed by rolling its children up, never written.
+    If a month held facts *and* its weeks did too, every total would be
+    double counted — silently, with no error anywhere.
+
+    That rule is what makes the existing monthly history valid unchanged:
+    those months have no children, so they are leaves themselves.
     """
 
     jalali_year = models.PositiveSmallIntegerField()
     jalali_month = models.PositiveSmallIntegerField()  # 1..12
 
+    kind = models.CharField(
+        max_length=8, choices=PeriodKind.choices, default=PeriodKind.MONTH
+    )
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE, related_name="children"
+    )
+    # Position inside the parent: week 1..6 in a month, day 1..7 in a week.
+    seq = models.PositiveSmallIntegerField(default=0)
+
+    # Gregorian bounds, inclusive. Every date calculation (pro-rated targets,
+    # "data as of", days-in-period) reads these rather than guessing from the
+    # month number — weeks are not all the same length.
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+
+    # Human-readable id: "1405.03" (month), "1405.03.2" (week 2).
+    code = models.CharField(max_length=24, blank=True, db_index=True)
+
     class Meta:
-        unique_together = ("jalali_year", "jalali_month")
-        ordering = ("jalali_year", "jalali_month")
-        verbose_name = "period (Jalali month)"
+        ordering = ("jalali_year", "jalali_month", "seq")
+        verbose_name = "period (month / week / day)"
+        constraints = [
+            # One month row per Jalali month. Weeks share the same year+month,
+            # so the old blanket unique_together had to go.
+            models.UniqueConstraint(
+                fields=["jalali_year", "jalali_month"],
+                condition=models.Q(kind="month"),
+                name="uniq_month_period",
+            ),
+            models.UniqueConstraint(
+                fields=["parent", "seq"],
+                condition=~models.Q(parent=None),
+                name="uniq_child_seq",
+            ),
+        ]
 
     @property
     def month_name_fa(self) -> str:
@@ -49,7 +93,30 @@ class DimPeriod(TimeStampedModel):
 
     @property
     def label(self) -> str:
-        return f"{self.month_name_fa} {self.jalali_year}"
+        base = f"{self.month_name_fa} {self.jalali_year}"
+        if self.kind == PeriodKind.MONTH:
+            return base
+        if self.kind == PeriodKind.WEEK:
+            return f"{base} · هفته {self.seq}"
+        # `seq` for a day is its position inside its week, so "روز ۱" of week 2
+        # is really the 9th of the month — useless on a tab. Show the date.
+        if self.start_date:
+            from apps.core import jalali
+
+            _, _, jd = jalali.from_gregorian(self.start_date)
+            return f"{jd} {self.month_name_fa} {self.jalali_year}"
+        return f"{base} · روز {self.seq}"
+
+    @property
+    def days(self) -> int:
+        """Length in days — 1 for a day, 7-ish for a week, 29-31 for a month."""
+        if self.start_date and self.end_date:
+            return (self.end_date - self.start_date).days + 1
+        return 0
+
+    @property
+    def is_leaf(self) -> bool:
+        return not self.children.exists()
 
     def __str__(self) -> str:
         return self.label
@@ -253,9 +320,25 @@ class SiteSetting(TimeStampedModel):
         ("mono", "تک‌رنگ مینیمال"),
     ]
 
+    # How often the sales sheets are filled in. Changing this only affects
+    # months created from now on — a month that already holds figures cannot
+    # be subdivided, so history keeps whatever grain it was recorded at.
+    SALES_GRAINS = [
+        ("month", "ماهانه"),
+        ("week", "هفتگی"),
+        ("day", "روزانه"),
+    ]
+
     singleton = models.BooleanField(default=True, unique=True, editable=False)
     chart_theme = models.CharField(max_length=20, choices=THEMES, default="modern")
     company_name = models.CharField(max_length=150, default="شرکت کاغذ حساس نمابر مهر")
+    sales_grain = models.CharField(
+        max_length=8, choices=SALES_GRAINS, default="month",
+        help_text="دانه‌بندی ثبت اطلاعات فروش",
+    )
+    # Slices shorter than this merge into the neighbouring week, so a month
+    # never produces a one-day "week".
+    min_week_days = models.PositiveSmallIntegerField(default=3)
 
     @classmethod
     def get(cls):

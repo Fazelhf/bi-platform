@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import api from "@/api/client";
+import { store } from "@/lib/storage";
 import type { Me } from "@/types";
 
 interface AuthState {
@@ -10,9 +11,9 @@ interface AuthState {
 
 export const useAuthStore = defineStore("auth", {
   state: (): AuthState => ({
-    access: localStorage.getItem("access"),
-    refresh: localStorage.getItem("refresh"),
-    me: JSON.parse(localStorage.getItem("me") || "null"),
+    access: store.get("access"),
+    refresh: store.get("refresh"),
+    me: store.getJSON<Me | null>("me", null),
   }),
   getters: {
     isAuthenticated: (s) => !!s.access,
@@ -28,20 +29,20 @@ export const useAuthStore = defineStore("auth", {
       const { data } = await api.post("/auth/token/", { username, password });
       this.access = data.access;
       this.refresh = data.refresh;
-      localStorage.setItem("access", data.access);
-      localStorage.setItem("refresh", data.refresh);
+      store.set("access", data.access);
+      store.set("refresh", data.refresh);
       await this.fetchMe();
     },
     async fetchMe() {
       const { data } = await api.get<Me>("/auth/me/");
       this.me = data;
-      localStorage.setItem("me", JSON.stringify(data));
+      store.setJSON("me", data);
     },
     logout() {
       this.access = this.refresh = this.me = null;
-      localStorage.removeItem("access");
-      localStorage.removeItem("refresh");
-      localStorage.removeItem("me");
+      store.remove("access");
+      store.remove("refresh");
+      store.remove("me");
     },
   },
 });

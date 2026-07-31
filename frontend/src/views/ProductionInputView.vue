@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { salesApi } from "@/api/sales";
 import { productionInputApi, type ProdInput } from "@/api/productionInput";
 import { num } from "@/utils/format";
+import { selectIfZero } from "@/utils/inputs";
 import MoneyInput from "@/components/MoneyInput.vue";
 import ExportActions from "@/components/ExportActions.vue";
 
@@ -121,7 +122,7 @@ watch(selectedPeriod, load);
                     v-model="m[c.key]"
                     type="number" step="any"
                     class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                  />
+                  @focus="selectIfZero" />
                 </td>
               </tr>
             </tbody>
@@ -139,7 +140,7 @@ watch(selectedPeriod, load);
           <label class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">تعداد کل نیروی انسانی (نفرروز)</span>
             <input v-model.number="data.benchmark.total_headcount" type="number"
-              class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+              class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" @focus="selectIfZero" />
           </label>
           <label v-for="c in data.costs" :key="c.category" class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">{{ c.category_name }}</span>
@@ -164,12 +165,12 @@ watch(selectedPeriod, load);
             <label v-for="c in data.print_colors" :key="c.color_count" class="flex items-center justify-between gap-3">
               <span class="text-sm text-slate-600">{{ COLOR_FA[c.color_count] }} (متر مربع)</span>
               <input v-model="c.area_sqm" type="number" step="any"
-                class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+                class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" @focus="selectIfZero" />
             </label>
             <label v-if="data.print" class="flex items-center justify-between gap-3 pt-1">
               <span class="text-sm text-slate-600">تعداد شیفت چاپ</span>
               <input v-model="data.print.active_shifts" type="number" step="any"
-                class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+                class="w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" @focus="selectIfZero" />
             </label>
           </div>
           <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
@@ -191,7 +192,7 @@ watch(selectedPeriod, load);
                 <span class="text-xs text-slate-400 ltr-nums">(اجرت {{ num(r.piece_rate_rial) }})</span>
               </span>
               <input v-model="r.quantity" type="number" step="any"
-                class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" />
+                class="w-32 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none" @focus="selectIfZero" />
             </label>
           </div>
           <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
@@ -202,7 +203,9 @@ watch(selectedPeriod, load);
       </div>
 
       <!-- Sticky action bar -->
-      <div class="sticky bottom-4 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+      <!-- z-30: the table's frozen first/last columns are z-10/z-20, so without
+           this the sheet scrolled over the save buttons. -->
+      <div class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
         <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm" @click="save(false)">ذخیره پیش‌نویس</button>

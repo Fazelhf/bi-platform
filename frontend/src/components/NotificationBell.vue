@@ -2,9 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { notificationsApi } from "@/api/platform";
 import { confirm, toast } from "@/composables/useUi";
+import { useClickOutside } from "@/composables/useClickOutside";
 import type { AppNotification } from "@/types";
 
+const root = ref<HTMLElement | null>(null);
 const open = ref(false);
+useClickOutside(root, () => (open.value = false));
 const unread = ref(0);
 const items = ref<AppNotification[]>([]);
 let timer: number | undefined;
@@ -87,7 +90,7 @@ onBeforeUnmount(() => window.clearInterval(timer));
 </script>
 
 <template>
-  <div class="relative">
+  <div ref="root" class="relative">
     <button
       class="relative p-2 rounded-full hover:bg-slate-100 text-slate-600 transition-colors"
       title="اعلان‌ها"
