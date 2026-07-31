@@ -13,17 +13,21 @@ from apps.accounts.serializers import (
     UserCardSerializer,
     UserSerializer,
 )
+from apps.adminpanel.permissions import IsAdminPanelUser
 from apps.core.audit import log as audit_log
 from apps.core.models import AuditLog
-from apps.core.permissions import IsExecutiveOrAdmin
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    """Admin-panel user management (executives/superusers only)."""
+    """
+    Legacy user-management endpoint. The full-featured version lives in the
+    Admin Panel (/api/admin/users/); this one is kept for existing clients and
+    is restricted to the same audience — administrators only, not the CEO.
+    """
 
     queryset = User.objects.order_by("id")
     serializer_class = UserSerializer
-    permission_classes = [IsExecutiveOrAdmin]
+    permission_classes = [IsAdminPanelUser]
     filterset_fields = ["role", "department", "is_active"]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
@@ -93,6 +97,8 @@ class MeView(APIView):
             "is_superuser": u.is_superuser,
             "can_enter_data": u.can_enter_data,
             "can_approve": u.can_approve,
+            # Drives the "پنل مدیریت" entry in the sidebar.
+            "is_admin_panel_user": u.is_admin_panel_user,
         }
 
 

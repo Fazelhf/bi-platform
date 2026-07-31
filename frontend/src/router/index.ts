@@ -184,13 +184,41 @@ const router = createRouter({
         { path: "profile", name: "profile-me", component: () => import("@/views/ProfileView.vue") },
         { path: "profile/:id", name: "profile", component: () => import("@/views/ProfileView.vue") },
 
-        // --- Site settings (users, base data, formulas, audit) — admin + CEO ---
+        // --- Site settings (appearance + KPI formulas) — CEO's own controls.
+        // User/role/data administration lives in the Admin Panel instead.
         {
           path: "settings",
           name: "settings",
           component: () => import("@/views/admin/SettingsView.vue"),
           meta: { executive: true },
         },
+      ],
+    },
+
+    // ================= Admin Panel =================
+    // A separate application area with its own shell, reachable only by
+    // administrators. The CEO and ordinary users are redirected home.
+    {
+      path: "/admin",
+      component: () => import("@/components/admin/AdminShell.vue"),
+      meta: { requiresAuth: true, adminPanel: true },
+      children: [
+        { path: "", redirect: { name: "admin-dashboard" } },
+        { path: "dashboard", name: "admin-dashboard", component: () => import("@/views/adminpanel/DashboardView.vue") },
+        { path: "users", name: "admin-users", component: () => import("@/views/adminpanel/UsersView.vue") },
+        { path: "roles", name: "admin-roles", component: () => import("@/views/adminpanel/RolesView.vue") },
+        { path: "teams", name: "admin-teams", component: () => import("@/views/adminpanel/TeamsView.vue") },
+        { path: "data", name: "admin-data", component: () => import("@/views/adminpanel/DataView.vue") },
+        { path: "system", name: "admin-system", component: () => import("@/views/adminpanel/SystemView.vue") },
+        { path: "audit", name: "admin-audit", component: () => import("@/views/adminpanel/AuditView.vue") },
+        { path: "security", name: "admin-security", component: () => import("@/views/adminpanel/SecurityView.vue") },
+        { path: "notifications", name: "admin-notifications", component: () => import("@/views/adminpanel/NotificationsView.vue") },
+        { path: "files", name: "admin-files", component: () => import("@/views/adminpanel/FilesView.vue") },
+        { path: "reports", name: "admin-reports", component: () => import("@/views/adminpanel/ReportsView.vue") },
+        { path: "database", name: "admin-database", component: () => import("@/views/adminpanel/DatabaseView.vue") },
+        { path: "workflow", name: "admin-workflow", component: () => import("@/views/adminpanel/WorkflowView.vue") },
+        { path: "monitoring", name: "admin-monitoring", component: () => import("@/views/adminpanel/MonitoringView.vue") },
+        { path: "content", name: "admin-content", component: () => import("@/views/adminpanel/ContentView.vue") },
       ],
     },
   ],
@@ -207,8 +235,13 @@ router.beforeEach(async (to) => {
   if (dept && !auth.me?.is_superuser && auth.department !== dept) {
     return { name: homeRouteFor(auth.department) };
   }
-  // Admin panel: executives/superusers only.
+  // Site settings: executives/superusers only.
   if (to.meta.executive && !auth.isExecutive) {
+    return { name: homeRouteFor(auth.department) };
+  }
+  // Admin Panel: administrators only. The CEO has their own dashboards and
+  // is kept out unless someone granted them access explicitly.
+  if (to.meta.adminPanel && !auth.isAdminPanelUser) {
     return { name: homeRouteFor(auth.department) };
   }
   // Inbox: approvers only.

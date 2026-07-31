@@ -11,6 +11,7 @@ ONLINE_WINDOW = timedelta(minutes=2)
 class Role(models.TextChoices):
     """Coarse RBAC roles that map onto BI-platform personas."""
 
+    ADMIN = "admin", "Administrator (system management)"
     EXECUTIVE = "executive", "Executive (CEO / board)"
     MANAGER = "manager", "Manager / supervisor (approves data)"
     OPERATOR = "operator", "Operator (enters data)"
@@ -54,6 +55,21 @@ class User(AbstractUser):
     # Pillow needed) — the client resizes to ~160px before upload.
     avatar_image = models.TextField(blank=True)
     last_seen = models.DateTimeField(null=True, blank=True)
+
+    # Explicit, per-account grant of Admin-Panel access. The panel is for
+    # administrators only: the CEO (executive) has their own dashboards and is
+    # deliberately locked out unless someone ticks this flag for them.
+    admin_access = models.BooleanField(
+        "admin panel access (explicit grant)", default=False
+    )
+
+    @property
+    def is_admin_panel_user(self) -> bool:
+        """Who may open the Admin Panel at all. Role alone is not enough for
+        the CEO — `admin_access` is the documented escape hatch."""
+        return bool(
+            self.is_superuser or self.role == Role.ADMIN or self.admin_access
+        )
 
     @property
     def is_online(self) -> bool:

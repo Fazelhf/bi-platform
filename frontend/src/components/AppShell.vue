@@ -298,6 +298,17 @@ onMounted(() => {
           <NavIcon name="settings" :size="20" />
           <span v-if="!collapsed" class="text-right flex-1">تنظیمات سایت</span>
         </button>
+        <!-- Administrators only — a separate application area. -->
+        <button
+          v-if="auth.isAdminPanelUser"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-slate-500 hover:bg-slate-100 transition"
+          :class="collapsed ? 'justify-center' : ''"
+          :title="collapsed ? 'پنل مدیریت' : ''"
+          @click="go('admin-dashboard')"
+        >
+          <NavIcon name="shield" :size="20" />
+          <span v-if="!collapsed" class="text-right flex-1">پنل مدیریت</span>
+        </button>
         <button
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-red-500 hover:bg-red-50"
           :class="collapsed ? 'justify-center' : ''"

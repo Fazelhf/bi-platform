@@ -6,15 +6,16 @@ from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
 )
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
+from rest_framework_simplejwt.views import TokenRefreshView
+
+from apps.adminpanel.auth import PanelTokenObtainPairView
+from apps.adminpanel.views import LiveAnnouncementView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     # --- Auth (JWT) ---
-    path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    # The panel's token view applies IP rules, lockout and login auditing.
+    path("api/auth/token/", PanelTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/", include("apps.accounts.urls")),
     # --- Domain APIs ---
@@ -22,6 +23,14 @@ urlpatterns = [
     path("api/production/", include("apps.production.urls")),
     path("api/crm/", include("apps.crm.urls")),
     path("api/executive/", include("apps.core.urls")),
+    # --- Admin Panel (administrators only) ---
+    path("api/admin/", include("apps.adminpanel.urls")),
+    # Admin-authored announcements, readable by every signed-in user.
+    path(
+        "api/announcements/",
+        LiveAnnouncementView.as_view(),
+        name="live-announcements",
+    ),
     # --- API docs ---
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
