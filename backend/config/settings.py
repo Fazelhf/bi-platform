@@ -5,7 +5,8 @@ Local dev runs on SQLite with zero config. Set DATABASE_URL (e.g. via
 docker-compose) to switch to PostgreSQL. All secrets come from the
 environment through django-environ.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from pathlib import Path
 
 import environ
@@ -42,6 +43,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.sales",
     "apps.production",
+    "apps.adminpanel",
 ]
 
 MIDDLEWARE = [
@@ -56,6 +58,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Admin-Panel switches: IP allow/deny lists and maintenance mode.
+    "apps.adminpanel.middleware.AdminGuardMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -129,8 +133,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Django REST Framework ---
 REST_FRAMEWORK = {
+    # Panel-aware JWT auth: honours admin "force logout" and account locks.
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.adminpanel.authentication.PanelJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -158,6 +163,10 @@ SPECTACULAR_SETTINGS = {
 }
 
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
+
+# Recorded once at import so the admin monitoring page can report uptime.
+# Stdlib only: django.utils.timezone reads settings, which are still loading.
+PROCESS_STARTED_AT = datetime.now(dt_timezone.utc)
 
 # --- Celery ---
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://localhost:6379/0")

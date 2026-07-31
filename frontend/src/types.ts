@@ -86,11 +86,13 @@ export interface Me {
   job_title_fa: string;
   initials: string;
   avatar_color: string;
-  role: "executive" | "manager" | "operator" | "viewer";
+  role: "admin" | "executive" | "manager" | "operator" | "viewer";
   department: Department;
   is_superuser: boolean;
   can_enter_data: boolean;
   can_approve: boolean;
+  /** Set by the server: may this account open the Admin Panel? */
+  is_admin_panel_user?: boolean;
 }
 
 export interface KpiResult {

@@ -7,6 +7,8 @@
 *.pyc
 **/db.sqlite3
 **/staticfiles/
+# Snapshots written by the admin panel's backup tool.
+backend/backups/
 
 # Node
 **/node_modules/

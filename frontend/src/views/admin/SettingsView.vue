@@ -1,24 +1,24 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import AdminUsersView from "@/views/admin/AdminUsersView.vue";
-import AdminDimensionsView from "@/views/admin/AdminDimensionsView.vue";
 import AdminFormulasView from "@/views/admin/AdminFormulasView.vue";
-import AdminAuditView from "@/views/admin/AdminAuditView.vue";
 import AdminAppearanceView from "@/views/admin/AdminAppearanceView.vue";
+import { useAuthStore } from "@/stores/auth";
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 
+// User management, base data and the audit trail moved to the Admin Panel
+// (/admin) — they are system administration, not the CEO's business controls.
+// What stays here is what the CEO genuinely owns: the KPI formulas behind the
+// numbers, and how the platform looks.
 const tabs = [
-  { key: "users", label: "کاربران", comp: AdminUsersView },
-  { key: "dimensions", label: "داده‌های پایه", comp: AdminDimensionsView },
-  { key: "formulas", label: "فرمول‌ها", comp: AdminFormulasView },
   { key: "appearance", label: "طرح گرافیکی", comp: AdminAppearanceView },
-  { key: "audit", label: "تاریخچه", comp: AdminAuditView },
+  { key: "formulas", label: "فرمول‌ها", comp: AdminFormulasView },
 ];
 
-const active = computed(() => (route.query.tab as string) || "users");
+const active = computed(() => (route.query.tab as string) || "appearance");
 const activeComp = computed(() => tabs.find((t) => t.key === active.value)?.comp ?? tabs[0].comp);
 
 function select(key: string) {
@@ -43,5 +43,11 @@ function select(key: string) {
     </div>
 
     <component :is="activeComp" />
+
+    <p v-if="auth.isAdminPanelUser" class="text-xs text-slate-400">
+      مدیریت کاربران، داده‌های پایه و تاریخچه رخدادها به
+      <RouterLink :to="{ name: 'admin-dashboard' }" class="text-brand-600 hover:underline">پنل مدیریت</RouterLink>
+      منتقل شده است.
+    </p>
   </div>
 </template>
