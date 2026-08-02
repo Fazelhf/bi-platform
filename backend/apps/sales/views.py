@@ -12,17 +12,20 @@ from rest_framework.views import APIView
 
 from apps.core.jalali import from_gregorian
 from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope, PeriodKind
-from apps.core.periods import month_of
+from apps.core.periods import leaf_ids_for, month_of
 from apps.sales.models import (
     ApprovalStatus,
     DimBank,
+    DimCustomerGroup,
     DimEmployee,
     EmployeeChannel,
     DimProvince,
     DimTeam,
     FactCollection,
+    FactSalesByCustomerGroup,
     FactSalesMonthly,
     FactSalesProvince,
+    SalesChannel,
 )
 from apps.core.audit import diff as audit_diff, log as audit_log, snapshot
 from apps.core.models import AuditLog
@@ -34,11 +37,16 @@ from apps.core.permissions import (
     IsExecutiveOrAdmin,
     SalesChannelOwnership,
 )
-from apps.sales.permissions import CanApprove, CanEnterData
+from apps.sales.permissions import (
+    CanApprove,
+    CanEnterData,
+    CanManageCustomerGroups,
+)
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.sales.serializers import (
     BankSerializer,
     CollectionSerializer,
+    CustomerGroupSerializer,
     EmployeeSerializer,
     KPIDefinitionSerializer,
     KPIResultSerializer,
@@ -738,6 +746,28 @@ class SalesInputView(APIView):
         all_provinces = [{"id": p.id, "name": p.name_fa}
                          for p in DimProvince.objects.all()]
 
+        # Customer segments, same treatment as provinces: every active group
+        # is listed so the manager fills the ones that sold, and untouched
+        # rows come back as zeros rather than as gaps. B2B only — the other
+        # channels do not report a segment split.
+        customer_groups = []
+        if channel == SalesChannel.B2B:
+            stored = {
+                g.customer_group_id: g
+                for g in FactSalesByCustomerGroup.objects.filter(
+                    period=period, channel=channel
+                )
+            }
+            for group in DimCustomerGroup.objects.filter(is_active=True):
+                row = stored.get(group.id)
+                customer_groups.append({
+                    "group_id": group.id,
+                    "name": group.name_fa,
+                    "sales_rial": str(row.sales_rial) if row else "0",
+                    "profit_rial": str(row.profit_rial) if row else "0",
+                    "invoice_count": row.invoice_count if row else 0,
+                })
+
         return Response({
             "period": PeriodSerializer(period).data,
             "channel": channel,
@@ -750,6 +780,7 @@ class SalesInputView(APIView):
             "columns": columns,
             "provinces": provinces,
             "all_provinces": all_provinces,
+            "customer_groups": customer_groups,
         })
 
     def post(self, request):
@@ -807,6 +838,23 @@ class SalesInputView(APIView):
             employee_id__in=kept_employee_ids
         ).delete()
 
+        # Removing a column has to take the person off the channel roster too.
+        # Deleting only the fact row looked like it worked and then undid
+        # itself: the roster is what re-lists everyone on the next load, so
+        # the column came straight back as a blank one.
+        #
+        # Explicit ids rather than "anyone missing from the payload", because
+        # a half-loaded sheet posting a short column list would otherwise
+        # empty the roster.
+        removed = request.data.get("remove_employee_ids") or []
+        if removed:
+            EmployeeChannel.objects.filter(
+                channel=channel, employee_id__in=removed
+            ).delete()
+            FactSalesMonthly.objects.filter(
+                period=period, channel=channel, employee_id__in=removed
+            ).delete()
+
         # Provinces. Every province is sent back, so skip untouched empty rows
         # to avoid creating 31 zero facts per channel per month. The province
         # target is the CEO's too.
@@ -823,6 +871,28 @@ class SalesInputView(APIView):
             FactSalesProvince.objects.update_or_create(
                 period=period, province_id=pid, channel=channel,
                 defaults={"sales_rial": sales},
+            )
+
+        # Customer segments — same rule as provinces: an all-zero row that was
+        # never stored stays unstored, so an untouched sheet does not litter
+        # the table with empty facts.
+        for g in request.data.get("customer_groups", []):
+            gid = g.get("group_id")
+            if not gid:
+                continue
+            values = {
+                "sales_rial": g.get("sales_rial") or 0,
+                "profit_rial": g.get("profit_rial") or 0,
+                "invoice_count": g.get("invoice_count") or 0,
+            }
+            existing = FactSalesByCustomerGroup.objects.filter(
+                period=period, customer_group_id=gid, channel=channel
+            ).first()
+            if existing is None and not any(_nonzero(v) for v in values.values()):
+                continue
+            FactSalesByCustomerGroup.objects.update_or_create(
+                period=period, customer_group_id=gid, channel=channel,
+                defaults=values,
             )
 
         audit_log(user, period, AuditLog.Action.UPDATE,
@@ -1289,3 +1359,182 @@ class RosterViewSet(viewsets.ModelViewSet):
              )}
             for e in rows
         ])
+
+
+# --------------------------------------------------------------------------
+# PERIOD REPORT — a range of months, next to the range before it
+# --------------------------------------------------------------------------
+class SalesPeriodReportView(APIView):
+    """
+    Quarter / half-year / custom-span reporting: ?from=<period>&to=<period>.
+
+    Read-only and derived entirely from facts already stored, so it needs no
+    approval workflow of its own — it shows whatever the entry sheets hold.
+    Access follows the same channel ownership rule as the dashboards: the
+    department that owns the channel, plus the CEO and admins.
+    """
+
+    permission_classes = [SalesChannelOwnership]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("from", int, required=True, description="شناسه ماه شروع"),
+            OpenApiParameter("to", int, required=True, description="شناسه ماه پایان"),
+            OpenApiParameter("channel", str),
+        ],
+        responses=dict,
+    )
+    def get(self, request):
+        from apps.sales.services.period_report import PeriodRangeError, build
+
+        channel = request.query_params.get("channel", SalesChannel.B2B)
+        # Reading another department's numbers is the same disclosure as
+        # reading their entry sheet, so the same check applies.
+        user = request.user
+        if not (user.is_superuser or user.role == "executive"):
+            if user.department != CHANNEL_DEPARTMENT.get(channel):
+                raise PermissionDenied("این کانال فروش متعلق به بخش شما نیست.")
+
+        try:
+            start = DimPeriod.objects.get(pk=request.query_params.get("from"))
+            end = DimPeriod.objects.get(pk=request.query_params.get("to"))
+        except (DimPeriod.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({"detail": "ماه شروع و پایان را انتخاب کنید."})
+
+        # The range is expressed in months; a week or a day is coerced up to
+        # its month so the picker can pass whatever the caller has.
+        start, end = month_of(start), month_of(end)
+
+        try:
+            return Response(build(start, end, channel))
+        except PeriodRangeError as exc:
+            raise ValidationError({"detail": str(exc)})
+
+
+class SalesPeriodPresetView(APIView):
+    """
+    The ready-made spans the workbook lists — quarters and halves of a Jalali
+    year — resolved to real period ids so the UI does not have to know the
+    calendar.
+    """
+
+    permission_classes = [SalesChannelOwnership]
+
+    PRESETS = [
+        ("q1", "بهار (فروردین–خرداد)", 1, 3),
+        ("q2", "تابستان (تیر–شهریور)", 4, 6),
+        ("q3", "پاییز (مهر–آذر)", 7, 9),
+        ("q4", "زمستان (دی–اسفند)", 10, 12),
+        ("h1", "نیمه اول سال", 1, 6),
+        ("h2", "نیمه دوم سال", 7, 12),
+        ("year", "کل سال", 1, 12),
+    ]
+
+    def get(self, request):
+        months = list(
+            DimPeriod.objects.filter(kind=PeriodKind.MONTH).order_by(
+                "jalali_year", "jalali_month"
+            )
+        )
+        if not months:
+            return Response({"years": [], "presets": []})
+
+        years = sorted({m.jalali_year for m in months}, reverse=True)
+        try:
+            year = int(request.query_params.get("year") or years[0])
+        except (TypeError, ValueError):
+            year = years[0]
+
+        in_year = {m.jalali_month: m for m in months if m.jalali_year == year}
+
+        # Which months actually hold figures for this channel. Without it the
+        # UI opens on the newest quarter, which for most of the year is the
+        # future — an empty report that looks like a broken one.
+        channel = request.query_params.get("channel", SalesChannel.B2B)
+        recorded = set()
+        for month in in_year.values():
+            leaves = leaf_ids_for(month)
+            if FactSalesMonthly.objects.filter(
+                period_id__in=leaves, channel=channel
+            ).exclude(revenue_rial=0).exists():
+                recorded.add(month.jalali_month)
+
+        presets = []
+        for key, label, first, last in self.PRESETS:
+            start, end = in_year.get(first), in_year.get(last)
+            if start and end:
+                presets.append({
+                    "key": key, "label": label,
+                    "from": start.id, "to": end.id,
+                    "from_label": start.label, "to_label": end.label,
+                    "has_data": any(first <= m <= last for m in recorded),
+                })
+        return Response({
+            "year": year,
+            "years": years,
+            "months": [
+                {"id": m.id, "label": m.label, "jalali_month": m.jalali_month,
+                 "has_data": m.jalali_month in recorded}
+                for m in months if m.jalali_year == year
+            ],
+            "presets": presets,
+        })
+
+
+# --------------------------------------------------------------------------
+# CUSTOMER SEGMENTS — the B2B manager's own reference list
+# --------------------------------------------------------------------------
+class CustomerGroupViewSet(viewsets.ModelViewSet):
+    """
+    «گروه‌های مشتری» — maintained by the department manager, not the admin.
+
+    The segments a B2B department sells into are a business fact its manager
+    owns and changes as the market does; routing every rename through a system
+    administrator would have made the list go stale. Reads are open to any
+    signed-in user (the dashboards label figures with these names); writes are
+    the B2B manager's, plus the CEO and superusers.
+
+    A group that already has figures recorded against it is deactivated rather
+    than deleted, so historical reports keep their labels.
+    """
+
+    queryset = DimCustomerGroup.objects.all()
+    serializer_class = CustomerGroupSerializer
+
+    def get_permissions(self):
+        from rest_framework.permissions import IsAuthenticated
+
+        if self.request.method in SAFE_METHODS:
+            return [IsAuthenticated()]
+        return [CanManageCustomerGroups()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.request.query_params.get("all") != "1":
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        audit_log(self.request.user, instance, AuditLog.Action.CREATE,
+                  {"name_fa": {"before": None, "after": instance.name_fa}})
+
+    def perform_update(self, serializer):
+        before = snapshot(serializer.instance)
+        instance = serializer.save()
+        audit_log(self.request.user, instance, AuditLog.Action.UPDATE,
+                  audit_diff(before, snapshot(instance)))
+
+    def perform_destroy(self, instance):
+        used = FactSalesByCustomerGroup.objects.filter(customer_group=instance).exists()
+        if used:
+            # Keep the row so past months keep their label; drop it from the
+            # entry sheet and every picker instead.
+            instance.is_active = False
+            instance.save(update_fields=["is_active", "updated_at"])
+            audit_log(self.request.user, instance, AuditLog.Action.UPDATE,
+                      {"is_active": {"before": "True", "after": "False"}})
+            return
+        audit_log(self.request.user, instance, AuditLog.Action.DELETE,
+                  {"name_fa": {"before": instance.name_fa, "after": None}})
+        instance.delete()
