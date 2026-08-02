@@ -31,7 +31,29 @@ const userMenuRoot = ref<HTMLElement | null>(null);
 useClickOutside(userMenuRoot, () => (userMenu.value = false));
 const search = ref("");
 
-interface Item { name: string; label: string; icon: string; badge?: () => number }
+interface Item {
+  name: string;
+  label: string;
+  icon: string;
+  badge?: () => number;
+  /**
+   * A group rather than a link. The CEO oversees every channel, so their
+   * sidebar had one row per dashboard and grew a little longer with each
+   * section added; folding related destinations under one heading keeps the
+   * top level to the handful of things they actually choose between.
+   *
+   * A group's `name` is a key, not a route — clicking it opens the group.
+   */
+  children?: Item[];
+  /** Shown inside an empty group instead of a blank panel. */
+  emptyHint?: string;
+  /**
+   * Named now, built later. Rendered muted with a «به‌زودی» tag and does not
+   * navigate — a menu row that 404s is worse than one that says it is not
+   * ready yet.
+   */
+  placeholder?: boolean;
+}
 
 /**
  * CRM ships as a locked demo: until its separate password is entered the
@@ -73,10 +95,38 @@ const primary = computed<Item[]>(() => {
   if (auth.isExecutive) {
     items.push(
       { name: "overview", label: "نمای کلی", icon: "grid" },
-      { name: "sales-dashboard", label: "فروش همکار", icon: "chart" },
-      { name: "sales-org-dashboard", label: "فروش بانکی", icon: "chart" },
-      { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "chart" },
+      {
+        // The three channels are one decision — "which part of sales?" —
+        // so they live under one heading instead of three top-level rows.
+        name: "group-sales",
+        label: "فروش",
+        icon: "chart",
+        children: [
+          { name: "sales-dashboard", label: "فروش همکار", icon: "chart" },
+          { name: "sales-org-dashboard", label: "فروش بانکی", icon: "chart" },
+          { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "chart" },
+        ],
+      },
       { name: "production-dashboard", label: "تولید", icon: "box" },
+      // Named now, built later — the shape of each section is agreed, what
+      // goes inside it is not.
+      {
+        name: "group-commercial",
+        label: "بازرگانی",
+        icon: "box",
+        children: [
+          { name: "commercial-domestic", label: "بازرگانی داخلی", icon: "box", placeholder: true },
+          { name: "commercial-foreign", label: "بازرگانی خارجی", icon: "box", placeholder: true },
+        ],
+      },
+      {
+        name: "group-finance",
+        label: "مالی",
+        icon: "chart",
+        children: [
+          { name: "finance-liquidity", label: "نقدینگی", icon: "chart", placeholder: true },
+        ],
+      },
       { name: "targets", label: "تارگت", icon: "target" },
     );
   } else if (auth.department === "production") {
@@ -115,6 +165,36 @@ const primary = computed<Item[]>(() => {
   return items;
 });
 
+
+/**
+ * Which sidebar groups are unfolded.
+ *
+ * A group holding the current page is always open — otherwise landing on
+ * «فروش بانکی» from a link would show a collapsed menu with nothing
+ * highlighted, and you could not tell where you were.
+ */
+const openGroups = ref<Set<string>>(new Set());
+
+function groupHasActive(item: Item): boolean {
+  return (item.children ?? []).some((c) => c.name === route.name);
+}
+
+function isGroupOpen(item: Item): boolean {
+  return openGroups.value.has(item.name) || groupHasActive(item);
+}
+
+function toggleGroup(item: Item) {
+  // On the icon-only rail there is nowhere to show children, so opening a
+  // group widens the sidebar first rather than doing nothing visible.
+  if (collapsed.value) {
+    collapsed.value = false;
+    openGroups.value = new Set([...openGroups.value, item.name]);
+    return;
+  }
+  const next = new Set(openGroups.value);
+  next.has(item.name) ? next.delete(item.name) : next.add(item.name);
+  openGroups.value = next;
+}
 
 const pageTitle = computed(() => {
   const map: Record<string, string> = {
@@ -204,25 +284,72 @@ onMounted(() => {
 
       <!-- Nav -->
       <nav class="flex-1 overflow-y-auto px-3 space-y-1">
-        <button
-          v-for="it in primary"
-          :key="it.name"
-          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition group relative"
-          :class="[
-            route.name === it.name ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
-            collapsed ? 'justify-center' : '',
-          ]"
-          :title="collapsed ? it.label : ''"
-          @click="go(it.name)"
-        >
-          <NavIcon :name="it.icon" :size="20" />
-          <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
-          <span
-            v-if="it.badge && it.badge()"
-            class="text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center"
-            :class="route.name === it.name ? 'bg-white/20' : 'bg-slate-200 text-slate-600'"
-          >{{ it.badge() }}</span>
-        </button>
+        <template v-for="it in primary" :key="it.name">
+          <!-- ===== Group: a heading that folds its destinations away ===== -->
+          <template v-if="it.children">
+            <button
+              class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
+              :class="[
+                groupHasActive(it) && !isGroupOpen(it)
+                  ? 'bg-slate-100 text-ink'
+                  : 'text-slate-500 hover:bg-slate-100',
+                collapsed ? 'justify-center' : '',
+              ]"
+              :title="collapsed ? it.label : ''"
+              :aria-expanded="isGroupOpen(it)"
+              @click="toggleGroup(it)"
+            >
+              <NavIcon :name="it.icon" :size="20" />
+              <template v-if="!collapsed">
+                <span class="flex-1 text-right">{{ it.label }}</span>
+                <NavIcon
+                  name="chevron"
+                  :size="15"
+                  class="shrink-0 text-slate-300 transition-transform"
+                  :class="isGroupOpen(it) ? '-rotate-90' : ''"
+                />
+              </template>
+            </button>
+
+            <div v-if="!collapsed && isGroupOpen(it)" class="mr-3 pr-3 border-r border-slate-100 space-y-1">
+              <button
+                v-for="child in it.children"
+                :key="child.name"
+                class="w-full flex items-center gap-3 rounded-2xl px-3 py-2 text-sm transition"
+                :class="route.name === child.name
+                  ? 'bg-panel text-white'
+                  : 'text-slate-500 hover:bg-slate-100'"
+                @click="go(child.name)"
+              >
+                <NavIcon :name="child.icon" :size="17" />
+                <span class="flex-1 text-right">{{ child.label }}</span>
+              </button>
+              <p v-if="!it.children.length" class="text-[11px] text-slate-300 px-3 py-2">
+                {{ it.emptyHint }}
+              </p>
+            </div>
+          </template>
+
+          <!-- ===== Plain destination ===== -->
+          <button
+            v-else
+            class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition group relative"
+            :class="[
+              route.name === it.name ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
+              collapsed ? 'justify-center' : '',
+            ]"
+            :title="collapsed ? it.label : ''"
+            @click="go(it.name)"
+          >
+            <NavIcon :name="it.icon" :size="20" />
+            <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
+            <span
+              v-if="it.badge && it.badge()"
+              class="text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center"
+              :class="route.name === it.name ? 'bg-white/20' : 'bg-slate-200 text-slate-600'"
+            >{{ it.badge() }}</span>
+          </button>
+        </template>
 
         <!-- CRM — one locked entry until the demo password is entered -->
         <template v-if="showCrm">
