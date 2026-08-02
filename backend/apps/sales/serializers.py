@@ -4,6 +4,7 @@ from apps.core.models import DimKPI, DimPeriod, FactKPI
 from apps.sales.models import EmployeeChannel  # noqa: F401  (roster)
 from apps.sales.models import (
     DimBank,
+    DimCustomerGroup,
     DimEmployee,
     DimProvince,
     DimTeam,
@@ -155,3 +156,33 @@ class RosterMemberSerializer(serializers.ModelSerializer):
 
     def get_username(self, obj) -> str:
         return obj.employee.user.username if obj.employee.user_id else ""
+
+
+class CustomerGroupSerializer(serializers.ModelSerializer):
+    """A customer segment, plus whether it can still be deleted outright."""
+
+    has_data = serializers.SerializerMethodField()
+    # Managers name groups, they do not invent slugs — one is derived on
+    # create so the field never blocks them.
+    code = serializers.SlugField(required=False)
+
+    class Meta:
+        model = DimCustomerGroup
+        fields = ["id", "code", "name_fa", "sort_order", "is_active", "has_data"]
+
+    def create(self, validated_data):
+        import uuid
+
+        validated_data.setdefault("code", f"grp-{uuid.uuid4().hex[:8]}")
+        return super().create(validated_data)
+
+    def get_has_data(self, obj) -> bool:
+        from apps.sales.models import FactSalesByCustomerGroup
+
+        return FactSalesByCustomerGroup.objects.filter(customer_group=obj).exists()
+
+    def validate_name_fa(self, value):
+        name = (value or "").strip()
+        if not name:
+            raise serializers.ValidationError("نام گروه الزامی است.")
+        return name

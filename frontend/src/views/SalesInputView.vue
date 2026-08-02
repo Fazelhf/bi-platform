@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { salesApi } from "@/api/sales";
-import { salesInputApi, type SalesInput } from "@/api/salesInput";
+import { customerGroupApi, salesInputApi, type SalesInput } from "@/api/salesInput";
 import type { MonthProgress } from "@/types";
-import { toast, confirm } from "@/composables/useUi";
+import { toast, confirm, prompt } from "@/composables/useUi";
 import { num, pct, rial } from "@/utils/format";
 import { selectIfZero } from "@/utils/inputs";
 import MoneyInput from "@/components/MoneyInput.vue";
@@ -156,12 +156,26 @@ async function confirmAdd() {
   await autoSave("فروشنده اضافه شد.");
 }
 
+/**
+ * Removing a column also takes the person off the channel roster.
+ *
+ * Deleting only this period's figures looked like it worked and then undid
+ * itself: the sheet is rebuilt from the roster, so the column reappeared —
+ * blank — on the very next load.
+ */
+const removedEmployeeIds = ref<number[]>([]);
+
 async function removeSalesperson(i: number) {
   const c = data.value!.columns[i];
-  if (await confirm({ title: "حذف فروشنده", message: `ستون «${c.name}» از این دوره حذف شود؟`, danger: true })) {
-    data.value!.columns.splice(i, 1);
-    await autoSave("فروشنده حذف شد.");
-  }
+  const ok = await confirm({
+    title: "حذف فروشنده",
+    message: `«${c.name}» از این بخش حذف شود؟ ستون او و اطلاعات این دوره پاک می‌شود.`,
+    danger: true,
+  });
+  if (!ok) return;
+  if (c.employee_id) removedEmployeeIds.value.push(c.employee_id);
+  data.value!.columns.splice(i, 1);
+  await autoSave("فروشنده حذف شد.");
 }
 
 /**
@@ -180,7 +194,10 @@ async function autoSave(message: string) {
       submit: false,
       columns: data.value.columns,
       provinces: data.value.provinces,
+      customer_groups: data.value.customer_groups,
+      remove_employee_ids: removedEmployeeIds.value,
     });
+    removedEmployeeIds.value = [];
     saving.value = "";
     toast.success(message);
     // Refresh the dots, but stay on the day being worked on — loadMonth()
@@ -233,6 +250,88 @@ function provinceAchievement(p: { sales_rial: any; target_rial: any }): number |
   return t ? (Number(p.sales_rial || 0) / t) * 100 : null;
 }
 
+// ---- Customer segments (B2B) ---------------------------------------------
+// The segment split is entered as department totals, so the one thing worth
+// checking on screen is whether it reconciles with the salespeople's column
+// total — a silent mismatch would make every segment report wrong.
+const groupTotals = computed(() => {
+  const rows = data.value?.customer_groups ?? [];
+  const sales = rows.reduce((s, g) => s + Number(g.sales_rial || 0), 0);
+  const profit = rows.reduce((s, g) => s + Number(g.profit_rial || 0), 0);
+  const channelSales = (data.value?.columns ?? []).reduce(
+    (s, c) => s + Number(c.revenue_rial || 0), 0,
+  );
+  const gap = channelSales - sales;
+  return {
+    sales,
+    profit,
+    margin: sales ? (profit / sales) * 100 : 0,
+    gap,
+    // Nothing entered yet is not a mismatch worth shouting about.
+    matches: sales === 0 || gap === 0,
+  };
+});
+
+function groupShare(g: { sales_rial: any }): number | null {
+  const total = groupTotals.value.sales;
+  return total ? (Number(g.sales_rial || 0) / total) * 100 : null;
+}
+
+// The manager maintains the segment list itself — the segments a department
+// sells into change with the market, and routing every rename through an
+// administrator is how reference data goes stale.
+const manageGroups = ref(false);
+const newGroupName = ref("");
+
+async function addGroup() {
+  const name = newGroupName.value.trim();
+  if (!name) return;
+  try {
+    await customerGroupApi.create({
+      name_fa: name,
+      sort_order: (data.value?.customer_groups.length ?? 0) + 1,
+    });
+    newGroupName.value = "";
+    await load();
+    toast.success("گروه اضافه شد.");
+  } catch (e: any) {
+    toast.error(e?.response?.status === 403
+      ? "اجازه‌ی مدیریت گروه‌ها را ندارید."
+      : "گروه اضافه نشد.");
+  }
+}
+
+async function renameGroup(groupId: number, current: string) {
+  const name = (await prompt({
+    title: "تغییر نام گروه", message: "نام تازه:", value: current,
+  }))?.trim();
+  if (!name || name === current) return;
+  try {
+    await customerGroupApi.patch(groupId, { name_fa: name });
+    await load();
+    toast.success("نام گروه تغییر کرد.");
+  } catch {
+    toast.error("تغییر نام انجام نشد.");
+  }
+}
+
+async function removeGroup(groupId: number, name: string) {
+  const ok = await confirm({
+    title: "حذف گروه",
+    message: `«${name}» حذف شود؟ اگر برای این گروه عددی ثبت شده باشد، `
+      + "به‌جای حذف بایگانی می‌شود تا گزارش‌های گذشته عنوانشان را از دست ندهند.",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await customerGroupApi.remove(groupId);
+    await load();
+    toast.success("گروه حذف شد.");
+  } catch {
+    toast.error("حذف انجام نشد.");
+  }
+}
+
 async function save(submit: boolean) {
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
   try {
@@ -242,7 +341,10 @@ async function save(submit: boolean) {
       submit,
       columns: data.value!.columns,
       provinces: data.value!.provinces,
+      customer_groups: data.value!.customer_groups,
+      remove_employee_ids: removedEmployeeIds.value,
     });
+    removedEmployeeIds.value = [];
     saving.value = "";
     toast.success(submit ? "برای تایید مدیرعامل ارسال شد." : "پیش‌نویس ذخیره شد.");
     // Refresh the strip so this week's dot changes colour.
@@ -543,6 +645,133 @@ watch(selectedDay, load);
         <p v-if="!visibleProvinces.length" class="text-sm text-slate-400 py-3">
           {{ onlyWithSales ? "هنوز برای هیچ استانی فروش وارد نشده است." : "استانی با این نام پیدا نشد." }}
         </p>
+      </section>
+
+      <!-- ===== Customer segments (B2B only) =====
+           Four rows a month. The department total per segment, not a figure
+           per salesperson — which segment carries the channel is a
+           department-level question. -->
+      <section
+        v-if="data.customer_groups.length"
+        class="bg-surface rounded-card shadow-soft p-5"
+      >
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+          <h2 class="font-semibold text-ink">فروش به تفکیک گروه مشتری</h2>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400">
+              جمع فروش گروه‌ها باید با کل فروش این ماه بخواند
+            </span>
+            <button
+              class="text-xs px-2.5 py-1 rounded-lg transition"
+              :class="manageGroups
+                ? 'bg-panel text-white'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              @click="manageGroups = !manageGroups"
+            >{{ manageGroups ? "پایان ویرایش" : "مدیریت گروه‌ها" }}</button>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 mb-4">
+          مجموع کل دپارتمان در هر گروه — نه به تفکیک کارشناس.
+        </p>
+
+        <!-- Segment list management, folded away until asked for so the
+             everyday job (typing four numbers) stays the obvious one. -->
+        <div v-if="manageGroups" class="bg-slate-50 rounded-xl p-3 mb-4 space-y-2">
+          <div class="flex flex-wrap gap-2">
+            <input
+              v-model="newGroupName"
+              placeholder="نام گروه تازه — مثلاً داروخانه‌ها"
+              class="flex-1 min-w-[200px] border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
+              @keyup.enter="addGroup"
+            />
+            <button
+              class="px-4 py-2 text-sm rounded-xl bg-accent-500 text-white hover:bg-accent-600 disabled:opacity-40 transition-colors"
+              :disabled="!newGroupName.trim()"
+              @click="addGroup"
+            >افزودن گروه</button>
+          </div>
+          <ul class="flex flex-wrap gap-1.5">
+            <li
+              v-for="g in data.customer_groups" :key="`m-${g.group_id}`"
+              class="flex items-center gap-1.5 bg-surface border border-slate-200 rounded-xl px-2.5 py-1 text-xs"
+            >
+              <span class="text-ink">{{ g.name }}</span>
+              <button
+                class="text-brand-600 hover:underline"
+                @click="renameGroup(g.group_id, g.name)"
+              >ویرایش</button>
+              <button
+                class="text-red-500 hover:underline"
+                @click="removeGroup(g.group_id, g.name)"
+              >حذف</button>
+            </li>
+          </ul>
+          <p class="text-[11px] text-slate-400">
+            گروهی که برایش عدد ثبت شده باشد بایگانی می‌شود، نه حذف — تا گزارش‌های
+            ماه‌های گذشته عنوانشان را از دست ندهند.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+          <div class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">مجموع فروش گروه‌ها</p>
+            <p class="text-sm font-bold text-ink ltr-nums">{{ rial(groupTotals.sales) }}</p>
+          </div>
+          <div class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">مجموع سود</p>
+            <p class="text-sm font-bold text-ink ltr-nums">{{ rial(groupTotals.profit) }}</p>
+          </div>
+          <div class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">حاشیه سود</p>
+            <p class="text-sm font-bold text-ink ltr-nums">{{ pct(groupTotals.margin) }}</p>
+          </div>
+          <div
+            class="rounded-xl px-3 py-2"
+            :class="groupTotals.matches ? 'bg-slate-50' : 'bg-amber-50'"
+          >
+            <p class="text-[11px] text-slate-400">اختلاف با کل فروش</p>
+            <p
+              class="text-sm font-bold ltr-nums"
+              :class="groupTotals.matches ? 'text-green-600' : 'text-amber-600'"
+            >{{ groupTotals.matches ? "بدون اختلاف" : rial(groupTotals.gap) }}</p>
+          </div>
+        </div>
+
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-[11px] text-slate-400 border-b border-slate-100">
+              <th class="text-right font-medium pb-2">گروه مشتری</th>
+              <th class="text-left font-medium pb-2 w-40">فروش (ریال)</th>
+              <th class="text-left font-medium pb-2 w-40">سود ناخالص (ریال)</th>
+              <th class="text-left font-medium pb-2 w-28">تعداد فاکتور</th>
+              <th class="text-left font-medium pb-2 w-20">سهم</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="g in data.customer_groups" :key="g.group_id"
+              class="border-b border-slate-50 last:border-0"
+            >
+              <td class="py-1.5 text-ink">{{ g.name }}</td>
+              <td class="py-1.5">
+                <MoneyInput v-model="g.sales_rial" class="w-full" />
+              </td>
+              <td class="py-1.5">
+                <MoneyInput v-model="g.profit_rial" class="w-full" />
+              </td>
+              <td class="py-1.5">
+                <input
+                  v-model="g.invoice_count"
+                  type="number" min="0"
+                  class="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-left ltr-nums bg-surface focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
+                />
+              </td>
+              <td class="py-1.5 text-left text-xs text-slate-500 ltr-nums">
+                {{ groupShare(g) === null ? "—" : pct(groupShare(g)!) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <!-- Sticky action bar -->
