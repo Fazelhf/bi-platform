@@ -29,6 +29,7 @@ class Department(models.TextChoices):
     SALES_ORG = "sales_org", "فروش بانکی"
     SALES_TEAM = "sales_team", "فروش همکار"
     SALES_B2B = "sales_b2b", "فروش B2B"
+    FINANCE = "finance", "مالی"
 
 
 class User(AbstractUser):
