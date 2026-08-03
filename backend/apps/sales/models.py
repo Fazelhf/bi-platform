@@ -252,6 +252,67 @@ class FactSalesProvince(TimeStampedModel):
         return f"{self.province} · {self.period}"
 
 
+class DimCustomerGroup(TimeStampedModel):
+    """
+    The kind of business a customer is — chain stores, clinics, distributors,
+    manufacturers. Taken from the B2B manager's own workbook, where every
+    report is cut by it: which segment the department actually lives on is a
+    question province and salesperson breakdowns cannot answer.
+    """
+
+    code = models.SlugField(unique=True)
+    name_fa = models.CharField(max_length=100)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("sort_order", "name_fa")
+        verbose_name = "customer group (گروه مشتری)"
+
+    def __str__(self) -> str:
+        return self.name_fa
+
+
+class FactSalesByCustomerGroup(TimeStampedModel):
+    """
+    Grain: period x customer group x channel — the department total, not a
+    figure per salesperson.
+
+    Deliberately coarser than FactSalesMonthly: the segment split is a
+    department-level question ("which segment carries us?"), and holding it
+    per salesperson too would have multiplied monthly data entry five-fold for
+    an answer nobody asked for. Shaped exactly like FactSalesProvince so the
+    entry sheet, the importers and the dashboards treat the two the same way.
+    """
+
+    period = models.ForeignKey(
+        DimPeriod, on_delete=models.PROTECT, related_name="customer_group_sales"
+    )
+    customer_group = models.ForeignKey(
+        DimCustomerGroup, on_delete=models.PROTECT, related_name="sales"
+    )
+    channel = models.CharField(
+        max_length=16, choices=SalesChannel.choices, default=SalesChannel.B2B
+    )
+    sales_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    profit_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    invoice_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("period", "customer_group", "channel")
+        ordering = ("period", "customer_group__sort_order")
+
+    @property
+    def margin_pct(self):
+        """Gross margin of the segment, or None when it sold nothing."""
+        if not self.sales_rial:
+            return None
+        return (self.profit_rial / self.sales_rial) * 100
+
+    def __str__(self) -> str:
+        return f"{self.customer_group} · {self.period}"
+
+
 class SalesTarget(TimeStampedModel):
     """
     The CEO's plan, always at MONTH grain.
