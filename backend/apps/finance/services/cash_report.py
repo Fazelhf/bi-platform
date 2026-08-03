@@ -44,24 +44,18 @@ def running_balance_before(days: list[DimPeriod]) -> Decimal:
     """
     Cash on hand the instant the report's first day begins.
 
-    Opening balance plus every approved-or-draft movement recorded earlier.
+    The accounts' own opening balances plus every movement recorded earlier.
     Movements are summed regardless of approval state on purpose: the balance
     is meant to reflect what the bank actually did, and money does not wait
     for the CEO to click تایید.
+
+    The opening figure comes from BankAccount now — the same walk the average
+    uses — so the two can never disagree about where a period starts.
     """
-    setting = FinanceSetting.get()
-    balance = setting.opening_balance_rial
-    if not days:
-        return balance
+    from apps.finance.services import balance_trend
 
-    first = days[0]
-    earlier = CashMovement.objects.filter(
-        period__start_date__lt=first.start_date
-    ) if first.start_date else CashMovement.objects.filter(period_id__lt=first.id)
-
-    for movement in earlier.only("direction", "amount_rial"):
-        balance += movement.signed_rial
-    return balance
+    opening = balance_trend._opening_before(days[0] if days else None)
+    return sum(opening.values(), ZERO)
 
 
 def build(period: DimPeriod) -> dict:
