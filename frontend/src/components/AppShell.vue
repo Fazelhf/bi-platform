@@ -316,13 +316,24 @@ onMounted(() => {
                 v-for="child in it.children"
                 :key="child.name"
                 class="w-full flex items-center gap-3 rounded-2xl px-3 py-2 text-sm transition"
-                :class="route.name === child.name
-                  ? 'bg-panel text-white'
-                  : 'text-slate-500 hover:bg-slate-100'"
-                @click="go(child.name)"
+                :class="child.placeholder
+                  ? 'text-slate-300 cursor-default'
+                  : route.name === child.name
+                    ? 'bg-panel text-white'
+                    : 'text-slate-500 hover:bg-slate-100'"
+                :disabled="child.placeholder"
+                :title="child.placeholder ? 'هنوز ساخته نشده است' : ''"
+                @click="child.placeholder || go(child.name)"
               >
                 <NavIcon :name="child.icon" :size="17" />
                 <span class="flex-1 text-right">{{ child.label }}</span>
+                <!-- These rows name a section that is agreed but not built.
+                     Navigating would hit an undefined route, so they are inert
+                     and say so rather than failing silently. -->
+                <span
+                  v-if="child.placeholder"
+                  class="text-[10px] rounded-full bg-slate-100 text-slate-400 px-1.5 py-0.5 shrink-0"
+                >به‌زودی</span>
               </button>
               <p v-if="!it.children.length" class="text-[11px] text-slate-300 px-3 py-2">
                 {{ it.emptyHint }}
