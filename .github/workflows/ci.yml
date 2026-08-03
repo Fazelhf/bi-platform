@@ -43,3 +43,36 @@ jobs:
       - name: Type-check & build
         working-directory: frontend
         run: npm run build
+
+  # The server does not build the frontend: deploy.sh serves the bundle
+  # committed at backend/spa/. A change to frontend/src that ships without
+  # rebuilding it deploys "successfully" and changes nothing on the site —
+  # which has already happened three times.
+  #
+  # This compares *which paths changed*, not build output: bundle filenames
+  # carry content hashes and minifier output can differ between a Windows
+  # laptop and CI, so a byte-comparison would go red for no reason.
+  spa-freshness:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Frontend changes come with a rebuilt bundle
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE" "$HEAD")
+          src=$(echo "$changed" | grep -c '^frontend/src/' || true)
+          spa=$(echo "$changed" | grep -c '^backend/spa/' || true)
+          echo "frontend/src files changed: $src"
+          echo "backend/spa files changed:  $spa"
+          if [ "$src" -gt 0 ] && [ "$spa" -eq 0 ]; then
+            echo "::error::frontend/src changed but backend/spa was not rebuilt."
+            echo "::error::Run build-spa.bat and commit the result, or these changes"
+            echo "::error::will deploy without ever reaching the site."
+            exit 1
+          fi
+          echo "OK."
