@@ -8,11 +8,19 @@
  * the CEO's کارتابل one queue.
  */
 import { computed, onMounted, ref, watch } from "vue";
-import { financeApi, type CashEntry, type CreditLine } from "@/api/finance";
+import {
+  financeApi,
+  type BankAccount,
+  type CashEntry,
+  type CreditLine,
+  type EntryRow,
+} from "@/api/finance";
 import { salesApi } from "@/api/sales";
 import { toast } from "@/composables/useUi";
-import { num, rial } from "@/utils/format";
+import { loadMoneySettings, useMoney } from "@/composables/useMoney";
+import { num } from "@/utils/format";
 import MoneyInput from "@/components/MoneyInput.vue";
+import NavIcon from "@/components/NavIcon.vue";
 
 const periods = ref<{ id: number; label: string }[]>([]);
 const selected = ref<number | null>(null);
@@ -23,6 +31,48 @@ const saving = ref("");
 const error = ref("");
 
 const n = (v: unknown) => Number(v ?? 0);
+
+const { money, unitLabel } = useMoney();
+const rial = (v: number | string | null | undefined) => money(v, false);
+const accounts = ref<BankAccount[]>([]);
+
+/** A blank row for a cell, defaulting to the first account so the common
+ *  case is one click instead of two. */
+function blankRow(): EntryRow {
+  return {
+    amount_rial: "0",
+    account: accounts.value[0]?.id ?? null,
+    credit_line: null,
+    note: "",
+  };
+}
+
+function addRow(day: CashEntry["days"][number], side: "in" | "out", categoryId: number) {
+  const key = String(categoryId);
+  day[side][key] = [...(day[side][key] ?? []), blankRow()];
+}
+
+function removeRow(
+  day: CashEntry["days"][number], side: "in" | "out", categoryId: number, index: number,
+) {
+  const key = String(categoryId);
+  day[side][key] = (day[side][key] ?? []).filter((_, i) => i !== index);
+}
+
+/** Rows still missing an account — saving is blocked until none are left. */
+const missingAccount = computed(() => {
+  let count = 0;
+  for (const day of data.value?.days ?? []) {
+    for (const side of ["in", "out"] as const) {
+      for (const rows of Object.values(day[side])) {
+        for (const row of rows) {
+          if (n(row.amount_rial) && !row.account) count += 1;
+        }
+      }
+    }
+  }
+  return count;
+});
 
 async function load() {
   if (!selected.value) return;
@@ -35,6 +85,7 @@ async function load() {
     ]);
     data.value = entry;
     lines.value = creditLines;
+    accounts.value = entry.accounts;
   } catch (e: any) {
     data.value = null;
     error.value = e?.response?.status === 403
@@ -47,6 +98,7 @@ async function load() {
 
 onMounted(async () => {
   try {
+    await loadMoneySettings();
     periods.value = await salesApi.periods();
     selected.value = periods.value[periods.value.length - 1]?.id ?? null;
     await load();
@@ -59,7 +111,10 @@ watch(selected, load);
 
 // ---- totals ---------------------------------------------------------------
 function dayTotal(day: CashEntry["days"][number], side: "in" | "out"): number {
-  return Object.values(day[side]).reduce((s, cell) => s + n(cell.amount_rial), 0);
+  return Object.values(day[side]).reduce(
+    (sum, rows) => sum + rows.reduce((s, row) => s + n(row.amount_rial), 0),
+    0,
+  );
 }
 
 const totals = computed(() => {
@@ -86,6 +141,10 @@ function needsLine(side: "in" | "out", categoryId: number): boolean {
 
 async function save(submit: boolean) {
   if (!data.value || !selected.value) return;
+  if (missingAccount.value) {
+    toast.error("برای هر مبلغ باید حساب انتخاب شود.");
+    return;
+  }
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
   try {
     const result = await financeApi.saveEntry({
@@ -114,6 +173,7 @@ async function save(submit: boolean) {
         <h1 class="font-bold text-ink">ورود اطلاعات نقدینگی</h1>
         <p class="text-xs text-slate-400 mt-0.5">
           هر روز یک ردیف است. ستون‌ها همان دسته‌های گزارش خودتان‌اند.
+          مبالغ به <span class="font-medium">{{ unitLabel }}</span>.
         </p>
       </div>
       <div class="flex items-end gap-3">
@@ -183,28 +243,63 @@ async function save(submit: boolean) {
                 class="border-t border-slate-50"
               >
                 <td class="px-3 py-1.5 text-ink whitespace-nowrap">{{ day.label }}</td>
-                <td v-for="c in data.categories[side]" :key="c.id" class="px-2 py-1.5">
-                  <MoneyInput
-                    v-model="day[side][String(c.id)].amount_rial"
-                    :disabled="!data.can_edit"
-                    class="w-full"
-                  />
-                  <!-- Facility / loan / partner money must say which one, or
-                       the balance it belongs to cannot be worked out. -->
-                  <select
-                    v-if="needsLine(side, c.id) && n(day[side][String(c.id)].amount_rial)"
-                    v-model.number="day[side][String(c.id)].credit_line"
-                    :disabled="!data.can_edit"
-                    class="mt-1 w-full border rounded-lg px-2 py-1 text-[11px] bg-surface"
-                    :class="day[side][String(c.id)].credit_line
-                      ? 'border-slate-200'
-                      : 'border-amber-300 bg-amber-50'"
+                <!-- A cell holds one row per account: the same category can
+                     hit two banks on the same day, and folding them into one
+                     figure would lose which bank the money is in. -->
+                <td v-for="c in data.categories[side]" :key="c.id" class="px-2 py-1.5 align-top">
+                  <div
+                    v-for="(row, i) in day[side][String(c.id)] ?? []" :key="i"
+                    class="mb-1.5 last:mb-0"
                   >
-                    <option :value="null">— طرف حساب را انتخاب کنید</option>
-                    <option v-for="l in lines" :key="l.id" :value="l.id">
-                      {{ l.kind_label }} · {{ l.counterparty }} — {{ l.title }}
-                    </option>
-                  </select>
+                    <div class="flex items-center gap-1">
+                      <MoneyInput
+                        v-model="row.amount_rial"
+                        :disabled="!data.can_edit"
+                        class="flex-1"
+                      />
+                      <button
+                        v-if="data.can_edit && (day[side][String(c.id)] ?? []).length > 1"
+                        class="text-slate-300 hover:text-red-500 shrink-0"
+                        title="حذف این ردیف"
+                        @click="removeRow(day, side, c.id, i)"
+                      ><NavIcon name="close" :size="13" /></button>
+                    </div>
+
+                    <select
+                      v-if="n(row.amount_rial)"
+                      v-model.number="row.account"
+                      :disabled="!data.can_edit"
+                      class="mt-1 w-full border rounded-lg px-2 py-1 text-[11px] bg-surface"
+                      :class="row.account ? 'border-slate-200' : 'border-amber-300 bg-amber-50'"
+                    >
+                      <option :value="null">— حساب را انتخاب کنید</option>
+                      <option v-for="a in accounts" :key="a.id" :value="a.id">
+                        {{ a.label }}
+                      </option>
+                    </select>
+
+                    <!-- Facility and loan money must say which one, or the
+                         balance it belongs to cannot be worked out. جاری شرکا
+                         no longer asks — the account carries what matters. -->
+                    <select
+                      v-if="needsLine(side, c.id) && n(row.amount_rial)"
+                      v-model.number="row.credit_line"
+                      :disabled="!data.can_edit"
+                      class="mt-1 w-full border rounded-lg px-2 py-1 text-[11px] bg-surface"
+                      :class="row.credit_line ? 'border-slate-200' : 'border-amber-300 bg-amber-50'"
+                    >
+                      <option :value="null">— طرف حساب را انتخاب کنید</option>
+                      <option v-for="l in lines" :key="l.id" :value="l.id">
+                        {{ l.kind_label }} · {{ l.counterparty }} — {{ l.title }}
+                      </option>
+                    </select>
+                  </div>
+
+                  <button
+                    v-if="data.can_edit && accounts.length > 1"
+                    class="text-[11px] text-brand-600 hover:underline"
+                    @click="addRow(day, side, c.id)"
+                  >+ حساب دیگر</button>
                 </td>
                 <td class="px-3 py-1.5 text-left ltr-nums font-medium">
                   {{ rial(dayTotal(day, side)) }}
@@ -219,8 +314,11 @@ async function save(submit: boolean) {
         v-if="data.can_edit"
         class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex flex-wrap items-center justify-between gap-2"
       >
-        <span class="text-sm text-white/70 px-2">
-          {{ saving || "پس از تکمیل، برای تایید مدیرعامل ارسال کنید." }}
+        <span class="text-sm px-2" :class="missingAccount ? 'text-amber-300' : 'text-white/70'">
+          {{ saving
+            || (missingAccount
+              ? `${num(missingAccount)} مبلغ هنوز حساب ندارد.`
+              : "پس از تکمیل، برای تایید مدیرعامل ارسال کنید.") }}
         </span>
         <div class="flex gap-2">
           <button

@@ -214,9 +214,20 @@ class AdminBootstrapView(APIView):
     permission_classes = [IsAdminPanelUser]
 
     def get(self, request):
+        from apps.accounts.models import Department, Role
         from apps.adminpanel.permissions import PERMISSION_CATALOG
 
         return Response({
+            # Roles and departments come from the model's own choices. The
+            # Admin Panel used to hard-code them, so adding مالی left the
+            # dropdown without it and no one could be made a finance manager
+            # through the interface at all.
+            "departments": [
+                {"value": value, "label": label} for value, label in Department.choices
+            ],
+            "roles": [
+                {"value": value, "label": label} for value, label in Role.choices
+            ],
             "user": {
                 "id": request.user.id,
                 "username": request.user.username,

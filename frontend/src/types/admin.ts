@@ -24,6 +24,9 @@ export interface PermissionGroup {
 }
 
 export interface AdminBootstrap {
+  /** From the model's choices, so a new department reaches every dropdown. */
+  departments: { value: string; label: string }[];
+  roles: { value: string; label: string }[];
   user: {
     id: number;
     username: string;

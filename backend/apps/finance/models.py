@@ -39,20 +39,73 @@ class Direction(models.TextChoices):
     OUT = "out", "برداشت"
 
 
+class CurrencyUnit(models.TextChoices):
+    """
+    How figures are shown. Everything is *stored* in Rial — the unit only
+    changes presentation, so switching it can never alter a recorded amount.
+    """
+
+    RIAL = "rial", "ریال"
+    TOMAN = "toman", "تومان"
+
+
+class BankAccount(TimeStampedModel):
+    """
+    A bank account or cash box. Every movement names one, so «چقدر پول داریم؟»
+    can be answered per account rather than only in total — which is the
+    question that actually gets asked when a payment is due from a particular
+    bank.
+
+    Each account carries its own opening balance; the company's opening
+    balance is their sum rather than a separate figure that could disagree.
+    """
+
+    class Kind(models.TextChoices):
+        BANK = "bank", "حساب بانکی"
+        CASH = "cash", "صندوق"
+        PETTY = "petty", "تنخواه"
+
+    title = models.CharField(max_length=120)
+    bank_name = models.CharField(max_length=100, blank=True)
+    account_no = models.CharField(max_length=40, blank=True)
+    iban = models.CharField("شبا", max_length=34, blank=True)
+    kind = models.CharField(max_length=6, choices=Kind.choices, default=Kind.BANK)
+    opening_balance_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0,
+        help_text="موجودی این حساب پیش از اولین روزِ ثبت‌شده",
+    )
+    #: Drawn in the stacked balance chart, so each account keeps one colour.
+    color = models.CharField(max_length=7, blank=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    note = models.CharField(max_length=250, blank=True)
+
+    class Meta:
+        ordering = ("sort_order", "title")
+        verbose_name = "bank account (حساب)"
+
+    @property
+    def label(self) -> str:
+        return f"{self.title} — {self.bank_name}" if self.bank_name else self.title
+
+    def __str__(self) -> str:
+        return self.label
+
+
 class FinanceSetting(TimeStampedModel):
     """
-    Singleton. Exists for one number the workbook does not have: what the
-    company held before the ledger starts.
+    Singleton for the few settings that belong to the department rather than
+    to one account: the low-cash warning threshold and the display unit.
 
-    Without it a cash report can only show *flow* — his week netted −۳٫۸
-    میلیارد, which says the direction but not whether that is survivable.
-    With an opening balance the same report answers «چقدر پول داریم؟».
+    The opening balance used to live here as a single figure. It moved onto
+    BankAccount when movements gained an account, so the total is the sum of
+    real accounts instead of a number kept beside them that could drift.
     """
 
     singleton = models.BooleanField(default=True, unique=True, editable=False)
     opening_balance_rial = models.DecimalField(
         max_digits=20, decimal_places=0, default=0,
-        help_text="موجودی نقد در ابتدای اولین روزِ ثبت‌شده",
+        help_text="منسوخ — موجودی اولیه اکنون روی هر حساب ثبت می‌شود",
     )
     opening_on = models.DateField(
         null=True, blank=True, help_text="تاریخی که موجودی بالا به آن تعلق دارد"
@@ -61,6 +114,10 @@ class FinanceSetting(TimeStampedModel):
     low_balance_rial = models.DecimalField(
         max_digits=20, decimal_places=0, default=0,
         help_text="آستانه هشدار کمبود نقدینگی — صفر یعنی بدون هشدار",
+    )
+    unit = models.CharField(
+        max_length=6, choices=CurrencyUnit.choices, default=CurrencyUnit.RIAL,
+        help_text="واحد نمایش؛ ذخیره‌سازی همیشه ریال است",
     )
 
     @classmethod
@@ -219,6 +276,13 @@ class CashMovement(TimeStampedModel):
     category = models.ForeignKey(
         CashCategory, on_delete=models.PROTECT, related_name="movements"
     )
+    #: Which bank account or cash box the money moved through. Nullable only
+    #: so the rows recorded before accounts existed keep working; the entry
+    #: form requires one.
+    account = models.ForeignKey(
+        BankAccount, null=True, blank=True,
+        on_delete=models.PROTECT, related_name="movements",
+    )
     amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     #: Set when the movement belongs to a facility, a loan or a partner
     #: account — this is what gives those their balance.
@@ -243,9 +307,10 @@ class CashMovement(TimeStampedModel):
     )
 
     class Meta:
-        # One figure per day per category per direction — the shape of his
-        # sheet, and what makes re-entering a day idempotent.
-        unique_together = ("period", "direction", "category", "credit_line")
+        # One figure per day per category per direction per account — the
+        # shape of his sheet once accounts were added, and what makes
+        # re-entering a day idempotent rather than duplicating it.
+        unique_together = ("period", "direction", "category", "credit_line", "account")
         ordering = ("period", "direction", "category__sort_order")
         indexes = [
             models.Index(fields=["period", "direction"]),

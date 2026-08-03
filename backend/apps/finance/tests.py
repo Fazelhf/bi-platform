@@ -53,10 +53,12 @@ class TreasuryTestCase(APITestCase):
         )
         self.client.force_authenticate(self.finance)
 
-    def movement(self, day_index, direction, category, amount, line=None):
+    def movement(self, day_index, direction, category, amount, line=None,
+                 account=None):
         return CashMovement.objects.create(
             period=self.days[day_index], direction=direction,
             category=category, amount_rial=Decimal(amount), credit_line=line,
+            account=account,
         )
 
 
@@ -75,12 +77,15 @@ class CashReportTests(TreasuryTestCase):
         self.assertEqual(report["totals"]["total_out"], "3733200000")
 
     def test_running_balance_starts_from_the_opening_figure(self):
-        setting = FinanceSetting.get()
-        setting.opening_balance_rial = Decimal(1_000_000_000)
-        setting.save()
+        # The opening balance lives on the account now, not on the setting —
+        # the company's figure is the sum of its accounts.
+        from apps.finance.models import BankAccount
 
-        self.movement(0, Direction.IN, self.sales, 500_000_000)
-        self.movement(1, Direction.OUT, self.supplier, 200_000_000)
+        account = BankAccount.objects.create(
+            title="جاری اصلی", opening_balance_rial=Decimal(1_000_000_000)
+        )
+        self.movement(0, Direction.IN, self.sales, 500_000_000, account=account)
+        self.movement(1, Direction.OUT, self.supplier, 200_000_000, account=account)
 
         report = cash_report.build(self.month)
         self.assertEqual(report["balance"]["opening"], "1000000000")

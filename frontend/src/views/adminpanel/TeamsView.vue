@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 3 · Teams — org units with a manager, a parent and members. */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { teamsApi, usersApi } from "@/api/admin";
 import { useAdminStore } from "@/stores/admin";
 import { confirm, toast } from "@/composables/useUi";
@@ -21,13 +21,16 @@ const tree = ref<TeamNode[]>([]);
 const users = ref<AdminUser[]>([]);
 const loading = ref(true);
 
-const DEPARTMENTS = [
-  { value: "", label: "— بدون بخش" },
-  { value: "production", label: "تولید" },
-  { value: "sales_org", label: "فروش بانکی" },
-  { value: "sales_team", label: "فروش همکار" },
-  { value: "sales_b2b", label: "فروش B2B" },
-];
+// Served by the API from the model's choices — see UsersView for why this is
+// not written out by hand.
+const DEPARTMENTS = computed(() =>
+  admin.departments.length
+    ? admin.departments.map((d) => ({
+      value: d.value,
+      label: d.value === "" ? "— بدون بخش" : d.label,
+    }))
+    : [{ value: "", label: "— بدون بخش" }],
+);
 
 const columns: Column[] = [
   { key: "name_fa", label: "تیم" },

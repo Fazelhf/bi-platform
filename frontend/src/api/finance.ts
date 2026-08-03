@@ -36,8 +36,39 @@ export interface CreditLine {
   movement_count: number;
 }
 
-export interface EntryCell {
+export interface BankAccount {
+  id: number;
+  title: string;
+  label: string;
+  bank_name: string;
+  account_no: string;
+  iban: string;
+  kind: "bank" | "cash" | "petty";
+  kind_label: string;
+  opening_balance_rial: string;
+  color: string;
+  sort_order: number;
+  is_active: boolean;
+  note: string;
+  movement_count: number;
+}
+
+export interface AccountBalance {
+  id: number;
+  title: string;
+  label: string;
+  kind: string;
+  color: string;
+  opening_rial: string;
+  balance_rial: string;
+  is_active: boolean;
+}
+
+/** One row of a cell — a cell can hold several, one per account. */
+export interface EntryRow {
+  movement_id?: number;
   amount_rial: string;
+  account: number | null;
   credit_line: number | null;
   note: string;
 }
@@ -46,8 +77,8 @@ export interface EntryDay {
   period_id: number;
   label: string;
   date: string | null;
-  in: Record<string, EntryCell>;
-  out: Record<string, EntryCell>;
+  in: Record<string, EntryRow[]>;
+  out: Record<string, EntryRow[]>;
 }
 
 export interface CashEntry {
@@ -55,7 +86,45 @@ export interface CashEntry {
   is_month: boolean;
   categories: { in: CashCategory[]; out: CashCategory[] };
   days: EntryDay[];
+  accounts: BankAccount[];
+  unit: FinanceSettings;
   can_edit: boolean;
+}
+
+export interface AccountSlice {
+  id: number | null;
+  title: string;
+  label: string;
+  color: string;
+  kind: string;
+  amount: string;
+}
+
+export interface TrendRow {
+  period_id: number;
+  label: string;
+  month?: number;
+  day_count: number;
+  average_rial: string;
+  closing_rial: string;
+  by_account: AccountSlice[];
+  has_data?: boolean;
+}
+
+export interface MonthTrend {
+  period: { id: number; label: string };
+  grain: "week" | "month";
+  rows: TrendRow[];
+  month: Omit<TrendRow, "period_id" | "label">;
+  accounts: AccountSlice[];
+}
+
+export interface YearTrend {
+  year: number | null;
+  years: number[];
+  rows: TrendRow[];
+  year_average_rial: string;
+  accounts: AccountSlice[];
 }
 
 export interface ReportDay {
@@ -113,6 +182,10 @@ export interface FinanceSettings {
   opening_balance_rial: string;
   opening_on: string | null;
   low_balance_rial: string;
+  /** Display only — storage is always Rial. */
+  unit: "rial" | "toman";
+  unit_label: string;
+  unit_divisor: number;
 }
 
 export const financeApi = {
@@ -157,6 +230,37 @@ export const financeApi = {
       id: number; period_label: string; direction: "in" | "out";
       category_name: string; amount_rial: string; note: string;
     }[];
+  },
+  async accounts(): Promise<BankAccount[]> {
+    const { data } = await api.get("/finance/accounts/", { params: { page_size: 200 } });
+    return data.results ?? data;
+  },
+  async saveAccount(payload: Record<string, unknown>, id?: number) {
+    const { data } = id
+      ? await api.patch(`/finance/accounts/${id}/`, payload)
+      : await api.post("/finance/accounts/", payload);
+    return data as BankAccount;
+  },
+  async removeAccount(id: number) {
+    await api.delete(`/finance/accounts/${id}/`);
+  },
+  async accountBalances() {
+    const { data } = await api.get("/finance/accounts/balances/");
+    return data as {
+      accounts: AccountBalance[];
+      total_rial: string;
+      unassigned_rial: string;
+    };
+  },
+  async monthTrend(periodId: number): Promise<MonthTrend> {
+    const { data } = await api.get("/finance/balance-trend/", {
+      params: { period: periodId },
+    });
+    return data;
+  },
+  async yearTrend(year?: number): Promise<YearTrend> {
+    const { data } = await api.get("/finance/balance-trend/", { params: { year } });
+    return data;
   },
   async settings(): Promise<FinanceSettings> {
     const { data } = await api.get("/finance/settings/");

@@ -32,20 +32,28 @@ const loading = ref(true);
 // we only need the one method we call.
 const table = ref<{ clearSelection: () => void } | null>(null);
 
-const ROLE_OPTIONS = [
-  { value: "admin", label: "ادمین سیستم" },
-  { value: "executive", label: "مدیرعامل" },
-  { value: "manager", label: "مدیر بخش" },
-  { value: "operator", label: "اپراتور" },
-  { value: "viewer", label: "بیننده" },
-];
-const DEPARTMENTS = [
-  { value: "", label: "— بدون بخش" },
-  { value: "production", label: "تولید" },
-  { value: "sales_org", label: "فروش بانکی" },
-  { value: "sales_team", label: "فروش همکار" },
-  { value: "sales_b2b", label: "فروش B2B" },
-];
+const ROLE_OPTIONS = computed(() =>
+  admin.roles.length
+    ? admin.roles
+    : [
+      { value: "admin", label: "ادمین سیستم" },
+      { value: "executive", label: "مدیرعامل" },
+      { value: "manager", label: "مدیر بخش" },
+      { value: "operator", label: "اپراتور" },
+      { value: "viewer", label: "بیننده" },
+    ],
+);
+// From the API, which reads the model's own choices. Hard-coding this list is
+// what left «مالی» out of the dropdown after it was added to the model, so no
+// one could be made a finance manager through the panel at all.
+const DEPARTMENTS = computed(() =>
+  admin.departments.length
+    ? admin.departments.map((d) => ({
+      value: d.value,
+      label: d.value === "" ? "— بدون بخش" : d.label,
+    }))
+    : [{ value: "", label: "— بدون بخش" }],
+);
 
 const columns: Column[] = [
   { key: "name", label: "کاربر", type: "slot" },
