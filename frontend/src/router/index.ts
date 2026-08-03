@@ -12,6 +12,8 @@ export function homeRouteFor(department: string): string {
       return "sales-entry";
     case "sales_b2b":
       return "sales-b2b-entry";
+    case "finance":
+      return "finance-cash-entry";
     default:
       return "overview"; // CEO / admin
   }
@@ -161,6 +163,20 @@ const router = createRouter({
           meta: { department: "production" },
         },
 
+        // --- مالی: cash in / cash out, and the credit behind some of it ---
+        {
+          path: "finance/cash",
+          name: "finance-cash-report",
+          component: () => import("@/views/finance/CashReportView.vue"),
+          meta: { finance: true },
+        },
+        {
+          path: "finance/entry",
+          name: "finance-cash-entry",
+          component: () => import("@/views/finance/CashEntryView.vue"),
+          meta: { finance: true },
+        },
+
         // --- منابع انسانی: each department's own roster ---
         {
           path: "roster",
@@ -255,6 +271,14 @@ router.beforeEach(async (to) => {
   if (salesChannel && !auth.isExecutive && !auth.me?.is_superuser) {
     const owner = { team: "sales_team", organizational: "sales_org", b2b: "sales_b2b" }[salesChannel];
     if (auth.department !== owner) return { name: homeRouteFor(auth.department) };
+  }
+  // Finance: cash position is the most sensitive figure in the platform, so
+  // it is the finance department, the CEO and admins — nobody else. The API
+  // enforces the same rule; this only keeps the URL from showing an error page.
+  if (to.meta.finance) {
+    const canFinance =
+      auth.isExecutive || !!auth.me?.is_superuser || auth.department === "finance";
+    if (!canFinance) return { name: homeRouteFor(auth.department) };
   }
   // Roster: department managers (their own section) and the CEO.
   if (to.meta.roster) {

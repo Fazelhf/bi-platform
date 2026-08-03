@@ -16,6 +16,7 @@ MANAGERS = [
     ("banking_mgr", "هانیه منزه", Role.MANAGER, Department.SALES_ORG, "مدیر فروش بانکی", "#f59e0b"),
     ("b2b_mgr", "سارا مسگرچیان", Role.MANAGER, Department.SALES_B2B, "مدیر فروش B2B", "#ec4899"),
     ("production_mgr", "محمد مهدی صیفی", Role.MANAGER, Department.PRODUCTION, "مدیر کارخانه", "#8b5cf6"),
+    ("finance_mgr", "مرتضی مسلمی", Role.MANAGER, Department.FINANCE, "رئیس حسابداری", "#0ea5e9"),
 ]
 ADMIN_USERNAME = "admin"
 ADMIN_DISPLAY = "مدیر سیستم"

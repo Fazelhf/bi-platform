@@ -123,8 +123,11 @@ const primary = computed<Item[]>(() => {
         name: "group-finance",
         label: "مالی",
         icon: "chart",
+        // Read-only, like every other section the CEO oversees: entry belongs
+        // to the department that owns the numbers. تسهیلات و قرض are not their
+        // own row either — they are read on the نقدینگی page itself.
         children: [
-          { name: "finance-liquidity", label: "نقدینگی", icon: "chart", placeholder: true },
+          { name: "finance-cash-report", label: "نقدینگی", icon: "chart" },
         ],
       },
       { name: "targets", label: "تارگت", icon: "target" },
@@ -148,6 +151,11 @@ const primary = computed<Item[]>(() => {
     items.push(
       { name: "sales-b2b-entry", label: "ورود فروش B2B", icon: "box" },
       { name: "sales-b2b-dashboard", label: "داشبورد فروش B2B", icon: "chart" },
+    );
+  } else if (auth.department === "finance") {
+    items.push(
+      { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "box" },
+      { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
     );
   }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
@@ -209,6 +217,7 @@ const pageTitle = computed(() => {
     "crm-unlock": "دمو CRM",
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
     "sales-b2b-entry": "ورود فروش B2B",
+    "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
     targets: "تعیین تارگت", settings: "تنظیمات سایت",
   };
