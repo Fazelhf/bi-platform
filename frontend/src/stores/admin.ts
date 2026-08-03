@@ -20,6 +20,10 @@ export const useAdminStore = defineStore("adminPanel", {
     maintenance: false,
     companyName: "",
     flags: {} as Record<string, boolean>,
+    // Served by the API from the model's choices — never hard-coded here,
+    // or a new department silently goes missing from every dropdown.
+    departments: [] as { value: string; label: string }[],
+    roles: [] as { value: string; label: string }[],
   }),
   getters: {
     isSuperuser: (s) => !!s.user?.is_superuser,
@@ -54,6 +58,8 @@ export const useAdminStore = defineStore("adminPanel", {
         this.maintenance = data.maintenance;
         this.companyName = data.company_name;
         this.flags = data.flags;
+        this.departments = data.departments ?? [];
+        this.roles = data.roles ?? [];
         this.loaded = true;
       } catch (e: any) {
         this.error = e?.response?.status === 403

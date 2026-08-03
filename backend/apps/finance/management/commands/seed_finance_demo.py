@@ -67,10 +67,7 @@ class Command(BaseCommand):
 
         days = self._days(month)
         if options["clear"]:
-            removed, _ = CashMovement.objects.filter(
-                period_id__in=[d.id for d in days]
-            ).delete()
-            self.stdout.write(self.style.SUCCESS(f"{removed} حرکت حذف شد."))
+            self._clear(days)
             return
 
         if not days:
@@ -120,6 +117,43 @@ class Command(BaseCommand):
         ))
 
     # -- helpers --------------------------------------------------------
+    def _clear(self, days: list[DimPeriod]) -> None:
+        """
+        Undo everything the seeder put in — movements, the two demo credit
+        lines and the opening balance.
+
+        Only the credit lines this command creates are removed, and only when
+        nothing else references them, so clearing demo data can never delete a
+        real facility someone entered by hand.
+        """
+        removed, _ = CashMovement.objects.filter(
+            period_id__in=[d.id for d in days]
+        ).delete()
+
+        lines_removed = 0
+        for kind, title in (
+            (CreditLine.Kind.PARTNER, "جاری شریک اول"),
+            (CreditLine.Kind.FACILITY, "تسهیلات سرمایه در گردش"),
+        ):
+            line = CreditLine.objects.filter(kind=kind, title=title).first()
+            if line and not line.movements.exists():
+                line.delete()
+                lines_removed += 1
+
+        setting = FinanceSetting.get()
+        if setting.opening_balance_rial == OPENING_BALANCE:
+            setting.opening_balance_rial = Decimal(0)
+            setting.low_balance_rial = Decimal(0)
+            setting.opening_on = None
+            setting.save()
+            reset = "موجودی اولیه صفر شد"
+        else:
+            reset = "موجودی اولیه دست‌نخورده ماند (توسط شما تغییر کرده بود)"
+
+        self.stdout.write(self.style.SUCCESS(
+            f"{removed} حرکت و {lines_removed} مورد تسهیلات/جاری حذف شد؛ {reset}."
+        ))
+
     @staticmethod
     def _days(month: DimPeriod) -> list[DimPeriod]:
         """The month's first seven days, splitting it up if it is still whole."""
