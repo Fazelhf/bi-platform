@@ -14,6 +14,7 @@ import {
   type YearTrend,
 } from "@/api/finance";
 import { salesApi } from "@/api/sales";
+import { currentPeriodId, type Period } from "@/types";
 import { toast } from "@/composables/useUi";
 import {
   faYear,
@@ -31,7 +32,7 @@ import AccountsPanel from "@/views/finance/AccountsPanel.vue";
 // balances themselves are read on one continuous page.
 import CreditLinesView from "@/views/finance/CreditLinesView.vue";
 
-const periods = ref<{ id: number; label: string }[]>([]);
+const periods = ref<Period[]>([]);
 const selected = ref<number | null>(null);
 const report = ref<CashReport | null>(null);
 const loading = ref(true);
@@ -91,7 +92,7 @@ onMounted(async () => {
   try {
     await loadMoneySettings();
     periods.value = await salesApi.periods();
-    selected.value = periods.value[periods.value.length - 1]?.id ?? null;
+    selected.value = currentPeriodId(periods.value);
     await load();
   } catch {
     error.value = "بارگذاری دوره‌ها ناموفق بود.";

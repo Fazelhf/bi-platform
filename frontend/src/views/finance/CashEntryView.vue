@@ -21,8 +21,9 @@ import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { num } from "@/utils/format";
 import MoneyInput from "@/components/MoneyInput.vue";
 import NavIcon from "@/components/NavIcon.vue";
+import { currentPeriodId, type Period } from "@/types";
 
-const periods = ref<{ id: number; label: string }[]>([]);
+const periods = ref<Period[]>([]);
 const selected = ref<number | null>(null);
 const data = ref<CashEntry | null>(null);
 const lines = ref<CreditLine[]>([]);
@@ -100,7 +101,7 @@ onMounted(async () => {
   try {
     await loadMoneySettings();
     periods.value = await salesApi.periods();
-    selected.value = periods.value[periods.value.length - 1]?.id ?? null;
+    selected.value = currentPeriodId(periods.value);
     await load();
   } catch {
     error.value = "بارگذاری دوره‌ها ناموفق بود.";
