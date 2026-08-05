@@ -69,6 +69,36 @@ const crmItems: Item[] = [
   { name: "crm-reports", label: "گزارش‌های CRM", icon: "chart" },
 ];
 
+/**
+ * بازرگانی داخلی. The same list serves the CEO (who reads it) and صدف جمالی
+ * (who keys it) — the section is read-only for the CEO by permission, not by
+ * a different menu, so there is one place to change when a page is added.
+ */
+const commercialItems: Item[] = [
+  { name: "commercial-dashboard", label: "داشبورد بازرگانی", icon: "grid" },
+  { name: "commercial-materials", label: "کالاها", icon: "box" },
+  { name: "commercial-suppliers", label: "تامین‌کنندگان", icon: "team" },
+  { name: "commercial-requests", label: "درخواست و استعلام", icon: "target" },
+  { name: "commercial-orders", label: "سفارش‌های خرید", icon: "notes" },
+  { name: "commercial-reports", label: "گزارش‌های بازرگانی", icon: "chart" },
+];
+
+/**
+ * Detail pages keep their list row highlighted — landing on «پرونده کالا» from
+ * a link would otherwise show a collapsed menu with nothing selected, and you
+ * could not tell where you were.
+ */
+const CHILD_PARENT: Record<string, string> = {
+  "commercial-material": "commercial-materials",
+  "commercial-supplier": "commercial-suppliers",
+  "commercial-request": "commercial-requests",
+};
+
+function childActive(name: string): boolean {
+  const current = String(route.name ?? "");
+  return current === name || CHILD_PARENT[current] === name;
+}
+
 const crm = useCrmStore();
 
 /** Who even sees the demo entry. */
@@ -108,14 +138,16 @@ const primary = computed<Item[]>(() => {
         ],
       },
       { name: "production-dashboard", label: "تولید", icon: "box" },
-      // Named now, built later — the shape of each section is agreed, what
-      // goes inside it is not.
       {
         name: "group-commercial",
         label: "بازرگانی",
         icon: "box",
+        // بازرگانی داخلی is built; its pages sit directly under the heading
+        // rather than nested a second level down, which the rail cannot draw.
+        // بازرگانی خارجی keeps its «به‌زودی» row — the shape is agreed, what
+        // goes inside it is not.
         children: [
-          { name: "commercial-domestic", label: "بازرگانی داخلی", icon: "box", placeholder: true },
+          ...commercialItems,
           { name: "commercial-foreign", label: "بازرگانی خارجی", icon: "box", placeholder: true },
         ],
       },
@@ -157,6 +189,15 @@ const primary = computed<Item[]>(() => {
       { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "box" },
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
     );
+  } else if (auth.department === "commercial") {
+    // Grouped for the manager too: six rows at the top level would push
+    // پیام‌ها and یادداشت‌ها off the first screen.
+    items.push({
+      name: "group-commercial",
+      label: "بازرگانی داخلی",
+      icon: "box",
+      children: commercialItems,
+    });
   }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
@@ -184,7 +225,7 @@ const primary = computed<Item[]>(() => {
 const openGroups = ref<Set<string>>(new Set());
 
 function groupHasActive(item: Item): boolean {
-  return (item.children ?? []).some((c) => c.name === route.name);
+  return (item.children ?? []).some((c) => childActive(c.name));
 }
 
 function isGroupOpen(item: Item): boolean {
@@ -220,6 +261,13 @@ const pageTitle = computed(() => {
     "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
     targets: "تعیین تارگت", settings: "تنظیمات سایت",
+    "commercial-dashboard": "داشبورد بازرگانی داخلی",
+    "commercial-materials": "کالاهای مصرفی", "commercial-material": "پرونده کالا",
+    "commercial-suppliers": "تامین‌کنندگان", "commercial-supplier": "پرونده تامین‌کننده",
+    "commercial-requests": "درخواست خرید و استعلام",
+    "commercial-request": "مقایسه استعلام‌ها",
+    "commercial-orders": "سفارش‌های خرید",
+    "commercial-reports": "گزارش‌های بازرگانی",
   };
   if (route.name === "roster") return rosterLabel.value;
   return map[route.name as string] ?? "شرکت کاغذ حساس نمابر مهر";
@@ -327,7 +375,7 @@ onMounted(() => {
                 class="w-full flex items-center gap-3 rounded-2xl px-3 py-2 text-sm transition"
                 :class="child.placeholder
                   ? 'text-slate-300 cursor-default'
-                  : route.name === child.name
+                  : childActive(child.name)
                     ? 'bg-panel text-white'
                     : 'text-slate-500 hover:bg-slate-100'"
                 :disabled="child.placeholder"

@@ -1,13 +1,20 @@
 /**
- * Money formatting for the finance section.
+ * Money formatting for every section that shows Rial.
  *
  * Everything is stored in Rial. The unit is a display choice, so this is the
  * only place that divides — and it always says which unit it used, because a
  * figure like «۵۶٫۶ میلیارد» means two very different things depending on the
  * answer and the page should never leave the reader guessing.
+ *
+ * The unit is read from `/auth/me/`, not from the finance settings endpoint.
+ * That endpoint is gated to the finance department, so بازرگانی — and any
+ * section added later — would silently fall back to the default divisor and
+ * print تومان figures labelled ریال. Writing the setting is still finance's
+ * alone; only reading it moved.
  */
 import { computed, ref } from "vue";
 import { financeApi, type FinanceSettings } from "@/api/finance";
+import { useAuthStore } from "@/stores/auth";
 
 const FA = new Intl.NumberFormat("fa-IR");
 /** Years are not quantities — «۱٬۴۰۵» is wrong, «۱۴۰۵» is the year. */
@@ -20,9 +27,31 @@ export function faYear(value: number | null | undefined): string {
 const settings = ref<FinanceSettings | null>(null);
 let inflight: Promise<void> | null = null;
 
-/** Loaded once per session; every finance page shares the same answer. */
+/** Loaded once per session; every page that shows money shares the answer. */
 export async function loadMoneySettings(force = false) {
   if (settings.value && !force) return;
+
+  const auth = useAuthStore();
+  const me = auth.me;
+  // Whoever may read the finance endpoint still does. It carries the opening
+  // balance and the low-cash threshold that the treasury pages need, and it
+  // is authoritative the moment someone changes the unit — `me` is cached in
+  // localStorage and would keep showing the old one until the next sign-in.
+  const readsFinance =
+    !!me && (me.is_superuser || me.role === "executive" || me.department === "finance");
+
+  if (!readsFinance && me?.unit) {
+    settings.value = {
+      opening_balance_rial: "0",
+      opening_on: null,
+      low_balance_rial: "0",
+      unit: me.unit,
+      unit_label: me.unit_label ?? (me.unit === "toman" ? "تومان" : "ریال"),
+      unit_divisor: me.unit_divisor ?? (me.unit === "toman" ? 10 : 1),
+    };
+    return;
+  }
+
   if (!inflight || force) {
     inflight = financeApi
       .settings()

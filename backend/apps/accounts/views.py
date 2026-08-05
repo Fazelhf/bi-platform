@@ -99,7 +99,26 @@ class MeView(APIView):
             "can_approve": u.can_approve,
             # Drives the "پنل مدیریت" entry in the sidebar.
             "is_admin_panel_user": u.is_admin_panel_user,
+            # Whether figures are shown in ریال or تومان is an install-wide
+            # display choice, not a finance secret — but it used to be
+            # readable only from /api/finance/settings/, which is gated to the
+            # finance department. Every other section rendered its money with
+            # the default divisor and silently showed the wrong unit. It is
+            # served here because every section needs it; writing it still
+            # belongs to finance alone.
+            **_display_unit(),
         }
+
+
+def _display_unit() -> dict:
+    from apps.finance.models import FinanceSetting
+
+    setting = FinanceSetting.get()
+    return {
+        "unit": setting.unit,
+        "unit_label": setting.get_unit_display(),
+        "unit_divisor": 10 if setting.unit == "toman" else 1,
+    }
 
 
 class HeartbeatView(APIView):
