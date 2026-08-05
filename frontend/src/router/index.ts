@@ -235,6 +235,56 @@ const router = createRouter({
           meta: { commercial: true },
         },
 
+        // --- بازرگانی خارجی: the import pipeline and the waiting in it ---
+        {
+          path: "commercial/foreign",
+          name: "foreign-dashboard",
+          component: () => import("@/views/commercial/ForeignDashboardView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/foreign/orders",
+          name: "foreign-orders",
+          component: () => import("@/views/commercial/ForeignOrdersView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/foreign/orders/:id",
+          name: "foreign-order",
+          component: () => import("@/views/commercial/ForeignOrderDetailView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/foreign/queue",
+          name: "foreign-queue",
+          component: () => import("@/views/commercial/AllocationQueueView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/foreign/stalled",
+          name: "foreign-stalled",
+          component: () => import("@/views/commercial/StalledOrdersView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/foreign/shipments",
+          name: "foreign-shipments",
+          component: () => import("@/views/commercial/ShipmentsView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/foreign/demurrage",
+          name: "foreign-demurrage",
+          component: () => import("@/views/commercial/DemurrageView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/foreign/fx",
+          name: "foreign-fx",
+          component: () => import("@/views/commercial/FxRatesView.vue"),
+          meta: { commercial: true },
+        },
+
         // --- منابع انسانی: each department's own roster ---
         {
           path: "roster",
