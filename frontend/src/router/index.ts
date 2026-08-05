@@ -180,109 +180,105 @@ const router = createRouter({
         },
 
         // --- بازرگانی داخلی: buying the factory's consumables ---
+        // The CEO's whole view of the section: both halves, totals only.
         {
           path: "commercial",
+          name: "commercial-overview",
+          component: () => import("@/views/commercial/CommercialOverviewView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/domestic",
           name: "commercial-dashboard",
           component: () => import("@/views/commercial/CommercialDashboardView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/materials",
           name: "commercial-materials",
           component: () => import("@/views/commercial/MaterialsView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/materials/:id",
           name: "commercial-material",
           component: () => import("@/views/commercial/MaterialDetailView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/suppliers",
           name: "commercial-suppliers",
           component: () => import("@/views/commercial/SuppliersView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/suppliers/:id",
           name: "commercial-supplier",
           component: () => import("@/views/commercial/SupplierDetailView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/requests",
           name: "commercial-requests",
           component: () => import("@/views/commercial/RequestsView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/requests/:id",
           name: "commercial-request",
           component: () => import("@/views/commercial/RequestDetailView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/orders",
           name: "commercial-orders",
           component: () => import("@/views/commercial/OrdersView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/reports",
           name: "commercial-reports",
           component: () => import("@/views/commercial/CommercialReportsView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
 
         // --- بازرگانی خارجی: the import pipeline and the waiting in it ---
+        // Organised by what a file needs, not by which stage table it sits in.
         {
           path: "commercial/foreign",
-          name: "foreign-dashboard",
-          component: () => import("@/views/commercial/ForeignDashboardView.vue"),
-          meta: { commercial: true },
+          name: "foreign-workbench",
+          component: () => import("@/views/commercial/WorkbenchView.vue"),
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/foreign/orders",
           name: "foreign-orders",
           component: () => import("@/views/commercial/ForeignOrdersView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/foreign/orders/:id",
           name: "foreign-order",
           component: () => import("@/views/commercial/ForeignOrderDetailView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
-          path: "commercial/foreign/queue",
-          name: "foreign-queue",
-          component: () => import("@/views/commercial/AllocationQueueView.vue"),
-          meta: { commercial: true },
-        },
-        {
-          path: "commercial/foreign/stalled",
-          name: "foreign-stalled",
-          component: () => import("@/views/commercial/StalledOrdersView.vue"),
-          meta: { commercial: true },
-        },
-        {
-          path: "commercial/foreign/shipments",
+          path: "commercial/foreign/cargo",
           name: "foreign-shipments",
           component: () => import("@/views/commercial/ShipmentsView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
-          path: "commercial/foreign/demurrage",
-          name: "foreign-demurrage",
-          component: () => import("@/views/commercial/DemurrageView.vue"),
-          meta: { commercial: true },
+          path: "commercial/foreign/payments",
+          name: "foreign-payments",
+          component: () => import("@/views/commercial/PaymentsView.vue"),
+          meta: { commercial: true, commercialOnly: true },
         },
         {
-          path: "commercial/foreign/fx",
-          name: "foreign-fx",
-          component: () => import("@/views/commercial/FxRatesView.vue"),
-          meta: { commercial: true },
+          path: "commercial/foreign/history",
+          name: "foreign-history",
+          component: () => import("@/views/commercial/ForeignHistoryView.vue"),
+          meta: { commercial: true, commercialOnly: true },
         },
 
         // --- منابع انسانی: each department's own roster ---
@@ -394,6 +390,13 @@ router.beforeEach(async (to) => {
     const canCommercial =
       auth.isExecutive || !!auth.me?.is_superuser || auth.department === "commercial";
     if (!canCommercial) return { name: homeRouteFor(auth.department) };
+    // The working pages are for the people who do the work. The CEO gets the
+    // overview instead — a BI dashboard answers «چطور پیش می‌رود», and thirteen
+    // screens of rows answer a question they are not asking.
+    const worksHere = !!auth.me?.is_superuser || auth.department === "commercial";
+    if (to.meta.commercialOnly && !worksHere) {
+      return { name: "commercial-overview" };
+    }
   }
   // Roster: department managers (their own section) and the CEO.
   if (to.meta.roster) {

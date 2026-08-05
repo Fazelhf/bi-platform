@@ -307,6 +307,150 @@ export interface ForeignDashboard {
   can_edit: boolean;
 }
 
+/** میز کار — a file that needs someone, and the reason it does. */
+export interface WorkbenchRow {
+  id: number;
+  file_no: string;
+  pi_no: string;
+  registration_no: string;
+  goods: string;
+  weight_ton: string;
+  currency: string;
+  amount: string;
+  bank: string;
+  status: OrderStatus;
+  status_label: string;
+  idle_days: number | null;
+  reason: string;
+  days: number | null;
+  deadline?: string;
+  over_by?: number;
+  expected?: number;
+  shipment_id?: number;
+  container_no?: string;
+  free_days_left?: number | null;
+  accrued_rial?: string;
+  daily_rial?: string;
+}
+
+export interface WorkbenchGroup {
+  key: string;
+  level: "danger" | "warn";
+  title: string;
+  hint: string;
+  rows: WorkbenchRow[];
+}
+
+export interface Workbench {
+  groups: WorkbenchGroup[];
+  totals: {
+    needing_action: number;
+    danger_groups: number;
+    live_files: number;
+  };
+  rates: RateCell[];
+  can_edit: boolean;
+}
+
+export interface PaymentRow {
+  id: number;
+  order_id: number;
+  file_no: string;
+  pi_no: string;
+  bl_no: string;
+  container_no: string;
+  goods: string;
+  weight_ton: string;
+  currency: string;
+  value_amount: string;
+  paid_amount: string;
+  outstanding: string;
+  interest_amount: string;
+  due_on: string | null;
+  overdue_days: number | null;
+  level: "ok" | "warn" | "danger";
+  paid_pct: number | null;
+}
+
+export interface PaymentsReport {
+  rows: PaymentRow[];
+  totals: {
+    value: string; paid: string; outstanding: string; interest: string;
+    payable: string; paid_pct: number;
+    shipment_count: number; unpaid_count: number; overdue_count: number;
+  };
+}
+
+export interface HistoryRow {
+  id: number;
+  file_no: string;
+  pi_no: string;
+  registration_no: string;
+  goods: string;
+  brand: string;
+  bank: string;
+  currency: string;
+  amount: string;
+  weight_ton: string;
+  price_per_ton: string;
+  registered_on: string | null;
+  finished_on: string;
+  queue_days: number | null;
+  sea_days: number | null;
+  customs_days: number | null;
+  total_days: number | null;
+  container_count: number;
+  status_label: string;
+  note: string;
+}
+
+export interface HistoryReport {
+  year: number;
+  years: number[];
+  rows: HistoryRow[];
+  totals: {
+    file_count: number; container_count: number;
+    value: string; tons: string; avg_price_per_ton: string;
+    avg_queue_days: number | null;
+    avg_sea_days: number | null;
+    avg_customs_days: number | null;
+    avg_total_days: number | null;
+    longest_days: number | null;
+  };
+}
+
+/** The executive page: both halves, totals only. */
+export interface CommercialOverview {
+  month: { label: string; key: string };
+  money: {
+    domestic_month_rial: string;
+    domestic_change_pct: number | null;
+    domestic_order_count: number;
+    foreign_by_currency: { currency: string; label: string; amount: string }[];
+    foreign_outstanding: string;
+    foreign_interest: string;
+    monthly_spend: {
+      key: string; label: string; amount_rial: string; has_data: boolean;
+    }[];
+  };
+  stuck: {
+    in_queue: number; queue_amount: string;
+    queue_avg_days: number; queue_max_days: number; queue_overdue: number;
+    by_bank: BankQueueRow[];
+    idle_files: number; live_files: number; open_requests: number;
+  };
+  bleeding: {
+    daily_rial: string; accrued_rial: string;
+    containers: number; over_free_days: number;
+    interest: string; overdue_payments: number;
+  };
+  tonnage: {
+    in_transit: string; in_transit_count: number;
+    at_customs: string; at_customs_count: number;
+    cleared_ytd: string;
+  };
+}
+
 export interface Choice { value: string; label: string }
 
 export interface ForeignOptions {
@@ -321,6 +465,25 @@ const BASE = "/commercial/foreign";
 const list = (data: any) => data.results ?? data;
 
 export const foreignApi = {
+  async workbench(): Promise<Workbench> {
+    const { data } = await api.get(`${BASE}/workbench/`);
+    return data;
+  },
+  async payments(outstandingOnly = false): Promise<PaymentsReport> {
+    const { data } = await api.get(`${BASE}/payments/`, {
+      params: { outstanding: outstandingOnly ? 1 : undefined },
+    });
+    return data;
+  },
+  async history(year?: number): Promise<HistoryReport> {
+    const { data } = await api.get(`${BASE}/history/`, { params: { year } });
+    return data;
+  },
+  /** Both halves at KPI level — lives outside foreign/ because it spans both. */
+  async overview(): Promise<CommercialOverview> {
+    const { data } = await api.get("/commercial/overview/");
+    return data;
+  },
   async dashboard(): Promise<ForeignDashboard> {
     const { data } = await api.get(`${BASE}/dashboard/`);
     return data;

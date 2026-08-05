@@ -30,8 +30,10 @@ def _row(shipment: Shipment, today: date) -> dict:
     left = shipment.free_days_left(today)
     demurrage_days = shipment.demurrage_days(today)
 
-    if left is None:
-        level = "none"
+    if left is None or not shipment.has_tariff:
+        # «شرایط ثبت نشده» — not «no problem». The page says so rather than
+        # showing a confident green row for a container nobody priced.
+        level = "unknown" if shipment.arrived_on else "none"
     elif demurrage_days > 0:
         level = "danger"
     elif left <= 3:
@@ -65,6 +67,7 @@ def _row(shipment: Shipment, today: date) -> dict:
         # Still ticking, versus a final figure on a cleared container. The
         # page must not show a settled number with a live-looking counter.
         "is_accruing": shipment.is_accruing,
+        "has_tariff": shipment.has_tariff,
         "level": level,
         # What one more day of delay costs — the number that actually makes
         # someone pick up the phone.
@@ -104,5 +107,9 @@ def build(only_accruing: bool = False, today: date | None = None) -> dict:
             ),
             "expiring_soon": sum(1 for r in live if r["level"] == "warn"),
             "over_free_days": sum(1 for r in live if r["level"] == "danger"),
+            # Surfaced rather than hidden: these are containers sitting in a
+            # port whose terms nobody has entered, so every figure above
+            # understates the real bill by an unknown amount.
+            "no_tariff_count": sum(1 for r in live if r["level"] == "unknown"),
         },
     }

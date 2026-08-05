@@ -28,6 +28,12 @@ foreign.register("shipments", views_foreign.ShipmentViewSet, basename="shipment"
 foreign.register("costs", views_foreign.ShipmentCostViewSet, basename="shipment-cost")
 
 foreign_patterns = [
+    path("workbench/", views_foreign.WorkbenchView.as_view(),
+         name="foreign-workbench"),
+    path("payments/", views_foreign.PaymentsView.as_view(),
+         name="foreign-payments"),
+    path("history/", views_foreign.HistoryView.as_view(),
+         name="foreign-history"),
     path("dashboard/", views_foreign.ForeignDashboardView.as_view(),
          name="foreign-dashboard"),
     path("queue/", views_foreign.AllocationQueueView.as_view(),
@@ -55,6 +61,9 @@ urlpatterns = [
     path("reports/monthly-spend/", views.MonthlySpendView.as_view(),
          name="commercial-monthly-spend"),
     path("forecast/", views.ForecastOverviewView.as_view(), name="commercial-forecast"),
+    # Both halves in one payload, for the executive page.
+    path("overview/", views_foreign.CommercialOverviewView.as_view(),
+         name="commercial-overview"),
     path("foreign/", include(foreign_patterns)),
     path("", include(router.urls)),
 ]

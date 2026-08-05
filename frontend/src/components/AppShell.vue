@@ -90,13 +90,11 @@ const commercialItems: Item[] = [
  * is about price, the other about time.
  */
 const foreignItems: Item[] = [
-  { name: "foreign-dashboard", label: "داشبورد واردات", icon: "grid" },
-  { name: "foreign-orders", label: "پرونده‌های واردات", icon: "notes" },
-  { name: "foreign-queue", label: "صف تخصیص ارز", icon: "target" },
-  { name: "foreign-stalled", label: "پرونده‌های راکد", icon: "inbox" },
-  { name: "foreign-shipments", label: "بارها", icon: "box" },
-  { name: "foreign-demurrage", label: "دموراژ و انبارداری", icon: "chart" },
-  { name: "foreign-fx", label: "نرخ ارز", icon: "chart" },
+  { name: "foreign-workbench", label: "میز کار", icon: "inbox" },
+  { name: "foreign-orders", label: "پرونده‌ها", icon: "notes" },
+  { name: "foreign-shipments", label: "بار و گمرک", icon: "box" },
+  { name: "foreign-payments", label: "پرداخت‌ها", icon: "chart" },
+  { name: "foreign-history", label: "تاریخچه", icon: "target" },
 ];
 
 /**
@@ -155,18 +153,10 @@ const primary = computed<Item[]>(() => {
         ],
       },
       { name: "production-dashboard", label: "تولید", icon: "box" },
-      {
-        name: "group-commercial",
-        label: "بازرگانی داخلی",
-        icon: "box",
-        children: commercialItems,
-      },
-      {
-        name: "group-commercial-foreign",
-        label: "بازرگانی خارجی",
-        icon: "box",
-        children: foreignItems,
-      },
+      // One row, not two groups of six. The CEO reads this section; they do
+      // not file a ثبت سفارش or chase a container, so the working screens
+      // would only be noise between «نمای کلی» and «تارگت».
+      { name: "commercial-overview", label: "بازرگانی", icon: "box" },
       {
         name: "group-finance",
         label: "مالی",
@@ -292,13 +282,12 @@ const pageTitle = computed(() => {
     "commercial-request": "مقایسه استعلام‌ها",
     "commercial-orders": "سفارش‌های خرید",
     "commercial-reports": "گزارش‌های بازرگانی",
-    "foreign-dashboard": "داشبورد بازرگانی خارجی",
+    "commercial-overview": "بازرگانی — نمای کلی",
+    "foreign-workbench": "میز کار بازرگانی خارجی",
     "foreign-orders": "پرونده‌های واردات", "foreign-order": "پرونده واردات",
-    "foreign-queue": "صف تخصیص ارز",
-    "foreign-stalled": "پرونده‌های راکد",
-    "foreign-shipments": "بارها و محموله‌ها",
-    "foreign-demurrage": "دموراژ و انبارداری",
-    "foreign-fx": "نرخ ارز",
+    "foreign-shipments": "بار و گمرک",
+    "foreign-payments": "پرداخت‌ها و سود دیرکرد",
+    "foreign-history": "تاریخچه واردات",
   };
   if (route.name === "roster") return rosterLabel.value;
   return map[route.name as string] ?? "شرکت کاغذ حساس نمابر مهر";

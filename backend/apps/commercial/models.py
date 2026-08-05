@@ -538,8 +538,15 @@ class ForeignOrder(TimeStampedModel):
     """
 
     class Status(models.TextChoices):
+        """
+        The stages the workbook keeps as five separate tables, in one list.
+        Separate tables meant a file had to be cut and pasted between them to
+        move forward, which is why several of them disagree with each other.
+        """
+
         DRAFT = "draft", "پیش‌نویس"
-        REGISTERED = "registered", "ثبت سفارش"
+        AWAITING_PERMIT = "permit", "منتظر مجوز صنعت و معدن"
+        REGISTERED = "registered", "ثبت سفارش شده"
         QUEUED = "queued", "در صف تخصیص ارز"
         ALLOCATED = "allocated", "تخصیص ارز"
         REMITTED = "remitted", "حواله ارز"
@@ -549,6 +556,16 @@ class ForeignOrder(TimeStampedModel):
         CLEARED = "cleared", "ترخیص شد"
         CLOSED = "closed", "بسته شده"
         CANCELLED = "cancelled", "لغو شده"
+
+    class Readiness(models.TextChoices):
+        """
+        The workbook's own «R» / «Q» columns for بیمه and بازرسی — done, or
+        still waited on. Kept because a file cannot be allocated without them
+        and «چرا این پرونده جلو نمی‌رود» is often answered by one of these two.
+        """
+
+        PENDING = "Q", "در انتظار"
+        DONE = "R", "انجام شده"
 
     #: Statuses where the file is finished and must drop out of every
     #: «چقدر معطل مانده» count. A closed file waiting forever is not a problem.
@@ -606,9 +623,48 @@ class ForeignOrder(TimeStampedModel):
     purchase_deadline = models.DateField(
         null=True, blank=True, help_text="مهلت خرید ارز"
     )
-    #: What the bank said the wait should be, so the real wait can be judged
-    #: against a promise rather than against nothing.
-    expected_queue_days = models.PositiveSmallIntegerField(default=0)
+    proforma_expires_on = models.DateField(
+        null=True, blank=True, help_text="تاریخ انقضای پروفرما"
+    )
+    #: «حداکثر انتظار» in the workbook, where it is 100 days. The real wait is
+    #: judged against this rather than against nothing, and the workbook's
+    #: «زمان باقی مانده» column is this minus the days already waited.
+    expected_queue_days = models.PositiveSmallIntegerField(default=100)
+
+    # -- the two gates that quietly hold a file back --------------------
+    insurance = models.CharField(
+        "بیمه", max_length=1, choices=Readiness.choices, default=Readiness.PENDING
+    )
+    inspection = models.CharField(
+        "بازرسی", max_length=1, choices=Readiness.choices, default=Readiness.PENDING
+    )
+
+    # -- what happened after the goods landed ---------------------------
+    arrived_on = models.DateField(
+        null=True, blank=True, help_text="رسیدن بار به بندر"
+    )
+    factory_entry_on = models.DateField(
+        null=True, blank=True, help_text="ورود کالا به کارخانه"
+    )
+    production_cert_on = models.DateField(
+        null=True, blank=True, help_text="تاریخ گواهی تولید"
+    )
+    customs_declared_on = models.DateField(
+        null=True, blank=True, help_text="تاریخ اظهار گمرکی"
+    )
+    #: Recorded on the file as well as on its containers, because the
+    #: workbook's clearance table is keyed by PI and several older rows have
+    #: no بارنامه at all — without this their clearance date is simply lost.
+    cleared_on = models.DateField(
+        null=True, blank=True, help_text="تاریخ ترخیص"
+    )
+    customs_value_rial = models.DecimalField(
+        max_digits=22, decimal_places=0, default=0,
+        help_text="مبلغ اظهار گمرکی",
+    )
+    #: Free text, because the workbook's «آخرین وضعیت» is a sentence, not a
+    #: code — «رفع تعهد بانکی انجام شده», «۹۰٪ ترخیص شده».
+    last_status_note = models.CharField(max_length=250, blank=True)
 
     status = models.CharField(
         max_length=12, choices=Status.choices, default=Status.DRAFT
@@ -784,6 +840,20 @@ class Shipment(TimeStampedModel):
         max_digits=18, decimal_places=2, default=0,
         help_text="ارزش این محموله به ارز پرونده",
     )
+    # -- what is still owed, and what the delay is costing ---------------
+    # The workbook tracks these per بارنامه: a shipment is often paid in
+    # instalments, and once a due date passes the seller charges interest that
+    # grows the same way دموراژ does. Kept here rather than netted into
+    # `value_amount`, because «چقدر ارزش داشت» and «چقدر هنوز بدهکاریم» are
+    # different questions and only one of them changes over time.
+    paid_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    due_on = models.DateField(
+        null=True, blank=True, help_text="سررسید پرداخت به فروشنده"
+    )
+    interest_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0,
+        help_text="سود دیرکرد اعلامی فروشنده",
+    )
 
     etd = models.DateField(null=True, blank=True)
     eta = models.DateField(null=True, blank=True)
@@ -860,10 +930,23 @@ class Shipment(TimeStampedModel):
             return None
         return max(0, self.free_days - days)
 
+    @property
+    def has_tariff(self) -> bool:
+        """
+        Whether anyone has told us what this container costs to sit.
+
+        A row with no Free Days *and* no daily rate is not a container with
+        zero free days — it is one nobody has entered terms for. Treating the
+        blank as zero would report every such box as running up demurrage
+        from the day it landed, and then bill it at nothing, which is wrong
+        in both directions at once.
+        """
+        return bool(self.free_days or self.demurrage_daily_rial or self.storage_daily_rial)
+
     def demurrage_days(self, today: "date | None" = None) -> int:
         """Days charged at the demurrage rate — only those past the free ones."""
         days = self.days_at_port(today)
-        if days is None:
+        if days is None or not self.has_tariff:
             return 0
         return max(0, days - self.free_days)
 
@@ -892,6 +975,29 @@ class Shipment(TimeStampedModel):
             and bool(self.arrived_on)
             and not self.cleared_on
         )
+
+    @property
+    def outstanding_amount(self) -> Decimal:
+        """What is still owed the seller on this shipment."""
+        return max(ZERO, (self.value_amount or ZERO) - (self.paid_amount or ZERO))
+
+    def overdue_days(self, today: "date | None" = None) -> int | None:
+        """
+        Days past the payment due date, while money is still owed.
+
+        None once it is paid: an instalment settled late is history, and
+        leaving it counting would make the overdue total grow forever.
+        """
+        if not self.due_on or self.outstanding_amount <= ZERO:
+            return None
+        return max(0, ((today or date.today()) - self.due_on).days)
+
+    @property
+    def price_per_ton(self) -> Decimal | None:
+        """What this container cost per tonne — the comparable unit."""
+        if not self.weight_ton:
+            return None
+        return (self.value_amount or ZERO) / self.weight_ton
 
     def transit_days(self) -> int | None:
         if not self.etd or not self.arrived_on:

@@ -6,11 +6,11 @@ hand: a column of «تعداد روز انتظار تخصیص» that somebody re
 «حداکثر انتظار» the bank promised. This computes both from the dates, so the
 number cannot go stale between Sundays.
 
-Share is reported by **file count**, not by value. «۴۰٪ کارآفرین» in the
-department's own words means four in ten files sit at that bank — a single
-large file would otherwise swamp the percentage and hide where the backlog
-really is. Value is reported beside it, separately, for the times that is the
-question instead.
+Share is reported **by value**, because that is what the workbook itself
+computes: its own bank summary divides each bank's مبلغ by the total, not its
+row count. The question behind it is «چقدر از پول ما پیش کدام بانک گیر کرده»,
+and two ۲۵-tonne files do not equal one ۵۰-tonne file. Count is carried
+alongside for the times that is the question instead.
 """
 from __future__ import annotations
 
@@ -22,8 +22,9 @@ from apps.commercial.services.base import ZERO, as_str
 
 #: How long a file may wait before it stops being normal. Used when the bank
 #: promised nothing — a file with no expectation still needs a threshold, or
-#: it can never be reported as late.
-DEFAULT_EXPECTED_DAYS = 60
+#: it can never be reported as late. 100 is the «حداکثر انتظار» the workbook
+#: uses on every row.
+DEFAULT_EXPECTED_DAYS = 100
 
 
 def _waiting(today: date):
@@ -67,44 +68,41 @@ def build(today: date | None = None) -> dict:
     rows.sort(key=lambda r: r["days_waiting"], reverse=True)
 
     total = len(rows)
-    by_bank = []
-    for bank in Bank.objects.all():
-        mine = [r for r in rows if r["bank_id"] == bank.id]
-        if not mine:
-            continue
+    total_amount = sum((Decimal(r["amount"]) for r in rows), ZERO)
+
+    def bank_row(mine, bank_id, name, color):
         waits = [r["days_waiting"] for r in mine]
-        by_bank.append({
-            "id": bank.id,
-            "name": bank.name_fa,
-            "color": bank.color,
+        amount = sum((Decimal(r["amount"]) for r in mine), ZERO)
+        return {
+            "id": bank_id,
+            "name": name,
+            "color": color,
             "count": len(mine),
-            "share_pct": round(len(mine) / total * 100, 1) if total else 0.0,
-            "amount": as_str(sum((Decimal(r["amount"]) for r in mine), ZERO)),
+            "count_pct": round(len(mine) / total * 100, 1) if total else 0.0,
+            "amount": as_str(amount),
+            # The headline share, matching the workbook's own arithmetic.
+            "share_pct": (
+                round(float(amount / total_amount * 100), 1) if total_amount else 0.0
+            ),
             "min_days": min(waits),
             "max_days": max(waits),
             "avg_days": round(sum(waits) / len(waits), 1),
             "overdue_count": sum(1 for r in mine if r["is_overdue"]),
-        })
-    by_bank.sort(key=lambda r: r["count"], reverse=True)
+        }
+
+    by_bank = []
+    for bank in Bank.objects.all():
+        mine = [r for r in rows if r["bank_id"] == bank.id]
+        if mine:
+            by_bank.append(bank_row(mine, bank.id, bank.name_fa, bank.color))
+    by_bank.sort(key=lambda r: Decimal(r["amount"]), reverse=True)
 
     # Files with no bank named are their own row rather than being dropped:
     # a file nobody assigned is a real gap, and silently excluding it makes
     # the shares add up to 100% of a number that is not the true total.
     orphans = [r for r in rows if not r["bank_id"]]
     if orphans:
-        waits = [r["days_waiting"] for r in orphans]
-        by_bank.append({
-            "id": None,
-            "name": "بانک ثبت نشده",
-            "color": "#94a3b8",
-            "count": len(orphans),
-            "share_pct": round(len(orphans) / total * 100, 1) if total else 0.0,
-            "amount": as_str(sum((Decimal(r["amount"]) for r in orphans), ZERO)),
-            "min_days": min(waits),
-            "max_days": max(waits),
-            "avg_days": round(sum(waits) / len(waits), 1),
-            "overdue_count": sum(1 for r in orphans if r["is_overdue"]),
-        })
+        by_bank.append(bank_row(orphans, None, "بانک ثبت نشده", "#94a3b8"))
 
     all_waits = [r["days_waiting"] for r in rows]
     return {
@@ -112,7 +110,7 @@ def build(today: date | None = None) -> dict:
         "by_bank": by_bank,
         "totals": {
             "count": total,
-            "amount": as_str(sum((Decimal(r["amount"]) for r in rows), ZERO)),
+            "amount": as_str(total_amount),
             "min_days": min(all_waits) if all_waits else 0,
             "max_days": max(all_waits) if all_waits else 0,
             "avg_days": round(sum(all_waits) / total, 1) if total else 0.0,

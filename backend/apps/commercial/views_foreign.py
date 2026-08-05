@@ -41,7 +41,11 @@ from apps.commercial.services import (
     foreign_alerts,
     foreign_dashboard,
     fx,
+    history,
+    overview,
+    payments,
     stalled,
+    workbench,
 )
 from apps.core.audit import log as audit_log
 from apps.core.models import AuditLog
@@ -302,6 +306,70 @@ class ForeignAlertsView(APIView):
         assert_commercial_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
         return Response({"rows": foreign_alerts.build(today)})
+
+
+class WorkbenchView(APIView):
+    """میز کار — files that need a person today, grouped by why."""
+
+    permission_classes = [CommercialAccess]
+
+    @extend_schema(responses=dict)
+    def get(self, request):
+        assert_commercial_visible(request.user)
+        today = _as_date(request.query_params.get("on")) or date.today()
+        data = workbench.build(today)
+        # The rate strip lives here rather than on its own page: it is
+        # reference material someone glances at, not a place they work.
+        data["rates"] = fx.board(today)
+        data["can_edit"] = is_commercial(request.user)
+        return Response(data)
+
+
+class PaymentsView(APIView):
+    """پرداخت‌ها — outstanding to the seller, and the interest on lateness."""
+
+    permission_classes = [CommercialAccess]
+
+    @extend_schema(parameters=[OpenApiParameter("outstanding", bool)], responses=dict)
+    def get(self, request):
+        assert_commercial_visible(request.user)
+        only = str(request.query_params.get("outstanding", "")).lower() in {"1", "true"}
+        today = _as_date(request.query_params.get("on")) or date.today()
+        return Response(payments.build(today, outstanding_only=only))
+
+
+class HistoryView(APIView):
+    """تاریخچه — files finished in a Jalali year, and how long they took."""
+
+    permission_classes = [CommercialAccess]
+
+    @extend_schema(parameters=[OpenApiParameter("year", int)], responses=dict)
+    def get(self, request):
+        assert_commercial_visible(request.user)
+        raw = request.query_params.get("year")
+        try:
+            year = int(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            year = None
+        today = _as_date(request.query_params.get("on")) or date.today()
+        return Response(history.build(year=year, today=today))
+
+
+class CommercialOverviewView(APIView):
+    """
+    نمای کلی بازرگانی — both halves, for the CEO.
+
+    Readable by anyone who may see the section; there is nothing here that is
+    not already a total on one of the working pages.
+    """
+
+    permission_classes = [CommercialAccess]
+
+    @extend_schema(responses=dict)
+    def get(self, request):
+        assert_commercial_visible(request.user)
+        today = _as_date(request.query_params.get("on")) or date.today()
+        return Response(overview.build(today))
 
 
 class ForeignOptionsView(APIView):
