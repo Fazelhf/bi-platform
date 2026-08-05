@@ -32,7 +32,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts import otp
-from apps.accounts.models import OtpChallenge
+from apps.accounts.models import OtpChallenge, User
 from apps.accounts.sms import can_send, mask_phone, normalize_phone
 from apps.core.audit import log as audit_log
 from apps.core.models import AuditLog
@@ -84,6 +84,29 @@ def two_factor_status(user) -> dict:
 # ---------------------------------------------------------------------------
 # Step 1 — password
 # ---------------------------------------------------------------------------
+def complete_login(user, request) -> dict:
+    """Everything that happens the moment a login actually succeeds.
+
+    Both steps can be the last one — an account without 2FA finishes at the
+    password, one with it finishes at the code — and the panel's audit trail
+    and lockout counter must see exactly one success either way. So this is
+    the only place that mints tokens for a login, and the only place that
+    calls `register_success`.
+    """
+    from apps.adminpanel.models import UserSecurity
+    from apps.adminpanel.services import security as sec_service
+
+    sec_service.register_success(user, request)
+    state = UserSecurity.get(user)
+    return {
+        **issue_tokens(user),
+        "must_change_password": bool(
+            state.must_change_password or sec_service.password_expired(user)
+        ),
+        "is_admin_panel_user": user.is_admin_panel_user,
+    }
+
+
 class LoginView(PublicAuthView):
     """
     Replaces SimpleJWT's TokenObtainPairView at the same URL.
@@ -92,19 +115,48 @@ class LoginView(PublicAuthView):
     that no token is ever minted for an account that still owes a second
     factor — a serializer that returns tokens and a view that throws them away
     is one refactor from leaking them.
+
+    The panel's login policy — IP rules, lockout, and a LoginEvent for every
+    outcome — used to live in PanelTokenObtainPairSerializer at this same URL.
+    It is applied here instead: two views cannot own one endpoint, and running
+    the checks in a serializer that returns tokens is the arrangement the
+    paragraph above exists to avoid. The order matters — an IP that is not
+    allowed to reach the platform should not get to find out whether a
+    password was right.
     """
 
     throttle_scope = "login"
 
     def post(self, request):
+        from apps.adminpanel.services import security as sec_service
+
         username = str(request.data.get("username") or "").strip()
         password = request.data.get("password") or ""
+
+        # 400, not 401, for these two — and that is a UI decision as much as a
+        # protocol one. The sign-in screen renders 401 as «نام کاربری یا رمز
+        # عبور نادرست است», so a locked account answering 401 would send the
+        # user hunting for a typo instead of reading «حساب موقتاً قفل است».
+        # It is also the contract the panel's serializer already had.
+        allowed, reason = sec_service.ip_allowed(sec_service.client_ip(request))
+        if not allowed:
+            sec_service.register_failure(username, request, reason)
+            raise ValidationError({"detail": "ورود از این آدرس شبکه مجاز نیست."})
+
+        locked_user = User.objects.filter(username=username).first()
+        if locked_user:
+            locked, message = sec_service.lock_state(locked_user)
+            if locked:
+                sec_service.register_failure(username, request, "locked")
+                raise ValidationError({"detail": message})
+
         user = authenticate(request, username=username, password=password)
         if user is None or not user.is_active:
+            sec_service.register_failure(username, request, "bad_password")
             raise AuthenticationFailed("نام کاربری یا رمز عبور نادرست است.")
 
         if not user.two_factor_active:
-            return Response(issue_tokens(user))
+            return Response(complete_login(user, request))
 
         try:
             challenge = otp.start(
@@ -112,6 +164,9 @@ class LoginView(PublicAuthView):
             )
         except otp.OtpError as exc:
             return otp_response(exc)
+        # Deliberately no `register_success` yet: the password alone is not a
+        # login for this account, and recording one here would clear the
+        # failure counter for someone who never produces the code.
         return Response(otp.payload(challenge))
 
 
@@ -135,7 +190,7 @@ class OtpVerifyView(PublicAuthView):
         # check would otherwise be the only one.
         if not user.is_active:
             raise AuthenticationFailed("حساب کاربری غیرفعال است.")
-        return Response(issue_tokens(user))
+        return Response(complete_login(user, request))
 
 
 class OtpResendView(PublicAuthView):

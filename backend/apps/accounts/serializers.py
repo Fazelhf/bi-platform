@@ -1,17 +1,21 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.accounts.models import Message, Note, User
+from apps.accounts.models import Department, Message, Note, User
 
 
 class DEPT_LABEL:
-    MAP = {
-        "": "—",
-        "production": "تولید",
-        "sales_org": "فروش بانکی",
-        "sales_team": "فروش همکار",
-        "sales_b2b": "فروش B2B",
-    }
+    """
+    Department labels, derived from the model's own choices.
+
+    This used to be a hand-written copy, and adding مالی to the model left it
+    behind: the label rendered as raw "finance" and the Admin Panel's dropdown
+    — another hand-written copy — had no option for it at all, so no one could
+    be made a finance manager through the interface. Deriving it means a new
+    department appears everywhere the moment it exists.
+    """
+
+    MAP = {value: label for value, label in Department.choices} | {"": "—"}
 
 
 class UserCardSerializer(serializers.ModelSerializer):

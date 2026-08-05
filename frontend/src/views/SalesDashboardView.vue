@@ -11,6 +11,7 @@ import ExportActions from "@/components/ExportActions.vue";
 import WeekProgress from "@/components/WeekProgress.vue";
 import PeriodCalendar from "@/components/PeriodCalendar.vue";
 import ReconcilePanel from "@/components/ReconcilePanel.vue";
+import PeriodReport from "@/components/PeriodReport.vue";
 import { rial } from "@/utils/format";
 
 /**
@@ -36,7 +37,7 @@ const periodB = ref<number | null>(null);   // side-by-side comparison month
 const compare = ref(false);
 const data = ref<Detail | null>(null);
 const dataB = ref<Detail | null>(null);
-const tab = ref<"people" | "teams">("people");
+const tab = ref<"people" | "teams" | "period">("people");
 const loading = ref(false);
 
 // When a week is picked from the strip the charts show just that week;
@@ -407,9 +408,19 @@ watch([periodA, () => props.channel], () => {
         :class="tab === 'teams' ? 'bg-panel text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50'"
         @click="tab = 'teams'"
       >داشبورد تیم</button>
+      <button
+        class="px-4 py-1.5 rounded-xl text-sm"
+        :class="tab === 'period' ? 'bg-panel text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50'"
+        @click="tab = 'period'"
+      >گزارش دوره‌ای</button>
     </div>
 
-    <DashboardSkeleton v-if="loading || !data" :cards="0" :charts="6" :table="false" />
+    <!-- ========== گزارش دوره‌ای ==========
+         A range of months rather than one, so it owns its own period picker
+         and ignores the month selector above. -->
+    <PeriodReport v-if="tab === 'period'" :channel="channel" />
+
+    <DashboardSkeleton v-else-if="loading || !data" :cards="0" :charts="6" :table="false" />
 
     <!-- ========== داشبورد فروشنده ========== -->
     <template v-else-if="tab === 'people'">

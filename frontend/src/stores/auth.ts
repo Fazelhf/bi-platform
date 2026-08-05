@@ -28,6 +28,8 @@ export const useAuthStore = defineStore("auth", {
     isAuthenticated: (s) => !!s.access,
     username: (s) => s.me?.display_name_fa || s.me?.username || "",
     isExecutive: (s) => s.me?.role === "executive" || s.me?.is_superuser,
+    /** May this account open the Admin Panel? Mirrors the server's rule. */
+    isAdminPanelUser: (s) => !!s.me?.is_admin_panel_user,
     department: (s): string => s.me?.department ?? "",
     canEnter: (s) => !!s.me?.can_enter_data,
   },

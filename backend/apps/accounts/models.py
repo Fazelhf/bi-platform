@@ -12,6 +12,7 @@ ONLINE_WINDOW = timedelta(minutes=2)
 class Role(models.TextChoices):
     """Coarse RBAC roles that map onto BI-platform personas."""
 
+    ADMIN = "admin", "Administrator (system management)"
     EXECUTIVE = "executive", "Executive (CEO / board)"
     MANAGER = "manager", "Manager / supervisor (approves data)"
     OPERATOR = "operator", "Operator (enters data)"
@@ -29,6 +30,7 @@ class Department(models.TextChoices):
     SALES_ORG = "sales_org", "فروش بانکی"
     SALES_TEAM = "sales_team", "فروش همکار"
     SALES_B2B = "sales_b2b", "فروش B2B"
+    FINANCE = "finance", "مالی"
 
 
 class User(AbstractUser):
@@ -69,6 +71,21 @@ class User(AbstractUser):
     def two_factor_active(self) -> bool:
         """2FA only counts when there is a number to send the code to."""
         return bool(self.two_factor_enabled and self.phone)
+
+    # Explicit, per-account grant of Admin-Panel access. The panel is for
+    # administrators only: the CEO (executive) has their own dashboards and is
+    # deliberately locked out unless someone ticks this flag for them.
+    admin_access = models.BooleanField(
+        "admin panel access (explicit grant)", default=False
+    )
+
+    @property
+    def is_admin_panel_user(self) -> bool:
+        """Who may open the Admin Panel at all. Role alone is not enough for
+        the CEO — `admin_access` is the documented escape hatch."""
+        return bool(
+            self.is_superuser or self.role == Role.ADMIN or self.admin_access
+        )
 
     @property
     def is_online(self) -> bool:

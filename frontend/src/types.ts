@@ -172,13 +172,15 @@ export interface Me {
   job_title_fa: string;
   initials: string;
   avatar_color: string;
-  role: "executive" | "manager" | "operator" | "viewer";
+  role: "admin" | "executive" | "manager" | "operator" | "viewer";
   department: Department;
   is_superuser: boolean;
   can_enter_data: boolean;
   can_approve: boolean;
   /** Two-step login is on **and** a phone number is on file. */
   two_factor_enabled: boolean;
+  /** Set by the server: may this account open the Admin Panel? */
+  is_admin_panel_user?: boolean;
 }
 
 /** The one-time-code screen: what the server tells the client to show. */
