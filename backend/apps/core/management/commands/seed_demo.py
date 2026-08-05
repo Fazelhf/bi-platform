@@ -26,6 +26,7 @@ import random
 from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -158,18 +159,28 @@ class Command(BaseCommand):
             return
 
         with transaction.atomic():
+            people = self.seed_users()
             accounts = self.seed_accounts(opts["accounts"])
             lines = self.seed_credit_lines(months)
             moves = self.seed_cash(rnd, months, accounts, lines)
             sup, mat = self.seed_catalogue(rnd)
             reqs, quotes, orders = self.seed_purchasing(rnd, months, sup, mat)
 
+        from apps.accounts.management.commands.seed_users import PASSWORD
+
         first, last = months[0], months[-1]
+        who = "\n".join(
+            f"    {u.username:12} / {PASSWORD}   ({u.job_title_fa})"
+            for u, _ in people
+        )
         self.stdout.write(self.style.SUCCESS(
-            f"\nداده‌ی نمایشی ساخته شد — {first.label} تا {last.label}\n"
-            f"  مالی    : {len(accounts)} حساب، {len(lines)} تسهیلات/جاری، {moves} تراکنش نقدی\n"
+            f"\nداده‌ی نمایشی ساخته شد — {first.label} تا {last.label}"
+            f"  ({len(months)} ماه)\n"
+            f"  مالی    : {len(accounts)} حساب، {len(lines)} تسهیلات/جاری، "
+            f"{moves} تراکنش نقدی (~{moves // max(len(months), 1)} در ماه)\n"
             f"  بازرگانی: {len(sup)} تأمین‌کننده، {len(mat)} کالا، "
             f"{reqs} درخواست، {quotes} استعلام، {orders} سفارش خرید\n"
+            f"\n  ورود به دو بخش:\n{who}\n"
             f"\nبرای حذف: python manage.py seed_demo --clear"
         ))
 
@@ -210,6 +221,46 @@ class Command(BaseCommand):
             except Exception:
                 days.append(w)
         return days or [month]
+
+    # -- people ----------------------------------------------------------
+    def seed_users(self) -> list:
+        """Someone to sign in as for each of the two sections.
+
+        Both sections are department-scoped: what the sidebar offers and what
+        the API allows follow `department`, so demoing مالی as the CEO shows
+        the read-only dashboards and never the entry sheet. These two accounts
+        exist to show the sections as the people who actually work in them see
+        them.
+
+        Password matches accounts/seed_users.py rather than inventing a second
+        convention. It is a demo credential for a demo database — a real
+        deployment changes it, which is what that command's own docstring says.
+        """
+        from apps.accounts.management.commands.seed_users import PASSWORD
+
+        User = get_user_model()
+        wanted = [
+            ("finance", "مدیر مالی — دمو", "مدیر مالی", "finance"),
+            ("commercial", "مدیر بازرگانی — دمو", "مدیر بازرگانی داخلی", "commercial"),
+        ]
+        out = []
+        for username, display, title, dept in wanted:
+            user, created = User.objects.get_or_create(
+                username=username,
+                defaults={"display_name_fa": display, "job_title_fa": title},
+            )
+            user.display_name_fa = display
+            user.job_title_fa = title
+            user.department = dept
+            # manager, not operator: it is the role that both enters the
+            # section's figures and sees its dashboards.
+            user.role = "manager"
+            user.is_active = True
+            if created or not user.has_usable_password():
+                user.set_password(PASSWORD)
+            user.save()
+            out.append((user, created))
+        return out
 
     # -- finance ---------------------------------------------------------
     def seed_accounts(self, how_many: int) -> list[BankAccount]:
@@ -263,18 +314,25 @@ class Command(BaseCommand):
             return 0
 
         # (category code, direction, how many a month, rial low, rial high)
+        #
+        # A busy month, on purpose. The cash pages are a ledger: a handful of
+        # rows a month reads like a system nobody uses, and neither the daily
+        # curve nor the per-account split says anything until there is real
+        # traffic behind it. Roughly 110 movements a month, weighted the way a
+        # factory's actually are — many sales receipts and supplier payments,
+        # a steady drip of petty cash, and the occasional facility drawdown.
         plan = [
-            ("sales", "in", 14, 800_000_000, 9_000_000_000),
-            ("debt-returned", "in", 3, 400_000_000, 5_000_000_000),
-            ("unclassified", "in", 2, 100_000_000, 900_000_000),
-            ("facility", "in", 1, 5_000_000_000, 20_000_000_000),
-            ("partner-account", "in", 2, 500_000_000, 4_000_000_000),
-            ("supplier", "out", 12, 600_000_000, 8_000_000_000),
-            ("payroll", "out", 4, 300_000_000, 2_500_000_000),
-            ("petty-cash", "out", 6, 40_000_000, 500_000_000),
-            ("facility", "out", 2, 800_000_000, 3_500_000_000),
-            ("lending", "out", 1, 200_000_000, 1_500_000_000),
-            ("partner-account", "out", 2, 500_000_000, 5_000_000_000),
+            ("sales", "in", 30, 400_000_000, 9_000_000_000),
+            ("debt-returned", "in", 6, 300_000_000, 5_000_000_000),
+            ("unclassified", "in", 5, 80_000_000, 900_000_000),
+            ("facility", "in", 2, 5_000_000_000, 20_000_000_000),
+            ("partner-account", "in", 4, 400_000_000, 4_000_000_000),
+            ("supplier", "out", 26, 300_000_000, 8_000_000_000),
+            ("payroll", "out", 8, 200_000_000, 2_500_000_000),
+            ("petty-cash", "out", 14, 20_000_000, 500_000_000),
+            ("facility", "out", 4, 600_000_000, 3_500_000_000),
+            ("lending", "out", 3, 150_000_000, 1_500_000_000),
+            ("partner-account", "out", 4, 400_000_000, 5_000_000_000),
         ]
         by_kind = {k: [ln for ln in lines if ln.kind == k] for k in ("facility", "lending", "partner")}
         rows = []
