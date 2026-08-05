@@ -100,7 +100,15 @@ export function defaultPeriodId(periods: Period[]): number | null {
   return pick.id;
 }
 
-export type Department = "" | "production" | "sales_org" | "sales_team";
+/** Mirrors `accounts.Department` on the server. Keep the two in step. */
+export type Department =
+  | ""
+  | "production"
+  | "sales_org"
+  | "sales_team"
+  | "sales_b2b"
+  | "finance"
+  | "commercial";
 
 export interface AppNotification {
   id: number;
@@ -181,6 +189,14 @@ export interface Me {
   two_factor_enabled: boolean;
   /** Set by the server: may this account open the Admin Panel? */
   is_admin_panel_user?: boolean;
+  /**
+   * Install-wide display unit. Served on `me` rather than read from the
+   * finance settings endpoint, which only the finance department may call —
+   * every other section used to render its money with the default divisor.
+   */
+  unit?: "rial" | "toman";
+  unit_label?: string;
+  unit_divisor?: number;
 }
 
 /** The one-time-code screen: what the server tells the client to show. */

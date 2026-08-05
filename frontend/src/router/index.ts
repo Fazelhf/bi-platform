@@ -14,6 +14,8 @@ export function homeRouteFor(department: string): string {
       return "sales-b2b-entry";
     case "finance":
       return "finance-cash-entry";
+    case "commercial":
+      return "commercial-dashboard";
     default:
       return "overview"; // CEO / admin
   }
@@ -189,6 +191,62 @@ const router = createRouter({
           meta: { finance: true },
         },
 
+        // --- بازرگانی داخلی: buying the factory's consumables ---
+        {
+          path: "commercial",
+          name: "commercial-dashboard",
+          component: () => import("@/views/commercial/CommercialDashboardView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/materials",
+          name: "commercial-materials",
+          component: () => import("@/views/commercial/MaterialsView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/materials/:id",
+          name: "commercial-material",
+          component: () => import("@/views/commercial/MaterialDetailView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/suppliers",
+          name: "commercial-suppliers",
+          component: () => import("@/views/commercial/SuppliersView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/suppliers/:id",
+          name: "commercial-supplier",
+          component: () => import("@/views/commercial/SupplierDetailView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/requests",
+          name: "commercial-requests",
+          component: () => import("@/views/commercial/RequestsView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/requests/:id",
+          name: "commercial-request",
+          component: () => import("@/views/commercial/RequestDetailView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/orders",
+          name: "commercial-orders",
+          component: () => import("@/views/commercial/OrdersView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          path: "commercial/reports",
+          name: "commercial-reports",
+          component: () => import("@/views/commercial/CommercialReportsView.vue"),
+          meta: { commercial: true },
+        },
+
         // --- منابع انسانی: each department's own roster ---
         {
           path: "roster",
@@ -294,6 +352,13 @@ router.beforeEach(async (to) => {
     const canFinance =
       auth.isExecutive || !!auth.me?.is_superuser || auth.department === "finance";
     if (!canFinance) return { name: homeRouteFor(auth.department) };
+  }
+  // بازرگانی: what the company pays its suppliers is commercially sensitive,
+  // so the same rule as finance — that department, the CEO and admins only.
+  if (to.meta.commercial) {
+    const canCommercial =
+      auth.isExecutive || !!auth.me?.is_superuser || auth.department === "commercial";
+    if (!canCommercial) return { name: homeRouteFor(auth.department) };
   }
   // Roster: department managers (their own section) and the CEO.
   if (to.meta.roster) {
