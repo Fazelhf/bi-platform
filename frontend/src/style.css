@@ -198,17 +198,46 @@ html[data-skin="glass"].dark {
    Form controls are excluded deliberately: a text field is where contrast
    matters most, and a translucent one over a moving gradient is exactly the
    4.5:1 failure the glass style is notorious for. They keep --c-surface,
-   which is why that token stays a solid colour in both modes above. */
-html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select) {
-  background-color: rgb(var(--c-glass-tint) / var(--surface-alpha));
+   which is why that token stays a solid colour in both modes above.
+   --------------------------------------------------------------------
+   The blur sits on a pseudo-element, NOT on the card. `backdrop-filter`
+   makes its element the containing block for every `position: fixed`
+   descendant, and this app renders modals, drawers and dialogs inside the
+   cards they belong to — so putting the filter on .bg-surface pinned each
+   of those overlays to a card's box instead of the viewport, and the
+   dialog rendered as a sliver somewhere inside the card. A pseudo-element
+   blurs the same backdrop but has no element descendants to capture. */
+html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select),
+html[data-skin="glass"] .bg-panel {
+  background-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select)::before,
+html[data-skin="glass"] .bg-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1; /* behind the card's content, in front of the page */
+  border-radius: inherit;
   backdrop-filter: blur(var(--surface-blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(180%);
+  pointer-events: none;
+}
+html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select)::before {
+  background-color: rgb(var(--c-glass-tint) / var(--surface-alpha));
 }
 /* Hero cards and sticky bars are glass too — just a darker pane. */
-html[data-skin="glass"] .bg-panel {
+html[data-skin="glass"] .bg-panel::before {
   background-color: rgb(var(--c-panel) / 0.82);
-  backdrop-filter: blur(var(--surface-blur)) saturate(150%);
-  -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(150%);
+}
+/* An absolutely-positioned pseudo needs a positioned parent, but only the
+   cards Tailwind left static: anything already carrying a position utility
+   (including responsive ones like `md:sticky`) is its own anchor already,
+   and forcing `relative` on the sidebar would unpin it. */
+html[data-skin="glass"] .bg-surface:not([class*="fixed"]):not([class*="absolute"]):not([class*="sticky"]):not([class*="relative"]),
+html[data-skin="glass"] .bg-panel:not([class*="fixed"]):not([class*="absolute"]):not([class*="sticky"]):not([class*="relative"]) {
+  position: relative;
 }
 
 /* The light source. Fixed so panels refract a still image while scrolling. */
@@ -383,12 +412,15 @@ body,
     transform var(--motion-dur) var(--motion-ease);
 }
 
-/* Pointer feedback is part of the skin: کلاسیک stays put (--motion-hover is
-   `none`), شیشه‌ای lifts, شفق lifts and swells a little. Only on devices that
-   actually have a pointer — on touch this would fire on every tap. */
+/* Pointer feedback is part of the skin, but it is elevation only — no
+   transform. A transform makes its element the containing block for every
+   `position: fixed` descendant, exactly like backdrop-filter, so lifting a
+   card on hover would have re-broken any dialog living inside it the moment
+   the pointer crossed the card. Elevation says the same thing and stays
+   per-skin: --shadow-pop is a drop shadow in کلاسیک, a lit edge in شیشه‌ای
+   and a violet glow in شفق. */
 @media (hover: hover) {
   .rounded-card.bg-surface:hover {
-    transform: var(--motion-hover);
     box-shadow: var(--shadow-pop);
   }
 }
@@ -428,6 +460,29 @@ body,
     transparent
   );
 }
+/* `background-attachment: fixed` is what makes the glass refract a still
+   image and the aurora sit behind the page rather than scroll with it. It is
+   also badly behaved on mobile — iOS Safari in particular repaints the whole
+   backdrop on every scroll frame, which on a long entry sheet reads as the
+   page freezing. Phones get the same gradient, scrolling with the content. */
+@media (max-width: 767px), (hover: none) {
+  html[data-skin="glass"] body,
+  html[data-skin="aurora"] body {
+    background-attachment: scroll;
+  }
+  /* Blur is per-frame GPU work on every card at once; on a phone that is the
+     difference between a list that scrolls and one that stutters. The tint
+     and the lit edge carry the look on their own. */
+  html[data-skin="glass"] .bg-surface::before,
+  html[data-skin="glass"] .bg-panel::before {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select)::before {
+    background-color: rgb(var(--c-glass-tint) / 0.82);
+  }
+}
+
 /* A skin may not override someone's accessibility setting: whichever one is
    active, motion collapses to a plain fade when the OS asks for it. */
 @media (prefers-reduced-motion: reduce) {
