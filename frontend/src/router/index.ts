@@ -315,6 +315,23 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: "login" };
+
+  // Every check below reads `auth.me` — role, department, approver, panel
+  // access. `me` is fetched at login and then cached, so a session that
+  // arrives without it (a cleared cache, a deep link, a second device) ran
+  // every one of those checks against null: department came back "", which
+  // sends the user to `overview`, which is executive-only, which sends them
+  // to `overview` again. The router aborted the loop and rendered nothing.
+  if (auth.isAuthenticated && !auth.me) {
+    try {
+      await auth.fetchMe();
+    } catch {
+      // The token is no longer good for anything — sign out rather than
+      // loop, and let the login screen say so.
+      auth.logout();
+      return { name: "login" };
+    }
+  }
   const signedOutOnly = ["login", "login-otp", "forgot-password"];
   if (signedOutOnly.includes(String(to.name)) && auth.isAuthenticated) {
     return { name: homeRouteFor(auth.department) };
