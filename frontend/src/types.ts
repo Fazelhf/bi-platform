@@ -160,6 +160,9 @@ export interface UserRow {
   is_active: boolean;
   is_superuser: boolean;
   last_login: string | null;
+  phone: string;
+  /** Admins may untick this (lost phone); only the user can tick it. */
+  two_factor_enabled: boolean;
 }
 
 export interface Me {
@@ -174,6 +177,27 @@ export interface Me {
   is_superuser: boolean;
   can_enter_data: boolean;
   can_approve: boolean;
+  /** Two-step login is on **and** a phone number is on file. */
+  two_factor_enabled: boolean;
+}
+
+/** The one-time-code screen: what the server tells the client to show. */
+export interface OtpChallenge {
+  otp_required: true;
+  challenge: string;
+  phone_masked: string;
+  expires_in: number;
+  resend_in: number;
+  sends_left: number;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  phone: string;
+  phone_masked: string;
+  /** False when the server has no SMS credentials — enrolling would fail. */
+  sms_configured: boolean;
+  enabled_at: string | null;
 }
 
 export interface KpiResult {
