@@ -166,6 +166,15 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 100,
+    # Only the unauthenticated auth endpoints are throttled. The per-challenge
+    # counters in apps.accounts.otp are the real limit (they survive multiple
+    # workers); this is the cheap outer wall that stops a password/OTP flood
+    # from reaching the database at all.
+    "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
+    "DEFAULT_THROTTLE_RATES": {
+        "login": env("THROTTLE_LOGIN", default="20/min"),
+        "otp": env("THROTTLE_OTP", default="20/min"),
+    },
 }
 
 SIMPLE_JWT = {
@@ -183,6 +192,44 @@ SPECTACULAR_SETTINGS = {
 }
 
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
+
+# --- SMS gateway: ملی‌پیامک (Melipayamak) ---------------------------------
+# SMS_PASSWORD holds the panel's **ApiKey**, not the account password: the
+# panel can be set to require it, and it can be rotated without touching the
+# login you use to top the account up. Both belong in backend/.env, which is
+# gitignored — never in this file.
+#
+# If the panel has an IP allow-list configured, the server's outbound address
+# must be on it, or every send comes back as -111/-109.
+SMS_USERNAME = env("SMS_USERNAME", default="")
+SMS_PASSWORD = env("SMS_PASSWORD", default="")
+# Which of the panel's two send methods this account may use:
+#   "otp"    → SendOtp; needs SMS_FROM, the account's own sender line.
+#   "shared" → BaseServiceNumber (خط خدماتی اشتراکی); no sender number, but
+#              needs SMS_BODY_ID — the id of a message template registered in
+#              the panel and approved by its administrators. The code is sent
+#              as the template's variable, so the wording lives in the panel.
+SMS_MODE = env("SMS_MODE", default="otp")
+SMS_FROM = env("SMS_FROM", default="")
+SMS_BODY_ID = env("SMS_BODY_ID", default="")
+SMS_BASE_URL = env("SMS_BASE_URL", default="https://rest.payamak-panel.com/api/SendSMS")
+SMS_TIMEOUT = env.int("SMS_TIMEOUT", default=10)
+
+# --- Two-step login (OTP over SMS) ---
+OTP_TTL_SECONDS = env.int("OTP_TTL_SECONDS", default=180)
+OTP_MAX_ATTEMPTS = env.int("OTP_MAX_ATTEMPTS", default=5)
+OTP_MAX_SENDS = env.int("OTP_MAX_SENDS", default=3)
+OTP_RESEND_COOLDOWN = env.int("OTP_RESEND_COOLDOWN", default=60)
+# With no gateway credentials, DEBUG logs the code to the console so the
+# two-step flow can be exercised offline. Production refuses instead — an
+# undelivered code must be an error, not a login that quietly proceeds.
+OTP_ECHO_IN_DEBUG = env.bool("OTP_ECHO_IN_DEBUG", default=True)
+
+# Sign in with an SMS code and no password at all («ورود با کد پیامکی»).
+# Convenient, and a real trade: it makes the phone a full credential rather
+# than a second one. Accounts that switched two-step login on are refused it
+# regardless — see apps.accounts.recovery. Set to False to remove the option.
+OTP_LOGIN_ENABLED = env.bool("OTP_LOGIN_ENABLED", default=True)
 
 # Recorded once at import so the admin monitoring page can report uptime.
 # Stdlib only: django.utils.timezone reads settings, which are still loading.

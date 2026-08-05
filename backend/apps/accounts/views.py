@@ -97,6 +97,7 @@ class MeView(APIView):
             "is_superuser": u.is_superuser,
             "can_enter_data": u.can_enter_data,
             "can_approve": u.can_approve,
+            "two_factor_enabled": u.two_factor_active,
             # Drives the "پنل مدیریت" entry in the sidebar.
             "is_admin_panel_user": u.is_admin_panel_user,
         }

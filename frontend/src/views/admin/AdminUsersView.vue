@@ -31,6 +31,11 @@ const columns: CrudColumn[] = [
     ],
   },
   { key: "is_active", label: "فعال", type: "boolean" },
+  { key: "phone", label: "موبایل", type: "text" },
+  // Only ever unticked here: enabling belongs to the user, who proves the
+  // number is theirs by entering a code sent to it. The API refuses a tick
+  // with that explanation, so this column is the "lost the phone" switch.
+  { key: "two_factor_enabled", label: "ورود دو مرحله‌ای", type: "boolean" },
   { key: "password", label: "رمز عبور (برای تغییر، خالی نگذارید)", type: "password", showInTable: false },
 ];
 
@@ -72,6 +77,11 @@ onMounted(load);
     <p class="text-xs text-slate-400">
       نقش «مدیرعامل» همه داشبوردها را می‌بیند و تاییدکننده نهایی است ولی داده وارد
       نمی‌کند؛ «مدیر بخش» فقط بخش خودش را ورود و ارسال می‌کند.
+    </p>
+    <p class="text-xs text-slate-400">
+      «ورود دو مرحله‌ای» را فقط می‌توانید <b>غیرفعال</b> کنید (برای کاربری که گوشی‌اش
+      را از دست داده). فعال‌سازی را خودِ کاربر از صفحهٔ «امنیت حساب» انجام می‌دهد تا
+      شمارهٔ موبایلش تأیید شود.
     </p>
   </div>
 </template>

@@ -23,6 +23,18 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/login", name: "login", component: () => import("@/views/LoginView.vue") },
+    // Two ways in that don't need the password — both end in a signed-in
+    // session, so the guard below treats them exactly like /login.
+    {
+      path: "/login-otp",
+      name: "login-otp",
+      component: () => import("@/views/OtpLoginView.vue"),
+    },
+    {
+      path: "/forgot-password",
+      name: "forgot-password",
+      component: () => import("@/views/ForgotPasswordView.vue"),
+    },
     {
       path: "/",
       component: () => import("@/components/AppShell.vue"),
@@ -198,6 +210,8 @@ const router = createRouter({
         { path: "notes", name: "notes", component: () => import("@/views/NotesView.vue") },
         { path: "team", name: "team", component: () => import("@/views/TeamView.vue") },
         { path: "profile", name: "profile-me", component: () => import("@/views/ProfileView.vue") },
+        // Everyone's own account security (two-step login) — not the admin panel.
+        { path: "security", name: "security", component: () => import("@/views/SecurityView.vue") },
         { path: "profile/:id", name: "profile", component: () => import("@/views/ProfileView.vue") },
 
         // --- Site settings (appearance + KPI formulas) — CEO's own controls.
@@ -243,7 +257,8 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: "login" };
-  if (to.name === "login" && auth.isAuthenticated) {
+  const signedOutOnly = ["login", "login-otp", "forgot-password"];
+  if (signedOutOnly.includes(String(to.name)) && auth.isAuthenticated) {
     return { name: homeRouteFor(auth.department) };
   }
   // Entry pages are department-scoped; keep others out.

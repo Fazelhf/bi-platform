@@ -6,15 +6,21 @@ import { onBeforeUnmount, onMounted, type Ref } from "vue";
  * Listens on the capture phase so it still fires when an inner handler stops
  * propagation, and checks `composedPath()` rather than `event.target` so a
  * click that lands on a child element still counts as "inside".
+ *
+ * `also` covers panels that are teleported out of the trigger's subtree: a
+ * click inside them is still "inside" even though the DOM says otherwise.
  */
 export function useClickOutside(
   root: Ref<HTMLElement | null>,
   onOutside: () => void,
+  also?: Ref<HTMLElement | null>,
 ) {
   function handlePointer(e: MouseEvent | TouchEvent) {
     const el = root.value;
     if (!el) return;
-    if (e.composedPath().includes(el)) return;
+    const path = e.composedPath();
+    if (path.includes(el)) return;
+    if (also?.value && path.includes(also.value)) return;
     onOutside();
   }
 

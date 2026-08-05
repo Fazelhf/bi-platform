@@ -8,14 +8,19 @@ from drf_spectacular.views import (
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from apps.adminpanel.auth import PanelTokenObtainPairView
+from apps.accounts.twofactor import LoginView
 from apps.adminpanel.views import LiveAnnouncementView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     # --- Auth (JWT) ---
-    # The panel's token view applies IP rules, lockout and login auditing.
-    path("api/auth/token/", PanelTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    # Same URL and same response as SimpleJWT's own view for accounts without
+    # two-step login; accounts that have it get an OTP challenge here instead
+    # of tokens, and finish at /api/auth/2fa/verify/. It also applies the
+    # panel's IP rules, lockout and login auditing — see LoginView, which
+    # absorbed PanelTokenObtainPairSerializer's policy when both branches
+    # arrived claiming this URL.
+    path("api/auth/token/", LoginView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/", include("apps.accounts.urls")),
     # --- Domain APIs ---
