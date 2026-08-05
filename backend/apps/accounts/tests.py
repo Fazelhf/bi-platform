@@ -131,6 +131,12 @@ class SmsGatewayTests(APITestCase):
         sent = self.send('<string xmlns="http://tempuri.org/">9876543210123456</string>')
         self.assertEqual(sent["result"], "9876543210123456")
 
+    def test_a_short_undocumented_reply_is_not_taken_for_success(self):
+        # The panel answers a bare "100" to SendOtp with no sender line. It is
+        # in no error table, but it is not a recId either.
+        with self.assertRaises(SmsError):
+            self.send('<string xmlns="http://tempuri.org/">100</string>')
+
     @override_settings(SMS_MODE="shared", SMS_BODY_ID="")
     def test_shared_mode_without_a_template_id_is_not_configured(self):
         self.assertFalse(is_configured())

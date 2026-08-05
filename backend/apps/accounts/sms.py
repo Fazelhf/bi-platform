@@ -239,8 +239,15 @@ def _read_result(payload: str, errors: dict) -> str:
         raise SmsError(_message_for(value or str(ret_status), errors), value)
     if value in errors:
         raise SmsError(errors[value], value)
-    if not value:
-        raise SmsError("پاسخ نامعتبر از سرویس پیامک.")
+
+    # A send that worked answers with a recId — a long number (the shared-line
+    # docs say more than 15 digits). Requiring that, rather than treating
+    # "anything not in the error table" as success, matters because the panel
+    # has undocumented replies: SendOtp with a missing sender line answers a
+    # bare "100", which would otherwise be recorded as a delivered code and
+    # leave the user waiting for an SMS that was never sent.
+    if not value.isdigit() or len(value) < 10:
+        raise SmsError(_message_for(value, errors), value)
     return value
 
 

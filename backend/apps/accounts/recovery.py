@@ -34,6 +34,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core import signing
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
+from django.utils import translation
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
@@ -161,7 +162,12 @@ class PasswordResetConfirmView(PublicAuthView):
         user = read_permit(request.data.get("reset_token"))
         password = request.data.get("password") or ""
         try:
-            validate_password(password, user)
+            # Django's own validators carry the only English strings a user of
+            # this platform would ever see. LANGUAGE_CODE stays en-us (it is
+            # the code locale, and the admin reads better in it), so the
+            # locale is switched just for the length of this check.
+            with translation.override("fa"):
+                validate_password(password, user)
         except DjangoValidationError as exc:
             raise ValidationError({"password": list(exc.messages)}) from exc
 
