@@ -16,11 +16,25 @@ export function isDark(): boolean {
   return document.documentElement.classList.contains("dark");
 }
 
+/**
+ * Reads a design token off <html>. ECharts draws to canvas, so it cannot use
+ * CSS variables directly — every axis, tooltip and label colour has to be
+ * resolved to a literal at option-build time. Going through the tokens (and
+ * not a hardcoded light/dark pair) is what lets charts follow all three skins
+ * instead of only کلاسیک.
+ */
+function token(name: string, fallback: string): string {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(`--${name}`)
+    .trim();
+  return raw ? `rgb(${raw.replace(/\s+/g, ",")})` : fallback;
+}
+
 /** Back-compat colour accessor used by chart components. */
 export const COLORS = new Proxy({} as Record<string, string>, {
   get(_t, key: string) {
     const p = activePalette();
-    if (key === "ink") return isDark() ? "#ececee" : "#1c1c1e";
+    if (key === "ink") return token("c-ink", isDark() ? "#ececee" : "#1c1c1e");
     return (p as any)[key] ?? "#3b6fed";
   },
 });
@@ -46,9 +60,10 @@ export function seriesColor(i: number): string {
 }
 
 /**
- * Bumped whenever the light/dark theme flips. AXIS and TOOLTIP read it inside
- * getters, so any computed chart option that spreads them registers a
- * dependency and rebuilds itself on toggle — no page reload needed.
+ * Bumped whenever the light/dark mode flips or the skin changes. AXIS and
+ * TOOLTIP read it inside getters, so any computed chart option that spreads
+ * them registers a dependency and rebuilds itself on toggle — no page reload
+ * needed.
  */
 const themeTick = ref(0);
 export function bumpChartTheme() {
@@ -59,19 +74,22 @@ export function bumpChartTheme() {
  *  hardcoded white (which turns into glaring outlines in dark mode). */
 export function surfaceColor(): string {
   themeTick.value;
-  return isDark() ? "#1e1e22" : "#ffffff";
+  // Not --c-surface: شیشه‌ای paints white at 9% over a dark page, so the
+  // literal token would hand ECharts white. --c-chart-surface is the colour
+  // the card actually resolves to on screen.
+  return token("c-chart-surface", isDark() ? "#1e1e22" : "#ffffff");
 }
 
 /** Legend / secondary chart text. */
 export function mutedColor(): string {
   themeTick.value;
-  return isDark() ? "#a3a3ad" : "#64748b";
+  return token("c-slate-500", isDark() ? "#a3a3ad" : "#64748b");
 }
 
 /** Data labels drawn outside the chart body. */
 export function labelColor(): string {
   themeTick.value;
-  return isDark() ? "#d6d6dd" : "#334155";
+  return token("c-slate-700", isDark() ? "#d6d6dd" : "#334155");
 }
 
 export const AXIS = {
@@ -81,7 +99,7 @@ export const AXIS = {
       type: "category" as const,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: isDark() ? "#a3a3ad" : "#64748b", fontSize: 11 },
+      axisLabel: { color: mutedColor(), fontSize: 11 },
     };
   },
   get value() {
@@ -91,9 +109,15 @@ export const AXIS = {
       type: "value" as const,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: dark ? "#8d8d97" : "#94a3b8", fontSize: 10 },
+      axisLabel: {
+        color: token("c-slate-400", dark ? "#8d8d97" : "#94a3b8"),
+        fontSize: 10,
+      },
       splitLine: {
-        lineStyle: { color: dark ? "#33333a" : "#eef0f2", type: "dashed" as const },
+        lineStyle: {
+          color: token("c-slate-200", dark ? "#33333a" : "#eef0f2"),
+          type: "dashed" as const,
+        },
       },
     };
   },
@@ -103,7 +127,9 @@ export const AXIS = {
 export const TOOLTIP = {
   get backgroundColor() {
     themeTick.value;
-    return isDark() ? "#3b3b44" : "#1c1c1e";
+    // --c-panel is the always-dark surface token, which every skin defines as
+    // its own "floating dark chip" colour — exactly what a tooltip is.
+    return token("c-panel", isDark() ? "#3b3b44" : "#1c1c1e");
   },
   borderWidth: 0,
   get textStyle() {

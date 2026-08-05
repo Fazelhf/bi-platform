@@ -3,6 +3,7 @@ import { store } from "@/lib/storage";
 import api from "@/api/client";
 import { paletteByKey, type Palette } from "@/components/charts/palettes";
 import { bumpChartTheme } from "@/components/charts/theme";
+import { DEFAULT_SKIN, isSkinKey, type SkinKey } from "@/lib/skins";
 
 /**
  * Site-wide UI preferences. The chart theme is chosen by the CEO in
@@ -20,10 +21,24 @@ function applyDark(on: boolean) {
   document.documentElement.classList.toggle("dark", on);
 }
 
+/** The skin is a personal choice, so it follows dark mode's rules: stored
+ *  per device in localStorage, never on the server, never inherited from a
+ *  colleague. An unknown or missing value falls back to کلاسیک, which is
+ *  what the app looked like before skins existed. */
+function initialSkin(): SkinKey {
+  const saved = store.get("skin");
+  return isSkinKey(saved) ? saved : DEFAULT_SKIN;
+}
+
+function applySkin(key: SkinKey) {
+  document.documentElement.dataset.skin = key;
+}
+
 export const useUiStore = defineStore("ui", {
   state: () => ({
     chartTheme: (store.get("chartTheme") || "modern") as string,
     dark: initialDark(),
+    skin: initialSkin(),
     companyName: "شرکت کاغذ حساس نمابر مهر",
     loaded: false,
   }),
@@ -33,15 +48,30 @@ export const useUiStore = defineStore("ui", {
     },
   },
   actions: {
-    /** Called once at startup so the class matches the stored preference. */
-    initDark() {
+    /** Called once at startup so the class and attribute match the stored
+     *  preferences. Both run before mount — the page must never flash the
+     *  wrong skin or the wrong mode. */
+    initAppearance() {
       applyDark(this.dark);
+      applySkin(this.skin);
     },
     toggleDark() {
       this.dark = !this.dark;
       store.set("darkMode", this.dark ? "1" : "0");
       applyDark(this.dark);
       bumpChartTheme(); // charts re-read their axis/tooltip colours
+    },
+    setDark(on: boolean) {
+      if (on !== this.dark) this.toggleDark();
+    },
+    setSkin(key: SkinKey) {
+      this.skin = key;
+      store.set("skin", key);
+      applySkin(key);
+      // Charts read --c-chart-surface and the slate ramp, both of which the
+      // skin rewrites, so they have to rebuild the same way they do on a
+      // light/dark flip.
+      bumpChartTheme();
     },
     async fetch() {
       try {

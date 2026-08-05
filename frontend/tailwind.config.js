@@ -58,12 +58,16 @@ export default {
           600: "#059669",
         },
       },
+      // Shape and depth are variables too, because that is what separates the
+      // three skins more than colour does: کلاسیک leans on soft drop shadows,
+      // شیشه‌ای on a lit top edge over blur, and متریال on a hairline outline
+      // with almost no shadow at all.
       borderRadius: {
-        card: "1.5rem", // 24px — the mockup's card radius
+        card: "var(--r-card)", // 24px in کلاسیک — the mockup's card radius
       },
       boxShadow: {
-        soft: "0 6px 24px -8px rgba(20,20,25,0.10)",
-        pop: "0 12px 40px -8px rgba(20,20,25,0.28)",
+        soft: "var(--shadow-soft)",
+        pop: "var(--shadow-pop)",
       },
     },
   },

@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { useUiStore } from "@/stores/ui";
 import { usePresence } from "@/composables/usePresence";
 import { useClickOutside } from "@/composables/useClickOutside";
 import { socialApi } from "@/api/social";
@@ -10,11 +9,11 @@ import { inboxApi } from "@/api/platform";
 import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import ThemePicker from "@/components/ThemePicker.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
 import { useCrmStore } from "@/stores/crm";
 
 const auth = useAuthStore();
-const ui = useUiStore();
 const route = useRoute();
 const router = useRouter();
 
@@ -331,27 +330,9 @@ onMounted(() => {
             <NavIcon name="search" :size="16" />
             <input v-model="search" placeholder="جستجو" class="bg-transparent outline-none w-32 text-ink" />
           </div>
-          <button
-            class="p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-ink transition-colors no-print"
-            :title="ui.dark ? 'حالت روشن' : 'حالت شب'"
-            :aria-label="ui.dark ? 'حالت روشن' : 'حالت شب'"
-            @click="ui.toggleDark()"
-          >
-            <!-- sun when dark (click → go light), moon when light -->
-            <svg
-              v-if="ui.dark" class="w-5 h-5" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-            </svg>
-            <svg
-              v-else class="w-5 h-5" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-            </svg>
-          </button>
+          <!-- One control for the whole look: skin + light/dark live together
+               inside the palette, so there is no second sun/moon button. -->
+          <ThemePicker />
           <NotificationBell />
           <div ref="userMenuRoot" class="relative">
             <button class="flex items-center gap-2" @click="userMenu = !userMenu">
