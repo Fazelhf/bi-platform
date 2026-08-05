@@ -31,6 +31,10 @@ class Department(models.TextChoices):
     SALES_TEAM = "sales_team", "فروش همکار"
     SALES_B2B = "sales_b2b", "فروش B2B"
     FINANCE = "finance", "مالی"
+    # One department, both halves. بازرگانی خارجی is not built yet, but it
+    # belongs to the same manager and the same section — a second choice would
+    # split one person's data across two departments for no gain.
+    COMMERCIAL = "commercial", "بازرگانی"
 
 
 class User(AbstractUser):
