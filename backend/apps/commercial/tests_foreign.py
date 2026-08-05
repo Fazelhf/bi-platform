@@ -47,7 +47,11 @@ def mk_user(username, role, department):
 
 class ForeignBase(APITestCase):
     def setUp(self):
-        self.manager = mk_user("sadaf", "manager", "commercial")
+        # بازرگانی خارجی is its own department. صدف runs the domestic half and
+        # is deliberately *not* the one who writes here — the import file
+        # carries supplier prices she has no reason to read.
+        self.manager = mk_user("foreign_mgr", "manager", "commercial_foreign")
+        self.domestic = mk_user("sadaf", "manager", "commercial")
         self.ceo = mk_user("ceo2", "executive", "")
         self.sales = mk_user("smgr", "manager", "sales_team")
 
@@ -295,7 +299,7 @@ class AlertTests(ForeignBase):
 
 
 class ForeignPermissionTests(ForeignBase):
-    def test_commercial_writes_ceo_reads_sales_gets_nothing(self):
+    def test_foreign_writes_ceo_reads_sales_gets_nothing(self):
         payload = {
             "pi_no": "TEST-1", "currency": "USD", "amount": "1000",
             "registered_on": "2026-08-01",
@@ -321,6 +325,24 @@ class ForeignPermissionTests(ForeignBase):
         )
         self.assertEqual(
             self.client.get("/api/commercial/foreign/queue/").status_code, 403
+        )
+
+    def test_the_domestic_buyer_cannot_see_the_import_files(self):
+        self.client.force_authenticate(self.domestic)
+        # What the company pays foreign mills, and what it still owes them, is
+        # not the domestic buyer's business — they were one department once,
+        # and this is the line that separates them now.
+        for path in (
+            "/api/commercial/foreign/dashboard/",
+            "/api/commercial/foreign/cards/",
+            "/api/commercial/foreign/orders/",
+            "/api/commercial/foreign/payments/",
+        ):
+            self.assertEqual(self.client.get(path).status_code, 403, path)
+
+        # Their own half still works.
+        self.assertEqual(
+            self.client.get("/api/commercial/dashboard/").status_code, 200
         )
 
 

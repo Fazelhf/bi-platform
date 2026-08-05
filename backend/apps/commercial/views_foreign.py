@@ -22,9 +22,9 @@ from apps.commercial.models import (
     ShipmentCost,
 )
 from apps.commercial.permissions import (
-    CommercialAccess,
-    assert_commercial_visible,
-    is_commercial,
+    ForeignAccess,
+    assert_foreign_visible,
+    is_foreign,
 )
 from apps.commercial.serializers_foreign import (
     BankSerializer,
@@ -39,10 +39,10 @@ from apps.commercial.services import (
     allocation_queue,
     demurrage,
     foreign_alerts,
+    foreign_cards,
     foreign_dashboard,
     fx,
     history,
-    overview,
     payments,
     stalled,
     workbench,
@@ -74,7 +74,7 @@ def _unique_code(model, source: str) -> str:
 class BankViewSet(viewsets.ModelViewSet):
     queryset = Bank.objects.all()
     serializer_class = BankSerializer
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["is_active"]
     search_fields = ["code", "name_fa", "note"]
@@ -98,7 +98,7 @@ class FxRateViewSet(viewsets.ModelViewSet):
 
     queryset = FxRate.objects.all()
     serializer_class = FxRateSerializer
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["currency", "kind", "on_date"]
     ordering_fields = ["on_date", "rate_rial"]
@@ -116,7 +116,7 @@ class FxRateViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def board(self, request):
         """The six-rate grid as of a date."""
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         on = _as_date(request.query_params.get("on")) or date.today()
         return Response({
             "on": on.isoformat(),
@@ -130,7 +130,7 @@ class FxRateViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def history(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         currency = request.query_params.get("currency") or Currency.USD
         kind = request.query_params.get("kind") or RateKind.CENTRE
         return Response({
@@ -142,14 +142,14 @@ class FxRateViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["post"])
     def sync(self, request):
         """Pull from the configured source now, rather than waiting for cron."""
-        if not is_commercial(request.user):
-            raise ValidationError({"detail": "فقط واحد بازرگانی می‌تواند اجرا کند."})
+        if not is_foreign(request.user):
+            raise ValidationError({"detail": "فقط واحد بازرگانی خارجی می‌تواند اجرا کند."})
         return Response(fx.sync(_as_date(request.data.get("on"))))
 
 
 class ForeignOrderViewSet(viewsets.ModelViewSet):
     queryset = ForeignOrder.objects.select_related("bank", "supplier", "owner")
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["status", "bank", "supplier", "currency", "country"]
     search_fields = [
@@ -199,8 +199,8 @@ class ForeignOrderViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="events")
     def add_event(self, request, pk=None):
         """Log an action — or a reason nothing is happening."""
-        if not is_commercial(request.user):
-            raise ValidationError({"detail": "فقط واحد بازرگانی می‌تواند ثبت کند."})
+        if not is_foreign(request.user):
+            raise ValidationError({"detail": "فقط واحد بازرگانی خارجی می‌تواند ثبت کند."})
         order = self.get_object()
         serializer = OrderEventSerializer(data={**request.data, "order": order.id})
         serializer.is_valid(raise_exception=True)
@@ -211,7 +211,7 @@ class ForeignOrderViewSet(viewsets.ModelViewSet):
 class ShipmentViewSet(viewsets.ModelViewSet):
     queryset = Shipment.objects.select_related("order").prefetch_related("costs")
     serializer_class = ShipmentSerializer
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["status", "order", "carrier"]
     search_fields = [
@@ -235,7 +235,7 @@ class ShipmentViewSet(viewsets.ModelViewSet):
 class ShipmentCostViewSet(viewsets.ModelViewSet):
     queryset = ShipmentCost.objects.select_related("shipment")
     serializer_class = ShipmentCostSerializer
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["shipment", "kind", "is_estimate"]
 
@@ -243,25 +243,25 @@ class ShipmentCostViewSet(viewsets.ModelViewSet):
 class ForeignDashboardView(APIView):
     """داشبورد بازرگانی خارجی."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(parameters=[OpenApiParameter("on", str)], responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
         data = foreign_dashboard.build(today)
-        data["can_edit"] = is_commercial(request.user)
+        data["can_edit"] = is_foreign(request.user)
         return Response(data)
 
 
 class AllocationQueueView(APIView):
     """صف تخصیص ارز، به تفکیک بانک."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
         return Response(allocation_queue.build(today))
 
@@ -269,11 +269,11 @@ class AllocationQueueView(APIView):
 class StalledOrdersView(APIView):
     """سفارش‌های راکد."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(parameters=[OpenApiParameter("min_days", int)], responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         raw = request.query_params.get("min_days")
         try:
             min_days = int(raw) if raw not in (None, "") else 0
@@ -286,11 +286,11 @@ class StalledOrdersView(APIView):
 class DemurrageView(APIView):
     """دموراژ و انبارداری، کانتینر به کانتینر."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(parameters=[OpenApiParameter("accruing", bool)], responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         only = str(request.query_params.get("accruing", "")).lower() in {"1", "true"}
         today = _as_date(request.query_params.get("on")) or date.today()
         return Response(demurrage.build(only_accruing=only, today=today))
@@ -299,11 +299,11 @@ class DemurrageView(APIView):
 class ForeignAlertsView(APIView):
     """هشدارها — فقط چیزهایی که امروز می‌شود برایشان کاری کرد."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
         return Response({"rows": foreign_alerts.build(today)})
 
@@ -311,28 +311,28 @@ class ForeignAlertsView(APIView):
 class WorkbenchView(APIView):
     """میز کار — files that need a person today, grouped by why."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
         data = workbench.build(today)
         # The rate strip lives here rather than on its own page: it is
         # reference material someone glances at, not a place they work.
         data["rates"] = fx.board(today)
-        data["can_edit"] = is_commercial(request.user)
+        data["can_edit"] = is_foreign(request.user)
         return Response(data)
 
 
 class PaymentsView(APIView):
     """پرداخت‌ها — outstanding to the seller, and the interest on lateness."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(parameters=[OpenApiParameter("outstanding", bool)], responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         only = str(request.query_params.get("outstanding", "")).lower() in {"1", "true"}
         today = _as_date(request.query_params.get("on")) or date.today()
         return Response(payments.build(today, outstanding_only=only))
@@ -341,11 +341,11 @@ class PaymentsView(APIView):
 class HistoryView(APIView):
     """تاریخچه — files finished in a Jalali year, and how long they took."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(parameters=[OpenApiParameter("year", int)], responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         raw = request.query_params.get("year")
         try:
             year = int(raw) if raw not in (None, "") else None
@@ -355,27 +355,28 @@ class HistoryView(APIView):
         return Response(history.build(year=year, today=today))
 
 
-class CommercialOverviewView(APIView):
+class ForeignCardsView(APIView):
     """
-    نمای کلی بازرگانی — both halves, for the CEO.
+    داشبورد بازرگانی خارجی — each figure with the rows behind it.
 
-    Readable by anyone who may see the section; there is nothing here that is
-    not already a total on one of the working pages.
+    The breakdown ships with the number rather than being fetched on click, so
+    a panel can never show a list that disagrees with the headline it opened
+    from.
     """
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(responses=dict)
     def get(self, request):
-        assert_commercial_visible(request.user)
+        assert_foreign_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
-        return Response(overview.build(today))
+        return Response(foreign_cards.build(today))
 
 
 class ForeignOptionsView(APIView):
     """Choice lists, so no form keeps its own copy of the model's."""
 
-    permission_classes = [CommercialAccess]
+    permission_classes = [ForeignAccess]
 
     @extend_schema(responses=dict)
     def get(self, request):

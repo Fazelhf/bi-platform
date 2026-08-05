@@ -17,8 +17,28 @@ from decimal import Decimal
 
 from apps.commercial.models import Currency, ForeignOrder, RateKind, Shipment
 from apps.commercial.models import FxRate
-from apps.commercial.services import allocation_queue, demurrage, foreign_alerts, stalled
+from apps.commercial.services import (
+    allocation_queue,
+    demurrage,
+    foreign_alerts,
+    history,
+    payments,
+    stalled,
+)
 from apps.commercial.services.base import ZERO, as_str
+
+#: The pipeline, in order, for the stage breakdown. Cancelled files are not a
+#: stage anyone is working toward, so they are left out of the funnel.
+PIPELINE = [
+    ForeignOrder.Status.AWAITING_PERMIT,
+    ForeignOrder.Status.REGISTERED,
+    ForeignOrder.Status.QUEUED,
+    ForeignOrder.Status.ALLOCATED,
+    ForeignOrder.Status.PURCHASED,
+    ForeignOrder.Status.SHIPPING,
+    ForeignOrder.Status.CUSTOMS,
+    ForeignOrder.Status.CLEARED,
+]
 
 
 def build(today: date | None = None) -> dict:
@@ -93,9 +113,41 @@ def build(today: date | None = None) -> dict:
         # The customs pile broken down the way the workbook does it: by brand
         # and tonnage, because that is how the warehouse talks about it.
         "customs_by_brand": _by_brand(at_customs),
+        "by_stage": _by_stage(orders),
+        "payments": payments.build(today)["totals"],
+        "cycle": history.build(today=today)["totals"],
         "rates": _latest_rates(today),
         "alerts": foreign_alerts.build(today),
     }
+
+
+def _by_stage(orders) -> list[dict]:
+    """
+    How many files sit at each stage, and how much money with them.
+
+    Both figures, because they answer different questions: a stage holding
+    twelve small files and one holding two large ones are different problems,
+    and a count alone cannot tell them apart.
+    """
+    labels = dict(ForeignOrder.Status.choices)
+    buckets = {s: {"count": 0, "amount": ZERO, "tons": ZERO} for s in PIPELINE}
+    for order in orders:
+        row = buckets.get(order.status)
+        if row is None:
+            continue
+        row["count"] += 1
+        row["amount"] += order.amount or ZERO
+        row["tons"] += order.weight_ton or ZERO
+    return [
+        {
+            "status": status,
+            "label": labels[status],
+            "count": row["count"],
+            "amount": as_str(row["amount"]),
+            "tons": as_str(row["tons"]),
+        }
+        for status, row in buckets.items()
+    ]
 
 
 def _by_brand(shipments) -> list[dict]:

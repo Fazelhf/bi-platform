@@ -16,6 +16,8 @@ export function homeRouteFor(department: string): string {
       return "finance-cash-entry";
     case "commercial":
       return "commercial-dashboard";
+    case "commercial_foreign":
+      return "foreign-workbench";
     default:
       return "overview"; // CEO / admin
   }
@@ -180,18 +182,11 @@ const router = createRouter({
         },
 
         // --- بازرگانی داخلی: buying the factory's consumables ---
-        // The CEO's whole view of the section: both halves, totals only.
         {
           path: "commercial",
-          name: "commercial-overview",
-          component: () => import("@/views/commercial/CommercialOverviewView.vue"),
-          meta: { commercial: true },
-        },
-        {
-          path: "commercial/domestic",
           name: "commercial-dashboard",
           component: () => import("@/views/commercial/CommercialDashboardView.vue"),
-          meta: { commercial: true, commercialOnly: true },
+          meta: { commercial: true },
         },
         {
           path: "commercial/materials",
@@ -246,39 +241,45 @@ const router = createRouter({
         // Organised by what a file needs, not by which stage table it sits in.
         {
           path: "commercial/foreign",
+          name: "foreign-dashboard",
+          component: () => import("@/views/commercial/ForeignDashboardView.vue"),
+          meta: { foreign: true },
+        },
+        {
+          path: "commercial/foreign/workbench",
           name: "foreign-workbench",
           component: () => import("@/views/commercial/WorkbenchView.vue"),
-          meta: { commercial: true, commercialOnly: true },
+          meta: { foreign: true, foreignOnly: true },
         },
         {
           path: "commercial/foreign/orders",
           name: "foreign-orders",
           component: () => import("@/views/commercial/ForeignOrdersView.vue"),
-          meta: { commercial: true, commercialOnly: true },
+          meta: { foreign: true, foreignOnly: true },
         },
         {
           path: "commercial/foreign/orders/:id",
           name: "foreign-order",
           component: () => import("@/views/commercial/ForeignOrderDetailView.vue"),
-          meta: { commercial: true, commercialOnly: true },
+          meta: { foreign: true, foreignOnly: true },
         },
         {
           path: "commercial/foreign/cargo",
           name: "foreign-shipments",
           component: () => import("@/views/commercial/ShipmentsView.vue"),
-          meta: { commercial: true, commercialOnly: true },
+          meta: { foreign: true, foreignOnly: true },
         },
         {
           path: "commercial/foreign/payments",
           name: "foreign-payments",
           component: () => import("@/views/commercial/PaymentsView.vue"),
-          meta: { commercial: true, commercialOnly: true },
+          meta: { foreign: true, foreignOnly: true },
         },
         {
           path: "commercial/foreign/history",
           name: "foreign-history",
           component: () => import("@/views/commercial/ForeignHistoryView.vue"),
-          meta: { commercial: true, commercialOnly: true },
+          meta: { foreign: true, foreignOnly: true },
         },
 
         // --- منابع انسانی: each department's own roster ---
@@ -386,17 +387,20 @@ router.beforeEach(async (to) => {
   }
   // بازرگانی: what the company pays its suppliers is commercially sensitive,
   // so the same rule as finance — that department, the CEO and admins only.
+  // بازرگانی داخلی and بازرگانی خارجی are separate sections with separate
+  // staff. Each has a dashboard the CEO reads and working pages only that
+  // department opens — a BI dashboard answers «چطور پیش می‌رود», and screens
+  // of rows answer a question the CEO is not asking.
+  const admin = !!auth.me?.is_superuser;
   if (to.meta.commercial) {
-    const canCommercial =
-      auth.isExecutive || !!auth.me?.is_superuser || auth.department === "commercial";
-    if (!canCommercial) return { name: homeRouteFor(auth.department) };
-    // The working pages are for the people who do the work. The CEO gets the
-    // overview instead — a BI dashboard answers «چطور پیش می‌رود», and thirteen
-    // screens of rows answer a question they are not asking.
-    const worksHere = !!auth.me?.is_superuser || auth.department === "commercial";
-    if (to.meta.commercialOnly && !worksHere) {
-      return { name: "commercial-overview" };
-    }
+    const works = admin || auth.department === "commercial";
+    if (!works && !auth.isExecutive) return { name: homeRouteFor(auth.department) };
+    if (to.meta.commercialOnly && !works) return { name: "commercial-dashboard" };
+  }
+  if (to.meta.foreign) {
+    const works = admin || auth.department === "commercial_foreign";
+    if (!works && !auth.isExecutive) return { name: homeRouteFor(auth.department) };
+    if (to.meta.foreignOnly && !works) return { name: "foreign-dashboard" };
   }
   // Roster: department managers (their own section) and the CEO.
   if (to.meta.roster) {

@@ -36,6 +36,8 @@ foreign_patterns = [
          name="foreign-history"),
     path("dashboard/", views_foreign.ForeignDashboardView.as_view(),
          name="foreign-dashboard"),
+    path("cards/", views_foreign.ForeignCardsView.as_view(),
+         name="foreign-cards"),
     path("queue/", views_foreign.AllocationQueueView.as_view(),
          name="foreign-queue"),
     path("stalled/", views_foreign.StalledOrdersView.as_view(),
@@ -61,9 +63,6 @@ urlpatterns = [
     path("reports/monthly-spend/", views.MonthlySpendView.as_view(),
          name="commercial-monthly-spend"),
     path("forecast/", views.ForecastOverviewView.as_view(), name="commercial-forecast"),
-    # Both halves in one payload, for the executive page.
-    path("overview/", views_foreign.CommercialOverviewView.as_view(),
-         name="commercial-overview"),
     path("foreign/", include(foreign_patterns)),
     path("", include(router.urls)),
 ]

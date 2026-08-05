@@ -30,10 +30,13 @@ class Department(models.TextChoices):
     SALES_TEAM = "sales_team", "فروش همکار"
     SALES_B2B = "sales_b2b", "فروش B2B"
     FINANCE = "finance", "مالی"
-    # One department, both halves. بازرگانی خارجی is not built yet, but it
-    # belongs to the same manager and the same section — a second choice would
-    # split one person's data across two departments for no gain.
-    COMMERCIAL = "commercial", "بازرگانی"
+    # Two halves, two departments. They looked like one section until the
+    # work was real: buying consumables at home and clearing containers
+    # through customs are different jobs, done by different people, and the
+    # import file carries supplier prices the domestic buyer has no reason
+    # to see.
+    COMMERCIAL = "commercial", "بازرگانی داخلی"
+    COMMERCIAL_FOREIGN = "commercial_foreign", "بازرگانی خارجی"
 
 
 class User(AbstractUser):

@@ -419,38 +419,6 @@ export interface HistoryReport {
   };
 }
 
-/** The executive page: both halves, totals only. */
-export interface CommercialOverview {
-  month: { label: string; key: string };
-  money: {
-    domestic_month_rial: string;
-    domestic_change_pct: number | null;
-    domestic_order_count: number;
-    foreign_by_currency: { currency: string; label: string; amount: string }[];
-    foreign_outstanding: string;
-    foreign_interest: string;
-    monthly_spend: {
-      key: string; label: string; amount_rial: string; has_data: boolean;
-    }[];
-  };
-  stuck: {
-    in_queue: number; queue_amount: string;
-    queue_avg_days: number; queue_max_days: number; queue_overdue: number;
-    by_bank: BankQueueRow[];
-    idle_files: number; live_files: number; open_requests: number;
-  };
-  bleeding: {
-    daily_rial: string; accrued_rial: string;
-    containers: number; over_free_days: number;
-    interest: string; overdue_payments: number;
-  };
-  tonnage: {
-    in_transit: string; in_transit_count: number;
-    at_customs: string; at_customs_count: number;
-    cleared_ytd: string;
-  };
-}
-
 export interface Choice { value: string; label: string }
 
 export interface ForeignOptions {
@@ -477,11 +445,6 @@ export const foreignApi = {
   },
   async history(year?: number): Promise<HistoryReport> {
     const { data } = await api.get(`${BASE}/history/`, { params: { year } });
-    return data;
-  },
-  /** Both halves at KPI level — lives outside foreign/ because it spans both. */
-  async overview(): Promise<CommercialOverview> {
-    const { data } = await api.get("/commercial/overview/");
     return data;
   },
   async dashboard(): Promise<ForeignDashboard> {

@@ -90,6 +90,7 @@ const commercialItems: Item[] = [
  * is about price, the other about time.
  */
 const foreignItems: Item[] = [
+  { name: "foreign-dashboard", label: "داشبورد", icon: "grid" },
   { name: "foreign-workbench", label: "میز کار", icon: "inbox" },
   { name: "foreign-orders", label: "پرونده‌ها", icon: "notes" },
   { name: "foreign-shipments", label: "بار و گمرک", icon: "box" },
@@ -153,10 +154,17 @@ const primary = computed<Item[]>(() => {
         ],
       },
       { name: "production-dashboard", label: "تولید", icon: "box" },
-      // One row, not two groups of six. The CEO reads this section; they do
-      // not file a ثبت سفارش or chase a container, so the working screens
-      // would only be noise between «نمای کلی» and «تارگت».
-      { name: "commercial-overview", label: "بازرگانی", icon: "box" },
+      // Two dashboards, no working screens: the CEO reads both halves but
+      // files no ثبت سفارش and chases no container.
+      {
+        name: "group-commercial",
+        label: "بازرگانی",
+        icon: "box",
+        children: [
+          { name: "commercial-dashboard", label: "بازرگانی داخلی", icon: "grid" },
+          { name: "foreign-dashboard", label: "بازرگانی خارجی", icon: "grid" },
+        ],
+      },
       {
         name: "group-finance",
         label: "مالی",
@@ -196,22 +204,21 @@ const primary = computed<Item[]>(() => {
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
     );
   } else if (auth.department === "commercial") {
-    // Grouped for the manager too: thirteen rows at the top level would push
-    // پیام‌ها and یادداشت‌ها off the first screen.
-    items.push(
-      {
-        name: "group-commercial",
-        label: "بازرگانی داخلی",
-        icon: "box",
-        children: commercialItems,
-      },
-      {
-        name: "group-commercial-foreign",
-        label: "بازرگانی خارجی",
-        icon: "box",
-        children: foreignItems,
-      },
-    );
+    // Domestic only. The import file carries what the company pays foreign
+    // mills and what it still owes them — not this buyer's business.
+    items.push({
+      name: "group-commercial",
+      label: "بازرگانی داخلی",
+      icon: "box",
+      children: commercialItems,
+    });
+  } else if (auth.department === "commercial_foreign") {
+    items.push({
+      name: "group-commercial-foreign",
+      label: "بازرگانی خارجی",
+      icon: "box",
+      children: foreignItems,
+    });
   }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
@@ -282,7 +289,7 @@ const pageTitle = computed(() => {
     "commercial-request": "مقایسه استعلام‌ها",
     "commercial-orders": "سفارش‌های خرید",
     "commercial-reports": "گزارش‌های بازرگانی",
-    "commercial-overview": "بازرگانی — نمای کلی",
+    "foreign-dashboard": "داشبورد بازرگانی خارجی",
     "foreign-workbench": "میز کار بازرگانی خارجی",
     "foreign-orders": "پرونده‌های واردات", "foreign-order": "پرونده واردات",
     "foreign-shipments": "بار و گمرک",
