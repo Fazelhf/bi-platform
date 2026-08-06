@@ -74,12 +74,28 @@ const crmItems: Item[] = [
  * a different menu, so there is one place to change when a page is added.
  */
 const commercialItems: Item[] = [
-  { name: "commercial-dashboard", label: "داشبورد بازرگانی", icon: "grid" },
+  { name: "commercial-dashboard", label: "داشبورد", icon: "grid" },
+  { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
   { name: "commercial-materials", label: "کالاها", icon: "box" },
   { name: "commercial-suppliers", label: "تامین‌کنندگان", icon: "team" },
   { name: "commercial-requests", label: "درخواست و استعلام", icon: "target" },
   { name: "commercial-orders", label: "سفارش‌های خرید", icon: "notes" },
   { name: "commercial-reports", label: "گزارش‌های بازرگانی", icon: "chart" },
+];
+
+/**
+ * بازرگانی خارجی. Its own group rather than more rows under one «بازرگانی»
+ * heading: together the two halves are thirteen destinations, which is a
+ * scroll rather than a menu, and the two are genuinely different jobs — one
+ * is about price, the other about time.
+ */
+const foreignItems: Item[] = [
+  { name: "foreign-dashboard", label: "داشبورد", icon: "grid" },
+  { name: "foreign-workbench", label: "میز کار", icon: "inbox" },
+  { name: "foreign-orders", label: "پرونده‌ها", icon: "notes" },
+  { name: "foreign-shipments", label: "بار و گمرک", icon: "box" },
+  { name: "foreign-payments", label: "پرداخت‌ها", icon: "chart" },
+  { name: "foreign-history", label: "تاریخچه", icon: "target" },
 ];
 
 /**
@@ -91,6 +107,7 @@ const CHILD_PARENT: Record<string, string> = {
   "commercial-material": "commercial-materials",
   "commercial-supplier": "commercial-suppliers",
   "commercial-request": "commercial-requests",
+  "foreign-order": "foreign-orders",
 };
 
 function childActive(name: string): boolean {
@@ -137,17 +154,16 @@ const primary = computed<Item[]>(() => {
         ],
       },
       { name: "production-dashboard", label: "تولید", icon: "box" },
+      // Three destinations, no working screens: the CEO reads this section
+      // but files no ثبت سفارش and chases no container.
       {
         name: "group-commercial",
         label: "بازرگانی",
         icon: "box",
-        // بازرگانی داخلی is built; its pages sit directly under the heading
-        // rather than nested a second level down, which the rail cannot draw.
-        // بازرگانی خارجی keeps its «به‌زودی» row — the shape is agreed, what
-        // goes inside it is not.
         children: [
-          ...commercialItems,
-          { name: "commercial-foreign", label: "بازرگانی خارجی", icon: "box", placeholder: true },
+          { name: "commercial-dashboard", label: "بازرگانی داخلی", icon: "grid" },
+          { name: "foreign-dashboard", label: "بازرگانی خارجی", icon: "grid" },
+          { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
         ],
       },
       {
@@ -189,14 +205,22 @@ const primary = computed<Item[]>(() => {
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
     );
   } else if (auth.department === "commercial") {
-    // Grouped for the manager too: six rows at the top level would push
-    // پیام‌ها and یادداشت‌ها off the first screen.
-    items.push({
-      name: "group-commercial",
-      label: "بازرگانی داخلی",
-      icon: "box",
-      children: commercialItems,
-    });
+    // Both halves, grouped: eleven rows at the top level would push پیام‌ها
+    // and یادداشت‌ها off the first screen.
+    items.push(
+      {
+        name: "group-commercial",
+        label: "بازرگانی داخلی",
+        icon: "box",
+        children: commercialItems,
+      },
+      {
+        name: "group-commercial-foreign",
+        label: "بازرگانی خارجی",
+        icon: "box",
+        children: foreignItems,
+      },
+    );
   }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
@@ -267,6 +291,13 @@ const pageTitle = computed(() => {
     "commercial-request": "مقایسه استعلام‌ها",
     "commercial-orders": "سفارش‌های خرید",
     "commercial-reports": "گزارش‌های بازرگانی",
+    "commercial-full-report": "گزارش کامل بازرگانی",
+    "foreign-dashboard": "داشبورد بازرگانی خارجی",
+    "foreign-workbench": "میز کار بازرگانی خارجی",
+    "foreign-orders": "پرونده‌های واردات", "foreign-order": "پرونده واردات",
+    "foreign-shipments": "بار و گمرک",
+    "foreign-payments": "پرداخت‌ها و سود دیرکرد",
+    "foreign-history": "تاریخچه واردات",
   };
   if (route.name === "roster") return rosterLabel.value;
   return map[route.name as string] ?? "شرکت کاغذ حساس نمابر مهر";

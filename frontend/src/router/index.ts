@@ -199,52 +199,104 @@ const router = createRouter({
           meta: { commercial: true },
         },
         {
+          // Both halves in tables, for review rather than for reacting.
+          path: "commercial/report",
+          name: "commercial-full-report",
+          component: () => import("@/views/commercial/CommercialFullReportView.vue"),
+          meta: { commercial: true },
+        },
+        {
           path: "commercial/materials",
           name: "commercial-materials",
           component: () => import("@/views/commercial/MaterialsView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/materials/:id",
           name: "commercial-material",
           component: () => import("@/views/commercial/MaterialDetailView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/suppliers",
           name: "commercial-suppliers",
           component: () => import("@/views/commercial/SuppliersView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/suppliers/:id",
           name: "commercial-supplier",
           component: () => import("@/views/commercial/SupplierDetailView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/requests",
           name: "commercial-requests",
           component: () => import("@/views/commercial/RequestsView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/requests/:id",
           name: "commercial-request",
           component: () => import("@/views/commercial/RequestDetailView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/orders",
           name: "commercial-orders",
           component: () => import("@/views/commercial/OrdersView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
         },
         {
           path: "commercial/reports",
           name: "commercial-reports",
           component: () => import("@/views/commercial/CommercialReportsView.vue"),
-          meta: { commercial: true },
+          meta: { commercial: true, commercialOnly: true },
+        },
+
+        // --- بازرگانی خارجی: the import pipeline and the waiting in it ---
+        // Organised by what a file needs, not by which stage table it sits in.
+        {
+          path: "commercial/foreign",
+          name: "foreign-dashboard",
+          component: () => import("@/views/commercial/ForeignDashboardView.vue"),
+          meta: { foreign: true },
+        },
+        {
+          path: "commercial/foreign/workbench",
+          name: "foreign-workbench",
+          component: () => import("@/views/commercial/WorkbenchView.vue"),
+          meta: { foreign: true, foreignOnly: true },
+        },
+        {
+          path: "commercial/foreign/orders",
+          name: "foreign-orders",
+          component: () => import("@/views/commercial/ForeignOrdersView.vue"),
+          meta: { foreign: true, foreignOnly: true },
+        },
+        {
+          path: "commercial/foreign/orders/:id",
+          name: "foreign-order",
+          component: () => import("@/views/commercial/ForeignOrderDetailView.vue"),
+          meta: { foreign: true, foreignOnly: true },
+        },
+        {
+          path: "commercial/foreign/cargo",
+          name: "foreign-shipments",
+          component: () => import("@/views/commercial/ShipmentsView.vue"),
+          meta: { foreign: true, foreignOnly: true },
+        },
+        {
+          path: "commercial/foreign/payments",
+          name: "foreign-payments",
+          component: () => import("@/views/commercial/PaymentsView.vue"),
+          meta: { foreign: true, foreignOnly: true },
+        },
+        {
+          path: "commercial/foreign/history",
+          name: "foreign-history",
+          component: () => import("@/views/commercial/ForeignHistoryView.vue"),
+          meta: { foreign: true, foreignOnly: true },
         },
 
         // --- منابع انسانی: each department's own roster ---
@@ -355,10 +407,27 @@ router.beforeEach(async (to) => {
   }
   // بازرگانی: what the company pays its suppliers is commercially sensitive,
   // so the same rule as finance — that department, the CEO and admins only.
+  // بازرگانی has two halves and one department. Each half has a dashboard the
+  // CEO reads and working pages only بازرگانی opens — a BI dashboard answers
+  // «چطور پیش می‌رود», and screens of rows answer a question the CEO is not
+  // asking.
+  const worksCommercial =
+    !!auth.me?.is_superuser || auth.department === "commercial";
   if (to.meta.commercial) {
-    const canCommercial =
-      auth.isExecutive || !!auth.me?.is_superuser || auth.department === "commercial";
-    if (!canCommercial) return { name: homeRouteFor(auth.department) };
+    if (!worksCommercial && !auth.isExecutive) {
+      return { name: homeRouteFor(auth.department) };
+    }
+    if (to.meta.commercialOnly && !worksCommercial) {
+      return { name: "commercial-dashboard" };
+    }
+  }
+  if (to.meta.foreign) {
+    if (!worksCommercial && !auth.isExecutive) {
+      return { name: homeRouteFor(auth.department) };
+    }
+    if (to.meta.foreignOnly && !worksCommercial) {
+      return { name: "foreign-dashboard" };
+    }
   }
   // Roster: department managers (their own section) and the CEO.
   if (to.meta.roster) {

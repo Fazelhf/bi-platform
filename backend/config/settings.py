@@ -236,6 +236,13 @@ OTP_LOGIN_ENABLED = env.bool("OTP_LOGIN_ENABLED", default=True)
 # Stdlib only: django.utils.timezone reads settings, which are still loading.
 PROCESS_STARTED_AT = datetime.now(dt_timezone.utc)
 
+# --- بازرگانی خارجی: currency rates ---
+# Dotted path to a apps.commercial.services.fx.RateProvider subclass. Empty
+# means the six rates are kept by hand, which is a fully supported mode — the
+# customs rate is set by circular rather than by a market, so part of this
+# table is always typed in regardless of what feed is wired up.
+COMMERCIAL_FX_PROVIDER = env("COMMERCIAL_FX_PROVIDER", default="")
+
 # --- Celery ---
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = env("REDIS_URL", default="redis://localhost:6379/0")
