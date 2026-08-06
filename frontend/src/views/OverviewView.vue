@@ -239,10 +239,51 @@ const card = "bg-surface rounded-card shadow-soft";
             </div>
           </div>
 
-          <!-- The cylinder the strip feeds off. Last in the DOM so it paints
-               over the paper's right edge, which is what makes the sheet look
-               like it passes underneath. -->
-          <div class="thermal-roll"></div>
+          <!-- The cylinder the strip feeds off. Last in the DOM (it decorates
+               the content above it) and moved to the right by `order`.
+
+               preserveAspectRatio="none" is safe here and only here: the roll
+               is a fixed width, so the only stretch is vertical, and a
+               cylinder stretched along its own axis is just a longer
+               cylinder. The end stays an ellipse, which is the whole reason
+               this is SVG and not a rounded div. -->
+          <div class="thermal-roll" aria-hidden="true">
+            <svg viewBox="0 0 200 200" preserveAspectRatio="none">
+              <defs>
+                <!-- Body: shaded at both rims, bright along the crown — the
+                     read that makes a rectangle look round. Kept close to
+                     white, because thermal stock is white. -->
+                <linearGradient id="roll-body" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#dedad0" />
+                  <stop offset=".09" stop-color="#f9f7f2" />
+                  <stop offset=".36" stop-color="#ffffff" />
+                  <stop offset=".70" stop-color="#fdfcf9" />
+                  <stop offset=".93" stop-color="#eceae1" />
+                  <stop offset="1" stop-color="#dcd8ce" />
+                </linearGradient>
+                <!-- The end face, lit from the upper left. -->
+                <radialGradient id="roll-face" cx=".36" cy=".30" r=".82">
+                  <stop offset="0" stop-color="#ffffff" />
+                  <stop offset=".58" stop-color="#fbf9f5" />
+                  <stop offset=".88" stop-color="#f0ede5" />
+                  <stop offset="1" stop-color="#e2ded4" />
+                </radialGradient>
+              </defs>
+
+              <!-- Cylinder lying on its side: a straight body closed by a
+                   near-circular end, so the diameter reads as the paper's
+                   width. -->
+              <rect x="0" y="2" width="132" height="196" fill="url(#roll-body)" />
+              <ellipse cx="132" cy="100" rx="66" ry="98" fill="url(#roll-face)" />
+              <ellipse cx="132" cy="100" rx="66" ry="98" fill="none"
+                       stroke="#000" stroke-opacity=".06" />
+              <!-- the core the paper is wound on -->
+              <ellipse cx="132" cy="100" rx="19" ry="28" fill="#000" fill-opacity=".02"
+                       stroke="#000" stroke-opacity=".09" />
+              <!-- the lip: the strip disappears under the roll here -->
+              <rect x="0" y="2" width="14" height="196" fill="#14141a" opacity=".12" />
+            </svg>
+          </div>
         </div>
 
         <!-- Profit + attention -->

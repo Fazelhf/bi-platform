@@ -40,6 +40,11 @@ const colWidth = computed(() => (width.value - GAP * (COLUMNS - 1)) / COLUMNS);
 const narrow = computed(() => width.value < 820);
 
 let observer: ResizeObserver | null = null;
+
+function measure() {
+  if (root.value) width.value = root.value.clientWidth;
+}
+
 onMounted(() => {
   if (!root.value) return;
   rtl.value = getComputedStyle(root.value).direction === "rtl";
@@ -47,9 +52,17 @@ onMounted(() => {
     width.value = entry.contentRect.width;
   });
   observer.observe(root.value);
-  width.value = root.value.clientWidth;
+  // The observer catches the sidebar collapsing, which no window event
+  // reports; the window listener catches the rest, including the case where
+  // the observer's callbacks are throttled with the frames they ride on.
+  window.addEventListener("resize", measure);
+  measure();
 });
-onBeforeUnmount(() => observer?.disconnect());
+
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  window.removeEventListener("resize", measure);
+});
 
 // ---------------------------------------------------------------- dragging
 type Mode = "move" | "resize";
