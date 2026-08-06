@@ -60,4 +60,12 @@ class PanelTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 
 class PanelTokenObtainPairView(TokenObtainPairView):
+    """No longer routed — do not put this back on /api/auth/token/.
+
+    Two-step login owns that URL now (apps.accounts.twofactor.LoginView), and
+    it applies the policy in the serializer above. Routing this view again
+    would restore IP rules and auditing while silently dropping the second
+    factor, because this class mints tokens straight from the password.
+    """
+
     serializer_class = PanelTokenObtainPairSerializer

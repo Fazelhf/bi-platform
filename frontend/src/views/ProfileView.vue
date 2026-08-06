@@ -157,11 +157,19 @@ watch(() => route.params.id, load);
             @click="deleteAccount"
           >🗑 حذف اکانت</button>
         </template>
-        <button
-          v-else
-          class="px-4 py-2 rounded-xl bg-slate-100 text-ink text-sm hover:bg-slate-200"
-          @click="openEdit"
-        >✎ ویرایش پروفایل</button>
+        <template v-else>
+          <RouterLink
+            :to="{ name: 'security' }"
+            class="px-4 py-2 rounded-xl bg-slate-100 text-ink text-sm hover:bg-slate-200"
+            :title="auth.me?.two_factor_enabled ? 'ورود دو مرحله‌ای فعال است' : 'ورود دو مرحله‌ای غیرفعال است'"
+          >
+            {{ auth.me?.two_factor_enabled ? "🔒" : "🔓" }} امنیت حساب
+          </RouterLink>
+          <button
+            class="px-4 py-2 rounded-xl bg-slate-100 text-ink text-sm hover:bg-slate-200"
+            @click="openEdit"
+          >✎ ویرایش پروفایل</button>
+        </template>
       </div>
     </div>
 

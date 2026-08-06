@@ -1,3 +1,4 @@
+import secrets
 from datetime import timedelta
 
 from django.conf import settings
@@ -60,6 +61,20 @@ class User(AbstractUser):
     # Pillow needed) — the client resizes to ~160px before upload.
     avatar_image = models.TextField(blank=True)
     last_seen = models.DateTimeField(null=True, blank=True)
+
+    # Two-step login: after the password, a one-time code sent to `phone`.
+    # Enabling it is a self-service act (the user proves they hold the phone
+    # by entering a code sent to it), which is why there is no plain admin
+    # checkbox that turns it on for someone else — see the accounts API.
+    two_factor_enabled = models.BooleanField(
+        "ورود دو مرحله‌ای", default=False
+    )
+    two_factor_enabled_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def two_factor_active(self) -> bool:
+        """2FA only counts when there is a number to send the code to."""
+        return bool(self.two_factor_enabled and self.phone)
 
     # Explicit, per-account grant of Admin-Panel access. The panel is for
     # administrators only: the CEO (executive) has their own dashboards and is
@@ -135,6 +150,64 @@ class Note(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title or self.body[:30]} — {self.author}"
+
+
+class OtpChallenge(models.Model):
+    """
+    One outstanding SMS code.
+
+    Kept in the database rather than the cache on purpose: the cache here is
+    Django's per-process default, so under more than one gunicorn worker a
+    code issued by worker A would be unverifiable on worker B — a login that
+    fails roughly half the time. The row is also the whole rate limit: the
+    attempt and resend counters live on it, so a code cannot be brute-forced
+    or used to pump the SMS bill regardless of which worker answers.
+
+    The client only ever sees `token`; the code itself is stored hashed.
+    """
+
+    class Purpose(models.TextChoices):
+        LOGIN = "login", "ورود دو مرحله‌ای"
+        ENABLE = "enable", "فعال‌سازی ورود دو مرحله‌ای"
+        OTP_LOGIN = "otp_login", "ورود با کد پیامکی"
+        RESET = "reset", "بازیابی رمز عبور"
+
+    token = models.CharField(max_length=64, unique=True, default=secrets.token_hex)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="otp_challenges"
+    )
+    purpose = models.CharField(
+        max_length=12, choices=Purpose.choices, default=Purpose.LOGIN
+    )
+    phone = models.CharField(max_length=30)
+    code_hash = models.CharField(max_length=64)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    sends = models.PositiveSmallIntegerField(default=0)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "purpose", "consumed_at"])]
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_live(self) -> bool:
+        return not self.consumed_at and not self.is_expired
+
+    @property
+    def seconds_left(self) -> int:
+        return max(int((self.expires_at - timezone.now()).total_seconds()), 0)
+
+    def __str__(self) -> str:
+        return f"{self.get_purpose_display()} — {self.user} ({self.token[:8]}…)"
 
 
 class Message(models.Model):

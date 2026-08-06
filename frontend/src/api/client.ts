@@ -9,6 +9,20 @@ const api = axios.create({ baseURL });
 /** Storage key for the CRM demo grant — separate from the login token. */
 export const CRM_KEY = "crmKey";
 
+/**
+ * Pages reachable while signed out. A 401 on one of these is expected — the
+ * app boots on the login screen and asks for site settings before anyone has
+ * a token — so bouncing to /login from here would just be a redirect loop
+ * that throws the user off «ورود با کد پیامکی» or «فراموشی رمز» the instant
+ * the page loads.
+ */
+const PUBLIC_PATHS = ["/login", "/login-otp", "/forgot-password"];
+
+function onPublicPage(): boolean {
+  // endsWith, not equality: the app can be mounted under a path (ntpbi.ir/crm).
+  return PUBLIC_PATHS.some((p) => location.pathname.endsWith(p));
+}
+
 // Attach the access token to every request.
 api.interceptors.request.use((config) => {
   const token = store.get("access");
@@ -67,7 +81,7 @@ api.interceptors.response.use(
       }
       store.remove("access");
       store.remove("refresh");
-      if (location.pathname !== "/login") location.href = "/login";
+      if (!onPublicPage()) location.href = "/login";
     }
     return Promise.reject(error);
   },

@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import Department, Message, Note, User
@@ -69,8 +70,22 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id", "username", "display_name_fa", "role", "department",
             "is_active", "is_superuser", "last_login", "password",
+            "phone", "two_factor_enabled",
         ]
         read_only_fields = ["is_superuser", "last_login"]
+
+    def validate_two_factor_enabled(self, value):
+        """An admin may switch two-step login **off** — that is the "lost the
+        phone" support call — but never on. Turning it on for someone else
+        would assert that a number is theirs without them ever proving it, and
+        a wrong number here locks the account out for good. Users enrol
+        themselves at /api/auth/2fa/start/, which sends a code to the number
+        and only enables once that code comes back."""
+        if value and not (self.instance and self.instance.two_factor_enabled):
+            raise serializers.ValidationError(
+                "ورود دو مرحله‌ای را باید خودِ کاربر از «امنیت حساب» فعال کند."
+            )
+        return value
 
     def create(self, validated_data):
         password = validated_data.pop("password", "")
@@ -83,6 +98,14 @@ class UserSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         password = validated_data.pop("password", "")
+        # Switching 2FA off must also drop the enrolment timestamp and kill any
+        # code still in flight, or the user's own security page keeps showing
+        # an enrolment that no longer guards anything.
+        if validated_data.get("two_factor_enabled") is False:
+            validated_data["two_factor_enabled_at"] = None
+            instance.otp_challenges.filter(consumed_at__isnull=True).update(
+                consumed_at=timezone.now()
+            )
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if password:
