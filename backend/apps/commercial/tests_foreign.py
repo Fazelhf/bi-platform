@@ -47,11 +47,9 @@ def mk_user(username, role, department):
 
 class ForeignBase(APITestCase):
     def setUp(self):
-        # بازرگانی خارجی is its own department. صدف runs the domestic half and
-        # is deliberately *not* the one who writes here — the import file
-        # carries supplier prices she has no reason to read.
-        self.manager = mk_user("foreign_mgr", "manager", "commercial_foreign")
-        self.domestic = mk_user("sadaf", "manager", "commercial")
+        # One بازرگانی department covering both halves — the same manager runs
+        # domestic buying and the import desk.
+        self.manager = mk_user("sadaf", "manager", "commercial")
         self.ceo = mk_user("ceo2", "executive", "")
         self.sales = mk_user("smgr", "manager", "sales_team")
 
@@ -327,23 +325,17 @@ class ForeignPermissionTests(ForeignBase):
             self.client.get("/api/commercial/foreign/queue/").status_code, 403
         )
 
-    def test_the_domestic_buyer_cannot_see_the_import_files(self):
-        self.client.force_authenticate(self.domestic)
-        # What the company pays foreign mills, and what it still owes them, is
-        # not the domestic buyer's business — they were one department once,
-        # and this is the line that separates them now.
+    def test_one_department_opens_both_halves(self):
+        self.client.force_authenticate(self.manager)
+        # بازرگانی is one department doing two jobs. Splitting it would mean
+        # the manager's account could hold only one of them at a time.
         for path in (
+            "/api/commercial/dashboard/",
             "/api/commercial/foreign/dashboard/",
             "/api/commercial/foreign/cards/",
-            "/api/commercial/foreign/orders/",
             "/api/commercial/foreign/payments/",
         ):
-            self.assertEqual(self.client.get(path).status_code, 403, path)
-
-        # Their own half still works.
-        self.assertEqual(
-            self.client.get("/api/commercial/dashboard/").status_code, 200
-        )
+            self.assertEqual(self.client.get(path).status_code, 200, path)
 
 
 class ForeignApiTests(ForeignBase):

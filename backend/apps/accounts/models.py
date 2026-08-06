@@ -30,13 +30,10 @@ class Department(models.TextChoices):
     SALES_TEAM = "sales_team", "فروش همکار"
     SALES_B2B = "sales_b2b", "فروش B2B"
     FINANCE = "finance", "مالی"
-    # Two halves, two departments. They looked like one section until the
-    # work was real: buying consumables at home and clearing containers
-    # through customs are different jobs, done by different people, and the
-    # import file carries supplier prices the domestic buyer has no reason
-    # to see.
-    COMMERCIAL = "commercial", "بازرگانی داخلی"
-    COMMERCIAL_FOREIGN = "commercial_foreign", "بازرگانی خارجی"
+    # One department, both halves. بازرگانی داخلی and بازرگانی خارجی are two
+    # jobs but one manager does them, so splitting them into two departments
+    # only meant her account could hold one at a time.
+    COMMERCIAL = "commercial", "بازرگانی"
 
 
 class User(AbstractUser):

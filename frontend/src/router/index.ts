@@ -16,8 +16,6 @@ export function homeRouteFor(department: string): string {
       return "finance-cash-entry";
     case "commercial":
       return "commercial-dashboard";
-    case "commercial_foreign":
-      return "foreign-workbench";
     default:
       return "overview"; // CEO / admin
   }
@@ -186,6 +184,13 @@ const router = createRouter({
           path: "commercial",
           name: "commercial-dashboard",
           component: () => import("@/views/commercial/CommercialDashboardView.vue"),
+          meta: { commercial: true },
+        },
+        {
+          // Both halves in tables, for review rather than for reacting.
+          path: "commercial/report",
+          name: "commercial-full-report",
+          component: () => import("@/views/commercial/CommercialFullReportView.vue"),
           meta: { commercial: true },
         },
         {
@@ -387,20 +392,27 @@ router.beforeEach(async (to) => {
   }
   // بازرگانی: what the company pays its suppliers is commercially sensitive,
   // so the same rule as finance — that department, the CEO and admins only.
-  // بازرگانی داخلی and بازرگانی خارجی are separate sections with separate
-  // staff. Each has a dashboard the CEO reads and working pages only that
-  // department opens — a BI dashboard answers «چطور پیش می‌رود», and screens
-  // of rows answer a question the CEO is not asking.
-  const admin = !!auth.me?.is_superuser;
+  // بازرگانی has two halves and one department. Each half has a dashboard the
+  // CEO reads and working pages only بازرگانی opens — a BI dashboard answers
+  // «چطور پیش می‌رود», and screens of rows answer a question the CEO is not
+  // asking.
+  const worksCommercial =
+    !!auth.me?.is_superuser || auth.department === "commercial";
   if (to.meta.commercial) {
-    const works = admin || auth.department === "commercial";
-    if (!works && !auth.isExecutive) return { name: homeRouteFor(auth.department) };
-    if (to.meta.commercialOnly && !works) return { name: "commercial-dashboard" };
+    if (!worksCommercial && !auth.isExecutive) {
+      return { name: homeRouteFor(auth.department) };
+    }
+    if (to.meta.commercialOnly && !worksCommercial) {
+      return { name: "commercial-dashboard" };
+    }
   }
   if (to.meta.foreign) {
-    const works = admin || auth.department === "commercial_foreign";
-    if (!works && !auth.isExecutive) return { name: homeRouteFor(auth.department) };
-    if (to.meta.foreignOnly && !works) return { name: "foreign-dashboard" };
+    if (!worksCommercial && !auth.isExecutive) {
+      return { name: homeRouteFor(auth.department) };
+    }
+    if (to.meta.foreignOnly && !worksCommercial) {
+      return { name: "foreign-dashboard" };
+    }
   }
   // Roster: department managers (their own section) and the CEO.
   if (to.meta.roster) {

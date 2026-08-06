@@ -22,7 +22,9 @@ from apps.commercial.models import (
     ShipmentCost,
 )
 from apps.commercial.permissions import (
+    CommercialAccess,
     ForeignAccess,
+    assert_commercial_visible,
     assert_foreign_visible,
     is_foreign,
 )
@@ -38,9 +40,11 @@ from apps.commercial.serializers_foreign import (
 from apps.commercial.services import (
     allocation_queue,
     demurrage,
+    domestic_cards,
     foreign_alerts,
     foreign_cards,
     foreign_dashboard,
+    full_report,
     fx,
     history,
     payments,
@@ -371,6 +375,30 @@ class ForeignCardsView(APIView):
         assert_foreign_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
         return Response(foreign_cards.build(today))
+
+
+class DomesticCardsView(APIView):
+    """داشبورد بازرگانی داخلی — each figure with the rows behind it."""
+
+    permission_classes = [CommercialAccess]
+
+    @extend_schema(responses=dict)
+    def get(self, request):
+        assert_commercial_visible(request.user)
+        today = _as_date(request.query_params.get("on")) or date.today()
+        return Response(domestic_cards.build(today))
+
+
+class FullReportView(APIView):
+    """گزارش کامل بازرگانی — both halves in tables, every row openable."""
+
+    permission_classes = [CommercialAccess]
+
+    @extend_schema(responses=dict)
+    def get(self, request):
+        assert_commercial_visible(request.user)
+        today = _as_date(request.query_params.get("on")) or date.today()
+        return Response(full_report.build(today))
 
 
 class ForeignOptionsView(APIView):

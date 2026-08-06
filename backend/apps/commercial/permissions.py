@@ -1,54 +1,49 @@
 """
 Who may see and touch بازرگانی data.
 
-Two halves, two gates. They were one for a while, and that was wrong: the
-import file carries what the company pays foreign mills and what it still owes
-them, which the person buying cartons at home has no reason to read. The CEO
-reads both; each department writes only its own.
+One department, both halves. They were briefly split, which was wrong: the
+same manager runs بازرگانی داخلی and بازرگانی خارجی, and a user carries one
+department, so splitting them meant her account could hold only one at a time.
 
-Read access is deliberately wider than write everywhere, so a dashboard never
-has to be built twice.
+Cash and supplier prices are commercially sensitive, so the rule is the tight
+one: the بازرگانی department writes, the CEO and admins read, nobody else gets
+either.
+
+`ForeignAccess` is a separate name for the same rule rather than an alias, so
+the foreign views read as gated on their own terms — and so the day the import
+desk becomes its own department, only this file changes.
 """
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
-DOMESTIC_DEPARTMENT = "commercial"
-FOREIGN_DEPARTMENT = "commercial_foreign"
+COMMERCIAL_DEPARTMENT = "commercial"
 
 
-def _in(user, department: str) -> bool:
+def is_commercial(user) -> bool:
     return bool(
         user
         and user.is_authenticated
-        and (user.is_superuser or user.department == department)
+        and (user.is_superuser or user.department == COMMERCIAL_DEPARTMENT)
     )
-
-
-def _executive(user) -> bool:
-    return bool(
-        user and user.is_authenticated
-        and (user.is_superuser or user.role == "executive")
-    )
-
-
-# -- بازرگانی داخلی -------------------------------------------------------
-def is_commercial(user) -> bool:
-    return _in(user, DOMESTIC_DEPARTMENT)
 
 
 def can_read_commercial(user) -> bool:
-    return is_commercial(user) or _executive(user)
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.role == "executive" or is_commercial(user))
+    )
 
 
 def assert_commercial_visible(user) -> None:
     if not can_read_commercial(user):
-        raise PermissionDenied("بخش بازرگانی داخلی برای شما قابل مشاهده نیست.")
+        raise PermissionDenied("بخش بازرگانی برای شما قابل مشاهده نیست.")
 
 
 class CommercialAccess(BasePermission):
-    """Read: بازرگانی داخلی + CEO + admin. Write: بازرگانی داخلی + admin."""
+    """Read: بازرگانی + CEO + admin. Write: بازرگانی + admin only."""
 
-    message = "دسترسی به بخش بازرگانی داخلی ندارید."
+    message = "دسترسی به بخش بازرگانی ندارید."
 
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
@@ -56,13 +51,9 @@ class CommercialAccess(BasePermission):
         return is_commercial(request.user)
 
 
-# -- بازرگانی خارجی -------------------------------------------------------
-def is_foreign(user) -> bool:
-    return _in(user, FOREIGN_DEPARTMENT)
-
-
-def can_read_foreign(user) -> bool:
-    return is_foreign(user) or _executive(user)
+# -- بازرگانی خارجی: same department, named separately -------------------
+is_foreign = is_commercial
+can_read_foreign = can_read_commercial
 
 
 def assert_foreign_visible(user) -> None:
@@ -70,12 +61,5 @@ def assert_foreign_visible(user) -> None:
         raise PermissionDenied("بخش بازرگانی خارجی برای شما قابل مشاهده نیست.")
 
 
-class ForeignAccess(BasePermission):
-    """Read: بازرگانی خارجی + CEO + admin. Write: بازرگانی خارجی + admin."""
-
+class ForeignAccess(CommercialAccess):
     message = "دسترسی به بخش بازرگانی خارجی ندارید."
-
-    def has_permission(self, request, view):
-        if request.method in SAFE_METHODS:
-            return can_read_foreign(request.user)
-        return is_foreign(request.user)

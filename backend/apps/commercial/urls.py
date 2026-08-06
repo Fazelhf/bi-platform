@@ -63,6 +63,11 @@ urlpatterns = [
     path("reports/monthly-spend/", views.MonthlySpendView.as_view(),
          name="commercial-monthly-spend"),
     path("forecast/", views.ForecastOverviewView.as_view(), name="commercial-forecast"),
+    # The executive trio: a dashboard per half, and one report over both.
+    path("cards/", views_foreign.DomesticCardsView.as_view(),
+         name="commercial-cards"),
+    path("full-report/", views_foreign.FullReportView.as_view(),
+         name="commercial-full-report"),
     path("foreign/", include(foreign_patterns)),
     path("", include(router.urls)),
 ]

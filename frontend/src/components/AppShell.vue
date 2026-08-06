@@ -75,7 +75,8 @@ const crmItems: Item[] = [
  * a different menu, so there is one place to change when a page is added.
  */
 const commercialItems: Item[] = [
-  { name: "commercial-dashboard", label: "داشبورد بازرگانی", icon: "grid" },
+  { name: "commercial-dashboard", label: "داشبورد", icon: "grid" },
+  { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
   { name: "commercial-materials", label: "کالاها", icon: "box" },
   { name: "commercial-suppliers", label: "تامین‌کنندگان", icon: "team" },
   { name: "commercial-requests", label: "درخواست و استعلام", icon: "target" },
@@ -154,8 +155,8 @@ const primary = computed<Item[]>(() => {
         ],
       },
       { name: "production-dashboard", label: "تولید", icon: "box" },
-      // Two dashboards, no working screens: the CEO reads both halves but
-      // files no ثبت سفارش and chases no container.
+      // Three destinations, no working screens: the CEO reads this section
+      // but files no ثبت سفارش and chases no container.
       {
         name: "group-commercial",
         label: "بازرگانی",
@@ -163,6 +164,7 @@ const primary = computed<Item[]>(() => {
         children: [
           { name: "commercial-dashboard", label: "بازرگانی داخلی", icon: "grid" },
           { name: "foreign-dashboard", label: "بازرگانی خارجی", icon: "grid" },
+          { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
         ],
       },
       {
@@ -204,21 +206,22 @@ const primary = computed<Item[]>(() => {
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
     );
   } else if (auth.department === "commercial") {
-    // Domestic only. The import file carries what the company pays foreign
-    // mills and what it still owes them — not this buyer's business.
-    items.push({
-      name: "group-commercial",
-      label: "بازرگانی داخلی",
-      icon: "box",
-      children: commercialItems,
-    });
-  } else if (auth.department === "commercial_foreign") {
-    items.push({
-      name: "group-commercial-foreign",
-      label: "بازرگانی خارجی",
-      icon: "box",
-      children: foreignItems,
-    });
+    // Both halves, grouped: eleven rows at the top level would push پیام‌ها
+    // and یادداشت‌ها off the first screen.
+    items.push(
+      {
+        name: "group-commercial",
+        label: "بازرگانی داخلی",
+        icon: "box",
+        children: commercialItems,
+      },
+      {
+        name: "group-commercial-foreign",
+        label: "بازرگانی خارجی",
+        icon: "box",
+        children: foreignItems,
+      },
+    );
   }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
@@ -289,6 +292,7 @@ const pageTitle = computed(() => {
     "commercial-request": "مقایسه استعلام‌ها",
     "commercial-orders": "سفارش‌های خرید",
     "commercial-reports": "گزارش‌های بازرگانی",
+    "commercial-full-report": "گزارش کامل بازرگانی",
     "foreign-dashboard": "داشبورد بازرگانی خارجی",
     "foreign-workbench": "میز کار بازرگانی خارجی",
     "foreign-orders": "پرونده‌های واردات", "foreign-order": "پرونده واردات",
