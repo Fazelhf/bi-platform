@@ -34,7 +34,12 @@ from apps.dashboards.permissions import (
     can_read_dataset,
     can_read_section,
 )
-from apps.dashboards.query import QueryError, month_periods, run_query
+from apps.dashboards.query import (
+    QueryError,
+    default_month,
+    month_periods,
+    run_query,
+)
 from apps.dashboards.serializers import (
     DashboardListSerializer,
     DashboardSerializer,
@@ -84,6 +89,7 @@ class CatalogView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        months = month_periods()
         datasets = [
             _dataset_payload(d)
             for d in DATASETS
@@ -110,8 +116,11 @@ class CatalogView(APIView):
             "periods": [
                 {"id": p.id, "label": p.label, "year": p.jalali_year,
                  "month": p.jalali_month}
-                for p in month_periods()
+                for p in months
             ],
+            # The month the board opens on — the newest one that has begun,
+            # not the last row of a table seeded to the end of the year.
+            "default_period": default_month(months).id if months else None,
         })
 
 

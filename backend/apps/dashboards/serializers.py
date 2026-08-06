@@ -130,13 +130,15 @@ class DashboardSerializer(serializers.ModelSerializer):
     section_label = serializers.CharField(source="get_section_display", read_only=True)
     owner_name = serializers.CharField(source="owner.__str__", read_only=True)
     can_edit = serializers.SerializerMethodField()
+    default_period = serializers.SerializerMethodField()
 
     class Meta:
         model = Dashboard
         fields = (
             "id", "section", "section_label", "title", "subtitle",
             "is_default", "is_published", "sort_order",
-            "owner", "owner_name", "can_edit", "updated_at", "widgets",
+            "owner", "owner_name", "can_edit", "default_period",
+            "updated_at", "widgets",
         )
         read_only_fields = ("owner",)
 
@@ -145,6 +147,35 @@ class DashboardSerializer(serializers.ModelSerializer):
 
         request = self.context.get("request")
         return bool(request and can_edit_boards(request.user))
+
+    def get_default_period(self, obj) -> int | None:
+        """
+        Which month this board should open on: the newest one its own first
+        dataset has figures for. See ``latest_month_with_data``.
+        """
+        from apps.dashboards.query import (
+            default_month,
+            latest_month_with_data,
+            month_periods,
+        )
+
+        months = month_periods()
+        if not months:
+            return None
+        for widget in obj.widgets.all():
+            dataset = get_dataset(str((widget.config or {}).get("dataset", "")))
+            if dataset is None:
+                continue
+            found = latest_month_with_data(dataset)
+            if found:
+                match = next(
+                    (p for p in months
+                     if (p.jalali_year, p.jalali_month) == found), None,
+                )
+                if match:
+                    return match.id
+            break  # only the board's leading dataset gets a say
+        return default_month(months).id
 
 
 class DashboardListSerializer(DashboardSerializer):

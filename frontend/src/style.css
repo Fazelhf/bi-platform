@@ -359,6 +359,97 @@ html[data-skin="aurora"].dark body {
   to   { background-position: 100% 100%; }
 }
 
+/* ------------------------------------------------------------------ */
+/* Thermal paper roll                                                   */
+/*                                                                      */
+/* The company makes thermal paper, so the month's headline prints on a  */
+/* roll that unrolls when the page opens. Deliberately not themed: a     */
+/* receipt is a physical object, and it looks like one in every skin and */
+/* in both light and dark. The only concession is a slightly duller      */
+/* paper at night, because full cream glares against a dark page.        */
+/* ------------------------------------------------------------------ */
+.thermal {
+  position: relative;
+  padding-top: 15px;
+}
+
+/* The cylinder the paper comes off. Two end caps make it read as a roll
+   seen edge-on rather than as a bar sitting on top of the card. */
+.thermal-roll {
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 21px;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #55555f 0%, #2c2c33 46%, #1a1a1f 100%);
+  box-shadow:
+    0 4px 12px -4px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  z-index: 2;
+}
+.thermal-roll::before,
+.thermal-roll::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 32%, #74747f, #1f1f25 72%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.thermal-roll::before { left: 4px; }
+.thermal-roll::after { right: 4px; }
+
+.thermal-paper {
+  --tear: 9px;
+  position: relative;
+  z-index: 1;
+  color: #17171a;
+  padding: 1.6rem 1.5rem 2rem;
+  border-radius: 3px 3px 0 0;
+  /* Warm stock, a faint horizontal grain, and a darker band at the very
+     top where the sheet is still curving off the roll. */
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.016) 0 2px, transparent 2px 6px),
+    linear-gradient(180deg, #e8e4d8 0%, #f6f3ec 5%, #faf8f3 22%, #f9f7f1 100%);
+  box-shadow: 0 12px 32px -14px rgba(20, 20, 25, 0.4);
+  /* Serrated bottom edge — where it was torn off the roll. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--tear)) no-repeat,
+    conic-gradient(from -45deg at 50% 0, #000 0 90deg, transparent 0) bottom / 18px var(--tear) repeat-x;
+  mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--tear)) no-repeat,
+    conic-gradient(from -45deg at 50% 0, #000 0 90deg, transparent 0) bottom / 18px var(--tear) repeat-x;
+  animation: thermal-unroll 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dark .thermal-paper {
+  color: #17171a;
+  background:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.022) 0 2px, transparent 2px 6px),
+    linear-gradient(180deg, #cfcabd 0%, #e2ded2 5%, #e8e4da 22%, #e6e2d8 100%);
+}
+
+/* Unrolls downward: the sheet is revealed top-to-bottom while it settles
+   the last few pixels, so it reads as paper being pulled off the roll
+   rather than a box fading in. */
+@keyframes thermal-unroll {
+  from { clip-path: inset(0 0 100% 0); transform: translateY(-8px); }
+  to   { clip-path: inset(0 0 0 0);    transform: translateY(0); }
+}
+
+/* Print rules — the dotted lines a receipt actually has. */
+.thermal-rule {
+  border: 0;
+  border-top: 1px dashed rgba(23, 23, 26, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thermal-paper { animation: none; }
+}
+
 /* Sticky total column — inline colours here would defeat theming. */
 .sum-cell {
   background: rgb(var(--c-sum-bg));

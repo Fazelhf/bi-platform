@@ -33,9 +33,18 @@ from typing import Any
 
 from django.core.exceptions import FieldError
 from django.db.models import Avg, Count, Max, Min, Q, Sum
+from django.utils import timezone
 
 from apps.core.models import JALALI_MONTHS, DimPeriod
 from apps.dashboards.catalog import Dataset, Dim, Metric, get_dataset
+
+__all__ = [
+    "QueryError",
+    "default_month",
+    "latest_month_with_data",
+    "month_periods",
+    "run_query",
+]
 
 AGGREGATES = {"sum": Sum, "avg": Avg, "count": Count, "min": Min, "max": Max}
 
@@ -72,6 +81,48 @@ def month_periods() -> list[DimPeriod]:
     )
 
 
+def default_month(months: list[DimPeriod]) -> DimPeriod:
+    """
+    The month a board opens on when the client names none.
+
+    Not simply the last row: the period table is seeded to the end of the
+    Jalali year, so the newest row is اسفند — months away, with every figure on
+    the page reading zero. The newest month that has actually *begun* is the
+    one a manager means by "this month". (The finance pages learned this the
+    same way; see ``currentPeriodId`` on the frontend.)
+    """
+    today = timezone.localdate()
+    started = [p for p in months if p.start_date and p.start_date <= today]
+    return (started or months)[-1]
+
+
+def latest_month_with_data(dataset: Dataset) -> tuple[int, int] | None:
+    """
+    The newest month this dataset actually has rows for.
+
+    A board opens on the month its own numbers are in. تولید stops reporting in
+    اردیبهشت while مالی is current to مرداد, and defaulting both to "now" would
+    open the production board on a page of zeros — which reads as "the factory
+    made nothing", not as "nobody has keyed this month yet".
+    """
+    if not dataset.period_path:
+        return None
+    qs = dataset.get_model().objects.all()
+    if dataset.base_filter:
+        qs = qs.filter(**dataset.base_filter)
+    if dataset.status_path:
+        qs = qs.filter(**{dataset.status_path: "approved"})
+    p = dataset.period_path
+    row = (
+        qs.values(f"{p}__jalali_year", f"{p}__jalali_month")
+        .order_by(f"-{p}__jalali_year", f"-{p}__jalali_month")
+        .first()
+    )
+    if not row:
+        return None
+    return row[f"{p}__jalali_year"], row[f"{p}__jalali_month"]
+
+
 def _months_for(spec_time: dict, period_id: int | None) -> list[tuple[int, int]] | None:
     """
     The (year, month) pairs a widget should cover, or None for "everything".
@@ -92,7 +143,7 @@ def _months_for(spec_time: dict, period_id: int | None) -> list[tuple[int, int]]
     if period_id:
         current = next((p for p in months if p.id == period_id), None)
     if current is None:
-        current = months[-1]
+        current = default_month(months)
 
     if mode == "selected":
         return [(current.jalali_year, current.jalali_month)]

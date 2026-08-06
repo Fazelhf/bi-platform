@@ -8,6 +8,15 @@ import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, num, pct, rial } from "@/utils/format";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
+import { activePalette } from "@/components/charts/theme";
+
+/**
+ * Channel colours for the mix bar. The light ramp specifically — this bar is
+ * printed on thermal paper, which stays cream at night, so the dark-mode
+ * steps would be the wrong ones. Three hardcoded hexes used to live here,
+ * left over from the palette that was replaced.
+ */
+const mix = computed(() => activePalette().series);
 
 /**
  * The CEO's one screen.
@@ -181,45 +190,52 @@ const card = "bg-surface rounded-card shadow-soft";
       <!-- ===== Hero: the month, judged ===== -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Headline + mix -->
-        <div class="bg-panel text-white rounded-card shadow-soft p-6 lg:col-span-2">
-          <div class="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <p class="text-sm text-white/60 mb-1">فروش کل شرکت — {{ data.period.label }}</p>
-              <p class="text-4xl font-extrabold ltr-nums">{{ rial(data.combined.total_sales_revenue) }}</p>
-              <p v-if="revenueDelta !== null" class="text-sm mt-1.5 ltr-nums"
-                 :class="revenueDelta >= 0 ? 'text-green-300' : 'text-red-300'">
-                {{ revenueDelta >= 0 ? "▲" : "▼" }} {{ deltaText(revenueDelta) }}
-                <span class="text-white/40">نسبت به {{ previous?.label }}</span>
-              </p>
-              <p v-else class="text-sm mt-1.5 text-white/40">ماه قبلی برای مقایسه ثبت نشده</p>
-            </div>
-
-            <div v-if="here?.target" class="text-left min-w-[190px]">
-              <p class="text-xs text-white/60 mb-1">تحقق تارگت</p>
-              <p class="text-2xl font-bold ltr-nums"
-                 :class="achievement >= 100 ? 'text-green-300' : achievement >= 70 ? 'text-amber-300' : 'text-red-300'">
-                {{ pct(achievement) }}
-              </p>
-              <div class="h-1.5 bg-white/15 rounded-full mt-2 overflow-hidden">
-                <div class="h-full rounded-full transition-all"
-                     :class="achievement >= 100 ? 'bg-green-400' : achievement >= 70 ? 'bg-amber-400' : 'bg-red-400'"
-                     :style="{ width: Math.min(achievement, 100) + '%' }"></div>
+        <!-- The month's headline, printed on the product the company makes.
+             .thermal is the roll; .thermal-paper unrolls out of it on load. -->
+        <div class="thermal lg:col-span-2">
+          <div class="thermal-roll"></div>
+          <div class="thermal-paper">
+            <div class="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <p class="text-sm text-black/55 mb-1">فروش کل شرکت — {{ data.period.label }}</p>
+                <p class="text-4xl font-extrabold ltr-nums">{{ rial(data.combined.total_sales_revenue) }}</p>
+                <p v-if="revenueDelta !== null" class="text-sm mt-1.5 ltr-nums"
+                   :class="revenueDelta >= 0 ? 'text-green-700' : 'text-red-700'">
+                  {{ revenueDelta >= 0 ? "▲" : "▼" }} {{ deltaText(revenueDelta) }}
+                  <span class="text-black/40">نسبت به {{ previous?.label }}</span>
+                </p>
+                <p v-else class="text-sm mt-1.5 text-black/40">ماه قبلی برای مقایسه ثبت نشده</p>
               </div>
-              <p class="text-[11px] text-white/40 mt-1 ltr-nums">تارگت {{ rial(here.target) }}</p>
-            </div>
-          </div>
 
-          <!-- Channel mix as one bar, so the split is seen rather than read -->
-          <div class="mt-5">
-            <div class="flex h-2.5 rounded-full overflow-hidden bg-white/10">
-              <div class="bg-[#3b6fed]" :style="{ width: share(data.combined.sales_team_revenue) + '%' }" title="فروش همکار"></div>
-              <div class="bg-[#f59e0b]" :style="{ width: share(data.combined.sales_org_revenue) + '%' }" title="فروش بانکی"></div>
-              <div class="bg-[#ec4899]" :style="{ width: share(data.combined.sales_b2b_revenue) + '%' }" title="فروش B2B"></div>
+              <div v-if="here?.target" class="text-left min-w-[190px]">
+                <p class="text-xs text-black/55 mb-1">تحقق تارگت</p>
+                <p class="text-2xl font-bold ltr-nums"
+                   :class="achievement >= 100 ? 'text-green-700' : achievement >= 70 ? 'text-amber-700' : 'text-red-700'">
+                  {{ pct(achievement) }}
+                </p>
+                <div class="h-1.5 bg-black/10 rounded-full mt-2 overflow-hidden">
+                  <div class="h-full rounded-full transition-all"
+                       :class="achievement >= 100 ? 'bg-green-600' : achievement >= 70 ? 'bg-amber-600' : 'bg-red-600'"
+                       :style="{ width: Math.min(achievement, 100) + '%' }"></div>
+                </div>
+                <p class="text-[11px] text-black/45 mt-1 ltr-nums">تارگت {{ rial(here.target) }}</p>
+              </div>
             </div>
-            <div class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-white/50 mt-2 ltr-nums">
-              <span><span class="inline-block w-2 h-2 rounded-full bg-[#3b6fed] ml-1"></span>همکار {{ pct(share(data.combined.sales_team_revenue)) }}</span>
-              <span><span class="inline-block w-2 h-2 rounded-full bg-[#f59e0b] ml-1"></span>بانکی {{ pct(share(data.combined.sales_org_revenue)) }}</span>
-              <span><span class="inline-block w-2 h-2 rounded-full bg-[#ec4899] ml-1"></span>B2B {{ pct(share(data.combined.sales_b2b_revenue)) }}</span>
+
+            <hr class="thermal-rule my-4" />
+
+            <!-- Channel mix as one bar, so the split is seen rather than read -->
+            <div>
+              <div class="flex h-2.5 rounded-full overflow-hidden bg-black/10">
+                <div :style="{ width: share(data.combined.sales_team_revenue) + '%', background: mix[0] }" title="فروش همکار"></div>
+                <div :style="{ width: share(data.combined.sales_org_revenue) + '%', background: mix[1] }" title="فروش بانکی"></div>
+                <div :style="{ width: share(data.combined.sales_b2b_revenue) + '%', background: mix[2] }" title="فروش B2B"></div>
+              </div>
+              <div class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-black/55 mt-2 ltr-nums">
+                <span><span class="inline-block w-2 h-2 rounded-full ml-1" :style="{ background: mix[0] }"></span>همکار {{ pct(share(data.combined.sales_team_revenue)) }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full ml-1" :style="{ background: mix[1] }"></span>بانکی {{ pct(share(data.combined.sales_org_revenue)) }}</span>
+                <span><span class="inline-block w-2 h-2 rounded-full ml-1" :style="{ background: mix[2] }"></span>B2B {{ pct(share(data.combined.sales_b2b_revenue)) }}</span>
+              </div>
             </div>
           </div>
         </div>
