@@ -21,6 +21,37 @@ export function homeRouteFor(department: string): string {
   }
 }
 
+/**
+ * Every section's manager-composed board.
+ *
+ * One component, one route per section — rather than a single `/reports/:id` —
+ * so each page keeps the exact guard its section already has. The report of a
+ * section must not be reachable by anyone the section itself is not.
+ */
+const BOARD_SECTIONS: { path: string; section: string; meta: Record<string, unknown> }[] = [
+  { path: "reports/overview", section: "overview", meta: { executive: true } },
+  { path: "reports/sales", section: "sales_team", meta: { salesChannel: "team" } },
+  { path: "reports/sales-org", section: "sales_org", meta: { salesChannel: "organizational" } },
+  { path: "reports/sales-b2b", section: "sales_b2b", meta: { salesChannel: "b2b" } },
+  { path: "reports/production", section: "production", meta: {} },
+  { path: "reports/finance", section: "finance", meta: { finance: true } },
+  { path: "reports/commercial", section: "commercial", meta: { commercial: true } },
+  { path: "reports/crm", section: "crm", meta: { crm: true } },
+];
+
+/** `sales_team` → `board-sales-team`, the name the sidebar links to. */
+export function boardRouteFor(section: string): string {
+  return `board-${section.replace(/_/g, "-")}`;
+}
+
+const boardRoutes = BOARD_SECTIONS.map((b) => ({
+  path: b.path,
+  name: boardRouteFor(b.section),
+  component: () => import("@/views/BoardView.vue"),
+  props: { section: b.section },
+  meta: b.meta,
+}));
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -89,6 +120,9 @@ const router = createRouter({
           component: () => import("@/views/TargetsView.vue"),
           meta: { executive: true },
         },
+
+        // --- Manager-composed reports, one per section ---
+        ...boardRoutes,
 
         // --- CRM (فروش همکار) — locked demo ---
         // Everything under /crm needs the demo password. `meta.crm` marks the

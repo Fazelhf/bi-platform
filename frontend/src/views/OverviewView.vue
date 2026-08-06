@@ -191,9 +191,9 @@ const card = "bg-surface rounded-card shadow-soft";
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Headline + mix -->
         <!-- The month's headline, printed on the product the company makes.
-             .thermal is the roll; .thermal-paper unrolls out of it on load. -->
+             The roll sits at the right and the strip runs out to the left,
+             which is how a roll feeds and how this interface reads. -->
         <div class="thermal lg:col-span-2">
-          <div class="thermal-roll"></div>
           <div class="thermal-paper">
             <div class="flex items-start justify-between gap-4 flex-wrap">
               <div>
@@ -238,6 +238,11 @@ const card = "bg-surface rounded-card shadow-soft";
               </div>
             </div>
           </div>
+
+          <!-- The cylinder the strip feeds off. Last in the DOM so it paints
+               over the paper's right edge, which is what makes the sheet look
+               like it passes underneath. -->
+          <div class="thermal-roll"></div>
         </div>
 
         <!-- Profit + attention -->

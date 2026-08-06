@@ -27,8 +27,10 @@ function onPublicPage(): boolean {
 api.interceptors.request.use((config) => {
   const token = store.get("access");
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  // CRM sits behind its own password; its grant rides along on CRM calls only.
-  if (config.url?.includes("/crm/")) {
+  // CRM sits behind its own password; its grant rides along on CRM calls only
+  // — and on the dashboard API, whose catalog and queries can reach CRM data
+  // and which enforces the same lock server-side.
+  if (config.url?.includes("/crm/") || config.url?.includes("/dashboards/")) {
     const crmKey = store.get(CRM_KEY);
     if (crmKey) config.headers["X-CRM-Key"] = crmKey;
   }
