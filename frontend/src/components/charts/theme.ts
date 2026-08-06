@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import { graphic } from "@/lib/echarts";
-import { paletteByKey, type Palette } from "./palettes";
+import { paletteByKey, SERIES_SLOTS, type Palette } from "./palettes";
 import { store } from "@/lib/storage";
 
 /**
@@ -53,10 +53,40 @@ export function barRadius(): number {
   return activePalette().radius;
 }
 
-/** Categorical colour for multi-series charts. */
+/**
+ * Categorical colour for multi-series charts, in fixed order.
+ *
+ * Past the last slot it returns the neutral rather than wrapping around.
+ * Cycling is what put two bank accounts in the same blue on a fourteen-account
+ * chart — colour stopped identifying anything, and no amount of palette work
+ * fixes that. A chart with more entities than slots has to fold its tail into
+ * «سایر» (see foldToSlots); the neutral is what that fold is painted in.
+ */
 export function seriesColor(i: number): string {
-  const s = activePalette().series;
-  return s[i % s.length];
+  themeTick.value;
+  const p = activePalette();
+  const ramp = isDark() ? p.seriesDark : p.series;
+  return ramp[i] ?? p.slate;
+}
+
+/**
+ * Rank-order N items and keep only as many as there are categorical slots,
+ * summing the rest into one «سایر» row.
+ *
+ * `by` is read once per item — the value that decides who is big enough to
+ * name. Ties keep input order, so the fold is stable across renders and a
+ * legend does not reshuffle while someone is reading it.
+ */
+export function foldToSlots<T>(
+  items: T[],
+  by: (item: T) => number,
+  merge: (tail: T[]) => T,
+): T[] {
+  if (items.length <= SERIES_SLOTS) return items;
+  const ranked = [...items].sort((a, b) => by(b) - by(a));
+  const keep = ranked.slice(0, SERIES_SLOTS - 1);
+  const tail = ranked.slice(SERIES_SLOTS - 1);
+  return [...keep, merge(tail)];
 }
 
 /**

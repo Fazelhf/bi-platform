@@ -158,13 +158,30 @@ class Command(BaseCommand):
             self.stderr.write("هیچ ماهی در جدول دوره‌ها نیست — اول seed_periods را اجرا کنید.")
             return
 
+        # One transaction per section, not one for the whole command. They
+        # share nothing, and a single wrapper meant a failure while writing
+        # بازرگانی rolled back مالی too — the demo lost both sections over a
+        # problem in one of them.
         with transaction.atomic():
             people = self.seed_users()
             accounts = self.seed_accounts(opts["accounts"])
             lines = self.seed_credit_lines(months)
             moves = self.seed_cash(rnd, months, accounts, lines)
-            sup, mat = self.seed_catalogue(rnd)
-            reqs, quotes, orders = self.seed_purchasing(rnd, months, sup, mat)
+
+        sup: list = []
+        mat: list = []
+        reqs = quotes = orders = 0
+        try:
+            with transaction.atomic():
+                sup, mat = self.seed_catalogue(rnd)
+                reqs, quotes, orders = self.seed_purchasing(rnd, months, sup, mat)
+        except Exception as exc:
+            self.stderr.write(self.style.WARNING(
+                f"\nبخش بازرگانی پر نشد: {exc}\n"
+                "  مالی سالم نوشته شد. اگر خطا درباره‌ی ستونی است که در مدل "
+                "نیست، جدول‌های این اپ از مدل جلوترند — یعنی مهاجرتی خارج از "
+                "این درخت روی همین دیتابیس اجرا شده.\n"
+            ))
 
         from apps.accounts.management.commands.seed_users import PASSWORD
 
@@ -278,7 +295,13 @@ class Command(BaseCommand):
                     "account_no": f"{1000 + i * 37}-{800 + i}-{9 + i}",
                     "iban": f"IR{62_000_000_000_000_000_000_000 + i * 7919}",
                     "opening_balance_rial": Decimal(opening),
-                    "color": colour,
+                    # Left blank on purpose. `color` exists so someone can
+                    # pin a house colour to an account; when it is empty the
+                    # chart assigns from the validated categorical ramp in
+                    # fixed order. Fourteen invented hexes bypassed that ramp
+                    # entirely and were never checked for colour-blind
+                    # separation against each other.
+                    "color": "",
                     "sort_order": i,
                     "is_active": True,
                     "note": MARK,
@@ -335,7 +358,20 @@ class Command(BaseCommand):
             ("partner-account", "out", 4, 400_000_000, 5_000_000_000),
         ]
         by_kind = {k: [ln for ln in lines if ln.kind == k] for k in ("facility", "lending", "partner")}
-        rows = []
+
+        # Traffic is not spread evenly over fourteen accounts. A company runs
+        # most of its money through one or two, and the rest see a trickle.
+        # Seeding it flat made every account roughly equal, which reads as
+        # noise on the split chart — and made «سایر» larger than any named
+        # account, so the fold looked like it was hiding the answer.
+        weights = [max(1.0, 40.0 * (0.62 ** i)) for i in range(len(accounts))]
+        # A movement is unique on (period, direction, category, credit_line,
+        # account) — one ledger line per day per category per account, not one
+        # row per transaction. So amounts are accumulated into that key rather
+        # than appended: two supplier payments from the same account on the
+        # same day are one line of the day's ledger, which is also how the
+        # finance colleague writes them down.
+        acc: dict[tuple, dict] = {}
         for month in months:
             days = self.day_pool(month)
             for code, direction, per_month, low, high in plan:
@@ -350,19 +386,40 @@ class Command(BaseCommand):
                             else ("lending" if code == "lending" else "facility"), []
                         )
                         line = rnd.choice(pool) if pool else None
-                    rows.append(CashMovement(
-                        period=rnd.choice(days),
-                        direction=Direction.IN if direction == "in" else Direction.OUT,
-                        category=cat,
-                        account=rnd.choice(accounts),
-                        amount_rial=Decimal(rnd.randrange(low, high, 1_000_000)),
-                        credit_line=line,
-                        # Most of it approved: a demo that is all drafts shows
-                        # empty dashboards, since the reports read approved rows.
-                        status=(ApprovalStatus.APPROVED if rnd.random() < 0.88
-                                else ApprovalStatus.SUBMITTED),
-                        note=MARK,
-                    ))
+                    key = (
+                        rnd.choice(days).id,
+                        Direction.IN if direction == "in" else Direction.OUT,
+                        cat.id,
+                        line.id if line else None,
+                        rnd.choices(accounts, weights=weights)[0].id,
+                    )
+                    amount = Decimal(rnd.randrange(low, high, 1_000_000))
+                    if key in acc:
+                        acc[key]["amount"] += amount
+                    else:
+                        acc[key] = {
+                            "amount": amount,
+                            "line": line,
+                            # Most of it approved: a demo that is all drafts
+                            # shows empty dashboards, since the reports read
+                            # approved rows.
+                            "status": (ApprovalStatus.APPROVED if rnd.random() < 0.88
+                                       else ApprovalStatus.SUBMITTED),
+                        }
+
+        rows = [
+            CashMovement(
+                period_id=period_id,
+                direction=direction,
+                category_id=cat_id,
+                account_id=account_id,
+                amount_rial=v["amount"],
+                credit_line=v["line"],
+                status=v["status"],
+                note=MARK,
+            )
+            for (period_id, direction, cat_id, _line_id, account_id), v in acc.items()
+        ]
         CashMovement.objects.bulk_create(rows, batch_size=500)
         return len(rows)
 

@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "apps.crm",
     "apps.finance",
     "apps.commercial",
+    "apps.dashboards",
     "apps.adminpanel",
 ]
 

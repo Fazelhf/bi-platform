@@ -285,13 +285,6 @@ const balanceSeries = computed(() => [
         :rows="yearTrend.rows"
       />
 
-      <StackedAccountBar
-        v-if="monthTrend && monthTrend.grain === 'week' && monthTrend.rows.length > 1"
-        :title="`میانگین موجودی هر هفته — ${monthTrend.period.label}`"
-        :rows="monthTrend.rows"
-        :height="260"
-      />
-
       <!-- Credit position -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div class="bg-surface rounded-card shadow-soft p-4">
@@ -337,6 +330,20 @@ const balanceSeries = computed(() => [
           :series="balanceSeries"
         />
       </div>
+
+      <!-- The weekly split of the selected month. It used to sit directly
+           under the yearly chart — two near-identical full-width stacks in a
+           row, the second one narrower and emptier than the first, which is
+           what made the page look broken rather than dense. It belongs after
+           the daily detail, as the last zoom level: year, then month, then
+           week. -->
+      <StackedAccountBar
+        v-if="monthTrend && monthTrend.grain === 'week' && monthTrend.rows.length > 1"
+        :title="`میانگین موجودی هر هفته — ${monthTrend.period.label}`"
+        :rows="monthTrend.rows"
+        :height="240"
+        :show-closing="false"
+      />
 
       <!-- The grid, exactly as he reads it -->
       <section

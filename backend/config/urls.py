@@ -30,6 +30,8 @@ urlpatterns = [
     path("api/finance/", include("apps.finance.urls")),
     path("api/commercial/", include("apps.commercial.urls")),
     path("api/executive/", include("apps.core.urls")),
+    # Manager-composed boards: the layout the CEO builds for each section.
+    path("api/dashboards/", include("apps.dashboards.urls")),
     # --- Admin Panel (administrators only) ---
     path("api/admin/", include("apps.adminpanel.urls")),
     # Admin-authored announcements, readable by every signed-in user.

@@ -12,7 +12,7 @@ import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
 import { useMoney } from "@/composables/useMoney";
-import { AXIS, TOOLTIP, seriesColor, labelColor } from "./theme";
+import { AXIS, TOOLTIP, foldToSlots, seriesColor, labelColor, surfaceColor } from "./theme";
 import type { TrendRow } from "@/api/finance";
 
 const props = withDefaults(defineProps<{
@@ -26,19 +26,41 @@ const props = withDefaults(defineProps<{
 const el = ref<HTMLElement | null>(null);
 const { toUnit, unitLabel, compact } = useMoney();
 
-/** Every account that appears anywhere, so the stack keeps a stable order. */
+/**
+ * Every account that appears anywhere, so the stack keeps a stable order —
+ * then folded down to the number of categorical colours that actually exist.
+ *
+ * Fourteen accounts against eight slots meant two of them wore the same blue,
+ * and a stack of fourteen bands is unreadable long before that. The biggest
+ * hold their own colour and the rest become one «سایر» band, ranked by total
+ * across the whole period so the same accounts stay named as months change.
+ */
 const accounts = computed(() => {
-  const seen = new Map<string, { key: string; title: string; color: string }>();
+  const seen = new Map<string, { key: string; title: string; color: string; total: number }>();
   for (const row of props.rows) {
     for (const slice of row.by_account) {
       const key = String(slice.id ?? "none");
-      if (!seen.has(key)) {
-        seen.set(key, { key, title: slice.title, color: slice.color });
-      }
+      const amount = Math.abs(Number(slice.amount) || 0);
+      const found = seen.get(key);
+      if (found) found.total += amount;
+      else seen.set(key, { key, title: slice.title, color: slice.color, total: amount });
     }
   }
-  return [...seen.values()];
+  return foldToSlots(
+    [...seen.values()],
+    (a) => a.total,
+    (tail) => ({
+      key: OTHER,
+      title: `سایر (${tail.length} حساب)`,
+      color: "",
+      total: tail.reduce((s, a) => s + a.total, 0),
+      members: new Set(tail.map((a) => a.key)),
+    }) as any,
+  );
 });
+
+/** Marks the folded band, so the series builder knows to sum into it. */
+const OTHER = "__other__";
 
 const categories = computed(() => props.rows.map((r) => r.label));
 
@@ -51,10 +73,21 @@ const option = computed<EChartsOption>(() => {
     barMaxWidth: 46,
     itemStyle: {
       color: account.color || seriesColor(i),
+      // A 2px gap in the card's own colour between segments: without it the
+      // bands butt together and two similar hues read as one taller band.
+      borderColor: surfaceColor(),
+      borderWidth: 2,
       borderRadius: i === list.length - 1 ? [6, 6, 0, 0] : 0,
     },
     data: props.rows.map((row) => {
       if (row.has_data === false) return null;
+      const members = (account as any).members as Set<string> | undefined;
+      if (members) {
+        // The folded band: everything that did not earn its own colour.
+        return row.by_account
+          .filter((s) => members.has(String(s.id ?? "none")))
+          .reduce((sum, s) => sum + toUnit(s.amount), 0);
+      }
       const slice = row.by_account.find(
         (s) => String(s.id ?? "none") === account.key,
       );
