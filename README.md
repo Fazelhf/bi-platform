@@ -162,6 +162,28 @@ Everyone gets the collaboration features: profile with online presence, team dir
 
 ---
 
+## Report builder · گزارش‌ساز
+
+Every section has a **گزارش و داشبورد** page the CEO composes themselves: add a card, pick a
+picture (KPI tile, bar/line/pie, gauge, table), pick a dataset, pick the figures and what to
+break them down by — with a live preview — then drag the cards into place and save. Staff keep
+entering data; the executive decides what the report *is*.
+
+مدیرعامل صفحه گزارش هر بخش را خودش می‌چیند: نوع نمودار، منبع داده، شاخص و بُعد تفکیک را
+انتخاب می‌کند، پیش‌نمایش را همان‌جا می‌بیند، کارت‌ها را جابه‌جا می‌کند و ذخیره می‌کند.
+
+A widget stores a **question**, never an answer — so a board built in خرداد still answers in
+مهر. The question can only be phrased in keys from `apps/dashboards/catalog.py`: that whitelist
+is the security boundary, and it is why "let the CEO write their own report" does not mean
+"let a saved JSON reach an arbitrary column". Editing is restricted to the CEO and
+administrators; reading follows the section's existing rule, CRM's demo password included.
+
+```bash
+python manage.py seed_boards   # a working starter board for every section
+```
+
+---
+
 ## Repository layout
 
 ```
@@ -170,6 +192,7 @@ backend/    Django 5 + DRF — warehouse, KPI engines, importers, API   (backend
   apps/accounts    custom User (role + department), JWT /me
   apps/sales       team + organizational channels, KPI engine, importers
   apps/production   machines/products/costs, 7-KPI engine, importer
+  apps/dashboards  data catalog · safe query engine · manager-composed boards
 frontend/   Vue 3 + TS + Vite — dashboards + Excel-like entry           (frontend/README.md)
 docs/       source-workbook analysis · KPI catalog · screenshots
 docker-compose.yml   Postgres · Redis · RabbitMQ · backend · worker · frontend/Nginx

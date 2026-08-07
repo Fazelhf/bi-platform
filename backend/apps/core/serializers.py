@@ -33,15 +33,23 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 class NotificationSerializer(serializers.ModelSerializer):
     actor_name = serializers.SerializerMethodField()
+    link = serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
         fields = [
             "id", "actor_name", "verb", "message",
-            "target_label", "target_id", "is_read", "created_at",
+            "target_label", "target_id", "link", "is_read", "created_at",
         ]
 
     def get_actor_name(self, obj) -> str:
         if obj.actor is None:
             return ""
         return obj.actor.display_name_fa or obj.actor.username
+
+    def get_link(self, obj) -> dict | None:
+        """Where clicking this notification should go — see notification_links."""
+        from apps.core.notification_links import link_for
+
+        request = self.context.get("request")
+        return link_for(obj, getattr(request, "user", None))

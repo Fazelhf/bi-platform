@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { notificationsApi } from "@/api/platform";
 import { confirm, toast } from "@/composables/useUi";
 import { useClickOutside } from "@/composables/useClickOutside";
 import type { AppNotification } from "@/types";
+
+const router = useRouter();
 
 const root = ref<HTMLElement | null>(null);
 const open = ref(false);
@@ -41,6 +44,48 @@ async function markAll() {
 }
 
 const hasRead = computed(() => items.value.some((n) => n.is_read));
+
+/**
+ * Which notifications are showing their full text.
+ *
+ * An announcement has no page to open, so clicking it used to do nothing at
+ * all — and a row that visibly ignores a click reads as broken. Those rows now
+ * unfold instead, which is the only thing left to give: the message itself,
+ * untruncated.
+ */
+const expanded = ref<Set<number>>(new Set());
+
+function isExpanded(n: AppNotification): boolean {
+  return expanded.value.has(n.id);
+}
+
+/** Reading it is what marks it read — locally too, so the badge drops at once. */
+async function markOneRead(n: AppNotification) {
+  if (n.is_read) return;
+  n.is_read = true;
+  unread.value = Math.max(0, unread.value - 1);
+  try {
+    await notificationsApi.markRead(n.id);
+  } catch {
+    await refreshCount();
+  }
+}
+
+/**
+ * Open a notification. The destination comes from the server, which knows the
+ * reader's role — see `apps/core/notification_links.py`.
+ */
+async function openNotification(n: AppNotification) {
+  await markOneRead(n);
+  if (!n.link) {
+    const next = new Set(expanded.value);
+    next.has(n.id) ? next.delete(n.id) : next.add(n.id);
+    expanded.value = next;
+    return;
+  }
+  open.value = false;
+  router.push({ name: n.link.name, params: n.link.params ?? {} });
+}
 
 /** Remove one notification. Optimistic — the list is cheap to re-fetch. */
 async function remove(n: AppNotification) {
@@ -134,20 +179,27 @@ onBeforeUnmount(() => window.clearInterval(timer));
       <div
         v-for="n in items"
         :key="n.id"
-        class="group flex gap-2 px-4 py-3 border-b border-slate-50 text-sm"
+        class="group flex gap-2 px-4 py-3 border-b border-slate-50 text-sm cursor-pointer hover:bg-slate-50 transition-colors"
         :class="n.is_read ? 'bg-surface' : 'bg-brand-50/50'"
+        role="button"
+        tabindex="0"
+        @click="openNotification(n)"
+        @keyup.enter="openNotification(n)"
       >
         <span>{{ VERB_ICON[n.verb] ?? "🔹" }}</span>
         <div class="flex-1 min-w-0">
-          <p class="text-slate-700 leading-6">{{ n.message }}</p>
+          <p class="text-slate-700 leading-6" :class="isExpanded(n) ? '' : 'line-clamp-2'">
+            {{ n.message }}
+          </p>
           <p class="text-xs text-slate-400 mt-1">
             {{ n.actor_name }} · {{ since(n.created_at) }}
+            <span v-if="n.link" class="text-brand-600">· بازکردن ←</span>
           </p>
         </div>
         <button
           class="shrink-0 self-start w-6 h-6 rounded-full text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors leading-none"
           title="حذف این اعلان"
-          @click="remove(n)"
+          @click.stop="remove(n)"
         >✕</button>
       </div>
     </div>

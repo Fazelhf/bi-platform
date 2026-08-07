@@ -138,6 +138,12 @@ export interface AppNotification {
   message: string;
   target_label: string;
   target_id: string;
+  /**
+   * Where clicking it goes, decided by the server because the destination
+   * depends on the reader's role — null when the notice has no page of its own
+   * (an announcement), and the bell then shows the message itself.
+   */
+  link: { name: string; params?: Record<string, string | number> } | null;
   is_read: boolean;
   created_at: string;
 }
