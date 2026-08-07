@@ -1,26 +1,35 @@
 {
+  "//": "ONE backend and ONE frontend for every session, both rooted in the main worktree (C:/Users/Asus/bi-platform-v2), which holds the complete database. The worktree under .claude/worktrees carries an identical copy of this file, so a session started there drives these same two servers rather than a second pair backed by a near-empty database.",
+  "//vite": "The root (positional) and --config are passed explicitly because `npm --prefix DIR` only changes where package.json is looked up: Vite still reads its config and its index.html from the current working directory. That is how a session in one tree ended up serving the other tree's frontend, proxying /api to the other backend, against the other database.",
   "version": "0.0.1",
   "configurations": [
     {
       "name": "backend-django",
       "runtimeExecutable": "C:/Users/Asus/bi-platform-v2/backend/.venv/Scripts/python.exe",
       "runtimeArgs": [
-        "C:/Users/Asus/bi-platform-v2/.claude/worktrees/bi-platform-help-3dd5e6/backend/manage.py",
+        "C:/Users/Asus/bi-platform-v2/backend/manage.py",
         "runserver",
-        "127.0.0.1:8000"
+        "127.0.0.1:8001"
       ],
-      "port": 8000
+      "port": 8001
     },
     {
       "name": "frontend-vite",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "--prefix",
-        "C:/Users/Asus/bi-platform-v2/.claude/worktrees/bi-platform-help-3dd5e6/frontend",
+        "C:/Users/Asus/bi-platform-v2/frontend",
         "run",
-        "dev"
+        "dev",
+        "--",
+        "C:/Users/Asus/bi-platform-v2/frontend",
+        "--config",
+        "C:/Users/Asus/bi-platform-v2/frontend/vite.config.ts",
+        "--port",
+        "5174",
+        "--strictPort"
       ],
-      "port": 5173
+      "port": 5174
     }
   ]
 }

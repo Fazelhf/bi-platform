@@ -1,0 +1,1 @@
+function r(t){if(!t.length)return null;const n=t.filter(e=>e.has_data);return(n.length?n:t)[(n.length?n:t).length-1].id}function c(t){if(!t.length)return null;const n=new Date().toISOString().slice(0,10),l=t.filter(a=>a.start_date&&a.start_date<=n),e=l.length?l:t;return e[e.length-1].id}export{c,r as d};

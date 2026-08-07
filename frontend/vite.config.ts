@@ -25,10 +25,17 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // v2 runs alongside the v1 platform on the same machine, so it owns its
+    // own pair of ports: 5174 here, Django on 8001. strictPort matters — with
+    // the default, a port already in use is silently swapped for the next
+    // free one, and the dev server comes up looking healthy while pointing at
+    // nothing. That is how two trees ended up serving each other's frontends
+    // against each other's databases.
+    port: 5174,
+    strictPort: true,
     proxy: {
       // Dev: proxy API to Django so there are no CORS surprises.
-      "/api": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/api": { target: "http://127.0.0.1:8001", changeOrigin: true },
     },
   },
 });

@@ -87,8 +87,69 @@ const option = computed<EChartsOption>(() => {
       ...TOOLTIP,
       trigger: "axis",
       axisPointer: { type: "shadow" },
-      valueFormatter: (v: any) =>
-        v === null || v === undefined ? "—" : compact(Number(v)),
+      // A plain axis tooltip prints one row per series. With fourteen accounts
+      // that is a fourteen-row wall, mostly zeros, taller than the chart — and
+      // the question it should answer («کدام حساب پول را نگه داشته») is the
+      // one thing it buries. So: the total first, then the accounts that
+      // actually hold something, biggest first, and the long tail collapsed
+      // into a single line.
+      formatter: (params: any) => {
+        const items = Array.isArray(params) ? params : [params];
+        if (!items.length) return "";
+
+        const closing = items.find((p: any) => p.seriesType === "line");
+        const bars = items
+          .filter((p: any) => p.seriesType !== "line")
+          .filter((p: any) => Number(p.value) > 0)
+          .sort((a: any, b: any) => Number(b.value) - Number(a.value));
+
+        const total = bars.reduce((s: number, p: any) => s + Number(p.value), 0);
+        const head = `<div style="font-weight:600;margin-bottom:4px">${items[0].axisValue}</div>`;
+
+        if (!bars.length) {
+          return head + '<div style="opacity:.7">ثبت نشده</div>';
+        }
+
+        const row = (dot: string, name: string, value: string, dim = false) =>
+          `<div style="display:flex;align-items:center;gap:6px;${dim ? "opacity:.65;" : ""}">`
+          + dot
+          + `<span style="flex:1">${name}</span>`
+          + `<span style="font-weight:600;direction:ltr">${value}</span></div>`;
+
+        const SHOWN = 6;
+        const top = bars.slice(0, SHOWN);
+        const rest = bars.slice(SHOWN);
+
+        const lines = top.map((p: any) =>
+          row(p.marker, p.seriesName, compact(Number(p.value))),
+        );
+
+        if (rest.length) {
+          const restSum = rest.reduce((s: number, p: any) => s + Number(p.value), 0);
+          lines.push(row(
+            '<span style="display:inline-block;width:10px"></span>',
+            `${rest.length} حساب دیگر`,
+            compact(restSum),
+            true,
+          ));
+        }
+
+        const totalRow = row(
+          '<span style="display:inline-block;width:10px"></span>',
+          "مجموع",
+          compact(total),
+        );
+        const closingRow = closing && closing.value !== null && closing.value !== undefined
+          ? row(closing.marker, closing.seriesName, compact(Number(closing.value)), true)
+          : "";
+
+        return head
+          + `<div style="margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(128,128,128,.25)">${totalRow}</div>`
+          + lines.join("")
+          + (closingRow
+            ? `<div style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(128,128,128,.25)">${closingRow}</div>`
+            : "");
+      },
     },
     xAxis: { ...AXIS.category, data: categories.value },
     yAxis: {

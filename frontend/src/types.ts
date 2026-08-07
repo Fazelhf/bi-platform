@@ -100,6 +100,27 @@ export function defaultPeriodId(periods: Period[]): number | null {
   return pick.id;
 }
 
+/**
+ * The month a ledger should open on: the newest one that has actually begun.
+ *
+ * `defaultPeriodId` above keys off `has_data`, which the periods endpoint
+ * fills in from *sales* figures — right for a sales dashboard, wrong for
+ * cash, where a month can be full of movements and still report false.
+ * Taking the last row instead is worse: the period table runs to the end of
+ * the Jalali year, so it lands on اسفند, months away, and every total on the
+ * page reads zero over «حرکتی ثبت نشده است».
+ *
+ * Assumes ascending order, and falls back to the newest month when none of
+ * them carry a start date.
+ */
+export function currentPeriodId(periods: Period[]): number | null {
+  if (!periods.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const started = periods.filter((p) => p.start_date && p.start_date <= today);
+  const pool = started.length ? started : periods;
+  return pool[pool.length - 1].id;
+}
+
 /** Mirrors `accounts.Department` on the server. Keep the two in step. */
 export type Department =
   | ""

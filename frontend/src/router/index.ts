@@ -21,6 +21,37 @@ export function homeRouteFor(department: string): string {
   }
 }
 
+/**
+ * Every section's manager-composed board.
+ *
+ * One component, one route per section — rather than a single `/reports/:id` —
+ * so each page keeps the exact guard its section already has. The report of a
+ * section must not be reachable by anyone the section itself is not.
+ */
+const BOARD_SECTIONS: { path: string; section: string; meta: Record<string, unknown> }[] = [
+  { path: "reports/overview", section: "overview", meta: { executive: true } },
+  { path: "reports/sales", section: "sales_team", meta: { salesChannel: "team" } },
+  { path: "reports/sales-org", section: "sales_org", meta: { salesChannel: "organizational" } },
+  { path: "reports/sales-b2b", section: "sales_b2b", meta: { salesChannel: "b2b" } },
+  { path: "reports/production", section: "production", meta: {} },
+  { path: "reports/finance", section: "finance", meta: { finance: true } },
+  { path: "reports/commercial", section: "commercial", meta: { commercial: true } },
+  { path: "reports/crm", section: "crm", meta: { crm: true } },
+];
+
+/** `sales_team` → `board-sales-team`, the name the sidebar links to. */
+export function boardRouteFor(section: string): string {
+  return `board-${section.replace(/_/g, "-")}`;
+}
+
+const boardRoutes = BOARD_SECTIONS.map((b) => ({
+  path: b.path,
+  name: boardRouteFor(b.section),
+  component: () => import("@/views/BoardView.vue"),
+  props: { section: b.section },
+  meta: b.meta,
+}));
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -89,6 +120,9 @@ const router = createRouter({
           component: () => import("@/views/TargetsView.vue"),
           meta: { executive: true },
         },
+
+        // --- Manager-composed reports, one per section ---
+        ...boardRoutes,
 
         // --- CRM (فروش همکار) — locked demo ---
         // Everything under /crm needs the demo password. `meta.crm` marks the
@@ -367,6 +401,23 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: "login" };
+
+  // Every check below reads `auth.me` — role, department, approver, panel
+  // access. `me` is fetched at login and then cached, so a session that
+  // arrives without it (a cleared cache, a deep link, a second device) ran
+  // every one of those checks against null: department came back "", which
+  // sends the user to `overview`, which is executive-only, which sends them
+  // to `overview` again. The router aborted the loop and rendered nothing.
+  if (auth.isAuthenticated && !auth.me) {
+    try {
+      await auth.fetchMe();
+    } catch {
+      // The token is no longer good for anything — sign out rather than
+      // loop, and let the login screen say so.
+      auth.logout();
+      return { name: "login" };
+    }
+  }
   const signedOutOnly = ["login", "login-otp", "forgot-password"];
   if (signedOutOnly.includes(String(to.name)) && auth.isAuthenticated) {
     return { name: homeRouteFor(auth.department) };

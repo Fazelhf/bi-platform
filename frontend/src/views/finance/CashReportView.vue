@@ -14,6 +14,7 @@ import {
   type YearTrend,
 } from "@/api/finance";
 import { salesApi } from "@/api/sales";
+import { currentPeriodId, type Period } from "@/types";
 import { toast } from "@/composables/useUi";
 import {
   faYear,
@@ -31,7 +32,7 @@ import AccountsPanel from "@/views/finance/AccountsPanel.vue";
 // balances themselves are read on one continuous page.
 import CreditLinesView from "@/views/finance/CreditLinesView.vue";
 
-const periods = ref<{ id: number; label: string }[]>([]);
+const periods = ref<Period[]>([]);
 const selected = ref<number | null>(null);
 const report = ref<CashReport | null>(null);
 const loading = ref(true);
@@ -91,7 +92,7 @@ onMounted(async () => {
   try {
     await loadMoneySettings();
     periods.value = await salesApi.periods();
-    selected.value = periods.value[periods.value.length - 1]?.id ?? null;
+    selected.value = currentPeriodId(periods.value);
     await load();
   } catch {
     error.value = "بارگذاری دوره‌ها ناموفق بود.";
@@ -284,13 +285,6 @@ const balanceSeries = computed(() => [
         :rows="yearTrend.rows"
       />
 
-      <StackedAccountBar
-        v-if="monthTrend && monthTrend.grain === 'week' && monthTrend.rows.length > 1"
-        :title="`میانگین موجودی هر هفته — ${monthTrend.period.label}`"
-        :rows="monthTrend.rows"
-        :height="260"
-      />
-
       <!-- Credit position -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div class="bg-surface rounded-card shadow-soft p-4">
@@ -336,6 +330,20 @@ const balanceSeries = computed(() => [
           :series="balanceSeries"
         />
       </div>
+
+      <!-- The weekly split of the selected month. It used to sit directly
+           under the yearly chart — two near-identical full-width stacks in a
+           row, the second one narrower and emptier than the first, which is
+           what made the page look broken rather than dense. It belongs after
+           the daily detail, as the last zoom level: year, then month, then
+           week. -->
+      <StackedAccountBar
+        v-if="monthTrend && monthTrend.grain === 'week' && monthTrend.rows.length > 1"
+        :title="`میانگین موجودی هر هفته — ${monthTrend.period.label}`"
+        :rows="monthTrend.rows"
+        :height="240"
+        :show-closing="false"
+      />
 
       <!-- The grid, exactly as he reads it -->
       <section
