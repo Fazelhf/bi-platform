@@ -152,12 +152,22 @@ class DatasetCatalogTests(TestCase):
     """Every catalog path must still resolve against its model."""
 
     def test_every_dataset_can_be_queried(self):
+        """
+        Every metric × dimension pair, actually executed.
+
+        A wrong ORM path in the catalog cannot be caught by reading it — it
+        fails only when the query runs, and by then it is a red card on
+        someone's board. CRM is the one exclusion: its lock is a password, not
+        a role, so it is unreachable without a demo grant.
+        """
         ceo = _user("ceo2", Role.EXECUTIVE)
+        ceo.is_superuser = True  # reaches finance/بازرگانی as the CEO does
+        ceo.save()
         from apps.dashboards.catalog import DATASETS
 
         for dataset in DATASETS:
-            if dataset.access:
-                continue  # needs a grant of its own; covered by the API tests
+            if dataset.access == "crm":
+                continue
             for metric in dataset.metrics:
                 for dim in dataset.dims:
                     run_query(
@@ -295,3 +305,152 @@ class BoardApiTests(APITestCase):
         self.board.refresh_from_db()
         self.assertFalse(self.board.is_default)
         self.assertTrue(second.is_default)
+
+
+class DateBucketedDatasetTests(TestCase):
+    """
+    Tables that carry a date instead of a reporting period.
+
+    A پرونده is registered on a day, not filed against a month, so the engine
+    buckets it into the Jalali calendar itself. What matters is that the two
+    ways a row can fail to land in a month stay distinguishable: one has no
+    date yet, the other has a date the calendar does not cover, and reporting
+    the second as "missing" would hide real business.
+    """
+
+    def setUp(self):
+        from apps.commercial.models import ForeignOrder, Supplier
+
+        self.ceo = _user("ceo-fx", Role.EXECUTIVE)
+        self.farvardin = DimPeriod.objects.create(
+            jalali_year=1405, jalali_month=1, kind=PeriodKind.MONTH,
+            start_date=date(2026, 3, 21), end_date=date(2026, 4, 20),
+        )
+        self.ordibehesht = DimPeriod.objects.create(
+            jalali_year=1405, jalali_month=2, kind=PeriodKind.MONTH,
+            start_date=date(2026, 4, 21), end_date=date(2026, 5, 21),
+        )
+        supplier = Supplier.objects.create(code="s1", name_fa="تامین‌کننده")
+
+        def order(code, registered_on):
+            return ForeignOrder.objects.create(
+                file_no=code, pi_no=code, supplier=supplier,
+                registered_on=registered_on,
+            )
+
+        order("a", date(2026, 3, 25))   # فروردین
+        order("b", date(2026, 4, 30))   # اردیبهشت
+        order("c", date(2026, 5, 2))    # اردیبهشت
+        order("d", date(2020, 1, 1))    # outside the calendar
+        order("e", None)                # not registered yet
+
+    def q(self, **spec):
+        base = {"dataset": "foreign_orders", "metrics": ["orders"],
+                "dimension": "month", "time": {"mode": "all"}}
+        return run_query({**base, **spec}, user=self.ceo)
+
+    def test_rows_land_in_the_month_their_date_falls_in(self):
+        result = self.q()
+        counts = dict(zip(result["categories"], result["series"][0]["values"]))
+        self.assertEqual(counts["فروردین 1405"], 1.0)
+        self.assertEqual(counts["اردیبهشت 1405"], 2.0)
+
+    def test_undated_and_out_of_calendar_rows_are_told_apart(self):
+        counts = dict(zip(
+            self.q()["categories"], self.q()["series"][0]["values"]
+        ))
+        self.assertEqual(counts["بدون تاریخ"], 1.0)
+        self.assertEqual(counts["خارج از تقویم"], 1.0)
+
+    def test_those_two_buckets_sort_after_the_real_months(self):
+        categories = self.q()["categories"]
+        self.assertEqual(categories[-2:], ["خارج از تقویم", "بدون تاریخ"])
+
+    def test_a_time_window_excludes_rows_it_cannot_place(self):
+        result = self.q(time={"mode": "selected"}, )
+        # "selected" with no period id falls back to the newest begun month;
+        # either way an undated row is never counted into a named month.
+        self.assertNotIn("بدون تاریخ", result["categories"])
+        self.assertNotIn("خارج از تقویم", result["categories"])
+
+    def test_selecting_one_month_counts_only_that_month(self):
+        result = run_query(
+            {"dataset": "foreign_orders", "metrics": ["orders"],
+             "time": {"mode": "selected"}},
+            user=self.ceo, period_id=self.ordibehesht.id,
+        )
+        self.assertEqual(result["totals"]["orders"], 2.0)
+
+
+class DrillDownTests(TestCase):
+    """
+    The rows behind one bar.
+
+    The contract that matters: a drill-down re-runs the widget's *own* spec and
+    only narrows it. If it rebuilt the filter independently it would drift from
+    the chart, and two numbers on the same screen would disagree.
+    """
+
+    def setUp(self):
+        from apps.dashboards.query import run_drill
+
+        self.run_drill = run_drill
+        self.ceo = _user("ceo-drill", Role.EXECUTIVE)
+        self.month = DimPeriod.objects.create(
+            jalali_year=1405, jalali_month=2, kind=PeriodKind.MONTH,
+            start_date=date(2026, 4, 21), end_date=date(2026, 5, 21),
+        )
+        team = DimTeam.objects.create(code="t", name_fa="تیم")
+        self.a = DimEmployee.objects.create(code="a", full_name_fa="الف", team=team)
+        b = DimEmployee.objects.create(code="b", full_name_fa="ب", team=team)
+        for employee, revenue in ((self.a, 300), (self.a, 200), (b, 100)):
+            FactSalesMonthly.objects.create(
+                period=self.month, employee=employee,
+                channel=SalesChannel.TEAM if revenue != 200
+                else SalesChannel.ORGANIZATIONAL,
+                revenue_rial=Decimal(revenue), status=ApprovalStatus.APPROVED,
+            )
+
+    def spec(self, **over):
+        return {"dataset": "sales", "metrics": ["revenue"], "dimension": "employee",
+                "time": {"mode": "selected"}, **over}
+
+    def test_returns_the_rows_that_make_up_the_bar(self):
+        result = self.run_drill(
+            self.spec(), "الف", user=self.ceo, period_id=self.month.id
+        )
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(len(result["rows"]), 2)
+
+    def test_it_inherits_the_widget_filters(self):
+        """Narrowing only — the widget's own channel filter still applies."""
+        spec = self.spec(filters=[{"dim": "channel", "op": "eq", "value": "team"}])
+        result = self.run_drill(spec, "الف", user=self.ceo, period_id=self.month.id)
+        self.assertEqual(result["total"], 1)
+
+    def test_choice_values_come_back_readable(self):
+        result = self.run_drill(
+            self.spec(), "ب", user=self.ceo, period_id=self.month.id
+        )
+        self.assertEqual(result["rows"][0]["channel"], "فروش همکار")
+        self.assertEqual(result["rows"][0]["status"], "تاییدشده")
+
+    def test_numeric_columns_stay_numbers_for_the_client_to_format(self):
+        result = self.run_drill(
+            self.spec(), "ب", user=self.ceo, period_id=self.month.id
+        )
+        self.assertEqual(result["rows"][0]["revenue_rial"], 100.0)
+        units = {c["key"]: c["unit"] for c in result["columns"]}
+        self.assertEqual(units["revenue_rial"], "rial")
+
+    def test_a_widget_without_a_breakdown_cannot_be_drilled(self):
+        with self.assertRaises(QueryError):
+            self.run_drill(self.spec(dimension=None), "الف", user=self.ceo)
+
+    def test_access_is_checked_here_too(self):
+        sales = _user("sal-drill", Role.MANAGER, Department.SALES_TEAM)
+        with self.assertRaises(QueryError):
+            self.run_drill(
+                {"dataset": "cash", "metrics": ["amount"], "dimension": "category"},
+                "x", user=sales,
+            )

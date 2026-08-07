@@ -36,6 +36,7 @@ const BOARD_SECTIONS: { path: string; section: string; meta: Record<string, unkn
   { path: "reports/production", section: "production", meta: {} },
   { path: "reports/finance", section: "finance", meta: { finance: true } },
   { path: "reports/commercial", section: "commercial", meta: { commercial: true } },
+  { path: "reports/commercial-foreign", section: "commercial_foreign", meta: { commercial: true } },
   { path: "reports/crm", section: "crm", meta: { crm: true } },
 ];
 

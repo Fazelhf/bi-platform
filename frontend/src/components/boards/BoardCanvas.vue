@@ -28,6 +28,7 @@ const emit = defineEmits<{
   (e: "edit", uid: string): void;
   (e: "remove", uid: string): void;
   (e: "duplicate", uid: string): void;
+  (e: "drill", uid: string, key: string, label: string): void;
 }>();
 
 const root = ref<HTMLElement | null>(null);
@@ -167,6 +168,7 @@ const ordered = computed(() =>
         @edit="emit('edit', widget.uid)"
         @remove="emit('remove', widget.uid)"
         @duplicate="emit('duplicate', widget.uid)"
+        @drill="(key, label) => emit('drill', widget.uid, key, label)"
       />
 
       <!-- Edit-mode furniture. The grip is a strip, not the whole card, so a

@@ -9,6 +9,7 @@ import {
   type QueryResult,
 } from "@/api/dashboards";
 import BoardCanvas from "@/components/boards/BoardCanvas.vue";
+import DrillDrawer from "@/components/boards/DrillDrawer.vue";
 import WidgetEditor from "@/components/boards/WidgetEditor.vue";
 import {
   bottomRow, compact, newUid, newWidget, toDraft, type DraftWidget,
@@ -45,6 +46,8 @@ const editing = ref(false);
 const error = ref("");
 
 const editorFor = ref<DraftWidget | null>(null);
+/** Which bar the reader opened, and from which card. */
+const drill = ref<{ widget: DraftWidget; key: string; label: string } | null>(null);
 const showAdd = ref(false);
 const showSettings = ref(false);
 
@@ -185,6 +188,11 @@ function editWidget(uid: string) {
   editorFor.value = widgets.value.find((w) => w.uid === uid) ?? null;
 }
 
+function openDrill(uid: string, key: string, label: string) {
+  const widget = widgets.value.find((w) => w.uid === uid);
+  if (widget) drill.value = { widget, key, label };
+}
+
 function applyWidget(updated: DraftWidget) {
   widgets.value = compact(
     widgets.value.map((w) => (w.uid === updated.uid ? { ...updated } : w)),
@@ -237,7 +245,7 @@ const control =
     <div class="flex items-start justify-between flex-wrap gap-2">
       <div class="min-w-0">
         <h2 class="text-lg font-bold text-ink">
-          {{ board?.title || sectionMeta?.label || "گزارش و داشبورد" }}
+          {{ board?.title || sectionMeta?.label || "گزارش" }}
         </h2>
         <p v-if="board?.subtitle" class="text-xs text-slate-400 mt-0.5">{{ board.subtitle }}</p>
       </div>
@@ -339,6 +347,7 @@ const control =
         @edit="editWidget"
         @remove="removeWidget"
         @duplicate="duplicateWidget"
+        @drill="openDrill"
       />
       <p v-if="!widgets.length" class="text-sm text-slate-400 text-center py-10">
         این داشبورد خالی است.
@@ -357,6 +366,17 @@ const control =
       :period="period"
       @save="applyWidget"
       @close="editorFor = null"
+    />
+
+    <!-- ===== drill-down ===== -->
+    <DrillDrawer
+      v-if="drill"
+      :config="drill.widget.config"
+      :data-key="drill.key"
+      :label="drill.label"
+      :title="drill.widget.title"
+      :period="period"
+      @close="drill = null"
     />
 
     <!-- ===== board settings ===== -->

@@ -9,32 +9,35 @@ export function useChart(
   el: Ref<HTMLElement | null>,
   option: Ref<EChartsOption>,
 ) {
-  let chart: EChartsType | null = null;
+  // A ref, not a plain local: callers that want to attach their own handlers
+  // (a click that opens a drill-down) need to know *when* the instance exists,
+  // and onMounted has already run by the time they could check.
+  const chart = ref<EChartsType | null>(null);
   const ready = ref(false);
 
   function resize() {
-    chart?.resize();
+    chart.value?.resize();
   }
 
   onMounted(() => {
     if (!el.value) return;
-    chart = init(el.value, undefined, { renderer: "canvas" });
-    chart.setOption(option.value);
+    chart.value = init(el.value, undefined, { renderer: "canvas" });
+    chart.value.setOption(option.value);
     ready.value = true;
     window.addEventListener("resize", resize);
   });
 
   watch(
     option,
-    (o) => chart?.setOption(o, true),
+    (o) => chart.value?.setOption(o, true),
     { deep: true },
   );
 
   onBeforeUnmount(() => {
     window.removeEventListener("resize", resize);
-    chart?.dispose();
-    chart = null;
+    chart.value?.dispose();
+    chart.value = null;
   });
 
-  return { ready };
+  return { ready, chart };
 }

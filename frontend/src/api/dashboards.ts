@@ -223,3 +223,24 @@ export const dashboardsApi = {
     return out;
   },
 };
+
+export interface DrillResult {
+  dataset: string;
+  dataset_label: string;
+  dimension: { key: string; label: string };
+  /** `unit` is set for numeric columns, so the drawer formats them like the chart. */
+  columns: { label: string; key: string; unit: string }[];
+  rows: Record<string, string | number | null>[];
+  total: number;
+  truncated: boolean;
+}
+
+/** The rows behind one bar — see `DrillView` on the server. */
+export async function drillInto(
+  config: WidgetConfig,
+  key: string,
+  period?: number | null,
+): Promise<DrillResult> {
+  const { data } = await api.post("/dashboards/drill/", { config, key, period });
+  return data;
+}
