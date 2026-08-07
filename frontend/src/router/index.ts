@@ -220,6 +220,14 @@ const router = createRouter({
           meta: { finance: true },
         },
         {
+          // The averages, which are a treasury tool rather than a company
+          // figure — see the note on TreasuryView.
+          path: "finance/treasury",
+          name: "finance-treasury",
+          component: () => import("@/views/finance/TreasuryView.vue"),
+          meta: { finance: true },
+        },
+        {
           path: "finance/entry",
           name: "finance-cash-entry",
           component: () => import("@/views/finance/CashEntryView.vue"),

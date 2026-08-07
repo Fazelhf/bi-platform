@@ -203,6 +203,9 @@ const primary = computed<Item[]>(() => {
     items.push(
       { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "box" },
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
+      // The treasury averages: this manager's own tool, and not on the page
+      // the CEO opens to read the company's position.
+      { name: "finance-treasury", label: "تحلیل خزانه", icon: "target" },
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
