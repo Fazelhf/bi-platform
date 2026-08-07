@@ -37,8 +37,15 @@ const rtl = ref(true);
 
 /** One column, in pixels — the unit every drag is rounded to. */
 const colWidth = computed(() => (width.value - GAP * (COLUMNS - 1)) / COLUMNS);
-/** Below this the grid is meaningless; cards stack instead. */
-const narrow = computed(() => width.value < 820);
+/**
+ * Below this the grid is meaningless; cards stack instead.
+ *
+ * Tuned down from 820: a 1280px laptop with the sidebar open leaves the canvas
+ * about 660px, which was being treated as a phone — so the manager saw the
+ * edit buttons but could not drag or resize anything, on the most ordinary
+ * screen in the company.
+ */
+const narrow = computed(() => width.value < 620);
 
 let observer: ResizeObserver | null = null;
 
