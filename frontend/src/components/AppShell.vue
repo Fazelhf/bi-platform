@@ -66,23 +66,7 @@ const crmItems: Item[] = [
   { name: "crm-customers", label: "مشتریان", icon: "team" },
   { name: "crm-activities", label: "فعالیت‌ها", icon: "notes" },
   { name: "crm-reports", label: "گزارش‌های CRM", icon: "chart" },
-  { name: "board-crm", label: "گزارش دلخواه", icon: "chart" },
 ];
-
-/**
- * The manager-composed report of a section.
- *
- * It sits *inside* the section it reports on, next to that section's dashboard
- * — not in a menu of its own. A heading called «گزارش و داشبورد» collected one
- * row per department into a second, parallel navigation of the same company,
- * so every section was reachable two ways and neither of them said which.
- *
- * `label` is required for that reason: each caller names its own section, so
- * there is no shared wording for the phrase to creep back in through.
- */
-function boardItem(section: string, label: string): Item {
-  return { name: `board-${section.replace(/_/g, "-")}`, label, icon: "chart" };
-}
 
 /**
  * بازرگانی داخلی. The same list serves the CEO (who reads it) and صدف جمالی
@@ -156,15 +140,7 @@ const primary = computed<Item[]>(() => {
   const items: Item[] = [];
   if (auth.isExecutive) {
     items.push(
-      {
-        name: "group-overview",
-        label: "نمای کلی",
-        icon: "grid",
-        children: [
-          { name: "overview", label: "داشبورد سازمان", icon: "grid" },
-          boardItem("overview", "گزارش سازمان"),
-        ],
-      },
+      { name: "overview", label: "نمای کلی", icon: "grid" },
       {
         // The three channels are one decision — "which part of sales?" —
         // so they live under one heading instead of three top-level rows.
@@ -175,20 +151,9 @@ const primary = computed<Item[]>(() => {
           { name: "sales-dashboard", label: "فروش همکار", icon: "chart" },
           { name: "sales-org-dashboard", label: "فروش بانکی", icon: "chart" },
           { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "chart" },
-          boardItem("sales_team", "گزارش فروش همکار"),
-          boardItem("sales_org", "گزارش فروش بانکی"),
-          boardItem("sales_b2b", "گزارش فروش B2B"),
         ],
       },
-      {
-        name: "group-production",
-        label: "تولید",
-        icon: "box",
-        children: [
-          { name: "production-dashboard", label: "داشبورد تولید", icon: "chart" },
-          boardItem("production", "گزارش تولید"),
-        ],
-      },
+      { name: "production-dashboard", label: "تولید", icon: "box" },
       // Three destinations, no working screens: the CEO reads this section
       // but files no ثبت سفارش and chases no container.
       {
@@ -199,8 +164,6 @@ const primary = computed<Item[]>(() => {
           { name: "commercial-dashboard", label: "بازرگانی داخلی", icon: "grid" },
           { name: "foreign-dashboard", label: "بازرگانی خارجی", icon: "grid" },
           { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
-          boardItem("commercial", "گزارش داخلی"),
-          boardItem("commercial_foreign", "گزارش خارجی"),
         ],
       },
       {
@@ -212,7 +175,6 @@ const primary = computed<Item[]>(() => {
         // own row either — they are read on the نقدینگی page itself.
         children: [
           { name: "finance-cash-report", label: "نقدینگی", icon: "chart" },
-          boardItem("finance", "گزارش مالی"),
         ],
       },
       { name: "targets", label: "تارگت", icon: "target" },
@@ -221,31 +183,26 @@ const primary = computed<Item[]>(() => {
     items.push(
       { name: "production-entry", label: "ورود تولید", icon: "box" },
       { name: "production-dashboard", label: "داشبورد تولید", icon: "chart" },
-      boardItem("production", "گزارش تولید"),
     );
   } else if (auth.department === "sales_org") {
     items.push(
       { name: "sales-org-entry", label: "ورود فروش بانکی", icon: "box" },
       { name: "sales-org-dashboard", label: "داشبورد فروش بانکی", icon: "chart" },
-      boardItem("sales_org", "گزارش فروش بانکی"),
     );
   } else if (auth.department === "sales_team") {
     items.push(
       { name: "sales-entry", label: "ورود فروش همکار", icon: "box" },
       { name: "sales-dashboard", label: "داشبورد فروش همکار", icon: "chart" },
-      boardItem("sales_team", "گزارش فروش همکار"),
     );
   } else if (auth.department === "sales_b2b") {
     items.push(
       { name: "sales-b2b-entry", label: "ورود فروش B2B", icon: "box" },
       { name: "sales-b2b-dashboard", label: "داشبورد فروش B2B", icon: "chart" },
-      boardItem("sales_b2b", "گزارش فروش B2B"),
     );
   } else if (auth.department === "finance") {
     items.push(
       { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "box" },
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
-      boardItem("finance", "گزارش مالی"),
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
@@ -256,13 +213,13 @@ const primary = computed<Item[]>(() => {
         name: "group-commercial",
         label: "بازرگانی داخلی",
         icon: "box",
-        children: [...commercialItems, boardItem("commercial", "گزارش داخلی")],
+        children: [...commercialItems],
       },
       {
         name: "group-commercial-foreign",
         label: "بازرگانی خارجی",
         icon: "box",
-        children: [...foreignItems, boardItem("commercial_foreign", "گزارش خارجی")],
+        children: [...foreignItems],
       },
     );
   }
@@ -285,7 +242,10 @@ const primary = computed<Item[]>(() => {
     // click instead of two.
     items.push({
       name: "group-collaboration",
-      label: "همکاری",
+      // «همکاری» named a value, not a place — nothing in the company is
+      // filed under it. These three are the people side of the platform:
+      // talking to someone, noting something about them, looking them up.
+      label: "ارتباطات",
       icon: "chat",
       children: collaboration,
     });

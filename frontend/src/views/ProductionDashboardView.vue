@@ -12,6 +12,7 @@ import BarChart from "@/components/BarChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
 import { kpiValue, num, rial } from "@/utils/format";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
@@ -150,5 +151,7 @@ function fmtCell(v: string | null, unit: string) {
         </table>
       </div>
     </template>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard section="production" :period="selectedPeriod" />
+</div>
 </template>

@@ -31,6 +31,7 @@ import AccountsPanel from "@/views/finance/AccountsPanel.vue";
 // part of the cash picture, so the ledger that moved the balance and the
 // balances themselves are read on one continuous page.
 import CreditLinesView from "@/views/finance/CreditLinesView.vue";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 const periods = ref<Period[]>([]);
 const selected = ref<number | null>(null);
@@ -442,5 +443,7 @@ const balanceSeries = computed(() => [
            above — same page, because they are the same question. -->
       <CreditLinesView embedded />
     </template>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard section="finance" :period="selected" />
+</div>
 </template>
