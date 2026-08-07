@@ -8,15 +8,6 @@ import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, num, pct, rial } from "@/utils/format";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
-import { activePalette } from "@/components/charts/theme";
-
-/**
- * Channel colours for the mix bar. The light ramp specifically — this bar is
- * printed on thermal paper, which stays cream at night, so the dark-mode
- * steps would be the wrong ones. Three hardcoded hexes used to live here,
- * left over from the palette that was replaced.
- */
-const mix = computed(() => activePalette().series);
 
 /**
  * The CEO's one screen.
@@ -190,99 +181,46 @@ const card = "bg-surface rounded-card shadow-soft";
       <!-- ===== Hero: the month, judged ===== -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Headline + mix -->
-        <!-- The month's headline, printed on the product the company makes.
-             The roll sits at the right and the strip runs out to the left,
-             which is how a roll feeds and how this interface reads. -->
-        <div class="thermal lg:col-span-2">
-          <div class="thermal-paper">
-            <div class="flex items-start justify-between gap-4 flex-wrap">
-              <div>
-                <p class="text-sm text-black/55 mb-1">فروش کل شرکت — {{ data.period.label }}</p>
-                <p class="text-4xl font-extrabold ltr-nums">{{ rial(data.combined.total_sales_revenue) }}</p>
-                <p v-if="revenueDelta !== null" class="text-sm mt-1.5 ltr-nums"
-                   :class="revenueDelta >= 0 ? 'text-green-700' : 'text-red-700'">
-                  {{ revenueDelta >= 0 ? "▲" : "▼" }} {{ deltaText(revenueDelta) }}
-                  <span class="text-black/40">نسبت به {{ previous?.label }}</span>
-                </p>
-                <p v-else class="text-sm mt-1.5 text-black/40">ماه قبلی برای مقایسه ثبت نشده</p>
-              </div>
-
-              <div v-if="here?.target" class="text-left min-w-[190px]">
-                <p class="text-xs text-black/55 mb-1">تحقق تارگت</p>
-                <p class="text-2xl font-bold ltr-nums"
-                   :class="achievement >= 100 ? 'text-green-700' : achievement >= 70 ? 'text-amber-700' : 'text-red-700'">
-                  {{ pct(achievement) }}
-                </p>
-                <div class="h-1.5 bg-black/10 rounded-full mt-2 overflow-hidden">
-                  <div class="h-full rounded-full transition-all"
-                       :class="achievement >= 100 ? 'bg-green-600' : achievement >= 70 ? 'bg-amber-600' : 'bg-red-600'"
-                       :style="{ width: Math.min(achievement, 100) + '%' }"></div>
-                </div>
-                <p class="text-[11px] text-black/45 mt-1 ltr-nums">تارگت {{ rial(here.target) }}</p>
-              </div>
+        <div class="bg-panel text-white rounded-card shadow-soft p-6 lg:col-span-2">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <p class="text-sm text-white/60 mb-1">فروش کل شرکت — {{ data.period.label }}</p>
+              <p class="text-4xl font-extrabold ltr-nums">{{ rial(data.combined.total_sales_revenue) }}</p>
+              <p v-if="revenueDelta !== null" class="text-sm mt-1.5 ltr-nums"
+                 :class="revenueDelta >= 0 ? 'text-green-300' : 'text-red-300'">
+                {{ revenueDelta >= 0 ? "▲" : "▼" }} {{ deltaText(revenueDelta) }}
+                <span class="text-white/40">نسبت به {{ previous?.label }}</span>
+              </p>
+              <p v-else class="text-sm mt-1.5 text-white/40">ماه قبلی برای مقایسه ثبت نشده</p>
             </div>
 
-            <hr class="thermal-rule my-4" />
-
-            <!-- Channel mix as one bar, so the split is seen rather than read -->
-            <div>
-              <div class="flex h-2.5 rounded-full overflow-hidden bg-black/10">
-                <div :style="{ width: share(data.combined.sales_team_revenue) + '%', background: mix[0] }" title="فروش همکار"></div>
-                <div :style="{ width: share(data.combined.sales_org_revenue) + '%', background: mix[1] }" title="فروش بانکی"></div>
-                <div :style="{ width: share(data.combined.sales_b2b_revenue) + '%', background: mix[2] }" title="فروش B2B"></div>
+            <div v-if="here?.target" class="text-left min-w-[190px]">
+              <p class="text-xs text-white/60 mb-1">تحقق تارگت</p>
+              <p class="text-2xl font-bold ltr-nums"
+                 :class="achievement >= 100 ? 'text-green-300' : achievement >= 70 ? 'text-amber-300' : 'text-red-300'">
+                {{ pct(achievement) }}
+              </p>
+              <div class="h-1.5 bg-white/15 rounded-full mt-2 overflow-hidden">
+                <div class="h-full rounded-full transition-all"
+                     :class="achievement >= 100 ? 'bg-green-400' : achievement >= 70 ? 'bg-amber-400' : 'bg-red-400'"
+                     :style="{ width: Math.min(achievement, 100) + '%' }"></div>
               </div>
-              <div class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-black/55 mt-2 ltr-nums">
-                <span><span class="inline-block w-2 h-2 rounded-full ml-1" :style="{ background: mix[0] }"></span>همکار {{ pct(share(data.combined.sales_team_revenue)) }}</span>
-                <span><span class="inline-block w-2 h-2 rounded-full ml-1" :style="{ background: mix[1] }"></span>بانکی {{ pct(share(data.combined.sales_org_revenue)) }}</span>
-                <span><span class="inline-block w-2 h-2 rounded-full ml-1" :style="{ background: mix[2] }"></span>B2B {{ pct(share(data.combined.sales_b2b_revenue)) }}</span>
-              </div>
+              <p class="text-[11px] text-white/40 mt-1 ltr-nums">تارگت {{ rial(here.target) }}</p>
             </div>
           </div>
 
-          <!-- The cylinder the strip feeds off. Last in the DOM (it decorates
-               the content above it) and moved to the right by `order`.
-
-               preserveAspectRatio="none" is safe here and only here: the roll
-               is a fixed width, so the only stretch is vertical, and a
-               cylinder stretched along its own axis is just a longer
-               cylinder. The end stays an ellipse, which is the whole reason
-               this is SVG and not a rounded div. -->
-          <div class="thermal-roll" aria-hidden="true">
-            <svg viewBox="0 0 200 200" preserveAspectRatio="none">
-              <defs>
-                <!-- Body: shaded at both rims, bright along the crown — the
-                     read that makes a rectangle look round. Kept close to
-                     white, because thermal stock is white. -->
-                <linearGradient id="roll-body" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stop-color="#dedad0" />
-                  <stop offset=".09" stop-color="#f9f7f2" />
-                  <stop offset=".36" stop-color="#ffffff" />
-                  <stop offset=".70" stop-color="#fdfcf9" />
-                  <stop offset=".93" stop-color="#eceae1" />
-                  <stop offset="1" stop-color="#dcd8ce" />
-                </linearGradient>
-                <!-- The end face, lit from the upper left. -->
-                <radialGradient id="roll-face" cx=".36" cy=".30" r=".82">
-                  <stop offset="0" stop-color="#ffffff" />
-                  <stop offset=".58" stop-color="#fbf9f5" />
-                  <stop offset=".88" stop-color="#f0ede5" />
-                  <stop offset="1" stop-color="#e2ded4" />
-                </radialGradient>
-              </defs>
-
-              <!-- Cylinder lying on its side: a straight body closed by a
-                   near-circular end, so the diameter reads as the paper's
-                   width. -->
-              <rect x="0" y="2" width="132" height="196" fill="url(#roll-body)" />
-              <ellipse cx="132" cy="100" rx="66" ry="98" fill="url(#roll-face)" />
-              <ellipse cx="132" cy="100" rx="66" ry="98" fill="none"
-                       stroke="#000" stroke-opacity=".06" />
-              <!-- the core the paper is wound on -->
-              <ellipse cx="132" cy="100" rx="19" ry="28" fill="#000" fill-opacity=".02"
-                       stroke="#000" stroke-opacity=".09" />
-              <!-- the lip: the strip disappears under the roll here -->
-              <rect x="0" y="2" width="14" height="196" fill="#14141a" opacity=".12" />
-            </svg>
+          <!-- Channel mix as one bar, so the split is seen rather than read -->
+          <div class="mt-5">
+            <div class="flex h-2.5 rounded-full overflow-hidden bg-white/10">
+              <div class="bg-[#3b6fed]" :style="{ width: share(data.combined.sales_team_revenue) + '%' }" title="فروش همکار"></div>
+              <div class="bg-[#f59e0b]" :style="{ width: share(data.combined.sales_org_revenue) + '%' }" title="فروش بانکی"></div>
+              <div class="bg-[#ec4899]" :style="{ width: share(data.combined.sales_b2b_revenue) + '%' }" title="فروش B2B"></div>
+            </div>
+            <div class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-white/50 mt-2 ltr-nums">
+              <span><span class="inline-block w-2 h-2 rounded-full bg-[#3b6fed] ml-1"></span>همکار {{ pct(share(data.combined.sales_team_revenue)) }}</span>
+              <span><span class="inline-block w-2 h-2 rounded-full bg-[#f59e0b] ml-1"></span>بانکی {{ pct(share(data.combined.sales_org_revenue)) }}</span>
+              <span><span class="inline-block w-2 h-2 rounded-full bg-[#ec4899] ml-1"></span>B2B {{ pct(share(data.combined.sales_b2b_revenue)) }}</span>
+            </div>
           </div>
         </div>
 
