@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   dashboardsApi,
   type Board,
@@ -9,6 +9,7 @@ import {
   type QueryResult,
 } from "@/api/dashboards";
 import BoardCanvas from "@/components/boards/BoardCanvas.vue";
+import DrillDrawer from "@/components/boards/DrillDrawer.vue";
 import WidgetEditor from "@/components/boards/WidgetEditor.vue";
 import {
   bottomRow, compact, newUid, newWidget, toDraft, type DraftWidget,
@@ -26,6 +27,7 @@ import {
 const props = defineProps<{ section?: string }>();
 
 const route = useRoute();
+const router = useRouter();
 const section = computed(
   () => props.section || String(route.params.section || "overview"),
 );
@@ -44,6 +46,8 @@ const editing = ref(false);
 const error = ref("");
 
 const editorFor = ref<DraftWidget | null>(null);
+/** Which bar the reader opened, and from which card. */
+const drill = ref<{ widget: DraftWidget; key: string; label: string } | null>(null);
 const showAdd = ref(false);
 const showSettings = ref(false);
 
@@ -62,13 +66,23 @@ async function loadAll() {
   try {
     if (!catalog.value) catalog.value = await dashboardsApi.catalog();
     boards.value = await dashboardsApi.boards(section.value);
-    const pick = boards.value.find((b) => b.is_default) ?? boards.value[0] ?? null;
+    // «تنظیمات سایت ← داشبوردها» links to one particular board, which is not
+    // necessarily the section's default one.
+    const asked = Number(route.query.board);
+    const pick =
+      boards.value.find((b) => b.id === asked)
+      ?? boards.value.find((b) => b.is_default)
+      ?? boards.value[0]
+      ?? null;
     if (!pick) {
       board.value = null;
       widgets.value = [];
       return;
     }
     await openBoard(pick.id);
+    // Arriving from the settings page means "let me rearrange this", so the
+    // page opens with the handles already on rather than asking twice.
+    if (route.query.edit === "1" && canEdit.value) startEdit();
   } catch (e: any) {
     error.value = e?.response?.data?.detail || "بارگذاری داشبورد ممکن نشد.";
   } finally {
@@ -123,10 +137,19 @@ function startEdit() {
   editing.value = true;
 }
 
+/** Drop `?edit=1` so a refresh (or a back button) does not re-open the editor. */
+function clearEditQuery() {
+  if (!route.query.edit) return;
+  const query = { ...route.query };
+  delete query.edit;
+  router.replace({ query });
+}
+
 function cancelEdit() {
   widgets.value = JSON.parse(snapshot);
   editing.value = false;
   showAdd.value = false;
+  clearEditQuery();
   refresh();
 }
 
@@ -139,6 +162,7 @@ async function save() {
     board.value = saved;
     widgets.value = toDraft(saved.widgets);
     editing.value = false;
+    clearEditQuery();
     await refresh();
   } catch (e: any) {
     const detail = e?.response?.data;
@@ -162,6 +186,11 @@ function addWidget(kind: string) {
 
 function editWidget(uid: string) {
   editorFor.value = widgets.value.find((w) => w.uid === uid) ?? null;
+}
+
+function openDrill(uid: string, key: string, label: string) {
+  const widget = widgets.value.find((w) => w.uid === uid);
+  if (widget) drill.value = { widget, key, label };
 }
 
 function applyWidget(updated: DraftWidget) {
@@ -192,8 +221,9 @@ function duplicateWidget(uid: string) {
 }
 
 // ------------------------------------------------------------- board admin
-const newTitle = ref("");
-
+// Creating, duplicating, publishing and deleting a board live in «تنظیمات سایت
+// ← داشبوردها». What stays here is renaming, because that is something you
+// realise while arranging the cards, not before.
 async function saveBoardSettings() {
   if (!board.value) return;
   await dashboardsApi.updateBoard(board.value.id, {
@@ -202,40 +232,6 @@ async function saveBoardSettings() {
   });
   showSettings.value = false;
   boards.value = await dashboardsApi.boards(section.value);
-}
-
-async function createBoard() {
-  if (!newTitle.value.trim()) return;
-  const created = await dashboardsApi.createBoard({
-    section: section.value,
-    title: newTitle.value.trim(),
-    is_default: !boards.value.length,
-  });
-  newTitle.value = "";
-  boards.value = await dashboardsApi.boards(section.value);
-  await openBoard(created.id);
-  startEdit();
-}
-
-async function duplicateBoard() {
-  if (!board.value) return;
-  const copy = await dashboardsApi.duplicate(board.value.id);
-  boards.value = await dashboardsApi.boards(section.value);
-  await openBoard(copy.id);
-}
-
-async function makeDefault() {
-  if (!board.value) return;
-  await dashboardsApi.makeDefault(board.value.id);
-  boards.value = await dashboardsApi.boards(section.value);
-  board.value = { ...board.value, is_default: true };
-}
-
-async function removeBoard() {
-  if (!board.value) return;
-  await dashboardsApi.deleteBoard(board.value.id);
-  board.value = null;
-  await loadAll();
 }
 
 const control =
@@ -249,7 +245,7 @@ const control =
     <div class="flex items-start justify-between flex-wrap gap-2">
       <div class="min-w-0">
         <h2 class="text-lg font-bold text-ink">
-          {{ board?.title || sectionMeta?.label || "گزارش و داشبورد" }}
+          {{ board?.title || sectionMeta?.label || "گزارش" }}
         </h2>
         <p v-if="board?.subtitle" class="text-xs text-slate-400 mt-0.5">{{ board.subtitle }}</p>
       </div>
@@ -279,11 +275,14 @@ const control =
               انصراف
             </button>
           </template>
-          <button
+          <!-- No edit button here: arranging the report is a site setting, and
+               this page is opened by the whole section. -->
+          <RouterLink
             v-else
-            class="border border-slate-200 rounded-xl px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-50 transition"
-            @click="startEdit"
-          >ویرایش چیدمان</button>
+            :to="{ name: 'settings', query: { tab: 'boards' } }"
+            class="text-xs text-slate-400 hover:text-brand-600 hover:underline transition"
+            title="چیدمان این صفحه در تنظیمات سایت ← داشبوردها ویرایش می‌شود"
+          >ویرایش در تنظیمات سایت ←</RouterLink>
         </template>
       </div>
     </div>
@@ -315,15 +314,8 @@ const control =
       </div>
 
       <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl" @click="showSettings = true">
-        تنظیمات داشبورد
+        تغییر عنوان
       </button>
-      <button class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl" @click="duplicateBoard">
-        رونوشت این داشبورد
-      </button>
-      <button
-        v-if="board && !board.is_default"
-        class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-xl" @click="makeDefault"
-      >پیش‌فرض این بخش شود</button>
 
       <span class="flex-1"></span>
       <span class="text-xs text-slate-400">
@@ -338,10 +330,11 @@ const control =
 
     <div v-else-if="!board" class="bg-surface rounded-card shadow-soft p-10 text-center">
       <p class="text-sm text-slate-500">برای این بخش هنوز داشبوردی ساخته نشده است.</p>
-      <div v-if="canEdit" class="mt-4 flex items-center justify-center gap-2">
-        <input v-model="newTitle" :class="control" placeholder="عنوان داشبورد" @keyup.enter="createBoard" />
-        <button class="bg-panel text-white rounded-xl px-4 py-1.5 text-sm" @click="createBoard">بساز</button>
-      </div>
+      <RouterLink
+        v-if="canEdit"
+        :to="{ name: 'settings', query: { tab: 'boards' } }"
+        class="inline-block mt-3 text-sm text-brand-600 hover:underline"
+      >ساخت داشبورد در تنظیمات سایت ←</RouterLink>
     </div>
 
     <template v-else>
@@ -354,6 +347,7 @@ const control =
         @edit="editWidget"
         @remove="removeWidget"
         @duplicate="duplicateWidget"
+        @drill="openDrill"
       />
       <p v-if="!widgets.length" class="text-sm text-slate-400 text-center py-10">
         این داشبورد خالی است.
@@ -372,6 +366,17 @@ const control =
       :period="period"
       @save="applyWidget"
       @close="editorFor = null"
+    />
+
+    <!-- ===== drill-down ===== -->
+    <DrillDrawer
+      v-if="drill"
+      :config="drill.widget.config"
+      :data-key="drill.key"
+      :label="drill.label"
+      :title="drill.widget.title"
+      :period="period"
+      @close="drill = null"
     />
 
     <!-- ===== board settings ===== -->
@@ -396,11 +401,6 @@ const control =
             <button class="px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-xl" @click="showSettings = false">
               انصراف
             </button>
-            <span class="flex-1"></span>
-            <button
-              v-if="boards.length > 1"
-              class="text-sm text-red-500 hover:bg-red-50 rounded-xl px-3 py-2" @click="removeBoard"
-            >حذف داشبورد</button>
           </div>
         </div>
       </div>

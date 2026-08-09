@@ -66,21 +66,7 @@ const crmItems: Item[] = [
   { name: "crm-customers", label: "مشتریان", icon: "team" },
   { name: "crm-activities", label: "فعالیت‌ها", icon: "notes" },
   { name: "crm-reports", label: "گزارش‌های CRM", icon: "chart" },
-  { name: "board-crm", label: "داشبورد دلخواه", icon: "grid" },
 ];
-
-/**
- * The manager-composed report of each section.
- *
- * Every section has one, and it is the same page for whoever opens it — the
- * CEO arranges it, the department reads it. Which sections a person is offered
- * follows the same rule as the rest of their menu.
- */
-const BOARD_LABEL = "گزارش و داشبورد";
-
-function boardItem(section: string, label = BOARD_LABEL): Item {
-  return { name: `board-${section.replace(/_/g, "-")}`, label, icon: "grid" };
-}
 
 /**
  * بازرگانی داخلی. The same list serves the CEO (who reads it) and صدف جمالی
@@ -192,73 +178,51 @@ const primary = computed<Item[]>(() => {
         ],
       },
       { name: "targets", label: "تارگت", icon: "target" },
-      {
-        // The CEO's own reports: one row per section, because this is the
-        // menu they *edit* from and jumping between sections is the whole
-        // point of the builder.
-        name: "group-boards",
-        label: BOARD_LABEL,
-        icon: "grid",
-        children: [
-          boardItem("overview", "نمای کلی"),
-          boardItem("sales_team", "فروش همکار"),
-          boardItem("sales_org", "فروش بانکی"),
-          boardItem("sales_b2b", "فروش B2B"),
-          boardItem("production", "تولید"),
-          boardItem("finance", "مالی"),
-          boardItem("commercial", "بازرگانی"),
-        ],
-      },
     );
   } else if (auth.department === "production") {
     items.push(
       { name: "production-entry", label: "ورود تولید", icon: "box" },
       { name: "production-dashboard", label: "داشبورد تولید", icon: "chart" },
-      boardItem("production"),
     );
   } else if (auth.department === "sales_org") {
     items.push(
       { name: "sales-org-entry", label: "ورود فروش بانکی", icon: "box" },
       { name: "sales-org-dashboard", label: "داشبورد فروش بانکی", icon: "chart" },
-      boardItem("sales_org"),
     );
   } else if (auth.department === "sales_team") {
     items.push(
       { name: "sales-entry", label: "ورود فروش همکار", icon: "box" },
       { name: "sales-dashboard", label: "داشبورد فروش همکار", icon: "chart" },
-      boardItem("sales_team"),
     );
   } else if (auth.department === "sales_b2b") {
     items.push(
       { name: "sales-b2b-entry", label: "ورود فروش B2B", icon: "box" },
       { name: "sales-b2b-dashboard", label: "داشبورد فروش B2B", icon: "chart" },
-      boardItem("sales_b2b"),
     );
   } else if (auth.department === "finance") {
     items.push(
       { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "box" },
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
-      boardItem("finance"),
+      // The treasury averages: this manager's own tool, and not on the page
+      // the CEO opens to read the company's position.
+      { name: "finance-treasury", label: "تحلیل خزانه", icon: "target" },
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
-    // and یادداشت‌ها off the first screen.
-    //
-    // The board entry hangs off داخلی only. Boards are per-section and
-    // «commercial» is the one that exists; خارجی gets one when a board is
-    // defined for it, not before.
+    // and یادداشت‌ها off the first screen. The composed report joins داخلی,
+    // which is where this manager's own figures are.
     items.push(
       {
         name: "group-commercial",
         label: "بازرگانی داخلی",
         icon: "box",
-        children: [...commercialItems, boardItem("commercial")],
+        children: [...commercialItems],
       },
       {
         name: "group-commercial-foreign",
         label: "بازرگانی خارجی",
         icon: "box",
-        children: foreignItems,
+        children: [...foreignItems],
       },
     );
   }
@@ -269,11 +233,28 @@ const primary = computed<Item[]>(() => {
   if (auth.isExecutive || ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)) {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
-  items.push(
+  const collaboration: Item[] = [
     { name: "chat", label: "پیام‌ها", icon: "chat", badge: () => chatCount.value },
     { name: "notes", label: "یادداشت‌ها", icon: "notes" },
     { name: "team", label: "همکاران", icon: "team" },
-  );
+  ];
+  if (auth.isExecutive) {
+    // The CEO's menu carries every section of the company, so these three
+    // general rows are what pushes it past a screen. A department manager's
+    // menu is short enough to keep them at the top level, where they are one
+    // click instead of two.
+    items.push({
+      name: "group-collaboration",
+      // «همکاری» named a value, not a place — nothing in the company is
+      // filed under it. These three are the people side of the platform:
+      // talking to someone, noting something about them, looking them up.
+      label: "ارتباطات",
+      icon: "chat",
+      children: collaboration,
+    });
+  } else {
+    items.push(...collaboration);
+  }
   return items;
 });
 

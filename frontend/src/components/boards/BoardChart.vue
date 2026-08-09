@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
 import { useUiStore } from "@/stores/ui";
@@ -151,7 +151,25 @@ const option = computed<EChartsOption>(() => {
   };
 });
 
-useChart(el, option);
+const emit = defineEmits<{ (e: "drill", key: string, label: string): void }>();
+
+const { chart } = useChart(el, option);
+
+/**
+ * Clicking a bar or a slice asks "made of what?".
+ *
+ * The row's stable key is sent, not the label on the axis — a label is
+ * translated and can be shared by two different values, and the drawer has to
+ * filter on the thing that was actually grouped.
+ */
+watch(chart, (instance) => {
+  if (!instance) return;
+  instance.off("click");
+  instance.on("click", (params: any) => {
+    const row = props.result.rows[params.dataIndex];
+    if (row) emit("drill", row.key, row.label);
+  });
+}, { immediate: true });
 </script>
 
 <template>

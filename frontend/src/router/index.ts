@@ -36,6 +36,7 @@ const BOARD_SECTIONS: { path: string; section: string; meta: Record<string, unkn
   { path: "reports/production", section: "production", meta: {} },
   { path: "reports/finance", section: "finance", meta: { finance: true } },
   { path: "reports/commercial", section: "commercial", meta: { commercial: true } },
+  { path: "reports/commercial-foreign", section: "commercial_foreign", meta: { commercial: true } },
   { path: "reports/crm", section: "crm", meta: { crm: true } },
 ];
 
@@ -216,6 +217,14 @@ const router = createRouter({
           path: "finance/cash",
           name: "finance-cash-report",
           component: () => import("@/views/finance/CashReportView.vue"),
+          meta: { finance: true },
+        },
+        {
+          // The averages, which are a treasury tool rather than a company
+          // figure — see the note on TreasuryView.
+          path: "finance/treasury",
+          name: "finance-treasury",
+          component: () => import("@/views/finance/TreasuryView.vue"),
           meta: { finance: true },
         },
         {

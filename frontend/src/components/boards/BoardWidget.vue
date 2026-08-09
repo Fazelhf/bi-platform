@@ -26,7 +26,17 @@ const emit = defineEmits<{
   (e: "edit"): void;
   (e: "remove"): void;
   (e: "duplicate"): void;
+  (e: "drill", key: string, label: string): void;
 }>();
+
+/**
+ * A click on a bar means "what is this made of?" — except while arranging the
+ * board, where the same click is aimed at the card, not at the data.
+ */
+function drill(key: string, label: string) {
+  if (props.editing) return;
+  emit("drill", key, label);
+}
 
 const CHART_KINDS = ["bar", "hbar", "line", "area", "stacked", "pie", "donut"];
 
@@ -121,8 +131,14 @@ const isEmpty = computed(() => {
           :options="widget.options"
         />
         <BoardGauge v-else-if="widget.kind === 'gauge'" :result="result" :options="widget.options" />
-        <BoardTable v-else-if="widget.kind === 'table'" :result="result" :options="widget.options" />
-        <BoardChart v-else-if="isChart" :kind="widget.kind" :result="result" :options="widget.options" />
+        <BoardTable
+          v-else-if="widget.kind === 'table'"
+          :result="result" :options="widget.options" @drill="drill"
+        />
+        <BoardChart
+          v-else-if="isChart"
+          :kind="widget.kind" :result="result" :options="widget.options" @drill="drill"
+        />
       </template>
 
       <p v-else-if="!isStatic" class="h-full flex items-center justify-center text-xs text-slate-400">

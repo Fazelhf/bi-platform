@@ -7,30 +7,21 @@
  * running balance, and a plain warning when the period burned cash.
  */
 import { computed, onMounted, ref, watch } from "vue";
-import {
-  financeApi,
-  type CashReport,
-  type MonthTrend,
-  type YearTrend,
-} from "@/api/finance";
+import { financeApi, type CashReport } from "@/api/finance";
 import { salesApi } from "@/api/sales";
 import { currentPeriodId, type Period } from "@/types";
 import { toast } from "@/composables/useUi";
-import {
-  faYear,
-  loadMoneySettings,
-  setMoneySettings,
-  useMoney,
-} from "@/composables/useMoney";
+import { loadMoneySettings, setMoneySettings, useMoney } from "@/composables/useMoney";
 import { num } from "@/utils/format";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
-import StackedAccountBar from "@/components/charts/StackedAccountBar.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import AccountsPanel from "@/views/finance/AccountsPanel.vue";
 // تسهیلات و قرض are not a section of their own and not even a tab: they are
 // part of the cash picture, so the ledger that moved the balance and the
 // balances themselves are read on one continuous page.
 import CreditLinesView from "@/views/finance/CreditLinesView.vue";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
+import { useAuthStore } from "@/stores/auth";
 
 const periods = ref<Period[]>([]);
 const selected = ref<number | null>(null);
@@ -40,27 +31,23 @@ const error = ref("");
 
 const n = (v: string | null | undefined) => Number(v ?? 0);
 
+const auth = useAuthStore();
+
+/**
+ * Who gets the working sheet as well as the position.
+ *
+ * The day-by-day grids, the account list and the facility list are the finance
+ * colleague's instrument: he keys them, reconciles them and answers for them.
+ * The CEO opens this page for four figures — how much came in, how much went
+ * out, where it ended and what is owed — and eight thousand pixels of daily
+ * detail underneath meant scrolling past the answer to reach nothing.
+ */
+const isTreasury = computed(() => auth.department === "finance");
+
 const { money, unitLabel, unit } = useMoney();
-const monthTrend = ref<MonthTrend | null>(null);
-const yearTrend = ref<YearTrend | null>(null);
 
 /** Money is written with the unit spelled out, so a figure is never ambiguous. */
 const rial = (v: number | string | null | undefined) => money(v, false);
-
-async function loadTrends() {
-  if (!selected.value) return;
-  try {
-    const [month, year] = await Promise.all([
-      financeApi.monthTrend(selected.value),
-      financeApi.yearTrend(),
-    ]);
-    monthTrend.value = month;
-    yearTrend.value = year;
-  } catch {
-    monthTrend.value = null;
-    yearTrend.value = null;
-  }
-}
 
 async function switchUnit(next: "rial" | "toman") {
   try {
@@ -77,7 +64,6 @@ async function load() {
   error.value = "";
   try {
     report.value = await financeApi.report(selected.value);
-    await loadTrends();
   } catch (e: any) {
     report.value = null;
     error.value = e?.response?.status === 403
@@ -204,86 +190,10 @@ const balanceSeries = computed(() => [
           <p class="text-lg font-bold ltr-nums" :class="closingTone">
             {{ rial(n(report.balance.closing)) }}
           </p>
-          <p
-            v-if="monthTrend"
-            class="text-[11px] text-slate-400 mt-0.5"
-          >میانگین ماه: {{ rial(n(monthTrend.month.average_rial)) }}</p>
         </div>
       </div>
 
-      <!-- ===== میانگین موجودی =====
-           A closing balance says where the month ended; the average says how
-           much was actually held through it, which is the question a treasury
-           asks when deciding what it can commit to. -->
-      <section v-if="monthTrend" class="bg-surface rounded-card shadow-soft overflow-hidden">
-        <div class="flex flex-wrap items-baseline justify-between gap-2 p-4 pb-2">
-          <h2 class="font-semibold text-ink">
-            میانگین موجودی — {{ monthTrend.grain === "week" ? "به تفکیک هفته" : "کل ماه" }}
-          </h2>
-          <span class="text-[11px] text-slate-400">
-            میانگین مانده پایان هر روز، شامل روزهای بی‌حرکت
-          </span>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-slate-50/60 text-[11px] text-slate-400">
-              <tr>
-                <th class="text-right font-medium px-3 py-2">دوره</th>
-                <th class="text-left font-medium px-3 py-2">روز</th>
-                <th class="text-left font-medium px-3 py-2">میانگین موجودی</th>
-                <th class="text-left font-medium px-3 py-2">موجودی پایان</th>
-                <th class="text-right font-medium px-3 py-2">تفکیک حساب</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in monthTrend.rows" :key="row.period_id"
-                class="border-t border-slate-50 hover:bg-slate-50/60"
-              >
-                <td class="px-3 py-2 text-ink whitespace-nowrap">{{ row.label }}</td>
-                <td class="px-3 py-2 text-left ltr-nums text-slate-400">{{ num(row.day_count) }}</td>
-                <td class="px-3 py-2 text-left ltr-nums font-medium text-ink">
-                  {{ rial(n(row.average_rial)) }}
-                </td>
-                <td
-                  class="px-3 py-2 text-left ltr-nums"
-                  :class="n(row.closing_rial) < 0 ? 'text-red-600' : 'text-slate-500'"
-                >{{ rial(n(row.closing_rial)) }}</td>
-                <td class="px-3 py-2">
-                  <div class="flex flex-wrap gap-1 justify-end">
-                    <span
-                      v-for="slice in row.by_account" :key="String(slice.id)"
-                      class="inline-flex items-center gap-1 text-[11px] rounded-full bg-slate-100 px-2 py-0.5"
-                    >
-                      <span
-                        class="w-1.5 h-1.5 rounded-full"
-                        :style="{ background: slice.color || '#94a3b8' }"
-                      ></span>
-                      {{ slice.title }}: {{ rial(n(slice.amount)) }}
-                    </span>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr class="border-t-2 border-slate-100 bg-slate-50/40 font-semibold">
-                <td class="px-3 py-2 text-ink">کل ماه</td>
-                <td class="px-3 py-2 text-left ltr-nums">{{ num(monthTrend.month.day_count) }}</td>
-                <td class="px-3 py-2 text-left ltr-nums">{{ rial(n(monthTrend.month.average_rial)) }}</td>
-                <td class="px-3 py-2 text-left ltr-nums">{{ rial(n(monthTrend.month.closing_rial)) }}</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </section>
 
-      <!-- The chart they asked for: one column a month, split by account. -->
-      <StackedAccountBar
-        v-if="yearTrend && yearTrend.rows.length"
-        :title="`میانگین موجودی هر ماه — سال ${faYear(yearTrend.year)}`"
-        :rows="yearTrend.rows"
-      />
 
       <!-- Credit position -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -331,21 +241,9 @@ const balanceSeries = computed(() => [
         />
       </div>
 
-      <!-- The weekly split of the selected month. It used to sit directly
-           under the yearly chart — two near-identical full-width stacks in a
-           row, the second one narrower and emptier than the first, which is
-           what made the page look broken rather than dense. It belongs after
-           the daily detail, as the last zoom level: year, then month, then
-           week. -->
-      <StackedAccountBar
-        v-if="monthTrend && monthTrend.grain === 'week' && monthTrend.rows.length > 1"
-        :title="`میانگین موجودی هر هفته — ${monthTrend.period.label}`"
-        :rows="monthTrend.rows"
-        :height="240"
-        :show-closing="false"
-      />
 
       <!-- The grid, exactly as he reads it -->
+      <template v-if="isTreasury">
       <section
         v-for="block in ([
           { key: 'in', title: 'واریز', cats: report.categories.in, tone: 'text-green-600' },
@@ -401,9 +299,10 @@ const balanceSeries = computed(() => [
           </table>
         </div>
       </section>
+      </template>
 
       <!-- Running balance per day -->
-      <section v-if="activeDays.length" class="bg-surface rounded-card shadow-soft overflow-hidden">
+      <section v-if="isTreasury && activeDays.length" class="bg-surface rounded-card shadow-soft overflow-hidden">
         <h2 class="font-semibold text-ink p-4 pb-2">موجودی روزبه‌روز</h2>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -436,11 +335,13 @@ const balanceSeries = computed(() => [
       </section>
 
       <!-- The accounts every figure above is attributed to. -->
-      <AccountsPanel @changed="load" />
+      <AccountsPanel v-if="isTreasury" @changed="load" />
 
       <!-- The facilities, loans and partner accounts behind the balances
            above — same page, because they are the same question. -->
-      <CreditLinesView embedded />
+      <CreditLinesView v-if="isTreasury" embedded />
     </template>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard section="finance" :period="selected" />
+</div>
 </template>

@@ -32,7 +32,9 @@ from decimal import Decimal
 from typing import Any
 
 from django.core.exceptions import FieldError
-from django.db.models import Avg, Count, Max, Min, Q, Sum
+from django.db.models import (
+    Avg, Case, CharField, Count, Max, Min, Q, Sum, Value, When,
+)
 from django.utils import timezone
 
 from apps.core.models import JALALI_MONTHS, DimPeriod
@@ -162,19 +164,70 @@ def _months_for(spec_time: dict, period_id: int | None) -> list[tuple[int, int]]
     raise QueryError(f"بازه زمانی ناشناخته: {mode}")
 
 
+def _month_rows(months: list[tuple[int, int]]) -> list[DimPeriod]:
+    """The DimPeriod rows for those (year, month) pairs, in order."""
+    if not months:
+        return []
+    q = Q()
+    for year, month in months:
+        q |= Q(jalali_year=year, jalali_month=month)
+    return list(
+        DimPeriod.objects.filter(kind="month")
+        .filter(q)
+        .order_by("jalali_year", "jalali_month")
+    )
+
+
 def _time_filter(dataset: Dataset, spec: dict, period_id: int | None) -> Q:
-    if not dataset.period_path:
+    if not (dataset.period_path or dataset.date_path):
         return Q()
     months = _months_for(spec.get("time") or {}, period_id)
     if months is None:
         return Q()
-    p = dataset.period_path
-    q = Q()
-    for year, month in months:
-        q |= Q(**{f"{p}__jalali_year": year, f"{p}__jalali_month": month})
     # No months at all means "no data", not "all data" — an empty Q would
     # quietly widen the query to the whole history.
-    return q if months else Q(pk__in=[])
+    if not months:
+        return Q(pk__in=[])
+
+    if dataset.period_path:
+        p = dataset.period_path
+        q = Q()
+        for year, month in months:
+            q |= Q(**{f"{p}__jalali_year": year, f"{p}__jalali_month": month})
+        return q
+
+    # Date-based: one range per month, so a gap in the calendar stays a gap
+    # rather than being papered over by a single min..max span.
+    q = Q()
+    for row in _month_rows(months):
+        if row.start_date and row.end_date:
+            q |= Q(**{f"{dataset.date_path}__range": (row.start_date, row.end_date)})
+    return q if q else Q(pk__in=[])
+
+
+def _date_month_bucket(dataset: Dataset, months: list[tuple[int, int]]):
+    """
+    A CASE that labels each row with the Jalali month its date falls in.
+
+    Doing it in SQL keeps the grouping a single aggregate query. The alternative
+    — pulling every row back and bucketing in Python — turns a chart into a
+    table scan, and the CASE is bounded by the 36-month cap on any time window.
+    """
+    # "بدون تاریخ" and "outside the reporting calendar" are different answers:
+    # a پرونده still awaiting its ثبت سفارش has no date at all, while one dated
+    # 1403 has a date the calendar simply does not cover. Folding both into one
+    # bucket would report the second as missing data.
+    whens = [When(**{f"{dataset.date_path}__isnull": True}, then=Value(NO_DATE))]
+    for row in _month_rows(months):
+        if not (row.start_date and row.end_date):
+            continue
+        whens.append(
+            When(
+                **{f"{dataset.date_path}__range": (row.start_date, row.end_date)},
+                then=Value(f"{row.jalali_year}-{row.jalali_month:02d}"),
+            )
+        )
+    return Case(*whens, default=Value(OUT_OF_RANGE), output_field=CharField())
 
 
 # ---------------------------------------------------------------------------
@@ -277,10 +330,19 @@ def _month_label(year: int, month: int) -> str:
     return f"{name} {year}"
 
 
+#: Annotation name for the month bucket of a date-based dataset.
+DATE_MONTH_ALIAS = "_month_bucket"
+#: Sentinels the bucket CASE emits for rows it cannot place in a month.
+NO_DATE = "~none"
+OUT_OF_RANGE = "~out"
+
+
 def _group_paths(dataset: Dataset, dim: Dim) -> list[str]:
     if dim.kind == "month":
-        p = dataset.period_path
-        return [f"{p}__jalali_year", f"{p}__jalali_month"]
+        if dataset.period_path:
+            p = dataset.period_path
+            return [f"{p}__jalali_year", f"{p}__jalali_month"]
+        return [DATE_MONTH_ALIAS]
     paths = [dim.value_path]
     if dim.sort_path and dim.sort_path not in paths:
         paths.append(dim.sort_path)
@@ -290,14 +352,27 @@ def _group_paths(dataset: Dataset, dim: Dim) -> list[str]:
 def _group_key(dataset: Dataset, dim: Dim, row: dict) -> tuple[str, str, Any]:
     """(stable key, human label, sort hint) for one grouped row."""
     if dim.kind == "month":
-        p = dataset.period_path
-        year = row.get(f"{p}__jalali_year") or 0
-        month = row.get(f"{p}__jalali_month") or 0
+        if dataset.period_path:
+            p = dataset.period_path
+            year = row.get(f"{p}__jalali_year") or 0
+            month = row.get(f"{p}__jalali_month") or 0
+        else:
+            raw = row.get(DATE_MONTH_ALIAS) or OUT_OF_RANGE
+            if raw == NO_DATE:
+                # Sorted last: these are rows still waiting for their date.
+                return NO_DATE, "بدون تاریخ", (9999, 99)
+            if raw == OUT_OF_RANGE:
+                return OUT_OF_RANGE, "خارج از تقویم", (9999, 98)
+            year, month = int(raw[:4]), int(raw[5:])
+        if not month:
+            return NO_DATE, "بدون تاریخ", (9999, 99)
         return f"{year}-{month:02d}", _month_label(year, month), (year, month)
     raw = row.get(dim.value_path)
     label = _label_for(dim, raw)
     hint = row.get(dim.sort_path) if dim.sort_path else label
-    return label, label, hint
+    # The key is the *stored* value, not the label: two rows can translate to
+    # the same Persian word, and the key is what a drill-down filters on.
+    return f"{raw}", label, hint
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +434,16 @@ def run_query(spec: dict, *, user, period_id: int | None = None, request=None) -
         paths = _group_paths(dataset, dim)
         if split:
             paths += _group_paths(dataset, split)
+
+        # A date-based dataset has no month column to group on, so one is
+        # computed. The buckets come from the *widget's own* time window, which
+        # is why this is built here and not once on the dataset.
+        if DATE_MONTH_ALIAS in paths:
+            window = _months_for(spec.get("time") or {}, period_id)
+            if window is None:  # "همه دوره‌ها" — bucket the whole calendar
+                window = [(p.jalali_year, p.jalali_month) for p in month_periods()]
+            qs = qs.annotate(**{DATE_MONTH_ALIAS: _date_month_bucket(dataset, window)})
+
         rows = list(qs.values(*paths).annotate(**annotations))
         totals = qs.aggregate(**annotations)
     except FieldError as exc:  # a catalog path that no longer matches the model
@@ -511,4 +596,152 @@ def _shape_split(dataset, dim, split, metrics, rows, totals, spec, period_id) ->
             for c in cat_list
         ],
         "totals": {metric.key: _number(totals.get(f"m_{metric.key}"))},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Drill-down — the rows behind one bar
+# ---------------------------------------------------------------------------
+
+#: How many underlying rows a drill-down returns. A drawer is for "show me
+#: what this is made of", not for exporting a table; past a screenful nobody
+#: reads it, and the widget's own table kind is the right tool for that.
+DRILL_LIMIT = 200
+
+
+def _detail_columns(dataset: Dataset) -> list[dict]:
+    """
+    The drawer's columns, derived from the dataset's own dims and metrics.
+
+    Not a separately declared list: anything worth grouping by is worth seeing
+    per row, and a second list would be one more place to forget when a dataset
+    changes. Each column carries what the row needs to be *readable* — the
+    dimension's choices, so `team` prints as «فروش همکار», and the metric's
+    unit, so an amount prints as Rials rather than as eleven digits.
+    """
+    columns: list[dict] = []
+    if dataset.period_path:
+        columns.append({"label": "دوره", "key": f"{dataset.period_path}__code"})
+    elif dataset.date_path:
+        columns.append({"label": "تاریخ", "key": dataset.date_path})
+    for dim in dataset.dims:
+        if dim.kind == "month":
+            continue
+        columns.append({
+            "label": dim.label, "key": dim.value_path,
+            "choices": dict(dim.choices),
+        })
+    for metric in dataset.metrics:
+        # Counts have no column of their own to show, and an expression is not
+        # a field — neither can be read off a single row.
+        if metric.agg == "count" or metric.expression is not None or not metric.path:
+            continue
+        columns.append({"label": metric.label, "key": metric.path,
+                        "unit": metric.unit})
+    # `values()` collapses duplicate paths, so the header would not line up.
+    seen, unique = set(), []
+    for column in columns:
+        if column["key"] in seen:
+            continue
+        seen.add(column["key"])
+        unique.append(column)
+    return unique
+
+
+def _dim_filter(dataset: Dataset, dim: Dim, key: str) -> Q:
+    """Narrow to the one group the user clicked."""
+    if dim.kind != "month":
+        # `value_path`, not `path`: the key came from the column that was
+        # grouped on, which for a foreign key is the *label* column. Filtering
+        # the id column with a person's name is how this first went wrong.
+        field = dim.value_path
+        if key in ("None", ""):
+            return Q(**{f"{field}__isnull": True}) | Q(**{field: ""})
+        return Q(**{field: key})
+
+    if key in (NO_DATE, OUT_OF_RANGE, "—"):
+        # Not a month, so there is nothing to narrow to — the caller already
+        # sees these as their own bucket.
+        return Q()
+    year, month = int(key[:4]), int(key[5:])
+    if dataset.period_path:
+        p = dataset.period_path
+        return Q(**{f"{p}__jalali_year": year, f"{p}__jalali_month": month})
+    row = _month_rows([(year, month)])
+    if not row or not (row[0].start_date and row[0].end_date):
+        return Q(pk__in=[])
+    return Q(**{f"{dataset.date_path}__range": (row[0].start_date, row[0].end_date)})
+
+
+def run_drill(
+    spec: dict, key: str, *, user, period_id: int | None = None, request=None
+) -> dict:
+    """
+    The rows behind one category of one widget.
+
+    Deliberately re-runs the widget's own spec — same dataset, same filters,
+    same time window — and only adds the clicked group on top. Rebuilding the
+    query from scratch here is how a drill-down drifts from the chart it came
+    from and starts showing a total nobody can reconcile.
+    """
+    from apps.dashboards.permissions import can_read_dataset
+
+    if not isinstance(spec, dict):
+        raise QueryError("مشخصات ویجت نامعتبر است.")
+    dataset = get_dataset(str(spec.get("dataset", "")))
+    if dataset is None:
+        raise QueryError(f"منبع داده ناشناخته: {spec.get('dataset')}")
+    if not can_read_dataset(user, dataset, request):
+        raise QueryError("به این منبع داده دسترسی ندارید.")
+
+    dim = dataset.dim(str(spec.get("dimension") or ""))
+    if dim is None:
+        raise QueryError("این ویجت تفکیکی ندارد که بتوان بازش کرد.")
+
+    qs = dataset.get_model().objects.all()
+    if dataset.base_filter:
+        qs = qs.filter(**dataset.base_filter)
+    if dataset.status_path and not spec.get("include_unapproved"):
+        qs = qs.filter(**{dataset.status_path: "approved"})
+
+    include, exclude = _user_filters(dataset, spec.get("filters"))
+    qs = qs.filter(include, _time_filter(dataset, spec, period_id))
+    qs = qs.filter(_dim_filter(dataset, dim, key))
+    if exclude:
+        qs = qs.exclude(exclude)
+
+    columns = _detail_columns(dataset)
+    try:
+        total = qs.count()
+        rows = list(qs.values(*[c["key"] for c in columns])[:DRILL_LIMIT])
+    except FieldError as exc:
+        raise QueryError(f"جزئیات این منبع داده خوانده نشد: {exc}") from exc
+
+    choices = {c["key"]: c["choices"] for c in columns if c.get("choices")}
+    numeric = {c["key"] for c in columns if c.get("unit")}
+
+    def cell(path: str, value: Any):
+        if value is None:
+            return None
+        if path in choices:
+            return choices[path].get(str(value), str(value))
+        # Numbers stay numbers so the client can format them by unit; a Decimal
+        # is not JSON, so it goes over as a float.
+        if path in numeric:
+            return _number(value)
+        return str(value)
+
+    return {
+        "dataset": dataset.key,
+        "dataset_label": dataset.label,
+        "dimension": {"key": dim.key, "label": dim.label},
+        "columns": [
+            {"label": c["label"], "key": c["key"], "unit": c.get("unit", "")}
+            for c in columns
+        ],
+        "rows": [
+            {path: cell(path, value) for path, value in row.items()} for row in rows
+        ],
+        "total": total,
+        "truncated": total > DRILL_LIMIT,
     }

@@ -1,1 +1,0 @@
-import{d as n,c as o,n as s,o as a}from"./vue-CV18Y6o-.js";const c=n({__name:"Skeleton",props:{rounded:{default:"rounded-lg"}},setup(e){return(r,t)=>(a(),o("div",{class:s(["skeleton",e.rounded])},null,2))}});export{c as _};

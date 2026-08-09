@@ -11,6 +11,7 @@ import DealForm from "@/components/crm/DealForm.vue";
 import ActivityForm from "@/components/crm/ActivityForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 /**
  * داشبورد CRM — the home screen.
@@ -374,5 +375,7 @@ async function onSaved(id?: number) {
         />
       </div>
     </div>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard section="crm" :period="null" />
+</div>
 </template>

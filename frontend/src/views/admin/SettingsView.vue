@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import AdminFormulasView from "@/views/admin/AdminFormulasView.vue";
 import AdminAppearanceView from "@/views/admin/AdminAppearanceView.vue";
 import AdminPeriodsView from "@/views/admin/AdminPeriodsView.vue";
+import AdminBoardsView from "@/views/admin/AdminBoardsView.vue";
 import { useAuthStore } from "@/stores/auth";
 
 const route = useRoute();
@@ -14,8 +15,12 @@ const auth = useAuthStore();
 // (/admin) — they are system administration, not the CEO's business controls.
 // What stays here is what the CEO genuinely owns: the reporting calendar,
 // the KPI formulas behind the numbers, and how the platform looks.
+// «داشبوردها» sits here rather than on the boards themselves: composing what
+// a section reports is something only the CEO does, and a control only one
+// person may use does not belong on a page the whole company opens.
 const tabs = [
   { key: "appearance", label: "طرح گرافیکی", comp: AdminAppearanceView },
+  { key: "boards", label: "داشبوردها", comp: AdminBoardsView },
   { key: "periods", label: "دوره‌ها", comp: AdminPeriodsView },
   { key: "formulas", label: "فرمول‌ها", comp: AdminFormulasView },
 ];

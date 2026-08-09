@@ -540,3 +540,80 @@ class DailyGrainTests(TestCase):
         )
         # 3100 sold against a plan of 1000 — not against 31 × 1000.
         self.assertAlmostEqual(float(achievement.actual), 310.0, places=4)
+
+
+class NotificationLinkTests(TestCase):
+    """
+    A notification that cannot be opened is a notification nobody acts on.
+
+    The destination depends on who is reading — the same submitted-for-approval
+    row is a task for the CEO and a status update for its author — so the rules
+    are checked from both ends here.
+    """
+
+    def setUp(self):
+        from apps.core.models import Notification
+        from apps.production.models import DimMachine, FactProduction
+
+        self.Notification = Notification
+        self.ceo = User.objects.create_user("ceo-n", password="x", role=Role.EXECUTIVE)
+        self.prod = User.objects.create_user(
+            "prod-n", password="x", role=Role.MANAGER,
+            department=Department.PRODUCTION,
+        )
+        period = DimPeriod.objects.create(jalali_year=1405, jalali_month=4)
+        machine = DimMachine.objects.create(code="m1", name_fa="خط ۱")
+        self.fact = FactProduction.objects.create(period=period, machine=machine)
+
+    def _note(self, recipient, verb, instance=None, label=None):
+        return self.Notification.objects.create(
+            recipient=recipient, verb=verb, message="…",
+            target_label=label or (
+                f"{instance._meta.app_label}.{instance._meta.object_name}"
+                if instance else ""
+            ),
+            target_id=str(getattr(instance, "pk", "")),
+        )
+
+    def _link(self, note, user):
+        from apps.core.notification_links import link_for
+
+        return link_for(note, user)
+
+    def test_a_submission_sends_the_approver_to_the_inbox(self):
+        note = self._note(self.ceo, "submitted", self.fact)
+        self.assertEqual(self._link(note, self.ceo), {"name": "inbox"})
+
+    def test_a_decision_sends_the_author_to_their_own_sheet(self):
+        note = self._note(self.prod, "rejected", self.fact)
+        self.assertEqual(self._link(note, self.prod), {"name": "production-entry"})
+
+    def test_another_department_is_not_sent_to_a_sheet_it_cannot_open(self):
+        sales = User.objects.create_user(
+            "sales-n", password="x", role=Role.MANAGER,
+            department=Department.SALES_TEAM,
+        )
+        note = self._note(sales, "approved", self.fact)
+        # production-dashboard is readable by everyone; production-entry is not.
+        self.assertEqual(self._link(note, sales), {"name": "production-dashboard"})
+
+    def test_a_manager_is_never_sent_to_the_executive_overview(self):
+        from apps.sales.models import FactSalesMonthly
+
+        note = self._note(
+            self.prod, "approved", label=f"sales.{FactSalesMonthly.__name__}"
+        )
+        self.assertIsNone(self._link(note, self.prod))
+
+    def test_a_notice_with_no_page_returns_no_link(self):
+        note = self._note(self.ceo, "approved", label="adminpanel.Broadcast")
+        self.assertIsNone(self._link(note, self.ceo))
+
+    def test_the_api_exposes_the_link(self):
+        from rest_framework.test import APIClient
+
+        self._note(self.ceo, "submitted", self.fact)
+        client = APIClient()
+        client.force_authenticate(self.ceo)
+        row = client.get("/api/executive/notifications/").data["results"][0]
+        self.assertEqual(row["link"], {"name": "inbox"})

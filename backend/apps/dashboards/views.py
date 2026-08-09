@@ -38,6 +38,7 @@ from apps.dashboards.query import (
     QueryError,
     default_month,
     month_periods,
+    run_drill,
     run_query,
 )
 from apps.dashboards.serializers import (
@@ -308,6 +309,35 @@ class QueryView(APIView):
                 serializer.validated_data["config"],
                 user=request.user,
                 period_id=serializer.validated_data.get("period"),
+                request=request,
+            )
+        except QueryError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(data)
+
+
+class DrillView(APIView):
+    """
+    The rows behind one bar, one slice, one table line.
+
+    A number on a board raises the question "made of what?", and a dashboard
+    that cannot answer it sends the reader to a different page to re-derive the
+    same filter by hand — where they usually get a slightly different total.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        config = request.data.get("config")
+        key = request.data.get("key")
+        if key is None:
+            return Response({"detail": "دسته انتخاب‌نشده است."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            data = run_drill(
+                config or {}, str(key),
+                user=request.user,
+                period_id=request.data.get("period"),
                 request=request,
             )
         except QueryError as exc:

@@ -7,6 +7,7 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import DrillPanel, { type DrillColumn } from "@/components/commercial/DrillPanel.vue";
 import Skeleton from "@/components/Skeleton.vue";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 /**
  * داشبورد بازرگانی خارجی.
@@ -270,5 +271,7 @@ const widest = computed(
         @pick="pick"
       />
     </template>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard section="commercial_foreign" :period="null" />
+</div>
 </template>

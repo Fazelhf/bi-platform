@@ -25,6 +25,8 @@ const columns = computed(() => {
   return props.result.series.map((s) => ({ key: s.key, label: s.name, unit: s.unit }));
 });
 
+const emit = defineEmits<{ (e: "drill", key: string, label: string): void }>();
+
 const showTotals = computed(
   () => !split.value && props.options.showValues !== false && props.result.rows.length > 1,
 );
@@ -47,7 +49,8 @@ const showTotals = computed(
       <tbody>
         <tr
           v-for="row in result.rows" :key="row.key"
-          class="border-t border-slate-100 hover:bg-slate-50/60 transition-colors"
+          class="border-t border-slate-100 hover:bg-slate-50/60 transition-colors cursor-pointer"
+          @click="emit('drill', row.key, row.label)"
         >
           <td class="py-1.5 px-2 text-ink whitespace-nowrap max-w-[180px] truncate" :title="row.label">
             {{ row.label }}

@@ -8,6 +8,7 @@ import { num } from "@/utils/format";
 import DrillPanel, { type DrillColumn } from "@/components/commercial/DrillPanel.vue";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
 import Skeleton from "@/components/Skeleton.vue";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 /**
  * داشبورد بازرگانی داخلی.
@@ -225,5 +226,7 @@ const widest = computed(() => Math.max(
         @close="open = null" @pick="pick"
       />
     </template>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard section="commercial" :period="null" />
+</div>
 </template>

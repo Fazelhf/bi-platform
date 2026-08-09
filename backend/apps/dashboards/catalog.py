@@ -89,6 +89,11 @@ class Dataset:
     #: ORM path to the DimPeriod this row belongs to. Datasets without one
     #: (the customer list) simply ignore every time filter.
     period_path: str = "period"
+    #: For tables that record a *date* rather than a reporting period — a
+    #: foreign order is registered on a day, not filed against a month. The
+    #: engine buckets these into Jalali months from the period calendar, so
+    #: they trend alongside everything else instead of being stuck on "همه".
+    date_path: str = ""
     #: Rows carry the submit→approve status; dashboards read approved only
     #: unless the widget explicitly opts into unapproved data.
     status_path: str = ""
@@ -381,6 +386,116 @@ DATASETS: tuple[Dataset, ...] = (
             Metric("quantity", "مقدار درخواستی", "sum", "quantity"),
         ),
     ),
+    # ---------------- بازرگانی خارجی ----------------
+    # These carry dates, not reporting periods — a پرونده is registered on a
+    # day and cleared on another — so they trend through `date_path`.
+    Dataset(
+        key="foreign_orders",
+        label="پرونده‌های بازرگانی خارجی",
+        section="commercial_foreign",
+        model="commercial.ForeignOrder",
+        access="commercial",
+        period_path="",
+        date_path="registered_on",
+        note="دوره بر اساس تاریخ ثبت سفارش محاسبه می‌شود.",
+        dims=(
+            MONTH_DIM,
+            Dim(key="status", label="وضعیت پرونده", path="status",
+                choices=(("draft", "پیش‌نویس"),
+                         ("permit", "منتظر مجوز صنعت و معدن"),
+                         ("registered", "ثبت سفارش شده"),
+                         ("queued", "در صف تخصیص ارز"),
+                         ("allocated", "تخصیص ارز"),
+                         ("remitted", "حواله ارز"),
+                         ("purchased", "خرید انجام شد"),
+                         ("shipping", "در حال حمل"),
+                         ("customs", "گمرک"),
+                         ("cleared", "ترخیص شد"),
+                         ("closed", "بسته شده"),
+                         ("cancelled", "لغو شده"))),
+            Dim(key="supplier", label="تامین‌کننده", path="supplier",
+                label_path="supplier__name_fa"),
+            Dim(key="country", label="کشور مبدأ", path="country"),
+            Dim(key="brand", label="برند", path="brand"),
+            Dim(key="material", label="کالا", path="material",
+                label_path="material__name_fa"),
+            Dim(key="currency", label="ارز", path="currency",
+                choices=(("USD", "دلار"), ("EUR", "یورو"),
+                         ("AED", "درهم"), ("CNY", "یوان"))),
+            Dim(key="bank", label="بانک", path="bank", label_path="bank__name_fa"),
+        ),
+        metrics=(
+            Metric("orders", "تعداد پرونده", "count"),
+            Metric("amount_fx", "مبلغ ارزی", "sum", "amount"),
+            Metric("weight_ton", "وزن", "sum", "weight_ton", "ton"),
+            Metric("customs_value", "ارزش گمرکی", "sum",
+                   "customs_value_rial", "rial"),
+        ),
+    ),
+    Dataset(
+        key="foreign_shipments",
+        label="محموله‌های وارداتی",
+        section="commercial_foreign",
+        model="commercial.Shipment",
+        access="commercial",
+        period_path="",
+        date_path="etd",
+        note="دوره بر اساس تاریخ حرکت محموله (ETD) محاسبه می‌شود.",
+        dims=(
+            MONTH_DIM,
+            Dim(key="status", label="وضعیت محموله", path="status",
+                choices=(("ready", "آماده بارگیری"), ("departed", "حرکت کرده"),
+                         ("at_sea", "روی دریا"), ("at_port", "بندر مقصد"),
+                         ("customs", "گمرک"), ("cleared", "ترخیص شد"),
+                         ("delivered", "تحویل کارخانه"), ("cancelled", "لغو شده"))),
+            Dim(key="order", label="پرونده", path="order",
+                label_path="order__file_no"),
+            Dim(key="supplier", label="تامین‌کننده", path="order__supplier",
+                label_path="order__supplier__name_fa"),
+            Dim(key="carrier", label="شرکت حمل", path="carrier"),
+            Dim(key="origin_port", label="بندر مبدأ", path="origin_port"),
+            Dim(key="destination_port", label="بندر مقصد", path="destination_port"),
+        ),
+        metrics=(
+            Metric("shipments", "تعداد محموله", "count"),
+            Metric("weight_ton", "وزن", "sum", "weight_ton", "ton"),
+            Metric("value_amount", "ارزش ارزی", "sum", "value_amount"),
+            Metric("paid_amount", "پرداخت‌شده", "sum", "paid_amount"),
+            Metric("interest", "سود/کارمزد", "sum", "interest_amount"),
+        ),
+    ),
+    Dataset(
+        key="foreign_costs",
+        label="هزینه‌های وارداتی",
+        section="commercial_foreign",
+        model="commercial.ShipmentCost",
+        access="commercial",
+        period_path="",
+        date_path="due_on",
+        note="کرایه، بیمه، حقوق گمرکی، دموراژ و انبارداری — به تفکیک نوع.",
+        dims=(
+            MONTH_DIM,
+            Dim(key="kind", label="نوع هزینه", path="kind",
+                choices=(("goods", "بهای کالا"), ("freight", "کرایه حمل"),
+                         ("insurance", "بیمه"), ("duty", "حقوق و عوارض گمرکی"),
+                         ("clearance", "ترخیصیه و سپرده"),
+                         ("transit", "حمل داخلی و ترانزیت"),
+                         ("demurrage", "دموراژ / حق توقف"),
+                         ("storage", "انبارداری"), ("other", "سایر"))),
+            Dim(key="shipment", label="محموله", path="shipment",
+                label_path="shipment__bl_no"),
+            Dim(key="supplier", label="تامین‌کننده",
+                path="shipment__order__supplier",
+                label_path="shipment__order__supplier__name_fa"),
+            Dim(key="is_estimate", label="برآوردی / قطعی", path="is_estimate",
+                choices=(("True", "برآوردی"), ("False", "قطعی"))),
+        ),
+        metrics=(
+            Metric("amount", "مبلغ ریالی", "sum", "amount_rial", "rial"),
+            Metric("amount_fx", "مبلغ ارزی", "sum", "amount_fx"),
+            Metric("rows", "تعداد ردیف", "count"),
+        ),
+    ),
     # ---------------- CRM ----------------
     Dataset(
         key="crm_deals",
@@ -468,7 +583,10 @@ SECTIONS: tuple[Section, ...] = (
     Section("sales_b2b", "فروش B2B", "sales_b2b"),
     Section("production", "تولید", "production"),
     Section("finance", "مالی", "finance", "finance"),
-    Section("commercial", "بازرگانی", "commercial", "commercial"),
+    Section("commercial", "بازرگانی داخلی", "commercial", "commercial"),
+    # Its own board rather than more cards on بازرگانی داخلی: the two halves
+    # answer different questions — one is about price, the other about time.
+    Section("commercial_foreign", "بازرگانی خارجی", "commercial", "commercial"),
     Section("crm", "CRM", "", "crm"),
 )
 

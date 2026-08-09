@@ -8,6 +8,7 @@ import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, num, pct, rial } from "@/utils/format";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 /**
  * The CEO's one screen.
@@ -367,5 +368,7 @@ const card = "bg-surface rounded-card shadow-soft";
         </div>
       </div>
     </template>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard section="overview" :period="selectedPeriod" />
+</div>
 </template>

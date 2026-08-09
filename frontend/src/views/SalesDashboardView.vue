@@ -13,6 +13,14 @@ import PeriodCalendar from "@/components/PeriodCalendar.vue";
 import ReconcilePanel from "@/components/ReconcilePanel.vue";
 import PeriodReport from "@/components/PeriodReport.vue";
 import { rial } from "@/utils/format";
+import SectionBoard from "@/components/boards/SectionBoard.vue";
+
+/** One component serves three channels, so its board follows the channel. */
+const SECTION_BY_CHANNEL: Record<string, string> = {
+  team: "sales_team",
+  organizational: "sales_org",
+  b2b: "sales_b2b",
+};
 
 /**
  * Mirrors the workbook's two chart sheets:
@@ -23,6 +31,8 @@ const props = withDefaults(defineProps<{ channel?: string; title?: string }>(), 
   channel: "team",
   title: "داشبورد فروش",
 });
+
+const boardSection = computed(() => SECTION_BY_CHANNEL[props.channel] ?? "sales_team");
 
 interface Detail {
   period: { id: number; label: string };
@@ -500,5 +510,7 @@ watch([periodA, () => props.channel], () => {
         />
       </div>
     </template>
-  </div>
+      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
+    <SectionBoard :section="boardSection" :period="periodA" />
+</div>
 </template>
