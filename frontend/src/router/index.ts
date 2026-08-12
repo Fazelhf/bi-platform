@@ -126,14 +126,7 @@ const router = createRouter({
         ...boardRoutes,
 
         // --- CRM (فروش همکار) — locked demo ---
-        // Everything under /crm needs the demo password. `meta.crm` marks the
-        // pages the guard protects; the API enforces the same lock, so this
-        // is convenience, not the security boundary.
-        {
-          path: "crm/unlock",
-          name: "crm-unlock",
-          component: () => import("@/views/crm/CrmLockView.vue"),
-        },
+        // CRM is reached by role, not by a password — see CrmAccess.
         {
           path: "crm",
           name: "crm-dashboard",
@@ -496,14 +489,6 @@ router.beforeEach(async (to) => {
       !!auth.me?.is_superuser ||
       ["sales_team", "sales_org", "sales_b2b"].includes(auth.department);
     if (!canRoster) return { name: homeRouteFor(auth.department) };
-  }
-  // CRM demo: locked until its own password is entered. `next` is carried so
-  // a deep link (a drill-down URL someone was sent) survives the prompt.
-  if (to.meta.crm) {
-    const { useCrmStore } = await import("@/stores/crm");
-    if (!(await useCrmStore().checkGate())) {
-      return { name: "crm-unlock", query: { next: to.fullPath } };
-    }
   }
 });
 

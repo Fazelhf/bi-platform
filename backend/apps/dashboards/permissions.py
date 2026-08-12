@@ -28,15 +28,19 @@ def can_edit_boards(user) -> bool:
     )
 
 
-def _crm_unlocked(user, request) -> bool:
-    """CRM data stays behind its own demo password, dashboards included."""
-    from apps.crm import gate
+def _crm_unlocked(user, request=None) -> bool:
+    """
+    Who may build a widget over CRM data.
 
-    if not request:
-        return False
-    if not gate.demo_password():
-        return False
-    return gate.verify(request.META.get(gate.HEADER, ""), user)
+    Was the demo password, back when the section held generated rows. It holds
+    the real customer file now, so a widget that reads it answers to the same
+    rule the section does — see apps.crm.views.CrmAccess. The `request`
+    argument is kept because every caller passes it and access may yet need to
+    consider more than the account.
+    """
+    from apps.crm.views import can_read_crm
+
+    return can_read_crm(user)
 
 
 def _has_access(user, access: str, request=None) -> bool:

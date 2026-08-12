@@ -25,7 +25,7 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.crm import gate, reports as rpt
+from apps.crm import reports as rpt
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label, period_for
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
@@ -57,6 +57,19 @@ def can_write_crm(user) -> bool:
     )
 
 
+def can_read_crm(user) -> bool:
+    """The CEO reads it, فروش همکار works it, an admin maintains it."""
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_superuser
+            or user.role == "executive"
+            or user.department == "sales_team"
+        )
+    )
+
+
 class CrmWritePermission(BasePermission):
     """Read: any authenticated user. Write: the sales-team department, the
     CEO, or a superuser — CRM records belong to فروش همکار."""
@@ -72,63 +85,37 @@ class CrmWritePermission(BasePermission):
         return can_write_crm(u)
 
 
+class CrmAccess(BasePermission):
+    """
+    Who may open CRM at all.
+
+    This used to be a shared demo password, which made sense while the section
+    held generated sample data and was shown to people without accounts. It
+    holds the company's real customer file now — every contact, every deal
+    value — and a single password that ships in the source is the wrong shape
+    of protection for that. Access is a property of the account instead: the
+    sales team who own the records, and the CEO who reads them.
+    """
+
+    message = "دسترسی به CRM ندارید."
+
+    def has_permission(self, request, view):
+        return can_read_crm(request.user)
+
+
 class GatedAPIView(APIView):
-    """Base for the CRM's non-viewset endpoints — all behind the demo lock."""
+    """Base for the CRM's non-viewset endpoints."""
 
-    permission_classes = [gate.CrmUnlocked]
-
-
-class CrmGateView(APIView):
-    """
-    The demo lock: the only CRM endpoint reachable without a grant.
-
-    GET  — is my current key still valid? (so a refresh does not re-prompt)
-    POST — exchange the demo password for a key
-    DELETE — throw the key away (lock it again)
-    """
-
-    def get(self, request):
-        token = request.META.get(gate.HEADER, "")
-        return Response({
-            "unlocked": gate.verify(token, request.user),
-            "configured": bool(gate.demo_password()),
-        })
-
-    def post(self, request):
-        if not gate.demo_password():
-            return Response(
-                {"detail": "دمو CRM غیرفعال است."}, status=status.HTTP_403_FORBIDDEN
-            )
-        # Brute force is the obvious attack on a single shared password, so
-        # attempts are budgeted per user before the comparison happens.
-        if gate.attempts_left(request.user) <= 0:
-            return Response(
-                {"detail": "تعداد تلاش‌های ناموفق زیاد بود. کمی بعد دوباره امتحان کنید."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-        if not gate.check_password(request.data.get("password", "")):
-            left = gate.record_failure(request.user)
-            return Response(
-                {"detail": "رمز دمو نادرست است.", "attempts_left": left},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        gate.clear_failures(request.user)
-        return Response({
-            "key": gate.issue(request.user),
-            "expires_in": gate.TTL_SECONDS,
-        })
-
-    def delete(self, request):
-        return Response({"unlocked": False})
+    permission_classes = [CrmAccess]
 
 
 # --------------------------------------------------------------------------
 # Lookup viewsets
 # --------------------------------------------------------------------------
 class _Base(viewsets.ModelViewSet):
-    # Two gates, deliberately: the demo lock decides whether CRM is visible at
-    # all, the write permission decides who may change it.
-    permission_classes = [gate.CrmUnlocked, CrmWritePermission]
+    # Two checks, deliberately: CrmAccess decides who sees the section at all,
+    # CrmWritePermission decides who may change what is in it.
+    permission_classes = [CrmAccess, CrmWritePermission]
 
 
 class CustomerGroupViewSet(_Base):

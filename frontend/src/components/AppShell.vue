@@ -11,7 +11,6 @@ import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
-import { useCrmStore } from "@/stores/crm";
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -55,9 +54,9 @@ interface Item {
 }
 
 /**
- * CRM ships as a locked demo: until its separate password is entered the
- * sidebar shows a single «دمو CRM» entry, and the real section only appears
- * afterwards. The list below is what unlocking reveals.
+ * CRM. Was a password-locked demo while it held generated data; it holds the
+ * company's real customer file now, so access follows the account instead —
+ * فروش همکار works it, the CEO reads it. See CrmAccess on the server.
  */
 const crmItems: Item[] = [
   { name: "crm-dashboard", label: "داشبورد CRM", icon: "grid" },
@@ -118,13 +117,10 @@ function childActive(name: string): boolean {
   return current === name || CHILD_PARENT[current] === name;
 }
 
-const crm = useCrmStore();
-
-/** Who even sees the demo entry. */
+/** Who sees the section at all. Mirrors CrmAccess on the server. */
 const showCrm = computed(
   () => auth.isExecutive || auth.department === "sales_team" || !!auth.me?.is_superuser,
 );
-const crmUnlocked = computed(() => crm.unlocked === true);
 
 // Detail pages keep their list item highlighted.
 const CRM_PARENT: Record<string, string> = {
@@ -306,7 +302,6 @@ const pageTitle = computed(() => {
     "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
     "crm-activities": "فعالیت‌ها و کارها", "crm-reports": "گزارش‌های CRM",
-    "crm-unlock": "دمو CRM",
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
     "sales-b2b-entry": "ورود فروش B2B",
     "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
@@ -347,18 +342,11 @@ async function refreshBadges() {
 
 function go(name: string) { router.push({ name }); mobileOpen.value = false; }
 
-function lockCrm() {
-  crm.lock();
-  if (String(route.name ?? "").startsWith("crm")) router.push({ name: "home" });
-}
 function logout() { auth.logout(); router.push({ name: "login" }); }
 
 onMounted(() => {
   refreshBadges();
   window.setInterval(refreshBadges, 30_000);
-  // Resolve the demo lock once, so a reload on any page shows the sidebar in
-  // the state it is actually in rather than always starting locked.
-  if (showCrm.value) crm.checkGate();
 });
 </script>
 
@@ -477,37 +465,10 @@ onMounted(() => {
           </button>
         </template>
 
-        <!-- CRM — one locked entry until the demo password is entered -->
+        <!-- CRM — visible to the sales team and the CEO, by role -->
         <template v-if="showCrm">
-          <button
-            v-if="!crmUnlocked"
-            class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2"
-            :class="[
-              route.name === 'crm-unlock' ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
-              collapsed ? 'justify-center' : '',
-            ]"
-            title="دمو CRM — رمز جداگانه دارد"
-            @click="go('crm-unlock')"
-          >
-            <NavIcon name="chart" :size="20" />
-            <template v-if="!collapsed">
-              <span class="flex-1 text-right">دمو CRM</span>
-              <svg class="w-3.5 h-3.5 opacity-50 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-            </template>
-          </button>
-
-          <template v-else>
             <div class="pt-3 pb-1 px-3 flex items-center gap-2">
-              <p v-if="!collapsed" class="text-[10px] font-semibold text-slate-300 tracking-wide flex-1">دمو CRM</p>
-              <button
-                v-if="!collapsed"
-                class="text-[10px] text-slate-300 hover:text-red-500"
-                title="بستن دمو"
-                @click="lockCrm"
-              >قفل</button>
+              <p v-if="!collapsed" class="text-[10px] font-semibold text-slate-300 tracking-wide flex-1">CRM</p>
               <div v-if="collapsed" class="h-px bg-slate-200 mx-1 flex-1"></div>
             </div>
             <button
@@ -524,7 +485,6 @@ onMounted(() => {
               <NavIcon :name="it.icon" :size="20" />
               <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
             </button>
-          </template>
         </template>
       </nav>
 
@@ -632,7 +592,7 @@ onMounted(() => {
       </main>
 
       <!-- CRM drill-down panel — mounted once, opened from any CRM page -->
-      <DrillDrawer v-if="crmUnlocked" />
+      <DrillDrawer v-if="showCrm" />
 
       <!-- Footer -->
       <footer class="text-center text-xs text-slate-400 py-3">

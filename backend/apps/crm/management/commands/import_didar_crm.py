@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand
@@ -38,6 +38,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from apps.core import jalali
+from apps.crm.jalali import period_for
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, Deal, DealItem, DealStageEvent,
     LeadSource, LostReason, PipelineStage, Product,
@@ -73,6 +74,10 @@ ACTIVITY_KIND = {
     "پرداخت": "payment",
 }
 RESULT = {"انجام شده": "success", "انجام نشده": "no_answer"}
+
+#: «برگ» is the only non-roll unit the catalogue actually uses. Left as roll
+#: for everything else, which is what a paper mill sells by default.
+UNIT = {"رول": "roll", "برگ": "sheet", "بسته": "pack", "تن": "ton"}
 
 
 def norm(value) -> str:
@@ -196,9 +201,10 @@ class Command(BaseCommand):
         lost = self._lost(deals)
         employees = self._employees(sheets)
         products = self._products(sheets["products"])
-        customers = self._customers(sheets, deals)
+        customers = self._customers(sheets, deals, employees)
         self._deals(deals, customers, employees, stages, sources, lost, products)
-        self._activities(sheets, customers)
+        self._activities(sheets, customers, employees)
+        self._rollup()
 
     def _stages(self, deals) -> dict:
         """
@@ -308,6 +314,7 @@ class Command(BaseCommand):
                 defaults={
                     "name_fa": title,
                     "category": categories[group],
+                    "unit": UNIT.get(norm(row.get("واحد محصول")), "roll"),
                     "list_price_rial": dec(row.get("قیمت هر واحد محصول")),
                     "is_active": norm(row.get("فعال/غیر فعال")) != "غیر فعال",
                 },
@@ -315,7 +322,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  محصول: {len(out)} در {len(categories)} گروه")
         return out
 
-    def _customers(self, sheets, deals) -> dict:
+    def _customers(self, sheets, deals, employees) -> dict:
         """
         دیدار keeps شرکت and شخص apart; this CRM keeps one account per customer.
 
@@ -348,6 +355,7 @@ class Command(BaseCommand):
                     "address": norm(row.get("آدرس"))[:400],
                     "national_id": norm(row.get("شناسه ملی"))[:20],
                     "city": norm(row.get("شهرستان"))[:100],
+                    "owner": employees.get(norm(row.get("مسئول شرکت"))),
                     "note": norm(row.get("توضیحات شرکت")),
                     "first_contact_at": (
                         jaware(row.get("تاریخ ثبت شرکت"))
@@ -384,6 +392,7 @@ class Command(BaseCommand):
                     "email": norm(row.get("ایمیل مشتری"))[:254],
                     "national_id": norm(row.get("کد ملی مشتری"))[:20],
                     "city": norm(row.get("شهرستان"))[:100],
+                    "owner": employees.get(norm(row.get("مسئول مشتری"))),
                     "note": norm(row.get("توضیحات شخص")),
                     "first_contact_at": (
                         jaware(row.get("تاریخ ثبت مشتری"))
@@ -474,6 +483,7 @@ class Command(BaseCommand):
                 orphan += 1
                 continue
             opened = jaware(head.get("تاریخ ایجاد معامله")) or timezone.now()
+            closed = jaware(head.get("تاریخ انجام معامله"))
             status = STATUS.get(norm(head.get("وضعیت معامله")), "open")
             deal = Deal.objects.update_or_create(
                 code=code_for("didar-d", did),
@@ -490,7 +500,12 @@ class Command(BaseCommand):
                     # a third of the deals have no item at all.
                     "amount_rial": dec(head.get("ارزش معامله")),
                     "opened_at": opened,
-                    "closed_at": jaware(head.get("تاریخ انجام معامله")),
+                    "closed_at": closed,
+                    # Both periods, deliberately: «فرصت‌های جدید» counts the
+                    # month a deal was opened and «فروش موفق» the month it was
+                    # won, and a single period would silently merge the two.
+                    "period": period_for(opened),
+                    "close_period": period_for(closed) if closed else None,
                     "expected_close_date": jdate(head.get("تاریخ احتمالی انجام معامله")),
                 },
             )[0]
@@ -516,9 +531,14 @@ class Command(BaseCommand):
             + (f" — {orphan} بدون مشتری رد شد" if orphan else "")
         )
 
-    def _activities(self, sheets, customers):
+    def _activities(self, sheets, customers, employees):
         """
         Calls, meetings and the rest. Notes join them as «پیام».
+
+        An activity that was planned and **not** carried out is a Task, not an
+        Activity: it is work still owed, and counting it among the calls that
+        happened would inflate every activity figure by the ones nobody made.
+        دیدار keeps both in one table with a وضعیت column; they part here.
 
         An activity has to belong to a customer, so the ones whose person and
         company are both unknown are counted and skipped rather than attached
@@ -534,35 +554,138 @@ class Command(BaseCommand):
              "کد اشخاص فعالیت": n.get("کد اشخاص یادداشت"),
              "کد شرکت های فعالیت": n.get("کد شرکت های یادداشت"),
              "کد معامله فعالیت": n.get("کد معامله یادداشت"),
+             "مسئول اجرا فعالیت": n.get("ثبت کننده یادداشت"),
              "وضعیت اجرای فعالیت": "انجام شده"}
             for n in sheets.get("notes_only", [])
         ]
 
-        made = skipped = 0
+        made = tasks = skipped = 0
         for row in rows + notes:
             customer = (
                 customers["pe"].get(norm(row.get("کد اشخاص فعالیت")))
                 or customers["co"].get(norm(row.get("کد شرکت های فعالیت")))
             )
-            at = (
-                jaware(row.get("تاریخ انجام شدن فعالیت"))
-                or jaware(row.get("تاریخ برنامه ریزی شده اجرا فعالیت"))
-            )
+            planned = jaware(row.get("تاریخ برنامه ریزی شده اجرا فعالیت"))
+            at = jaware(row.get("تاریخ انجام شدن فعالیت")) or planned
             if not customer or not at:
                 skipped += 1
                 continue
+            kind = ACTIVITY_KIND.get(norm(row.get("نوع فعالیت")), "call_out")
+            owner = employees.get(norm(row.get("مسئول اجرا فعالیت")))
+            deal = deals.get(code_for("didar-d", norm(row.get("کد معامله فعالیت"))))
+            text = (
+                norm(row.get("متن فعالیت"))
+                or norm(row.get("عنوان فعالیت"))
+            )[:2000]
+
+            if norm(row.get("وضعیت اجرای فعالیت")) == "انجام نشده":
+                Task.objects.create(
+                    title=norm(row.get("عنوان فعالیت"))[:200] or "پیگیری",
+                    customer=customer, deal=deal, owner=owner, kind=kind,
+                    due_at=planned or at, note=text,
+                )
+                tasks += 1
+                continue
+
             Activity.objects.create(
-                kind=ACTIVITY_KIND.get(norm(row.get("نوع فعالیت")), "call_out"),
-                customer=customer,
-                deal=deals.get(code_for("didar-d", norm(row.get("کد معامله فعالیت")))),
-                at=at,
+                kind=kind, customer=customer, deal=deal, owner=owner, at=at,
                 result=RESULT.get(norm(row.get("وضعیت اجرای فعالیت")), ""),
-                note=norm(row.get("متن فعالیت"))[:2000]
-                or norm(row.get("عنوان فعالیت"))[:2000],
+                note=text,
+                period=period_for(at),
             )
             made += 1
+
+        self._cases(sheets, customers, employees)
         self.stdout.write(
-            f"  فعالیت: {made}" + (f" — {skipped} بدون مشتری یا تاریخ رد شد" if skipped else "")
+            f"  فعالیت: {made} انجام‌شده + {tasks} کار باز"
+            + (f" — {skipped} بدون مشتری یا تاریخ رد شد" if skipped else "")
+        )
+
+    def _cases(self, sheets, customers, employees):
+        """کارت‌ها — دیدار's support cases. Seven rows, imported as tasks."""
+        made = 0
+        for row in sheets.get("cases", []):
+            customer = customers["pe"].get(norm(row.get("کد دیدار شخص")))
+            at = jaware(row.get("تاریخ انجام کارت")) or jaware(row.get("تاریخ ثبت کارت"))
+            title = norm(row.get("عنوان کارت"))
+            if not customer or not at or not title:
+                continue
+            Task.objects.create(
+                title=title[:200], customer=customer,
+                owner=employees.get(norm(row.get("مسئول کارت"))),
+                due_at=at,
+                done_at=at if norm(row.get("وضعیت کارت")) not in ("", "باز") else None,
+                note=norm(row.get("توضیحات کارت"))[:2000],
+            )
+            made += 1
+        if made:
+            self.stdout.write(f"  کارت: {made}")
+
+    def _rollup(self) -> None:
+        """
+        Fill the per-customer figures that are facts *about* the deals rather
+        than fields in any export.
+
+        دیدار has no «وضعیت مشتری» column: it knows who bought and when, and
+        leaves the label to whoever reads it. Deriving it here rather than
+        leaving all two thousand accounts as «سرنخ» is the difference between
+        a customer list that can be segmented and one that cannot — and every
+        input to the rule is in the data, so nothing is invented.
+
+        * a won deal, and something happening in the last six months → فعال
+        * a won deal, but silent since then → راکد
+        * asked, never bought → سرنخ
+
+        The window is counted from the newest activity in the file, not from
+        today: this is an export with an end date, and judging it against a
+        clock that keeps moving would mark the whole book راکد a year from now.
+        """
+        from django.db.models import Max, Min
+
+        latest = Activity.objects.aggregate(m=Max("at"))["m"] or timezone.now()
+        cutoff = latest - timedelta(days=182)
+
+        won = dict(
+            Deal.objects.filter(status="won", closed_at__isnull=False)
+            .values("customer_id").annotate(first=Min("closed_at"))
+            .values_list("customer_id", "first")
+        )
+        seen = dict(
+            Activity.objects.values("customer_id").annotate(last=Max("at"))
+            .values_list("customer_id", "last")
+        )
+        # The customer's own lead source is the one on their earliest deal —
+        # how this relationship began, not how the newest deal was found.
+        source = {}
+        for deal in Deal.objects.exclude(lead_source=None).order_by("-opened_at"):
+            source[deal.customer_id] = deal.lead_source_id
+
+        updated = []
+        for customer in Customer.objects.all():
+            first_won = won.get(customer.pk)
+            last_seen = seen.get(customer.pk)
+            customer.first_deal_won_at = first_won
+            customer.last_activity_at = last_seen
+            customer.lead_source_id = source.get(customer.pk)
+            if first_won:
+                recent = max(filter(None, [last_seen, first_won]))
+                customer.status = (
+                    Customer.Status.ACTIVE if recent >= cutoff
+                    else Customer.Status.DORMANT
+                )
+            else:
+                customer.status = Customer.Status.LEAD
+            updated.append(customer)
+        Customer.objects.bulk_update(
+            updated,
+            ["first_deal_won_at", "last_activity_at", "lead_source", "status"],
+            batch_size=500,
+        )
+        counts = {}
+        for c in updated:
+            counts[c.status] = counts.get(c.status, 0) + 1
+        self.stdout.write(
+            "  وضعیت مشتری: " + "، ".join(f"{k}={v}" for k, v in counts.items())
         )
 
     # -- verification ----------------------------------------------------

@@ -231,18 +231,6 @@ export interface DealInput {
 }
 
 export const crmApi = {
-  // ---- demo lock -------------------------------------------------------
-  /** Is the current key still valid? Cheap, and the only call allowed while locked. */
-  async gateStatus(): Promise<{ unlocked: boolean; configured: boolean }> {
-    const { data } = await api.get("/crm/gate/");
-    return data;
-  },
-
-  async unlock(password: string): Promise<{ key: string; expires_in: number }> {
-    const { data } = await api.post("/crm/gate/", { password });
-    return data;
-  },
-
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
     return data;
