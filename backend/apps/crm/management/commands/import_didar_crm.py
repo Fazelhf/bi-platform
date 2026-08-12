@@ -89,6 +89,24 @@ def norm(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def fit(model, field: str, value) -> str:
+    """
+    Clamp a value to the width of the column it is going into.
+
+    The lengths used to be written by hand at each call site, and they drifted:
+    `note` was sliced to 2000 against a `max_length=500` column, and `phone`
+    was not sliced at all. On SQLite none of that shows — it ignores
+    `VARCHAR(n)` entirely — so the import ran clean locally and died on the
+    server's PostgreSQL with «value too long for type character varying(40)».
+
+    Asking the model removes the guess, and keeps working when a field is
+    widened or narrowed later.
+    """
+    limit = model._meta.get_field(field).max_length
+    text = "" if value is None else str(value)
+    return text[:limit] if limit else text
+
+
 def plain(value) -> str:
     """
     Strip the HTML دیدار stores its note bodies in.
@@ -455,13 +473,13 @@ class Command(BaseCommand):
                 defaults={
                     "name_fa": name,
                     "kind": Customer.Kind.COMPANY,
-                    "phone": norm(row.get("تلفن شرکت")),
-                    "email": norm(row.get("ایمیل شرکت"))[:254],
-                    "address": norm(row.get("آدرس"))[:400],
-                    "national_id": norm(row.get("شناسه ملی"))[:20],
-                    "city": norm(row.get("شهرستان"))[:100],
+                    "phone": fit(Customer, "phone", norm(row.get("تلفن شرکت"))),
+                    "email": fit(Customer, "email", norm(row.get("ایمیل شرکت"))),
+                    "address": fit(Customer, "address", norm(row.get("آدرس"))),
+                    "national_id": fit(Customer, "national_id", norm(row.get("شناسه ملی"))),
+                    "city": fit(Customer, "city", norm(row.get("شهرستان"))),
                     "owner": employees.get(norm(row.get("مسئول شرکت"))),
-                    "note": plain(row.get("توضیحات شرکت")),
+                    "note": fit(Customer, "note", plain(row.get("توضیحات شرکت"))),
                     "first_contact_at": (
                         jaware(row.get("تاریخ ثبت شرکت"))
                         or earliest.get(("co", did))
@@ -491,14 +509,14 @@ class Command(BaseCommand):
                 defaults={
                     "name_fa": full,
                     "kind": Customer.Kind.PERSON,
-                    "contact_name": full,
-                    "mobile": mobile,
-                    "phone": norm(row.get("تلفن ثابت مشتری")),
-                    "email": norm(row.get("ایمیل مشتری"))[:254],
-                    "national_id": norm(row.get("کد ملی مشتری"))[:20],
-                    "city": norm(row.get("شهرستان"))[:100],
+                    "contact_name": fit(Customer, "contact_name", full),
+                    "mobile": fit(Customer, "mobile", mobile),
+                    "phone": fit(Customer, "phone", norm(row.get("تلفن ثابت مشتری"))),
+                    "email": fit(Customer, "email", norm(row.get("ایمیل مشتری"))),
+                    "national_id": fit(Customer, "national_id", norm(row.get("کد ملی مشتری"))),
+                    "city": fit(Customer, "city", norm(row.get("شهرستان"))),
                     "owner": employees.get(norm(row.get("مسئول مشتری"))),
-                    "note": plain(row.get("توضیحات شخص")),
+                    "note": fit(Customer, "note", plain(row.get("توضیحات شخص"))),
                     "first_contact_at": (
                         jaware(row.get("تاریخ ثبت مشتری"))
                         or earliest.get(("pe", did))
@@ -538,8 +556,8 @@ class Command(BaseCommand):
             defaults={
                 "name_fa": name,
                 "kind": Customer.Kind.COMPANY if is_company else Customer.Kind.PERSON,
-                "mobile": norm(head.get("موبایل شخص معامله")),
-                "phone": norm(head.get("شماره تلفن شرکت")),
+                "mobile": fit(Customer, "mobile", norm(head.get("موبایل شخص معامله"))),
+                "phone": fit(Customer, "phone", norm(head.get("شماره تلفن شرکت"))),
                 "note": "از روی معامله بازسازی شد — در فهرست اصلی دیدار نبود.",
                 "first_contact_at": (
                     jaware(head.get("تاریخ ایجاد معامله")) or timezone.now()
@@ -593,14 +611,14 @@ class Command(BaseCommand):
             deal = Deal.objects.update_or_create(
                 code=code_for("didar-d", did),
                 defaults={
-                    "title": norm(head.get("عنوان معامله")) or f"معامله {did}",
+                    "title": fit(Deal, "title", norm(head.get("عنوان معامله")) or f"معامله {did}"),
                     "customer": customer,
                     "owner": employees.get(norm(head.get("مسئول معامله"))),
                     "stage": stages.get(norm(head.get("مرحله کاریز معامله"))),
                     "status": status,
                     "lead_source": sources.get(norm(head.get("شیوه آشنایی معامله"))),
                     "lost_reason": lost.get(norm(head.get("دلیل شکست معامله"))),
-                    "lost_note": plain(head.get("یادداشت شکست معامله"))[:400],
+                    "lost_note": fit(Deal, "lost_note", plain(head.get("یادداشت شکست معامله"))),
                     # Straight from دیدار, never recomputed from the items —
                     # a third of the deals have no item at all.
                     "amount_rial": dec(head.get("ارزش معامله")),
@@ -682,13 +700,13 @@ class Command(BaseCommand):
             body = plain(row.get("متن فعالیت"))
             # A title that only repeats the activity type tells the reader
             # nothing, so it is not worth keeping as the note.
-            text = (body or (title if title != norm(row.get("نوع فعالیت")) else ""))[:2000]
+            text = body or (title if title != norm(row.get("نوع فعالیت")) else "")
 
             if norm(row.get("وضعیت اجرای فعالیت")) == "انجام نشده":
                 Task.objects.create(
-                    title=plain(row.get("عنوان فعالیت"))[:200] or "پیگیری",
+                    title=fit(Task, "title", plain(row.get("عنوان فعالیت")) or "پیگیری"),
                     customer=customer, deal=deal, owner=owner, kind=kind,
-                    due_at=planned or at, note=text,
+                    due_at=planned or at, note=fit(Task, "note", text),
                 )
                 tasks += 1
                 continue
@@ -696,7 +714,7 @@ class Command(BaseCommand):
             Activity.objects.create(
                 kind=kind, customer=customer, deal=deal, owner=owner, at=at,
                 result=RESULT.get(norm(row.get("وضعیت اجرای فعالیت")), ""),
-                note=text,
+                note=fit(Activity, "note", text),
                 period=period_for(at),
             )
             made += 1
@@ -717,11 +735,11 @@ class Command(BaseCommand):
             if not customer or not at or not title:
                 continue
             Task.objects.create(
-                title=plain(title)[:200], customer=customer,
+                title=fit(Task, "title", plain(title)), customer=customer,
                 owner=employees.get(norm(row.get("مسئول کارت"))),
                 due_at=at,
                 done_at=at if norm(row.get("وضعیت کارت")) not in ("", "باز") else None,
-                note=plain(row.get("توضیحات کارت"))[:2000],
+                note=fit(Task, "note", plain(row.get("توضیحات کارت"))),
             )
             made += 1
         if made:
@@ -819,7 +837,10 @@ class Command(BaseCommand):
         ok = True
         for status in ("won", "lost", "open"):
             n_src, v_src = want.get(status, (0, Decimal(0)))
-            qs = Deal.objects.filter(status=status)
+            # Scoped to the real dataset, or the showroom's deals are counted
+            # into the company's totals and every line reports a mismatch that
+            # is not there.
+            qs = Deal.objects.filter(status=status, dataset="real")
             n_db = qs.count()
             v_db = sum((d.amount_rial for d in qs), Decimal(0))
             match = "✔" if (n_src, v_src) == (n_db, v_db) else "✗"

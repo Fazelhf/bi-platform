@@ -25,7 +25,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.crm import reports as rpt
-from apps.crm.management.commands.import_didar_crm import Command as ImportCommand
+from apps.crm.management.commands.import_didar_crm import Command as ImportCommand, fit
 from apps.crm.models import (
     Customer, Dataset, Deal, DealItem, PipelineStage, Product,
 )
@@ -187,3 +187,36 @@ class CrossDatasetReferenceTests(DatasetTestCase):
         from django.db.models import ProtectedError
         with self.assertRaises(ProtectedError):
             Product.objects.filter(dataset=Dataset.REAL).delete()
+
+
+class ColumnWidthTests(APITestCase):
+    """
+    The class of bug that only production could see.
+
+    SQLite ignores `VARCHAR(n)` completely, so an over-long value writes clean
+    in development and the import looks correct. PostgreSQL does not, and the
+    server stopped on «value too long for type character varying(40)» — after
+    the import had already been declared working here.
+
+    `fit` asks the model for the width instead of the call site guessing it,
+    which is what these lock in: the two real offenders, and the property that
+    a clamp is derived rather than typed.
+    """
+
+    def test_clamps_to_the_field_s_own_limit(self):
+        long_phone = "02196052633 مدیریت اداره خرید و فروش اقلام عمده شرکت"
+        self.assertGreater(len(long_phone), 40)
+        self.assertEqual(len(fit(Customer, "phone", long_phone)), 40)
+
+        from apps.crm.models import Activity
+        self.assertEqual(len(fit(Activity, "note", "ن" * 900)), 500)
+
+    def test_uses_the_model_rather_than_a_written_number(self):
+        """`note` was hand-sliced to 2000 against a 500-wide column; the point
+        of deriving the limit is that such a slice cannot drift again."""
+        limit = Customer._meta.get_field("name_fa").max_length
+        self.assertEqual(len(fit(Customer, "name_fa", "ا" * (limit + 50))), limit)
+
+    def test_none_and_numbers_survive(self):
+        self.assertEqual(fit(Customer, "phone", None), "")
+        self.assertEqual(fit(Customer, "phone", 2196052633), "2196052633")
