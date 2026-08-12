@@ -26,7 +26,9 @@ from rest_framework.test import APITestCase
 
 from apps.crm import reports as rpt
 from apps.crm.management.commands.import_didar_crm import Command as ImportCommand
-from apps.crm.models import Customer, Dataset, Deal, PipelineStage
+from apps.crm.models import (
+    Customer, Dataset, Deal, DealItem, PipelineStage, Product,
+)
 
 
 def _user(username, role, department="", dataset="real"):
@@ -149,3 +151,39 @@ class ImportGuardTests(DatasetTestCase):
         cmd._clear_mislabelled()
 
         self.assertFalse(Customer.objects.filter(dataset=Dataset.REAL).exists())
+
+
+class CrossDatasetReferenceTests(DatasetTestCase):
+    """
+    The failure that stopped the repair on the server.
+
+    `seed_crm` upserts its reference lists by code, so a run that finds a
+    Product already there does not touch `created_at` — and tagging by time
+    alone left it wearing whatever label it arrived with. The showroom's
+    DealItems then pointed at a Product tagged «واقعی», and PROTECT refused to
+    let the real import delete it. Nothing is wrong on screen; it only breaks
+    the next reload, which is the worst moment to find out.
+    """
+
+    def test_a_demo_line_may_not_hold_a_real_product(self):
+        real_product = Product.objects.create(
+            code="pr-thermal", name_fa="رول حرارتی", dataset=Dataset.REAL,
+        )
+        demo_deal = Deal.objects.get(code="deal-9001")
+        DealItem.objects.create(
+            deal=demo_deal, product=real_product, quantity=1,
+            unit_price_rial=1000, dataset=Dataset.DEMO,
+        )
+
+        crossed = DealItem.objects.filter(dataset=Dataset.DEMO).exclude(
+            product__dataset=Dataset.DEMO
+        )
+        self.assertEqual(
+            crossed.count(), 1,
+            "this fixture is the broken shape — the assertion below is the point",
+        )
+        # And the real product cannot be removed while it is held, which is
+        # exactly the ProtectedError the server raised.
+        from django.db.models import ProtectedError
+        with self.assertRaises(ProtectedError):
+            Product.objects.filter(dataset=Dataset.REAL).delete()
