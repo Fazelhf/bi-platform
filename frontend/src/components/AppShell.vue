@@ -450,7 +450,7 @@ onMounted(() => {
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2 text-slate-500 hover:bg-slate-100"
           :class="collapsed ? 'justify-center' : ''"
           title="CRM — مشتریان و فروش"
-          @click="router.push({ name: 'crm-home' })"
+          @click="router.push({ name: 'crm-dashboard' })"
         >
           <NavIcon name="team" :size="20" />
           <template v-if="!collapsed">

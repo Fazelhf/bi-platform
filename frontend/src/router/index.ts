@@ -335,12 +335,11 @@ const router = createRouter({
       meta: { requiresAuth: true, crm: true },
       children: [
         {
+          // The dashboard is the landing page. A separate «میز کار» was tried
+          // and removed: this dataset is a sixteen-month history, so every
+          // outstanding follow-up in it is a year old, and a to-do list where
+          // all four hundred rows are equally late is not a to-do list.
           path: "",
-          name: "crm-home",
-          component: () => import("@/views/crm/CrmHomeView.vue"),
-        },
-        {
-          path: "dashboard",
           name: "crm-dashboard",
           component: () => import("@/views/crm/CrmDashboardView.vue"),
         },

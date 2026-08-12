@@ -147,7 +147,7 @@ async function onSaved(id?: number) {
   <div class="space-y-4">
     <div v-if="crm.canEdit" class="flex flex-wrap items-center gap-2 no-print">
       <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="modal = 'activity'">ثبت فعالیت</button>
-      <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'deal'">+ فرصت فروش</button>
+      <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'deal'">+ معامله</button>
       <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'customer'">+ مشتری</button>
       <span class="text-xs text-slate-400">
         {{ crm.me?.employee_name ? `ثبت به نام ${crm.me.employee_name}` : "" }}
@@ -199,10 +199,10 @@ async function onSaved(id?: number) {
         />
       </div>
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">فرصت‌های جدید به تفکیک وضعیت</h3>
+        <h3 class="text-sm font-semibold text-ink mb-2">معامله‌های جدید به تفکیک وضعیت</h3>
         <CrmChart
           :categories="incomingCats" :series="incomingSeries" format="count" :height="270"
-          @pick="(i) => openRow(data!.incoming_trend, i, 'فرصت‌های جدید')"
+          @pick="(i) => openRow(data!.incoming_trend, i, 'معامله‌های جدید')"
         />
       </div>
     </div>

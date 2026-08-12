@@ -24,7 +24,6 @@ urlpatterns = [
     path("pipeline/", views.PipelineBoardView.as_view(), name="crm-pipeline"),
     path("options/", views.CrmOptionsView.as_view(), name="crm-options"),
     path("me/", views.CrmMeView.as_view(), name="crm-me"),
-    path("workbench/", views.CrmWorkbenchView.as_view(), name="crm-workbench"),
     path("reports/", views.CrmReportIndexView.as_view(), name="crm-report-index"),
     path("reports/<str:key>/", views.CrmReportView.as_view(), name="crm-report"),
 ]
