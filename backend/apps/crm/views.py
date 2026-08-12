@@ -15,8 +15,9 @@ Write access follows the platform rule already in place for فروش همکار:
 sales_team department owns the data, the CEO reads everything.
 """
 from datetime import timedelta
+from decimal import Decimal
 
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
@@ -721,6 +722,110 @@ class CrmMeView(GatedAPIView):
                 request.user.is_superuser
                 or request.user.role in {"executive", "manager"}
             ),
+        })
+
+
+class CrmWorkbenchView(GatedAPIView):
+    """
+    میز کار — what is waiting for you, rather than what happened.
+
+    The dashboard answers «چطور پیش می‌رویم»; this answers «حالا چه کنم». They
+    are different questions and mixing them produces a page that is neither:
+    a wall of charts you cannot act on, with the three overdue callbacks
+    buried somewhere underneath.
+
+    Everything here is scoped to the caller when they are a salesperson, and
+    company-wide for a manager — the same person should not have to switch a
+    filter to see their own work.
+    """
+
+    def get(self, request):
+        today = timezone.now()
+        me = employee_for(request.user)
+        manager = bool(
+            request.user.is_superuser or request.user.role in {"executive", "manager"}
+        )
+
+        tasks = Task.objects.filter(done_at__isnull=True).select_related(
+            "customer", "deal", "owner"
+        )
+        deals = Deal.objects.filter(status="open").select_related(
+            "customer", "owner", "stage"
+        )
+        if me and not manager:
+            tasks = tasks.filter(owner=me)
+            deals = deals.filter(owner=me)
+
+        overdue = tasks.filter(due_at__lt=today).order_by("due_at")
+        due_soon = tasks.filter(
+            due_at__gte=today, due_at__lt=today + timedelta(days=7)
+        ).order_by("due_at")
+
+        # A deal nobody has touched in three weeks is the thing most likely to
+        # be quietly dying, and the one least likely to be noticed — an open
+        # deal looks identical to a healthy one on every other screen.
+        quiet_since = today - timedelta(days=21)
+        touched = dict(
+            Activity.objects.values("deal_id").annotate(last=Max("at"))
+            .values_list("deal_id", "last")
+        )
+        stale = sorted(
+            (d for d in deals if (touched.get(d.pk) or d.opened_at) < quiet_since),
+            key=lambda d: touched.get(d.pk) or d.opened_at,
+        )
+
+        pipeline_value = sum((d.amount_rial for d in deals), Decimal(0))
+
+        def task_row(t):
+            return {
+                "id": t.id, "title": t.title,
+                "customer": t.customer.name_fa, "customer_id": t.customer_id,
+                "deal_id": t.deal_id,
+                "owner": t.owner.full_name_fa if t.owner else "",
+                "due_at": t.due_at,
+                "days_late": max(0, (today - t.due_at).days) if t.due_at < today else 0,
+            }
+
+        def deal_row(d):
+            last = touched.get(d.pk) or d.opened_at
+            return {
+                "id": d.id, "title": d.title,
+                "customer": d.customer.name_fa, "customer_id": d.customer_id,
+                "amount_rial": str(d.amount_rial),
+                "stage": d.stage.name_fa if d.stage else "",
+                "owner": d.owner.full_name_fa if d.owner else "",
+                "quiet_days": (today - last).days,
+            }
+
+        return Response({
+            "greeting_name": (
+                me.full_name_fa if me
+                else (request.user.display_name_fa or request.user.username)
+            ),
+            "scope": "همه‌ی تیم" if manager else "کارهای من",
+            "tiles": [
+                {"key": "overdue", "label": "پیگیری عقب‌افتاده",
+                 "value": overdue.count(), "tone": "warn"},
+                {"key": "week", "label": "این هفته",
+                 "value": due_soon.count(), "tone": ""},
+                {"key": "open", "label": "معامله باز",
+                 "value": deals.count(), "tone": ""},
+                {"key": "value", "label": "مبلغ در جریان",
+                 "value": str(pipeline_value), "unit": "rial", "tone": ""},
+            ],
+            "overdue": [task_row(t) for t in overdue[:12]],
+            "due_soon": [task_row(t) for t in due_soon[:12]],
+            "stale_deals": [deal_row(d) for d in stale[:10]],
+            "recent": [
+                {
+                    "id": a.id, "kind": a.get_kind_display(),
+                    "customer": a.customer.name_fa, "customer_id": a.customer_id,
+                    "note": a.note[:120], "at": a.at,
+                    "owner": a.owner.full_name_fa if a.owner else "",
+                }
+                for a in Activity.objects.select_related("customer", "owner")
+                .order_by("-at")[:10]
+            ],
         })
 
 

@@ -27,6 +27,7 @@ Two shapes in the source deserve attention:
 """
 from __future__ import annotations
 
+import html as _html
 import re
 from collections import defaultdict
 from datetime import datetime, time, timedelta
@@ -83,6 +84,21 @@ UNIT = {"رول": "roll", "برگ": "sheet", "بسته": "pack", "تن": "ton"}
 def norm(value) -> str:
     """Trim and fold the whitespace دیدار leaves around almost every name."""
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def plain(value) -> str:
+    """
+    Strip the HTML دیدار stores its note bodies in.
+
+    Its editor is rich text, so «تماس گرفتم احوال پرسی کردم» arrives as
+    `<p>…&nbsp;</p>`. Rendered as text that is what the user reads on the
+    activity list, and rendered as HTML it would be an injection point — this
+    is other people's typing. Tags out, entities decoded, whitespace folded.
+    """
+    text = re.sub(r"<br\s*/?>|</p>|</div>", " ", str(value or ""), flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = _html.unescape(text).replace(" ", " ")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def jdate(value):
@@ -356,7 +372,7 @@ class Command(BaseCommand):
                     "national_id": norm(row.get("شناسه ملی"))[:20],
                     "city": norm(row.get("شهرستان"))[:100],
                     "owner": employees.get(norm(row.get("مسئول شرکت"))),
-                    "note": norm(row.get("توضیحات شرکت")),
+                    "note": plain(row.get("توضیحات شرکت")),
                     "first_contact_at": (
                         jaware(row.get("تاریخ ثبت شرکت"))
                         or earliest.get(("co", did))
@@ -393,7 +409,7 @@ class Command(BaseCommand):
                     "national_id": norm(row.get("کد ملی مشتری"))[:20],
                     "city": norm(row.get("شهرستان"))[:100],
                     "owner": employees.get(norm(row.get("مسئول مشتری"))),
-                    "note": norm(row.get("توضیحات شخص")),
+                    "note": plain(row.get("توضیحات شخص")),
                     "first_contact_at": (
                         jaware(row.get("تاریخ ثبت مشتری"))
                         or earliest.get(("pe", did))
@@ -495,7 +511,7 @@ class Command(BaseCommand):
                     "status": status,
                     "lead_source": sources.get(norm(head.get("شیوه آشنایی معامله"))),
                     "lost_reason": lost.get(norm(head.get("دلیل شکست معامله"))),
-                    "lost_note": norm(head.get("یادداشت شکست معامله"))[:400],
+                    "lost_note": plain(head.get("یادداشت شکست معامله"))[:400],
                     # Straight from دیدار, never recomputed from the items —
                     # a third of the deals have no item at all.
                     "amount_rial": dec(head.get("ارزش معامله")),
@@ -573,14 +589,15 @@ class Command(BaseCommand):
             kind = ACTIVITY_KIND.get(norm(row.get("نوع فعالیت")), "call_out")
             owner = employees.get(norm(row.get("مسئول اجرا فعالیت")))
             deal = deals.get(code_for("didar-d", norm(row.get("کد معامله فعالیت"))))
-            text = (
-                norm(row.get("متن فعالیت"))
-                or norm(row.get("عنوان فعالیت"))
-            )[:2000]
+            title = plain(row.get("عنوان فعالیت"))
+            body = plain(row.get("متن فعالیت"))
+            # A title that only repeats the activity type tells the reader
+            # nothing, so it is not worth keeping as the note.
+            text = (body or (title if title != norm(row.get("نوع فعالیت")) else ""))[:2000]
 
             if norm(row.get("وضعیت اجرای فعالیت")) == "انجام نشده":
                 Task.objects.create(
-                    title=norm(row.get("عنوان فعالیت"))[:200] or "پیگیری",
+                    title=plain(row.get("عنوان فعالیت"))[:200] or "پیگیری",
                     customer=customer, deal=deal, owner=owner, kind=kind,
                     due_at=planned or at, note=text,
                 )
@@ -611,11 +628,11 @@ class Command(BaseCommand):
             if not customer or not at or not title:
                 continue
             Task.objects.create(
-                title=title[:200], customer=customer,
+                title=plain(title)[:200], customer=customer,
                 owner=employees.get(norm(row.get("مسئول کارت"))),
                 due_at=at,
                 done_at=at if norm(row.get("وضعیت کارت")) not in ("", "باز") else None,
-                note=norm(row.get("توضیحات کارت"))[:2000],
+                note=plain(row.get("توضیحات کارت"))[:2000],
             )
             made += 1
         if made:

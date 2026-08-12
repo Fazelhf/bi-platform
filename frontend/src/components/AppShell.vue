@@ -53,19 +53,6 @@ interface Item {
   placeholder?: boolean;
 }
 
-/**
- * CRM. Was a password-locked demo while it held generated data; it holds the
- * company's real customer file now, so access follows the account instead —
- * فروش همکار works it, the CEO reads it. See CrmAccess on the server.
- */
-const crmItems: Item[] = [
-  { name: "crm-dashboard", label: "داشبورد CRM", icon: "grid" },
-  { name: "crm-pipeline", label: "مراحل فروش", icon: "target" },
-  { name: "crm-deals", label: "فرصت‌های فروش", icon: "box" },
-  { name: "crm-customers", label: "مشتریان", icon: "team" },
-  { name: "crm-activities", label: "فعالیت‌ها", icon: "notes" },
-  { name: "crm-reports", label: "گزارش‌های CRM", icon: "chart" },
-];
 
 /**
  * بازرگانی داخلی. The same list serves the CEO (who reads it) and صدف جمالی
@@ -122,15 +109,6 @@ const showCrm = computed(
   () => auth.isExecutive || auth.department === "sales_team" || !!auth.me?.is_superuser,
 );
 
-// Detail pages keep their list item highlighted.
-const CRM_PARENT: Record<string, string> = {
-  "crm-deal": "crm-deals",
-  "crm-customer": "crm-customers",
-};
-function crmActive(name: string): boolean {
-  const current = String(route.name ?? "");
-  return current === name || CRM_PARENT[current] === name;
-}
 
 /** The CEO oversees every section, so «تیم من» would be the wrong word. */
 const rosterLabel = computed(() => (auth.isExecutive ? "تیم فروش" : "تیم من"));
@@ -465,27 +443,23 @@ onMounted(() => {
           </button>
         </template>
 
-        <!-- CRM — visible to the sales team and the CEO, by role -->
-        <template v-if="showCrm">
-            <div class="pt-3 pb-1 px-3 flex items-center gap-2">
-              <p v-if="!collapsed" class="text-[10px] font-semibold text-slate-300 tracking-wide flex-1">CRM</p>
-              <div v-if="collapsed" class="h-px bg-slate-200 mx-1 flex-1"></div>
-            </div>
-            <button
-              v-for="it in crmItems"
-              :key="it.name"
-              class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
-              :class="[
-                crmActive(it.name) ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
-                collapsed ? 'justify-center' : '',
-              ]"
-              :title="collapsed ? it.label : ''"
-              @click="go(it.name)"
-            >
-              <NavIcon :name="it.icon" :size="20" />
-              <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
-            </button>
-        </template>
+        <!-- CRM is a workspace of its own, not a group of rows here: one
+             door in, and its own shell takes over from there. -->
+        <button
+          v-if="showCrm"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2 text-slate-500 hover:bg-slate-100"
+          :class="collapsed ? 'justify-center' : ''"
+          title="CRM — مشتریان و فروش"
+          @click="router.push({ name: 'crm-home' })"
+        >
+          <NavIcon name="team" :size="20" />
+          <template v-if="!collapsed">
+            <span class="flex-1 text-right">CRM</span>
+            <svg class="w-3.5 h-3.5 opacity-40 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            </svg>
+          </template>
+        </button>
       </nav>
 
       <!-- Bottom: profile, settings (admin+CEO only), logout -->

@@ -230,6 +230,42 @@ export interface DealInput {
   }[];
 }
 
+export interface WorkbenchTask {
+  id: number;
+  title: string;
+  customer: string;
+  customer_id: number;
+  deal_id: number | null;
+  owner: string;
+  due_at: string;
+  days_late: number;
+}
+
+export interface WorkbenchDeal {
+  id: number;
+  title: string;
+  customer: string;
+  customer_id: number;
+  amount_rial: string;
+  stage: string;
+  owner: string;
+  quiet_days: number;
+}
+
+export interface CrmWorkbench {
+  greeting_name: string;
+  /** «کارهای من» for a rep, «همه‌ی تیم» for a manager. */
+  scope: string;
+  tiles: { key: string; label: string; value: number | string; unit?: string; tone?: string }[];
+  overdue: WorkbenchTask[];
+  due_soon: WorkbenchTask[];
+  stale_deals: WorkbenchDeal[];
+  recent: {
+    id: number; kind: string; customer: string; customer_id: number;
+    note: string; at: string; owner: string;
+  }[];
+}
+
 export const crmApi = {
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
@@ -238,6 +274,12 @@ export const crmApi = {
 
   async me(): Promise<CrmMe> {
     const { data } = await api.get("/crm/me/");
+    return data;
+  },
+
+  /** میز کار — what is waiting, as opposed to what happened. */
+  async workbench(): Promise<CrmWorkbench> {
+    const { data } = await api.get("/crm/workbench/");
     return data;
   },
 
