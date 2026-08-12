@@ -73,14 +73,14 @@ const crmItems: Item[] = [
  * (who keys it) — the section is read-only for the CEO by permission, not by
  * a different menu, so there is one place to change when a page is added.
  */
+// نمونه‌ها is deliberately absent: it is reached from درخواست و استعلام, where
+// asking a supplier for one actually happens.
 const commercialItems: Item[] = [
   { name: "commercial-dashboard", label: "داشبورد", icon: "grid" },
-  { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
   { name: "commercial-materials", label: "کالاها", icon: "box" },
   { name: "commercial-suppliers", label: "تامین‌کنندگان", icon: "team" },
   { name: "commercial-requests", label: "درخواست و استعلام", icon: "target" },
   { name: "commercial-orders", label: "سفارش‌های خرید", icon: "notes" },
-  { name: "commercial-reports", label: "گزارش‌های بازرگانی", icon: "chart" },
 ];
 
 /**
@@ -107,6 +107,9 @@ const CHILD_PARENT: Record<string, string> = {
   "commercial-material": "commercial-materials",
   "commercial-supplier": "commercial-suppliers",
   "commercial-request": "commercial-requests",
+  // نمونه‌ها has no row of its own — it is reached from درخواست و استعلام,
+  // which stays highlighted while you are in it.
+  "commercial-samples": "commercial-requests",
   "foreign-order": "foreign-orders",
 };
 
@@ -209,8 +212,12 @@ const primary = computed<Item[]>(() => {
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
-    // and یادداشت‌ها off the first screen. The composed report joins داخلی,
-    // which is where this manager's own figures are.
+    // and یادداشت‌ها off the first screen.
+    //
+    // No report rows here. This manager works the section rather than reading
+    // it, and the داشبورد is already clickable — every figure on it opens the
+    // rows it was counted from, which is what a separate report page was
+    // being used for. The composed cross-section report belongs to the CEO.
     items.push(
       {
         name: "group-commercial",
@@ -310,8 +317,8 @@ const pageTitle = computed(() => {
     "commercial-suppliers": "تامین‌کنندگان", "commercial-supplier": "پرونده تامین‌کننده",
     "commercial-requests": "درخواست خرید و استعلام",
     "commercial-request": "مقایسه استعلام‌ها",
+    "commercial-samples": "نمونه‌ها",
     "commercial-orders": "سفارش‌های خرید",
-    "commercial-reports": "گزارش‌های بازرگانی",
     "commercial-full-report": "گزارش کامل بازرگانی",
     "foreign-dashboard": "داشبورد بازرگانی خارجی",
     "foreign-workbench": "میز کار بازرگانی خارجی",

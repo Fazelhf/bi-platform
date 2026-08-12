@@ -285,15 +285,15 @@ const router = createRouter({
           meta: { commercial: true, commercialOnly: true },
         },
         {
-          path: "commercial/orders",
-          name: "commercial-orders",
-          component: () => import("@/views/commercial/OrdersView.vue"),
+          path: "commercial/samples",
+          name: "commercial-samples",
+          component: () => import("@/views/commercial/SamplesView.vue"),
           meta: { commercial: true, commercialOnly: true },
         },
         {
-          path: "commercial/reports",
-          name: "commercial-reports",
-          component: () => import("@/views/commercial/CommercialReportsView.vue"),
+          path: "commercial/orders",
+          name: "commercial-orders",
+          component: () => import("@/views/commercial/OrdersView.vue"),
           meta: { commercial: true, commercialOnly: true },
         },
 

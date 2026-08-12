@@ -6,6 +6,7 @@ import {
   type PurchaseOrder,
   type PurchaseRequest,
   type Quote,
+  type Sample,
 } from "@/api/commercial";
 import { useAuthStore } from "@/stores/auth";
 import { useMoney, loadMoneySettings } from "@/composables/useMoney";
@@ -16,6 +17,8 @@ import { faDate } from "@/utils/adminFormat";
 import QuoteForm from "@/components/commercial/QuoteForm.vue";
 import AwardDialog from "@/components/commercial/AwardDialog.vue";
 import OrderForm from "@/components/commercial/OrderForm.vue";
+import SampleForm from "@/components/commercial/SampleForm.vue";
+import SampleVerdictDialog from "@/components/commercial/SampleVerdictDialog.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -31,6 +34,7 @@ const { exact, unitLabel } = useMoney();
 
 const request = ref<PurchaseRequest | null>(null);
 const orders = ref<PurchaseOrder[]>([]);
+const samples = ref<Sample[]>([]);
 const loading = ref(true);
 const error = ref("");
 
@@ -57,9 +61,10 @@ async function load() {
   loading.value = true;
   try {
     const id = Number(route.params.id);
-    [request.value, orders.value] = await Promise.all([
+    [request.value, orders.value, samples.value] = await Promise.all([
       commercialApi.request(id),
       commercialApi.orders({ request: id }),
+      commercialApi.samples({ request: id }),
     ]);
   } catch (e) {
     error.value = apiError(e);
@@ -74,17 +79,55 @@ const editingQuote = ref<Quote | null>(null);
 const showQuote = ref(false);
 const showAward = ref(false);
 const showOrder = ref(false);
+/** Which quote the award dialog should open on, when it was opened from a row. */
+const preselect = ref<number | null>(null);
 
 function openQuote(quote: Quote | null) {
   editingQuote.value = quote;
   showQuote.value = true;
 }
 
+/**
+ * «برنده» on a row.
+ *
+ * It still goes through the award dialog rather than flipping the flag
+ * directly, because the losers need their reasons — that file is the point of
+ * the module. What the button removes is the step where the user opens a
+ * dialog and hunts for the row they were already pointing at.
+ */
+function awardFrom(quote: Quote | null) {
+  preselect.value = quote?.id ?? null;
+  showAward.value = true;
+}
+
+const showSample = ref(false);
+const sampleQuote = ref<Quote | null>(null);
+const editingSample = ref<Sample | null>(null);
+const decidingSample = ref<Sample | null>(null);
+
+/** Ask this supplier for a sample. The کالا comes from the request. */
+function askSample(quote: Quote | null) {
+  sampleQuote.value = quote;
+  editingSample.value = null;
+  showSample.value = true;
+}
+
+function editSample(sample: Sample) {
+  editingSample.value = sample;
+  sampleQuote.value = null;
+  showSample.value = true;
+}
+
 function afterChange() {
   showQuote.value = false;
   showAward.value = false;
   showOrder.value = false;
+  showSample.value = false;
   editingQuote.value = null;
+  editingSample.value = null;
+  sampleQuote.value = null;
+  decidingSample.value = null;
+  preselect.value = null;
   load();
 }
 
@@ -153,7 +196,7 @@ const FA = new Intl.NumberFormat("fa-IR");
             <button
               v-if="canEdit && quotes.length"
               class="bg-panel text-white rounded-xl px-4 py-2 text-sm"
-              @click="showAward = true"
+              @click="awardFrom(null)"
             >{{ winner ? "تغییر انتخاب" : "انتخاب تامین‌کننده" }}</button>
             <button
               v-if="canEdit && winner"
@@ -194,7 +237,8 @@ const FA = new Intl.NumberFormat("fa-IR");
                 <th class="text-right font-medium px-3">اختلاف با کمترین</th>
                 <th class="text-right font-medium px-3">مبلغ کل</th>
                 <th class="text-right font-medium px-3">تحویل</th>
-                <th class="text-right font-medium px-3">اعتبار</th>
+                <th class="text-right font-medium px-3">شرایط پرداخت</th>
+                <th class="text-right font-medium px-3">نمونه</th>
                 <th class="text-right font-medium px-3">نتیجه</th>
                 <th class="px-4"></th>
               </tr>
@@ -232,8 +276,38 @@ const FA = new Intl.NumberFormat("fa-IR");
                     v-if="fastest && q.id === fastest.id"
                     class="text-xs text-sky-600"
                   >سریع‌ترین</span>
+                  <p v-if="q.validity_days" class="text-xs text-slate-400">
+                    اعتبار {{ num(q.validity_days) }} روز
+                  </p>
                 </td>
-                <td class="px-3 ltr-nums text-slate-500">{{ num(q.validity_days) }} روز</td>
+                <td class="px-3 text-xs">
+                  <span :class="q.payment_term_name ? 'text-ink' : 'text-slate-300'">
+                    {{ q.payment_term_name || "ثبت نشده" }}
+                  </span>
+                  <p v-if="q.payment_method_label" class="text-slate-400">
+                    {{ q.payment_method_label }}
+                  </p>
+                  <p v-if="q.payment_note" class="text-slate-400">{{ q.payment_note }}</p>
+                </td>
+                <td class="px-3">
+                  <button
+                    v-if="q.sample_status"
+                    class="text-xs rounded-full px-2 py-0.5"
+                    :class="q.sample_status.is_approved
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : q.sample_status.status === 'rejected'
+                        ? 'bg-red-50 text-red-500'
+                        : 'bg-amber-50 text-amber-700'"
+                    :title="`${q.sample_status.sample_no} — برای دیدن پرونده نمونه‌ها`"
+                    @click="router.push({ name: 'commercial-samples' })"
+                  >{{ q.sample_status.status_label }}</button>
+                  <button
+                    v-else-if="canEdit"
+                    class="text-xs text-slate-400 hover:text-ink"
+                    @click="askSample(q)"
+                  >+ نمونه بخواهید</button>
+                  <span v-else class="text-xs text-slate-300">—</span>
+                </td>
                 <td class="px-3">
                   <span
                     v-if="q.reason_name"
@@ -249,6 +323,12 @@ const FA = new Intl.NumberFormat("fa-IR");
                 </td>
                 <td class="px-4 text-left whitespace-nowrap">
                   <button
+                    v-if="canEdit && !q.is_selected"
+                    class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg px-2 py-1 ml-1"
+                    :title="`${q.supplier_name} برنده این استعلام شود`"
+                    @click="awardFrom(q)"
+                  >برنده</button>
+                  <button
                     v-if="canEdit"
                     class="text-xs text-slate-400 hover:text-ink px-1.5"
                     @click="openQuote(q)"
@@ -263,6 +343,74 @@ const FA = new Intl.NumberFormat("fa-IR");
             </tbody>
           </table>
         </div>
+      </div>
+
+      <!-- Samples: what arrived before anyone committed to buying -->
+      <div
+        v-if="samples.length || canEdit"
+        class="bg-surface rounded-card shadow-soft overflow-hidden"
+      >
+        <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <h3 class="font-bold text-ink text-sm">
+            نمونه‌ها
+            <span v-if="samples.length" class="text-slate-400 font-normal">
+              ({{ num(samples.length) }})
+            </span>
+          </h3>
+          <button
+            v-if="canEdit"
+            class="text-xs text-slate-500 hover:text-ink"
+            @click="askSample(null)"
+          >+ درخواست نمونه</button>
+        </div>
+
+        <EmptyState
+          v-if="!samples.length"
+          title="نمونه‌ای برای این درخواست ثبت نشده"
+          hint="پیش از خرید از تامین‌کننده‌ای که سابقه ندارد، نمونه بخواهید."
+        />
+
+        <table v-else class="w-full text-sm">
+          <tbody>
+            <tr v-for="s in samples" :key="s.id" class="border-t border-slate-100">
+              <td class="px-4 py-2.5 ltr-nums text-ink font-medium">{{ s.sample_no }}</td>
+              <td class="px-3 text-slate-600">{{ s.supplier_name }}</td>
+              <td class="px-3 text-xs text-slate-500">{{ s.spec || "—" }}</td>
+              <td class="px-3 whitespace-nowrap">
+                <span
+                  class="text-xs rounded-full px-2 py-0.5"
+                  :class="s.is_approved
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : s.status === 'rejected'
+                      ? 'bg-red-50 text-red-500'
+                      : 'bg-amber-50 text-amber-700'"
+                >{{ s.status_label }}</span>
+                <span v-if="s.reason_name" class="text-xs text-red-500 mr-1">
+                  {{ s.reason_name }}
+                </span>
+                <span
+                  v-else-if="s.waiting_days !== null"
+                  class="text-xs text-slate-400 mr-1"
+                >{{ num(s.waiting_days) }} روز در انتظار</span>
+              </td>
+              <td class="px-4 text-left whitespace-nowrap">
+                <button
+                  v-if="canEdit"
+                  class="text-xs rounded-lg px-2 py-1 ml-1"
+                  :class="s.waiting_days !== null
+                    ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    : 'text-slate-400 hover:text-ink'"
+                  @click="decidingSample = s"
+                >{{ s.waiting_days !== null ? "ثبت نتیجه" : "تغییر نتیجه" }}</button>
+                <button
+                  v-if="canEdit"
+                  class="text-xs text-slate-400 hover:text-ink px-1.5"
+                  @click="editSample(s)"
+                >ویرایش</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Orders raised from this request -->
@@ -293,13 +441,23 @@ const FA = new Intl.NumberFormat("fa-IR");
       />
       <AwardDialog
         v-if="showAward"
-        :request="request" :quotes="quotes"
+        :request="request" :quotes="quotes" :preselect="preselect"
         @close="showAward = false" @saved="afterChange"
       />
       <OrderForm
         v-if="showOrder"
         :request="request" :quote="winner"
         @close="showOrder = false" @saved="afterChange"
+      />
+      <SampleForm
+        v-if="showSample"
+        :request="request" :quote="sampleQuote" :sample="editingSample"
+        @close="showSample = false" @saved="afterChange"
+      />
+      <SampleVerdictDialog
+        v-if="decidingSample"
+        :sample="decidingSample"
+        @close="decidingSample = null" @saved="afterChange"
       />
     </template>
 

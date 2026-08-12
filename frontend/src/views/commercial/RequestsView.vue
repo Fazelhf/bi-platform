@@ -78,6 +78,13 @@ function onSaved(saved: PurchaseRequest) {
         <option value="cancelled">لغو شده</option>
       </select>
       <span class="text-xs text-slate-400 px-2">{{ num(filtered.length) }} درخواست</span>
+      <!-- نمونه‌ها has no row in the sidebar. It is reached from here, because
+           asking for a sample is part of running an استعلام, not a section of
+           its own. -->
+      <button
+        class="text-sm text-slate-500 hover:text-ink px-2 py-2 shrink-0"
+        @click="router.push({ name: 'commercial-samples' })"
+      >نمونه‌ها</button>
       <button
         v-if="canEdit"
         class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"

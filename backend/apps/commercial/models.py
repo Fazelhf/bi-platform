@@ -168,8 +168,9 @@ class QuoteReason(TimeStampedModel):
     class Kind(models.TextChoices):
         WIN = "win", "دلیل انتخاب"
         LOSE = "lose", "دلیل عدم انتخاب"
+        SAMPLE = "sample", "دلیل رد نمونه"
 
-    kind = models.CharField(max_length=4, choices=Kind.choices)
+    kind = models.CharField(max_length=8, choices=Kind.choices)
     code = models.SlugField(unique=True)
     name_fa = models.CharField(max_length=120)
     sort_order = models.PositiveSmallIntegerField(default=0)
@@ -181,6 +182,54 @@ class QuoteReason(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.get_kind_display()} · {self.name_fa}"
+
+
+class PaymentMethod(models.TextChoices):
+    """*How* the money moves. Separate from *when* — see PaymentTerm."""
+
+    CASH = "cash", "نقدی"
+    CHEQUE = "cheque", "چک"
+    TRANSFER = "transfer", "حواله بانکی"
+    LC = "lc", "اعتبار اسنادی داخلی"
+    OTHER = "other", "سایر"
+
+
+class PaymentTerm(TimeStampedModel):
+    """
+    شرایط پرداخت — when the money leaves, as a schedule rather than a sentence.
+
+    «۵۰٪ پیش‌پرداخت، مابقی ۶۰ روزه» typed into a note field is unusable: it
+    cannot be compared, sorted or summed. Split into a percentage and a number
+    of days, the comparison table can finally answer the question that decides
+    most purchases — whether the cheaper quote is actually cheaper once its
+    terms are counted. A supplier asking for everything up front at 2٪ less is
+    lending the factory nothing; one offering ninety days at 3٪ more is.
+
+    Data, not choices, for the reason the whole app uses: the department must
+    be able to add «۴۰٪ پیش‌پرداخت، مابقی چک ۴ ماهه» without a deploy.
+    """
+
+    code = models.SlugField(unique=True)
+    name_fa = models.CharField(max_length=120)
+    #: درصد پیش‌پرداخت — what has to be paid before anything arrives.
+    advance_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    #: مهلت تسویه مابقی, counted from delivery. Zero means on delivery.
+    days = models.PositiveSmallIntegerField(default=0)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    note = models.CharField(max_length=250, blank=True)
+
+    class Meta:
+        ordering = ("sort_order", "name_fa")
+        verbose_name = "payment term (شرایط پرداخت)"
+
+    @property
+    def deferred_pct(self) -> Decimal:
+        """The share that is genuinely credit — the part worth comparing."""
+        return max(ZERO, Decimal(100) - (self.advance_pct or ZERO))
+
+    def __str__(self) -> str:
+        return self.name_fa
 
 
 class PurchaseRequest(TimeStampedModel):
@@ -281,6 +330,19 @@ class Quote(TimeStampedModel):
     validity_days = models.PositiveSmallIntegerField(
         default=0, help_text="اعتبار قیمت به روز"
     )
+    # -- what the price is actually worth -------------------------------
+    # Terms belong on the quote, not only on the order: they are part of the
+    # offer and part of what is being compared. Recording them only once a
+    # purchase is placed throws away the reason the losing quote lost.
+    payment_term = models.ForeignKey(
+        PaymentTerm, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="quotes",
+    )
+    payment_method = models.CharField(
+        max_length=10, choices=PaymentMethod.choices, blank=True
+    )
+    payment_note = models.CharField(max_length=250, blank=True)
+
     is_selected = models.BooleanField(default=False)
     reason = models.ForeignKey(
         QuoteReason, null=True, blank=True,
@@ -350,6 +412,16 @@ class PurchaseOrder(TimeStampedModel):
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.PENDING
     )
+    #: The terms actually agreed, which are not always the ones quoted — that
+    #: gap is worth being able to see.
+    payment_term = models.ForeignKey(
+        PaymentTerm, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="orders",
+    )
+    payment_method = models.CharField(
+        max_length=10, choices=PaymentMethod.choices, blank=True
+    )
+    payment_note = models.CharField(max_length=250, blank=True)
     note = models.TextField(blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
@@ -393,6 +465,126 @@ class PurchaseOrder(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.order_no} · {self.material} از {self.supplier}"
+
+
+class Sample(TimeStampedModel):
+    """
+    نمونه — what the supplier sent before anyone committed to buying it.
+
+    A sample is deliberately **not** a field on Quote. The two do not line up:
+
+    * A supplier is often asked for a sample before any استعلام exists — the
+      department is still deciding whether the company is worth quoting.
+    * One استعلام can involve two samples, when the first was rejected and the
+      supplier sent a corrected one.
+    * A sample approved for a material stays meaningful for the *next*
+      purchase of that material, long after its استعلام is closed.
+
+    The approval is a **dated decision by a named person**, not a boolean.
+    When a delivered batch does not match what was tested, the question asked
+    is «چه کسی این نمونه را تایید کرد و کِی؟», and a checkbox cannot answer it.
+    """
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "درخواست شد"
+        RECEIVED = "received", "دریافت شد"
+        TESTING = "testing", "در حال آزمایش"
+        APPROVED = "approved", "تایید شد"
+        REJECTED = "rejected", "رد شد"
+
+    #: Statuses where a verdict has been reached and the clock stops.
+    DECIDED = {Status.APPROVED, Status.REJECTED}
+
+    sample_no = models.CharField(max_length=24, unique=True, blank=True)
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.PROTECT, related_name="samples"
+    )
+    material = models.ForeignKey(
+        Material, on_delete=models.PROTECT, related_name="samples"
+    )
+    #: Both optional, for the reasons in the class docstring.
+    request = models.ForeignKey(
+        PurchaseRequest, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="samples",
+    )
+    quote = models.ForeignKey(
+        Quote, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="samples",
+    )
+
+    quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    #: What was asked for — «۴۸ گرم، عرض ۸۰», the yardstick the test judges by.
+    spec = models.CharField(max_length=300, blank=True)
+
+    requested_on = models.DateField()
+    received_on = models.DateField(null=True, blank=True)
+    decided_on = models.DateField(null=True, blank=True)
+
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.REQUESTED
+    )
+    #: Only meaningful on a rejection. Data, like every other reason here.
+    reason = models.ForeignKey(
+        QuoteReason, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="samples",
+    )
+    lab_note = models.TextField("نتیجه آزمایش", blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+        help_text="تاییدکننده / ردکننده",
+    )
+    note = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+
+    class Meta:
+        ordering = ("-requested_on", "-id")
+        verbose_name = "sample (نمونه)"
+        indexes = [
+            models.Index(fields=["status"]),
+            models.Index(fields=["supplier", "material"]),
+            models.Index(fields=["requested_on"]),
+        ]
+
+    # -- derived ---------------------------------------------------------
+    @property
+    def is_decided(self) -> bool:
+        return self.status in self.DECIDED
+
+    @property
+    def is_approved(self) -> bool:
+        return self.status == self.Status.APPROVED
+
+    def waiting_days(self, today: "date | None" = None) -> int | None:
+        """
+        Days this sample has been outstanding.
+
+        Stops on the verdict, so a sample approved last year does not report a
+        year of waiting and drown the ones actually holding a purchase up.
+        """
+        if self.is_decided:
+            return None
+        start = self.received_on or self.requested_on
+        if not start:
+            return None
+        return max(0, ((today or date.today()) - start).days)
+
+    def turnaround_days(self) -> int | None:
+        """Arrival to verdict — how long the lab actually takes."""
+        if not self.received_on or not self.decided_on:
+            return None
+        return (self.decided_on - self.received_on).days
+
+    def save(self, *args, **kwargs):
+        if not self.sample_no:
+            self.sample_no = _next_number("SM", self.requested_on)
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.sample_no} · {self.material} از {self.supplier}"
 
 
 class DocumentCounter(models.Model):

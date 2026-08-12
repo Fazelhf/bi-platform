@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
 import { apiError } from "@/components/crm/formError";
 import { useMoney } from "@/composables/useMoney";
 import {
@@ -17,7 +18,12 @@ import {
  * throw away the answer to «چرا از بقیه نخریدیم؟» — which is the whole reason
  * the price file is kept, and the number every supplier statistic is built on.
  */
-const props = defineProps<{ request: PurchaseRequest; quotes: Quote[] }>();
+const props = defineProps<{
+  request: PurchaseRequest;
+  quotes: Quote[];
+  /** Opened from a «برنده» button on one row — start with that one chosen. */
+  preselect?: number | null;
+}>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
 const inp =
@@ -31,13 +37,27 @@ const loseReasons = ref<QuoteReason[]>([]);
 const saving = ref(false);
 const error = ref("");
 
-const winner = ref<number | null>(
-  props.quotes.find((q) => q.is_selected)?.id ?? null,
-);
+const current = props.quotes.find((q) => q.is_selected) ?? null;
+const opening = props.preselect
+  ? props.quotes.find((q) => q.id === props.preselect) ?? current
+  : current;
+
+const winner = ref<number | null>(opening?.id ?? null);
 const winReason = ref<number | null>(
-  props.quotes.find((q) => q.is_selected)?.reason ?? null,
+  // Only carry a reason over when the same quote is still the winner — the
+  // reason «قیمت مناسب» belonged to the old choice, not to this one.
+  opening && opening.id === current?.id ? opening.reason : null,
 );
-const winNote = ref(props.quotes.find((q) => q.is_selected)?.decision_note ?? "");
+const winNote = ref(
+  opening && opening.id === current?.id ? opening.decision_note : "",
+);
+
+const winReasonOptions = computed(
+  () => winReasons.value.map((r) => ({ value: r.id, label: r.name_fa })),
+);
+const loseReasonOptions = computed(
+  () => loseReasons.value.map((r) => ({ value: r.id, label: r.name_fa })),
+);
 
 /** Per losing quote: why it was not chosen. Keyed by quote id. */
 const rejections = ref<Record<number, { reason: number | null; note: string }>>(
@@ -127,13 +147,11 @@ async function save() {
             </p>
 
             <!-- The winner names why it was chosen; everyone else why not. -->
-            <div v-if="winner === q.id" class="mt-2 grid sm:grid-cols-2 gap-2">
-              <select v-model="winReason" :class="inp">
-                <option :value="null">دلیل انتخاب…</option>
-                <option v-for="r in winReasons" :key="r.id" :value="r.id">
-                  {{ r.name_fa }}
-                </option>
-              </select>
+            <div v-if="winner === q.id" class="mt-2 grid sm:grid-cols-2 gap-2" @click.stop>
+              <PickerField
+                v-model="winReason" :options="winReasonOptions"
+                placeholder="دلیل انتخاب…"
+              />
               <input v-model="winNote" :class="inp" placeholder="توضیح (اختیاری)" />
             </div>
             <div
@@ -141,12 +159,10 @@ async function save() {
               class="mt-2 grid sm:grid-cols-2 gap-2"
               @click.stop
             >
-              <select v-model="rejections[q.id].reason" :class="inp">
-                <option :value="null">دلیل عدم انتخاب…</option>
-                <option v-for="r in loseReasons" :key="r.id" :value="r.id">
-                  {{ r.name_fa }}
-                </option>
-              </select>
+              <PickerField
+                v-model="rejections[q.id].reason" :options="loseReasonOptions"
+                placeholder="دلیل عدم انتخاب…"
+              />
               <input
                 v-model="rejections[q.id].note" :class="inp"
                 placeholder="توضیح (اختیاری)"

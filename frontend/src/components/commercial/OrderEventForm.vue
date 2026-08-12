@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
 import { apiError } from "@/components/crm/formError";
 import { foreignApi, type ForeignOrder } from "@/api/commercialForeign";
 
@@ -21,6 +22,9 @@ const inp =
   "focus:ring-2 focus:ring-slate-300";
 const lbl = "text-xs text-slate-500 mb-1 block";
 
+// The reasons that come up most, offered as a starting point. The field stays
+// free text: «سایر» tells a later reader nothing, and the whole value of علت
+// توقف is that it names the actual obstacle.
 const BLOCKED = [
   "در انتظار تخصیص ارز",
   "در انتظار پاسخ بانک",
@@ -28,8 +32,7 @@ const BLOCKED = [
   "در انتظار فروشنده",
   "مشکل اسناد",
   "مشکل مالی",
-  "سایر",
-];
+].map((r) => ({ value: r, label: r }));
 
 const saving = ref(false);
 const error = ref("");
@@ -94,10 +97,10 @@ async function save() {
 
     <div v-if="isBlocked">
       <label :class="lbl">علت توقف</label>
-      <select v-model="form.blocked_reason" :class="inp">
-        <option value="">انتخاب کنید…</option>
-        <option v-for="r in BLOCKED" :key="r" :value="r">{{ r }}</option>
-      </select>
+      <PickerField
+        v-model="form.blocked_reason" :options="BLOCKED" creatable
+        placeholder="انتخاب کنید یا بنویسید…"
+      />
     </div>
 
     <div>

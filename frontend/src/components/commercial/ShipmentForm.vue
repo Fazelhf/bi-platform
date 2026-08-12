@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
 import { apiError } from "@/components/crm/formError";
 import MoneyInput from "@/components/MoneyInput.vue";
 import { useMoney } from "@/composables/useMoney";
+import { commercialApi, type Suggestions } from "@/api/commercial";
 import {
   foreignApi,
   type ForeignOrder,
@@ -31,6 +33,7 @@ const lbl = "text-xs text-slate-500 mb-1 block";
 
 const { exact, unitLabel } = useMoney();
 const options = ref<ForeignOptions | null>(null);
+const seen = ref<Suggestions | null>(null);
 const saving = ref(false);
 const error = ref("");
 
@@ -81,7 +84,19 @@ watch(() => form.value.status, (status) => {
   }
 });
 
-onMounted(async () => { options.value = await foreignApi.options(); });
+const statusOptions = computed(
+  () => (options.value?.shipment_statuses ?? [])
+    .map((s) => ({ value: s.value, label: s.label })),
+);
+const textOptions = (rows: string[] | undefined) =>
+  (rows ?? []).map((v) => ({ value: v, label: v }));
+
+onMounted(async () => {
+  options.value = await foreignApi.options();
+  try {
+    seen.value = await commercialApi.suggestions();
+  } catch { /* suggestions are optional */ }
+});
 
 async function save() {
   saving.value = true;
@@ -131,19 +146,31 @@ async function save() {
       </div>
       <div>
         <label :class="lbl">شرکت حمل</label>
-        <input v-model="form.carrier" :class="inp" />
+        <PickerField
+          v-model="form.carrier" :options="textOptions(seen?.carriers)" creatable
+          placeholder="مثلاً HMM"
+        />
       </div>
       <div>
         <label :class="lbl">بندر مبدأ</label>
-        <input v-model="form.origin_port" :class="inp" />
+        <PickerField
+          v-model="form.origin_port" :options="textOptions(seen?.origin_ports)" creatable
+          placeholder="مثلاً Taicang"
+        />
       </div>
       <div>
         <label :class="lbl">بندر مقصد</label>
-        <input v-model="form.destination_port" :class="inp" />
+        <PickerField
+          v-model="form.destination_port"
+          :options="textOptions(seen?.destination_ports)" creatable
+          placeholder="مثلاً شهید رجایی"
+        />
       </div>
       <div class="sm:col-span-2">
         <label :class="lbl">شرح محموله</label>
-        <input v-model="form.goods_desc" :class="inp" />
+        <PickerField
+          v-model="form.goods_desc" :options="textOptions(seen?.goods)" creatable
+        />
       </div>
       <div>
         <label :class="lbl">وزن (تن)</label>
@@ -155,11 +182,10 @@ async function save() {
       </div>
       <div class="sm:col-span-2">
         <label :class="lbl">وضعیت</label>
-        <select v-model="form.status" :class="inp">
-          <option
-            v-for="s in options?.shipment_statuses ?? []" :key="s.value" :value="s.value"
-          >{{ s.label }}</option>
-        </select>
+        <PickerField
+          v-model="form.status" :options="statusOptions" :clearable="false"
+          search-placeholder="مرحله محموله…"
+        />
       </div>
     </div>
 
