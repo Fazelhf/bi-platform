@@ -18,3 +18,12 @@ backend/backups/
 frontend/vite.config.js
 frontend/vite.config.d.ts
 *.tsbuildinfo
+
+# Didar CRM exports — the folder is tracked, its contents never are.
+# These sheets carry ~1800 real customers' names, mobile numbers and deal
+# values. Git history is permanent, so a commit here would keep that data in
+# every clone forever, even after a later delete. They are uploaded to the
+# server instead. See backend/data/didar/README.md.
+backend/data/didar/*
+!backend/data/didar/README.md
+!backend/data/didar/.gitkeep

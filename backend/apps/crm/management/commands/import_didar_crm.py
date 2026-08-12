@@ -34,6 +34,8 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand
+from pathlib import Path
+
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -141,6 +143,15 @@ def code_for(prefix: str, value, fallback: str = "") -> str:
     return f"{prefix}-{slugify(norm(fallback), allow_unicode=True)[:40] or 'x'}"
 
 
+#: Every sheet the importer needs. Checked up front so a half-uploaded
+#: folder fails with a list of what is missing, rather than a KeyError from
+#: somewhere in the middle of the third pass.
+REQUIRED_FILES = [
+    "شرکت ها.xlsx", "اشخاص.xlsx", "معاملات.xlsx",
+    "محصولات.xlsx", "فعالیت ها .xlsx", "یاداشت ها.xlsx", "کارت ها.xlsx",
+]
+
+
 class Command(BaseCommand):
     help = "Import the real CRM data exported from دیدار."
 
@@ -179,6 +190,20 @@ class Command(BaseCommand):
             return
 
         self.dir = options["dir"].rstrip("/\\")
+
+        # The export may not be on the server yet — it is uploaded by hand,
+        # after the first deploy. Say so and stop, rather than raising: this
+        # command runs from deploy.sh under `set -e`, where an exception would
+        # abort the deploy before collectstatic and the app restart, leaving
+        # the site down for a missing spreadsheet.
+        missing = [n for n in REQUIRED_FILES if not Path(self.dir, n).exists()]
+        if missing:
+            short = "، ".join(missing[:4]) + (" …" if len(missing) > 4 else "")
+            self.stdout.write(self.style.WARNING(
+                f"فایل‌های دیدار در «{self.dir}» پیدا نشد — وارد کردن رد شد."
+            ))
+            self.stdout.write(f"  کم است: {short}")
+            return
         sheets = self._read_all()
         if options["check"]:
             self._compare(sheets)
