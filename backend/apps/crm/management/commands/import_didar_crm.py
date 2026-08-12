@@ -34,6 +34,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -144,7 +145,17 @@ class Command(BaseCommand):
     help = "Import the real CRM data exported from دیدار."
 
     def add_arguments(self, parser):
-        parser.add_argument("--dir", default="C:/Users/Asus/Downloads")
+        parser.add_argument(
+            "--dir", default=str(settings.BASE_DIR / "data" / "didar"),
+            help="پوشه‌ی خروجی‌های دیدار",
+        )
+        parser.add_argument(
+            "--if-empty", action="store_true",
+            help=(
+                "اگر داده‌ی واقعی از قبل هست، هیچ کاری نکن. "
+                "همین گزینه است که اجرای این دستور در deploy را بی‌خطر می‌کند."
+            ),
+        )
         parser.add_argument(
             "--fresh", action="store_true",
             help="Delete the generated demo CRM rows before importing.",
@@ -155,6 +166,18 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # The guard that makes this safe to call from deploy.sh.
+        #
+        # Without it, every deploy would re-run a command whose --fresh path
+        # deletes every real CRM row — and the moment the sales team starts
+        # entering data on the server, that is their work. A one-time load has
+        # to be able to tell that it has already happened.
+        if options["if_empty"] and Customer.objects.filter(dataset="real").exists():
+            self.stdout.write(
+                "داده‌ی واقعی CRM از قبل موجود است — وارد کردن رد شد."
+            )
+            return
+
         self.dir = options["dir"].rstrip("/\\")
         sheets = self._read_all()
         if options["check"]:
@@ -190,11 +213,13 @@ class Command(BaseCommand):
     # -- removal ---------------------------------------------------------
     def _wipe(self) -> None:
         """
-        Clear the generated demo dataset.
+        Clear the previously imported real dataset.
 
-        Everything CRM-side goes, including the reference lists: دیدار has its
-        own مراحل کاریز and دلایل شکست, and keeping the invented ones beside
-        them would leave two vocabularies for the same question.
+        Scoped to `dataset="real"`, so re-importing a fresher export never
+        touches the showroom sitting beside it. Everything real goes, including
+        the reference lists: دیدار has its own مراحل کاریز and دلایل شکست, and
+        keeping a second vocabulary beside them would leave two answers to the
+        same question.
         """
         counts = {}
         for model in (
@@ -202,7 +227,9 @@ class Command(BaseCommand):
             Deal, Customer, Product, ProductCategory, PipelineStage,
             LeadSource, LostReason, Tag,
         ):
-            counts[model.__name__] = model.objects.all().delete()[0]
+            counts[model.__name__] = model.objects.filter(
+                dataset="real"
+            ).delete()[0]
         self.stdout.write(self.style.WARNING(
             "پاک شد: " + "، ".join(f"{k}={v}" for k, v in counts.items() if v)
         ))

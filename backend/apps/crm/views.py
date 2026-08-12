@@ -113,10 +113,36 @@ class GatedAPIView(APIView):
 # --------------------------------------------------------------------------
 # Lookup viewsets
 # --------------------------------------------------------------------------
+def active_dataset(request) -> str:
+    """
+    Which dataset this request reads and writes — the account's own choice.
+
+    Read from the user rather than the query string on purpose. A dataset that
+    can be switched by editing a URL is one that ends up switched by accident,
+    and a report of fabricated numbers is indistinguishable from a real one
+    once it has been screenshotted.
+    """
+    return getattr(request.user, "crm_dataset", "real") or "real"
+
+
 class _Base(viewsets.ModelViewSet):
     # Two checks, deliberately: CrmAccess decides who sees the section at all,
     # CrmWritePermission decides who may change what is in it.
     permission_classes = [CrmAccess, CrmWritePermission]
+
+    def get_queryset(self):
+        """
+        Every CRM list is scoped to the caller's dataset — one override rather
+        than a filter repeated in fourteen viewsets, because the one that got
+        forgotten would be the leak.
+        """
+        return super().get_queryset().filter(dataset=active_dataset(self.request))
+
+    def perform_create(self, serializer):
+        # Whatever you are looking at is what you add to. Creating a real
+        # customer while the screen says «داده نمایشی» would put a genuine
+        # record somewhere nobody thinks to look for it.
+        serializer.save(dataset=active_dataset(self.request))
 
 
 class CustomerGroupViewSet(_Base):
@@ -348,6 +374,7 @@ class DealViewSet(_Base):
             # Default to the first open stage so a new deal always appears on
             # the board rather than in a stage-less limbo.
             first = PipelineStage.objects.filter(
+                dataset=active_dataset(self.request),
                 is_active=True, kind=PipelineStage.Kind.OPEN
             ).order_by("order").first()
             if first:
@@ -432,7 +459,9 @@ class DealViewSet(_Base):
         did not go through the API cannot silently skip the log.
         """
         deal = self.get_object()
-        stage = PipelineStage.objects.filter(pk=request.data.get("stage")).first()
+        stage = PipelineStage.objects.filter(
+            pk=request.data.get("stage"), dataset=active_dataset(request)
+        ).first()
         if not stage:
             return Response({"detail": "مرحله نامعتبر است."}, status=400)
         # Same rule as the edit form: a loss with no reason would leave a hole
@@ -460,7 +489,10 @@ class DealViewSet(_Base):
             deal.status = Deal.Status.LOST
             deal.closed_at = now
             deal.close_period = period_for(now)
-            reason = LostReason.objects.filter(pk=request.data.get("lost_reason")).first()
+            reason = LostReason.objects.filter(
+                pk=request.data.get("lost_reason"),
+                dataset=active_dataset(request),
+            ).first()
             deal.lost_reason = reason
             deal.lost_note = request.data.get("lost_note", "")
         else:
@@ -621,7 +653,7 @@ class CrmDashboardView(GatedAPIView):
         ]
     )
     def get(self, request):
-        f = rpt.Filters.from_query(request.query_params)
+        f = rpt.Filters.from_query(request.query_params, active_dataset(request))
         data = rpt.dashboard(f)
         data["window"] = {
             "start": f.start.isoformat() if f.start else None,
@@ -639,7 +671,7 @@ class CrmReportView(GatedAPIView):
                 {"detail": f"گزارش «{key}» تعریف نشده است."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        f = rpt.Filters.from_query(request.query_params)
+        f = rpt.Filters.from_query(request.query_params, active_dataset(request))
         axis = request.query_params.get("axis") or ""
         data = rpt.run_report(key, f, axis)
         data["axis_labels"] = rpt.AXIS_LABELS
@@ -666,8 +698,11 @@ class PipelineBoardView(GatedAPIView):
     """مراحل فروش — the kanban board: stages with their open deals."""
 
     def get(self, request):
-        f = rpt.Filters.from_query(request.query_params)
-        qs = Deal.objects.filter(channel=f.channel, status=Deal.Status.OPEN)
+        ds = active_dataset(request)
+        f = rpt.Filters.from_query(request.query_params, ds)
+        qs = Deal.objects.filter(
+            channel=f.channel, status=Deal.Status.OPEN, dataset=ds
+        )
         if f.owner:
             qs = qs.filter(owner_id=f.owner)
         if f.group:
@@ -686,7 +721,9 @@ class PipelineBoardView(GatedAPIView):
             by_stage.setdefault(deal.stage_id, []).append(deal)
 
         columns = []
-        for st in PipelineStage.objects.filter(is_active=True).order_by("order"):
+        for st in PipelineStage.objects.filter(
+            is_active=True, dataset=ds
+        ).order_by("order"):
             deals = by_stage.get(st.id, [])
             columns.append({
                 "id": st.id,
@@ -714,6 +751,7 @@ class CrmMeView(GatedAPIView):
     def get(self, request):
         emp = employee_for(request.user)
         return Response({
+            "dataset": active_dataset(request),
             "can_edit": can_write_crm(request.user),
             "employee": emp.id if emp else None,
             "employee_name": emp.full_name_fa if emp else "",
@@ -725,12 +763,33 @@ class CrmMeView(GatedAPIView):
         })
 
 
+class CrmDatasetView(GatedAPIView):
+    """
+    Switch this account between the real customer file and the showroom.
+
+    A POST rather than a query parameter, and stored on the account, so the
+    choice survives a refresh and cannot be set by a link someone was sent.
+    """
+
+    def post(self, request):
+        choice = (request.data.get("dataset") or "").strip()
+        if choice not in {"real", "demo"}:
+            return Response(
+                {"detail": "داده باید «real» یا «demo» باشد."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        request.user.crm_dataset = choice
+        request.user.save(update_fields=["crm_dataset"])
+        return Response({"dataset": choice})
+
+
 class CrmOptionsView(GatedAPIView):
     """Every filter dropdown the CRM UI needs, in one request."""
 
     def get(self, request):
         # The month list is served rather than computed in the browser so the
         # Jalali calendar lives in exactly one place.
+        ds = active_dataset(request)
         jy, jm = jalali_month_of(timezone.localdate())
         months = []
         for _ in range(24):
@@ -760,17 +819,24 @@ class CrmOptionsView(GatedAPIView):
                 .filter(is_active=True)
                 .exclude(full_name_fa__in=["", "0"])
             ],
-            "groups": CustomerGroupSerializer(CustomerGroup.objects.all(), many=True).data,
-            "sources": LeadSourceSerializer(LeadSource.objects.all(), many=True).data,
-            "reasons": LostReasonSerializer(LostReason.objects.all(), many=True).data,
+            "groups": CustomerGroupSerializer(
+                CustomerGroup.objects.filter(dataset=ds), many=True
+            ).data,
+            "sources": LeadSourceSerializer(
+                LeadSource.objects.filter(dataset=ds), many=True
+            ).data,
+            "reasons": LostReasonSerializer(
+                LostReason.objects.filter(dataset=ds), many=True
+            ).data,
             "stages": PipelineStageSerializer(
-                PipelineStage.objects.filter(is_active=True), many=True
+                PipelineStage.objects.filter(is_active=True, dataset=ds), many=True
             ).data,
             "products": ProductSerializer(
-                Product.objects.filter(is_active=True).select_related("category"),
+                Product.objects.filter(is_active=True, dataset=ds)
+                .select_related("category"),
                 many=True,
             ).data,
-            "tags": TagSerializer(Tag.objects.all(), many=True).data,
+            "tags": TagSerializer(Tag.objects.filter(dataset=ds), many=True).data,
             "activity_kinds": [
                 {"code": c, "label": l} for c, l in Activity.Kind.choices
             ],

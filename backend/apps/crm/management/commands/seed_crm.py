@@ -173,8 +173,36 @@ ACTIVITY_NOTES = {
 class Command(BaseCommand):
     help = "Seed the CRM (فروش همکار) with a realistic demo dataset."
 
+    #: Everything the showroom owns, children before parents.
+    DEMO_MODELS = (
+        Activity, Task, DealStageEvent, DealItem, Deal, CustomerFeedback,
+        Customer, Product, ProductCategory, PipelineStage, LeadSource,
+        LostReason, Tag, CustomerGroup,
+    )
+
+    def _wipe_demo(self) -> None:
+        """Remove the showroom and nothing else — the real file stays put."""
+        for model in self.DEMO_MODELS:
+            model.objects.filter(dataset="demo").delete()
+        DemoProvinceTarget.objects.all().delete()
+
+    def _tag_demo(self, since) -> None:
+        for model in self.DEMO_MODELS:
+            model.objects.filter(created_at__gte=since).update(dataset="demo")
+
     def add_arguments(self, parser):
-        parser.add_argument("--fresh", action="store_true", help="حذف داده‌های قبلی CRM")
+        parser.add_argument(
+            "--fresh", action="store_true",
+            help="حذف داده‌ی نمایشی قبلی (داده‌ی واقعی دست‌نخورده می‌ماند)",
+        )
+        parser.add_argument(
+            "--if-empty", action="store_true",
+            help="اگر داده‌ی نمایشی از قبل هست، هیچ کاری نکن (برای deploy).",
+        )
+        parser.add_argument(
+            "--clear", action="store_true",
+            help="فقط داده‌ی نمایشی را بردار و خارج شو.",
+        )
         parser.add_argument("--customers", type=int, default=240)
         parser.add_argument("--months", type=int, default=17)
         parser.add_argument("--seed", type=int, default=1405)
@@ -185,11 +213,25 @@ class Command(BaseCommand):
         rnd = random.Random(opts["seed"])
         self.rnd = rnd
 
+        if opts["if_empty"] and Customer.objects.filter(dataset="demo").exists():
+            self.stdout.write("داده‌ی نمایشی از قبل موجود است — ساخت رد شد.")
+            return
+
+        if opts["clear"]:
+            self._wipe_demo()
+            self.stdout.write(self.style.SUCCESS("داده‌ی نمایشی برداشته شد."))
+            return
+
         if opts["fresh"]:
-            self.stdout.write("پاک‌سازی داده‌های قبلی CRM …")
-            for model in (Activity, Task, DealStageEvent, DealItem, Deal,
-                          CustomerFeedback, Customer, DemoProvinceTarget):
-                model.objects.all().delete()
+            self.stdout.write("پاک‌سازی داده‌ی نمایشی قبلی …")
+            self._wipe_demo()
+
+        # Everything written from here on belongs to the showroom. Tagging by
+        # creation time at the end, rather than threading a dataset= through
+        # forty create() calls, keeps the generator readable — and it is exact,
+        # because the whole command is one transaction and nothing else is
+        # writing CRM rows inside it.
+        started_at = timezone.now()
 
         stages = self._seed_stages()
         groups = self._seed_simple(CustomerGroup, GROUPS)
@@ -210,6 +252,7 @@ class Command(BaseCommand):
         self._seed_tasks(customers, reps)
         self._seed_province_targets(months)
 
+        self._tag_demo(started_at)
         self.stdout.write(self.style.SUCCESS(
             f"✔ CRM seeded — {Customer.objects.count()} مشتری، "
             f"{Deal.objects.count()} معامله، {DealItem.objects.count()} ردیف، "
