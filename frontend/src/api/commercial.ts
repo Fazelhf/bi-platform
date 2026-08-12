@@ -43,6 +43,11 @@ export interface Supplier {
   id: number;
   code: string;
   name_fa: string;
+  /** Foreign mills are known by their Latin name on every document. */
+  name_en: string;
+  origin: "domestic" | "foreign";
+  origin_label: string;
+  country: string;
   contact_name: string;
   mobile: string;
   phone: string;
@@ -55,14 +60,102 @@ export interface Supplier {
   quote_count: number;
 }
 
+/**
+ * Values already present in the free-text fields, so those inputs can suggest
+ * instead of asking the user to remember exactly how they spelled it last
+ * time. Not a lookup table — anything new still goes straight through.
+ */
+export interface Suggestions {
+  requester_units: string[];
+  activities: string[];
+  countries: string[];
+  brands: string[];
+  goods: string[];
+  carriers: string[];
+  origin_ports: string[];
+  destination_ports: string[];
+}
+
 export interface QuoteReason {
   id: number;
-  kind: "win" | "lose";
+  kind: "win" | "lose" | "sample";
   kind_label: string;
   code: string;
   name_fa: string;
   sort_order: number;
   is_active: boolean;
+}
+
+/** How the money moves — separate from when, which is PaymentTerm. */
+export type PaymentMethodCode = "cash" | "cheque" | "transfer" | "lc" | "other" | "";
+
+/**
+ * شرایط پرداخت as a schedule, not a sentence: a percentage up front and a
+ * number of days for the rest. That is what makes «۶۰ روزه» comparable with
+ * «۵۰٪ پیش‌پرداخت» instead of merely displayable beside it.
+ */
+export interface PaymentTerm {
+  id: number;
+  code: string;
+  name_fa: string;
+  advance_pct: string;
+  days: number;
+  deferred_pct: string;
+  sort_order: number;
+  is_active: boolean;
+  note: string;
+  quote_count: number;
+}
+
+export type SampleStatus =
+  | "requested" | "received" | "testing" | "approved" | "rejected";
+
+/** The latest verdict on a supplier's sample, carried on each quote. */
+export interface QuoteSample {
+  id: number;
+  sample_no: string;
+  status: SampleStatus;
+  status_label: string;
+  is_approved: boolean;
+  decided_on: string | null;
+}
+
+export interface Sample {
+  id: number;
+  sample_no: string;
+  supplier: number;
+  supplier_name: string;
+  material: number;
+  material_name: string;
+  material_unit: string;
+  request: number | null;
+  request_no: string;
+  quote: number | null;
+  quantity: string;
+  spec: string;
+  requested_on: string;
+  received_on: string | null;
+  decided_on: string | null;
+  status: SampleStatus;
+  status_label: string;
+  reason: number | null;
+  reason_name: string;
+  lab_note: string;
+  decided_by: number | null;
+  decided_by_name: string;
+  /** Days outstanding; null once decided — a closed sample is not waiting. */
+  waiting_days: number | null;
+  /** Arrival to verdict: how long the lab actually takes. */
+  turnaround_days: number | null;
+  is_approved: boolean;
+  note: string;
+}
+
+export interface SampleVerdict {
+  approve: boolean;
+  decided_on?: string | null;
+  reason?: number | null;
+  lab_note?: string;
 }
 
 export interface Quote {
@@ -77,10 +170,19 @@ export interface Quote {
   quoted_on: string | null;
   delivery_days: number;
   validity_days: number;
+  payment_term: number | null;
+  payment_term_name: string;
+  advance_pct: string | null;
+  payment_days: number | null;
+  payment_method: PaymentMethodCode;
+  payment_method_label: string;
+  payment_note: string;
+  /** null when this supplier has never sent a sample of this material. */
+  sample_status: QuoteSample | null;
   is_selected: boolean;
   reason: number | null;
   reason_name: string;
-  reason_kind: "win" | "lose" | "";
+  reason_kind: "win" | "lose" | "sample" | "";
   decision_note: string;
   note: string;
 }
@@ -133,6 +235,12 @@ export interface PurchaseOrder {
   period_label: string;
   status: OrderStatus;
   status_label: string;
+  /** The terms actually agreed — not always the ones that were quoted. */
+  payment_term: number | null;
+  payment_term_name: string;
+  payment_method: PaymentMethodCode;
+  payment_method_label: string;
+  payment_note: string;
   note: string;
 }
 
@@ -348,13 +456,18 @@ export const commercialApi = {
     const { data } = await api.get("/commercial/units/");
     return data.units;
   },
+  /** What has already been typed into each free-text field, commonest first. */
+  async suggestions(): Promise<Suggestions> {
+    const { data } = await api.get("/commercial/suggestions/");
+    return data;
+  },
   async categories(): Promise<MaterialCategory[]> {
     const { data } = await api.get("/commercial/categories/", {
       params: { page_size: 200 },
     });
     return unwrap<MaterialCategory>(data);
   },
-  async reasons(kind?: "win" | "lose"): Promise<QuoteReason[]> {
+  async reasons(kind?: "win" | "lose" | "sample"): Promise<QuoteReason[]> {
     const { data } = await api.get("/commercial/reasons/", {
       params: { kind, is_active: true, page_size: 200 },
     });
@@ -455,6 +568,42 @@ export const commercialApi = {
   },
   async removeQuote(id: number) {
     await api.delete(`/commercial/quotes/${id}/`);
+  },
+
+  // -- payment terms ---------------------------------------------------
+  async paymentTerms(params: Record<string, unknown> = {}): Promise<PaymentTerm[]> {
+    const { data } = await api.get("/commercial/payment-terms/", {
+      params: { page_size: 100, ...params },
+    });
+    return unwrap<PaymentTerm>(data);
+  },
+  async savePaymentTerm(payload: Record<string, unknown>, id?: number) {
+    const { data } = id
+      ? await api.patch(`/commercial/payment-terms/${id}/`, payload)
+      : await api.post("/commercial/payment-terms/", payload);
+    return data as PaymentTerm;
+  },
+
+  // -- samples ---------------------------------------------------------
+  async samples(params: Record<string, unknown> = {}): Promise<Sample[]> {
+    const { data } = await api.get("/commercial/samples/", {
+      params: { page_size: 200, ...params },
+    });
+    return unwrap<Sample>(data);
+  },
+  async saveSample(payload: Record<string, unknown>, id?: number) {
+    const { data } = id
+      ? await api.patch(`/commercial/samples/${id}/`, payload)
+      : await api.post("/commercial/samples/", payload);
+    return data as Sample;
+  },
+  async removeSample(id: number) {
+    await api.delete(`/commercial/samples/${id}/`);
+  },
+  /** تایید یا رد — one call, so a sample is never «رد شد» without a reason. */
+  async sampleVerdict(id: number, payload: SampleVerdict): Promise<Sample> {
+    const { data } = await api.post(`/commercial/samples/${id}/verdict/`, payload);
+    return data;
   },
 
   // -- orders ----------------------------------------------------------

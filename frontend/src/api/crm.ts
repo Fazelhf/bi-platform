@@ -198,6 +198,8 @@ function clean(p: Params = {}): Params {
 }
 
 export interface CrmMe {
+  /** Which body of data this account is reading — real file, or showroom. */
+  dataset: "real" | "demo";
   /** False for anyone outside فروش همکار — the UI hides every create/edit
    *  affordance rather than letting them fill a form and hit a 403. */
   can_edit: boolean;
@@ -231,20 +233,14 @@ export interface DealInput {
 }
 
 export const crmApi = {
-  // ---- demo lock -------------------------------------------------------
-  /** Is the current key still valid? Cheap, and the only call allowed while locked. */
-  async gateStatus(): Promise<{ unlocked: boolean; configured: boolean }> {
-    const { data } = await api.get("/crm/gate/");
-    return data;
-  },
-
-  async unlock(password: string): Promise<{ key: string; expires_in: number }> {
-    const { data } = await api.post("/crm/gate/", { password });
-    return data;
-  },
-
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
+    return data;
+  },
+
+  /** Switch this account between the real customer file and the showroom. */
+  async setDataset(dataset: "real" | "demo"): Promise<{ dataset: string }> {
+    const { data } = await api.post("/crm/dataset/", { dataset });
     return data;
   },
 

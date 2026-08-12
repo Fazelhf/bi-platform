@@ -111,7 +111,7 @@ async function onSaved() {
         <p class="text-lg font-bold text-ink">{{ num(totals.count) }}</p>
       </div>
       <div>
-        <p class="text-xs text-slate-400">ارزش فرصت‌های باز</p>
+        <p class="text-xs text-slate-400">ارزش معامله‌های باز</p>
         <p class="text-lg font-bold text-ink">{{ rial(totals.amount) }}</p>
       </div>
       <div>
@@ -120,14 +120,14 @@ async function onSaved() {
       </div>
       <span class="flex-1"></span>
       <input
-        v-model="search" placeholder="جستجوی فرصت یا مشتری…"
+        v-model="search" placeholder="جستجوی معامله یا مشتری…"
         class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-slate-300 w-56"
       />
       <button
         v-if="crm.canEdit"
         class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"
         @click="addTo(columns.find((c) => c.kind === 'open')?.id ?? 0)"
-      >+ فرصت فروش جدید</button>
+      >+ معامله جدید</button>
     </div>
 
     <DealForm
@@ -190,10 +190,10 @@ async function onSaved() {
             v-if="crm.canEdit && col.kind === 'open'"
             class="w-full text-xs text-slate-400 hover:text-ink hover:bg-slate-100 rounded-xl py-2 border border-dashed border-slate-200"
             @click="addTo(col.id)"
-          >+ افزودن فرصت</button>
+          >+ معامله</button>
 
           <p v-if="!col.deals.length" class="text-xs text-slate-300 text-center py-6">
-            فرصتی در این مرحله نیست
+            معامله‌ای در این مرحله نیست
           </p>
         </div>
       </section>
@@ -203,7 +203,7 @@ async function onSaved() {
     <Teleport to="body">
       <div v-if="lostPrompt" class="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" dir="rtl">
         <div class="bg-surface rounded-card shadow-pop w-full max-w-md p-5">
-          <h3 class="font-bold text-ink">ثبت از دست رفتن فرصت</h3>
+          <h3 class="font-bold text-ink">ثبت شکست معامله</h3>
           <p class="text-xs text-slate-400 mt-1">{{ lostPrompt.deal.title }}</p>
 
           <label class="block text-xs text-slate-500 mt-4 mb-1">دلیل از دست رفتن</label>

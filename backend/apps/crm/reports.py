@@ -70,11 +70,17 @@ class Filters:
     kind: str = ""         # activity kind
     granularity: str = "month"
 
+    #: Which body of data to read — the company's real customer file, or the
+    #: showroom. Set from the signed-in account, never from the query string:
+    #: a URL that can flip a report onto fabricated numbers is a URL that will
+    #: eventually be pasted into an email as if it were real.
+    dataset: str = "real"
+
     raw: dict = field(default_factory=dict)
 
     # ---- parsing ---------------------------------------------------------
     @classmethod
-    def from_query(cls, q) -> "Filters":
+    def from_query(cls, q, dataset: str = "real") -> "Filters":
         def num(name):
             v = q.get(name)
             try:
@@ -82,7 +88,7 @@ class Filters:
             except (TypeError, ValueError):
                 return None
 
-        f = cls(raw=dict(q.items()))
+        f = cls(raw=dict(q.items()), dataset=dataset)
         f.owner = num("owner")
         f.group = num("group")
         f.source = num("source")
@@ -123,7 +129,7 @@ class Filters:
     # ---- queryset shaping -------------------------------------------------
     def deals(self, date_field: str = "closed_at"):
         """Deals inside the window, measured on `date_field`."""
-        qs = Deal.objects.filter(channel=self.channel)
+        qs = Deal.objects.filter(channel=self.channel, dataset=self.dataset)
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
@@ -148,7 +154,9 @@ class Filters:
         return qs
 
     def activities(self):
-        qs = Activity.objects.filter(customer__channel=self.channel)
+        qs = Activity.objects.filter(
+            customer__channel=self.channel, dataset=self.dataset
+        )
         qs = self._window(qs, "at")
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
@@ -169,7 +177,7 @@ class Filters:
         return qs
 
     def customers(self, date_field: str = "first_deal_won_at"):
-        qs = Customer.objects.filter(channel=self.channel)
+        qs = Customer.objects.filter(channel=self.channel, dataset=self.dataset)
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
@@ -486,7 +494,10 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
       • `ever`           — how many deals ever reached the stage (from the
         stage-event log), which is the only honest way to compute drop-off.
     """
-    stages = list(PipelineStage.objects.filter(is_active=True).order_by("order"))
+    stages = list(
+        PipelineStage.objects.filter(is_active=True, dataset=f.dataset)
+        .order_by("order")
+    )
     open_qs = f.deals("opened_at").filter(status=Deal.Status.OPEN)
     now_map = {
         r["stage_id"]: r
@@ -524,6 +535,26 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
             "reach_pct": _pct(ever, first_ever) if first_ever else 0.0,
             "drill": {"kind": "deals", "params": d},
         })
+
+    # What makes it a funnel rather than a bar chart.
+    #
+    # The per-stage count is a *distribution* — 796 deals sitting at first
+    # contact, 40 at sample-sent — and drawn as widths it is not a funnel at
+    # all; it is one wide bar and eight slivers, in no particular order.
+    #
+    # A funnel needs a monotonically narrowing measure, so each stage carries
+    # how many open deals are at it **or past it**. That is the honest
+    # reading available from current state alone: `ever` would be better, but
+    # it comes from the stage-event log, and deals imported from دیدار have no
+    # event history to read.
+    running = 0
+    for row in reversed(rows):
+        running += int(row["count"])
+        row["remaining"] = running
+    widest = rows[0]["remaining"] if rows else 0
+    for row in rows:
+        row["remaining_pct"] = _pct(row["remaining"], widest) if widest else 0.0
+
     return _shape("funnel", "stage", rows, chronological=True)
 
 
@@ -1026,7 +1057,9 @@ def dashboard(f: Filters) -> dict:
     lost_agg = lost.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
     in_agg = opened.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
 
-    open_now = Deal.objects.filter(channel=f.channel, status=Deal.Status.OPEN)
+    open_now = Deal.objects.filter(
+        channel=f.channel, status=Deal.Status.OPEN, dataset=f.dataset
+    )
     if f.owner:
         open_now = open_now.filter(owner_id=f.owner)
     pipeline_agg = open_now.aggregate(
@@ -1047,7 +1080,9 @@ def dashboard(f: Filters) -> dict:
     new_customers = f.customers("first_deal_won_at").count()
     overdue = 0
     from apps.crm.models import Task as CrmTask
-    overdue_qs = CrmTask.objects.filter(done_at__isnull=True, due_at__lt=timezone.now())
+    overdue_qs = CrmTask.objects.filter(
+        done_at__isnull=True, due_at__lt=timezone.now(), dataset=f.dataset
+    )
     if f.owner:
         overdue_qs = overdue_qs.filter(owner_id=f.owner)
     overdue = overdue_qs.count()

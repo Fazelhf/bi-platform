@@ -17,10 +17,12 @@ from rest_framework.views import APIView
 from apps.commercial.models import (
     Material,
     MaterialCategory,
+    PaymentTerm,
     PurchaseOrder,
     PurchaseRequest,
     Quote,
     QuoteReason,
+    Sample,
     Supplier,
 )
 from apps.commercial.permissions import (
@@ -32,11 +34,14 @@ from apps.commercial.serializers import (
     AwardSerializer,
     MaterialCategorySerializer,
     MaterialSerializer,
+    PaymentTermSerializer,
     PurchaseOrderSerializer,
     PurchaseRequestListSerializer,
     PurchaseRequestSerializer,
     QuoteReasonSerializer,
     QuoteSerializer,
+    SampleSerializer,
+    SampleVerdictSerializer,
     SupplierSerializer,
     UnitChoiceSerializer,
 )
@@ -177,9 +182,9 @@ class SupplierViewSet(viewsets.ModelViewSet):
     serializer_class = SupplierSerializer
     permission_classes = [CommercialAccess]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["is_active"]
-    search_fields = ["code", "name_fa", "contact_name", "mobile", "phone",
-                     "email", "activity", "note"]
+    filterset_fields = ["is_active", "origin"]
+    search_fields = ["code", "name_fa", "name_en", "contact_name", "mobile",
+                     "phone", "email", "activity", "country", "note"]
     ordering_fields = ["name_fa", "created_at"]
 
     def perform_create(self, serializer):
@@ -251,7 +256,11 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         if self.action == "list":
-            return qs.annotate(quote_count=Count("quotes"))
+            # Not `quote_count`: PurchaseRequest already has a property of that
+            # name, and Django assigns an annotation by setattr — which on a
+            # property with no setter raises, so the whole list 500s as soon
+            # as there is a single row to serialise.
+            return qs.annotate(quotes_n=Count("quotes"))
         return qs.prefetch_related("quotes__supplier", "quotes__reason")
 
     def perform_create(self, serializer):
@@ -346,6 +355,93 @@ class QuoteViewSet(viewsets.ModelViewSet):
         if quote.request.status == PurchaseRequest.Status.OPEN:
             quote.request.status = PurchaseRequest.Status.QUOTING
             quote.request.save(update_fields=["status", "updated_at"])
+
+
+class PaymentTermViewSet(viewsets.ModelViewSet):
+    """شرایط پرداخت — a short list the department maintains itself."""
+
+    queryset = PaymentTerm.objects.all()
+    serializer_class = PaymentTermSerializer
+    permission_classes = [CommercialAccess]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["is_active"]
+    ordering_fields = ["sort_order", "days", "advance_pct", "name_fa"]
+
+    def perform_create(self, serializer):
+        code = serializer.validated_data.get("code")
+        serializer.save(
+            code=code or _unique_code(
+                PaymentTerm, serializer.validated_data.get("name_fa", "")
+            ),
+        )
+
+    def perform_destroy(self, instance):
+        if instance.quotes.exists() or instance.orders.exists():
+            raise ValidationError({
+                "detail": "این شرایط پرداخت روی استعلام یا سفارش ثبت شده و "
+                          "حذف نمی‌شود. می‌توانید غیرفعالش کنید.",
+            })
+        instance.delete()
+
+
+class SampleViewSet(viewsets.ModelViewSet):
+    """نمونه — asking for one, receiving it, and deciding on it."""
+
+    queryset = Sample.objects.select_related(
+        "supplier", "material", "request", "reason", "decided_by"
+    )
+    serializer_class = SampleSerializer
+    permission_classes = [CommercialAccess]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["status", "supplier", "material", "request"]
+    search_fields = [
+        "sample_no", "spec", "lab_note", "note",
+        "supplier__name_fa", "material__name_fa",
+    ]
+    ordering_fields = ["requested_on", "received_on", "decided_on", "created_at"]
+
+    def perform_create(self, serializer):
+        sample = serializer.save(created_by=self.request.user)
+        audit_log(self.request.user, sample, AuditLog.Action.CREATE)
+
+    @extend_schema(request=SampleVerdictSerializer, responses=SampleSerializer)
+    @action(detail=True, methods=["post"])
+    def verdict(self, request, pk=None):
+        """
+        تایید یا رد نمونه.
+
+        Its own endpoint rather than a PATCH on `status`, because a verdict is
+        four facts that must land together — the outcome, the date, who
+        decided, and (on a rejection) why. Written one field at a time, a
+        sample spends a moment «رد شد» with no reason attached, and that is
+        the state someone screenshots.
+        """
+        sample = self.get_object()
+        payload = SampleVerdictSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        approve = data["approve"]
+        if not approve and not data.get("reason"):
+            raise ValidationError({
+                "reason": "برای رد نمونه، دلیل رد الزامی است.",
+            })
+
+        with transaction.atomic():
+            sample.status = (
+                Sample.Status.APPROVED if approve else Sample.Status.REJECTED
+            )
+            sample.decided_on = data.get("decided_on") or date.today()
+            sample.decided_by = request.user
+            # A reason belongs to a rejection. Keeping the old one on an
+            # approval would leave «تایید شد — گرماژ خارج از تلورانس» on screen.
+            sample.reason = None if approve else data["reason"]
+            if data.get("lab_note"):
+                sample.lab_note = data["lab_note"]
+            sample.save()
+
+        audit_log(request.user, sample, AuditLog.Action.UPDATE)
+        return Response(SampleSerializer(sample).data)
 
 
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
@@ -485,6 +581,58 @@ class UnitsView(APIView):
     @extend_schema(responses=dict)
     def get(self, request):
         return Response({"units": UnitChoiceSerializer.all()})
+
+
+def _seen_values(model, field: str, limit: int = 60) -> list[str]:
+    """
+    The values already typed into a free-text field, commonest first.
+
+    Frequency order rather than alphabetical: the point of the list is that
+    the answer someone needs is usually the one they gave last time, and
+    «شهید رجایی» should not sit twenty rows below a port used once in 1403.
+    """
+    rows = (
+        model.objects.exclude(**{field: ""})
+        .exclude(**{f"{field}__isnull": True})
+        .values(field)
+        .annotate(n=Count("id"))
+        .order_by("-n", field)[:limit]
+    )
+    return [row[field] for row in rows]
+
+
+class SuggestionsView(APIView):
+    """
+    What has been typed into each free-text field before.
+
+    کشور, برند, شرکت حمل and بندر are not lookup tables and should not become
+    them — the department must be able to write a port nobody has used yet
+    without asking anyone to add a row first. But left as bare text inputs
+    they drift: «شهید رجایی» and «شهید رجائی» become two ports, and every
+    report that groups by port quietly splits in half.
+
+    Suggesting the existing values costs one query per field and removes most
+    of that drift, while still letting anything new through.
+    """
+
+    permission_classes = [CommercialAccess]
+
+    @extend_schema(responses=dict)
+    def get(self, request):
+        from apps.commercial.models import ForeignOrder, Shipment
+
+        return Response({
+            "requester_units": _seen_values(PurchaseRequest, "requester_unit"),
+            "activities": _seen_values(Supplier, "activity"),
+            "countries": sorted(set(
+                _seen_values(Supplier, "country") + _seen_values(ForeignOrder, "country")
+            )),
+            "brands": _seen_values(ForeignOrder, "brand"),
+            "goods": _seen_values(ForeignOrder, "goods_desc"),
+            "carriers": _seen_values(Shipment, "carrier"),
+            "origin_ports": _seen_values(Shipment, "origin_port"),
+            "destination_ports": _seen_values(Shipment, "destination_port"),
+        })
 
 
 def _int(raw) -> int | None:

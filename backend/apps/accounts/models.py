@@ -62,6 +62,16 @@ class User(AbstractUser):
     avatar_image = models.TextField(blank=True)
     last_seen = models.DateTimeField(null=True, blank=True)
 
+    # Which CRM dataset this account is looking at. Per-account rather than
+    # global so one person can walk an outsider through the showroom while
+    # everyone else keeps working on the real customer file. Never sticky in
+    # the dangerous direction: it defaults to the real data, so an account
+    # left alone always shows the truth.
+    crm_dataset = models.CharField(
+        "داده‌ی CRM", max_length=4, default="real",
+        choices=[("real", "داده واقعی"), ("demo", "داده نمایشی")],
+    )
+
     # Two-step login: after the password, a one-time code sent to `phone`.
     # Enabling it is a self-service act (the user proves they hold the phone
     # by entering a code sent to it), which is why there is no plain admin

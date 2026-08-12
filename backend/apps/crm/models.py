@@ -34,7 +34,39 @@ from apps.sales.models import DimEmployee, DimProvince, SalesChannel
 # --------------------------------------------------------------------------
 # Reference / lookup tables (all CEO-editable, all used as report axes)
 # --------------------------------------------------------------------------
-class CustomerGroup(TimeStampedModel):
+class Dataset(models.TextChoices):
+    """
+    Which body of data a row belongs to.
+
+    The company's real customer file lives beside a fabricated one. The demo
+    set is a showroom — it can be shown to an outsider, projected in a
+    meeting, or used to learn the screens, without a single real customer's
+    name or mobile number leaving the room. It is meant to be temporary, and
+    deleting it later is `manage.py seed_crm --clear`, not a migration.
+
+    Every row carries its own tag rather than the two sets living in separate
+    tables or databases: a customer and a deal point at DimEmployee, DimPeriod
+    and DimProvince, which belong to other apps, and a cross-database foreign
+    key is not a thing Django can follow.
+    """
+
+    REAL = "real", "داده واقعی"
+    DEMO = "demo", "داده نمایشی"
+
+
+class DatasetModel(TimeStampedModel):
+    """Mixin for everything that exists once per dataset."""
+
+    dataset = models.CharField(
+        max_length=4, choices=Dataset.choices, default=Dataset.REAL,
+        db_index=True,
+    )
+
+    class Meta:
+        abstract = True
+
+
+class CustomerGroup(DatasetModel):
     """گروه مشتری — the market segment a customer belongs to."""
 
     code = models.SlugField(unique=True)
@@ -49,7 +81,7 @@ class CustomerGroup(TimeStampedModel):
         return self.name_fa
 
 
-class Tag(TimeStampedModel):
+class Tag(DatasetModel):
     """برچسب — free-form label attachable to customers and deals."""
 
     name_fa = models.CharField(max_length=60, unique=True)
@@ -62,7 +94,7 @@ class Tag(TimeStampedModel):
         return self.name_fa
 
 
-class LeadSource(TimeStampedModel):
+class LeadSource(DatasetModel):
     """منبع سرنخ — how the customer first found us. Drives the
     "بهترین منابع سرنخ" report: which channels actually convert."""
 
@@ -77,7 +109,7 @@ class LeadSource(TimeStampedModel):
         return self.name_fa
 
 
-class LostReason(TimeStampedModel):
+class LostReason(DatasetModel):
     """دلیل از دست رفتن — why a deal was lost. Required when a deal is marked lost,
     which is what makes the "دلایل از دست رفتن فرصت" report trustworthy."""
 
@@ -97,7 +129,7 @@ class LostReason(TimeStampedModel):
         return self.name_fa
 
 
-class ProductCategory(TimeStampedModel):
+class ProductCategory(DatasetModel):
     """دسته محصول — e.g. کاغذ حرارتی، کاغذ کربن‌لس، رول بانکی."""
 
     code = models.SlugField(unique=True)
@@ -111,7 +143,7 @@ class ProductCategory(TimeStampedModel):
         return self.name_fa
 
 
-class Product(TimeStampedModel):
+class Product(DatasetModel):
     """
     محصول. `unit_cost_rial` is what makes profit reporting possible: margin is
     computed per deal line, so "سود فروش" can always be explained by *which*
@@ -151,7 +183,7 @@ class Product(TimeStampedModel):
         return self.name_fa
 
 
-class PipelineStage(TimeStampedModel):
+class PipelineStage(DatasetModel):
     """
     مرحله فروش — one column of the sales pipeline board.
 
@@ -184,7 +216,7 @@ class PipelineStage(TimeStampedModel):
 # --------------------------------------------------------------------------
 # Customer
 # --------------------------------------------------------------------------
-class Customer(TimeStampedModel):
+class Customer(DatasetModel):
     """
     مشتری. `owner` is the salesperson accountable for the account — every
     per-rep report (new customers, active customers, satisfaction) hangs off
@@ -294,7 +326,7 @@ class DemoProvinceTarget(TimeStampedModel):
         return f"{self.province} · {self.period} (دمو)"
 
 
-class CustomerFeedback(TimeStampedModel):
+class CustomerFeedback(DatasetModel):
     """
     نظرسنجی رضایت — feeds the "تعداد مشتری ناراضی از کارشناسان" widget. Score is
     1..5; anything <= 2 counts as unhappy, and the rep it is about is stored
@@ -331,7 +363,7 @@ class CustomerFeedback(TimeStampedModel):
 # --------------------------------------------------------------------------
 # Deal (معامله) — the heart of the CRM
 # --------------------------------------------------------------------------
-class Deal(TimeStampedModel):
+class Deal(DatasetModel):
     """
     یک معامله. Money fields are denormalised from DealItem by
     :meth:`recalculate` so reports never have to join through the lines —
@@ -450,7 +482,7 @@ class Deal(TimeStampedModel):
         return f"{self.title} · {self.customer}"
 
 
-class DealItem(TimeStampedModel):
+class DealItem(DatasetModel):
     """
     ردیف محصول در معامله. The margin of the whole company is ultimately the
     sum of these rows, so the profit report drills down to exactly here:
@@ -490,7 +522,7 @@ class DealItem(TimeStampedModel):
         return f"{self.product} × {self.quantity}"
 
 
-class DealStageEvent(TimeStampedModel):
+class DealStageEvent(DatasetModel):
     """
     Every movement of a deal between pipeline stages. Two reports need it and
     neither can be reconstructed from the deal alone: the funnel (how many
@@ -526,7 +558,7 @@ class DealStageEvent(TimeStampedModel):
 # --------------------------------------------------------------------------
 # Activity (فعالیت)
 # --------------------------------------------------------------------------
-class Activity(TimeStampedModel):
+class Activity(DatasetModel):
     """
     یک فعالیت روی مشتری/معامله. Mirrors Didar's activity kinds so the
     "فعالیت‌های انجام شده" report is directly comparable.
@@ -591,7 +623,7 @@ class Activity(TimeStampedModel):
         return f"{self.get_kind_display()} · {self.customer}"
 
 
-class Task(TimeStampedModel):
+class Task(DatasetModel):
     """
     کار / یادآوری آینده. Activities record what already happened; a Task is
     what a rep still owes a customer. Overdue tasks are the leading indicator

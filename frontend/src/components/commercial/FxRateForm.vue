@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
 import { apiError } from "@/components/crm/formError";
 import MoneyInput from "@/components/MoneyInput.vue";
 import {
@@ -33,6 +34,13 @@ const form = ref({
   rate_rial: "",
   note: "",
 });
+
+const currencyOptions = computed(
+  () => currencies.value.map((c) => ({ value: c.value, label: c.label })),
+);
+const kindOptions = computed(
+  () => kinds.value.map((k) => ({ value: k.value, label: k.label })),
+);
 
 onMounted(async () => {
   const board = await foreignApi.rateBoard();
@@ -69,17 +77,11 @@ async function save() {
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
         <label :class="lbl">ارز</label>
-        <select v-model="form.currency" :class="inp">
-          <option v-for="c in currencies" :key="c.value" :value="c.value">
-            {{ c.label }}
-          </option>
-        </select>
+        <PickerField v-model="form.currency" :options="currencyOptions" :clearable="false" />
       </div>
       <div>
         <label :class="lbl">نوع نرخ</label>
-        <select v-model="form.kind" :class="inp">
-          <option v-for="k in kinds" :key="k.value" :value="k.value">{{ k.label }}</option>
-        </select>
+        <PickerField v-model="form.kind" :options="kindOptions" :clearable="false" />
       </div>
       <div>
         <label :class="lbl">تاریخ</label>

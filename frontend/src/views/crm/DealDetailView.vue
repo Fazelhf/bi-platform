@@ -127,7 +127,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       <template v-if="crm.canEdit && deal">
         <button class="text-sm bg-panel text-white rounded-xl px-3 py-1.5" @click="modal = 'activity'">ثبت فعالیت</button>
         <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'task'">کار جدید</button>
-        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'deal'">ویرایش فرصت</button>
+        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'deal'">ویرایش معامله</button>
       </template>
     </div>
 
@@ -193,7 +193,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       <Teleport to="body">
         <div v-if="lostPrompt" class="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" dir="rtl">
           <div class="bg-surface rounded-card shadow-pop w-full max-w-md p-5">
-            <h3 class="font-bold text-ink">ثبت از دست رفتن فرصت</h3>
+            <h3 class="font-bold text-ink">ثبت شکست معامله</h3>
             <p class="text-xs text-slate-400 mt-1">{{ deal.title }}</p>
 
             <label class="block text-xs text-slate-500 mt-4 mb-1">دلیل از دست رفتن</label>

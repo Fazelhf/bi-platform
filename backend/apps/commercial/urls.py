@@ -16,6 +16,8 @@ router.register("categories", views.MaterialCategoryViewSet, basename="material-
 router.register("materials", views.MaterialViewSet, basename="material")
 router.register("suppliers", views.SupplierViewSet, basename="supplier")
 router.register("reasons", views.QuoteReasonViewSet, basename="quote-reason")
+router.register("payment-terms", views.PaymentTermViewSet, basename="payment-term")
+router.register("samples", views.SampleViewSet, basename="sample")
 router.register("requests", views.PurchaseRequestViewSet, basename="purchase-request")
 router.register("quotes", views.QuoteViewSet, basename="quote")
 router.register("orders", views.PurchaseOrderViewSet, basename="purchase-order")
@@ -54,6 +56,8 @@ foreign_patterns = [
 urlpatterns = [
     path("dashboard/", views.DashboardView.as_view(), name="commercial-dashboard"),
     path("units/", views.UnitsView.as_view(), name="commercial-units"),
+    path("suggestions/", views.SuggestionsView.as_view(),
+         name="commercial-suggestions"),
     path("reports/purchases/", views.PurchaseReportView.as_view(),
          name="commercial-purchase-report"),
     path("reports/suppliers/", views.SupplierReportView.as_view(),

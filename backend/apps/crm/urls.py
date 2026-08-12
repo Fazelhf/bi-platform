@@ -19,13 +19,12 @@ router.register("stages", views.PipelineStageViewSet)
 router.register("tags", views.TagViewSet)
 
 urlpatterns = [
-    # The lock itself — the only CRM route reachable without a demo key.
-    path("gate/", views.CrmGateView.as_view(), name="crm-gate"),
     path("", include(router.urls)),
     path("dashboard/", views.CrmDashboardView.as_view(), name="crm-dashboard"),
     path("pipeline/", views.PipelineBoardView.as_view(), name="crm-pipeline"),
     path("options/", views.CrmOptionsView.as_view(), name="crm-options"),
     path("me/", views.CrmMeView.as_view(), name="crm-me"),
+    path("dataset/", views.CrmDatasetView.as_view(), name="crm-dataset"),
     path("reports/", views.CrmReportIndexView.as_view(), name="crm-report-index"),
     path("reports/<str:key>/", views.CrmReportView.as_view(), name="crm-report"),
 ]

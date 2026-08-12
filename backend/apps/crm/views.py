@@ -15,8 +15,9 @@ Write access follows the platform rule already in place for فروش همکار:
 sales_team department owns the data, the CEO reads everything.
 """
 from datetime import timedelta
+from decimal import Decimal
 
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
@@ -25,7 +26,7 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.crm import gate, reports as rpt
+from apps.crm import reports as rpt
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label, period_for
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
@@ -57,6 +58,19 @@ def can_write_crm(user) -> bool:
     )
 
 
+def can_read_crm(user) -> bool:
+    """The CEO reads it, فروش همکار works it, an admin maintains it."""
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_superuser
+            or user.role == "executive"
+            or user.department == "sales_team"
+        )
+    )
+
+
 class CrmWritePermission(BasePermission):
     """Read: any authenticated user. Write: the sales-team department, the
     CEO, or a superuser — CRM records belong to فروش همکار."""
@@ -72,63 +86,63 @@ class CrmWritePermission(BasePermission):
         return can_write_crm(u)
 
 
+class CrmAccess(BasePermission):
+    """
+    Who may open CRM at all.
+
+    This used to be a shared demo password, which made sense while the section
+    held generated sample data and was shown to people without accounts. It
+    holds the company's real customer file now — every contact, every deal
+    value — and a single password that ships in the source is the wrong shape
+    of protection for that. Access is a property of the account instead: the
+    sales team who own the records, and the CEO who reads them.
+    """
+
+    message = "دسترسی به CRM ندارید."
+
+    def has_permission(self, request, view):
+        return can_read_crm(request.user)
+
+
 class GatedAPIView(APIView):
-    """Base for the CRM's non-viewset endpoints — all behind the demo lock."""
+    """Base for the CRM's non-viewset endpoints."""
 
-    permission_classes = [gate.CrmUnlocked]
-
-
-class CrmGateView(APIView):
-    """
-    The demo lock: the only CRM endpoint reachable without a grant.
-
-    GET  — is my current key still valid? (so a refresh does not re-prompt)
-    POST — exchange the demo password for a key
-    DELETE — throw the key away (lock it again)
-    """
-
-    def get(self, request):
-        token = request.META.get(gate.HEADER, "")
-        return Response({
-            "unlocked": gate.verify(token, request.user),
-            "configured": bool(gate.demo_password()),
-        })
-
-    def post(self, request):
-        if not gate.demo_password():
-            return Response(
-                {"detail": "دمو CRM غیرفعال است."}, status=status.HTTP_403_FORBIDDEN
-            )
-        # Brute force is the obvious attack on a single shared password, so
-        # attempts are budgeted per user before the comparison happens.
-        if gate.attempts_left(request.user) <= 0:
-            return Response(
-                {"detail": "تعداد تلاش‌های ناموفق زیاد بود. کمی بعد دوباره امتحان کنید."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-        if not gate.check_password(request.data.get("password", "")):
-            left = gate.record_failure(request.user)
-            return Response(
-                {"detail": "رمز دمو نادرست است.", "attempts_left": left},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        gate.clear_failures(request.user)
-        return Response({
-            "key": gate.issue(request.user),
-            "expires_in": gate.TTL_SECONDS,
-        })
-
-    def delete(self, request):
-        return Response({"unlocked": False})
+    permission_classes = [CrmAccess]
 
 
 # --------------------------------------------------------------------------
 # Lookup viewsets
 # --------------------------------------------------------------------------
+def active_dataset(request) -> str:
+    """
+    Which dataset this request reads and writes — the account's own choice.
+
+    Read from the user rather than the query string on purpose. A dataset that
+    can be switched by editing a URL is one that ends up switched by accident,
+    and a report of fabricated numbers is indistinguishable from a real one
+    once it has been screenshotted.
+    """
+    return getattr(request.user, "crm_dataset", "real") or "real"
+
+
 class _Base(viewsets.ModelViewSet):
-    # Two gates, deliberately: the demo lock decides whether CRM is visible at
-    # all, the write permission decides who may change it.
-    permission_classes = [gate.CrmUnlocked, CrmWritePermission]
+    # Two checks, deliberately: CrmAccess decides who sees the section at all,
+    # CrmWritePermission decides who may change what is in it.
+    permission_classes = [CrmAccess, CrmWritePermission]
+
+    def get_queryset(self):
+        """
+        Every CRM list is scoped to the caller's dataset — one override rather
+        than a filter repeated in fourteen viewsets, because the one that got
+        forgotten would be the leak.
+        """
+        return super().get_queryset().filter(dataset=active_dataset(self.request))
+
+    def perform_create(self, serializer):
+        # Whatever you are looking at is what you add to. Creating a real
+        # customer while the screen says «داده نمایشی» would put a genuine
+        # record somewhere nobody thinks to look for it.
+        serializer.save(dataset=active_dataset(self.request))
 
 
 class CustomerGroupViewSet(_Base):
@@ -360,6 +374,7 @@ class DealViewSet(_Base):
             # Default to the first open stage so a new deal always appears on
             # the board rather than in a stage-less limbo.
             first = PipelineStage.objects.filter(
+                dataset=active_dataset(self.request),
                 is_active=True, kind=PipelineStage.Kind.OPEN
             ).order_by("order").first()
             if first:
@@ -444,7 +459,9 @@ class DealViewSet(_Base):
         did not go through the API cannot silently skip the log.
         """
         deal = self.get_object()
-        stage = PipelineStage.objects.filter(pk=request.data.get("stage")).first()
+        stage = PipelineStage.objects.filter(
+            pk=request.data.get("stage"), dataset=active_dataset(request)
+        ).first()
         if not stage:
             return Response({"detail": "مرحله نامعتبر است."}, status=400)
         # Same rule as the edit form: a loss with no reason would leave a hole
@@ -472,7 +489,10 @@ class DealViewSet(_Base):
             deal.status = Deal.Status.LOST
             deal.closed_at = now
             deal.close_period = period_for(now)
-            reason = LostReason.objects.filter(pk=request.data.get("lost_reason")).first()
+            reason = LostReason.objects.filter(
+                pk=request.data.get("lost_reason"),
+                dataset=active_dataset(request),
+            ).first()
             deal.lost_reason = reason
             deal.lost_note = request.data.get("lost_note", "")
         else:
@@ -633,7 +653,7 @@ class CrmDashboardView(GatedAPIView):
         ]
     )
     def get(self, request):
-        f = rpt.Filters.from_query(request.query_params)
+        f = rpt.Filters.from_query(request.query_params, active_dataset(request))
         data = rpt.dashboard(f)
         data["window"] = {
             "start": f.start.isoformat() if f.start else None,
@@ -651,7 +671,7 @@ class CrmReportView(GatedAPIView):
                 {"detail": f"گزارش «{key}» تعریف نشده است."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        f = rpt.Filters.from_query(request.query_params)
+        f = rpt.Filters.from_query(request.query_params, active_dataset(request))
         axis = request.query_params.get("axis") or ""
         data = rpt.run_report(key, f, axis)
         data["axis_labels"] = rpt.AXIS_LABELS
@@ -678,8 +698,11 @@ class PipelineBoardView(GatedAPIView):
     """مراحل فروش — the kanban board: stages with their open deals."""
 
     def get(self, request):
-        f = rpt.Filters.from_query(request.query_params)
-        qs = Deal.objects.filter(channel=f.channel, status=Deal.Status.OPEN)
+        ds = active_dataset(request)
+        f = rpt.Filters.from_query(request.query_params, ds)
+        qs = Deal.objects.filter(
+            channel=f.channel, status=Deal.Status.OPEN, dataset=ds
+        )
         if f.owner:
             qs = qs.filter(owner_id=f.owner)
         if f.group:
@@ -698,7 +721,9 @@ class PipelineBoardView(GatedAPIView):
             by_stage.setdefault(deal.stage_id, []).append(deal)
 
         columns = []
-        for st in PipelineStage.objects.filter(is_active=True).order_by("order"):
+        for st in PipelineStage.objects.filter(
+            is_active=True, dataset=ds
+        ).order_by("order"):
             deals = by_stage.get(st.id, [])
             columns.append({
                 "id": st.id,
@@ -726,6 +751,7 @@ class CrmMeView(GatedAPIView):
     def get(self, request):
         emp = employee_for(request.user)
         return Response({
+            "dataset": active_dataset(request),
             "can_edit": can_write_crm(request.user),
             "employee": emp.id if emp else None,
             "employee_name": emp.full_name_fa if emp else "",
@@ -737,12 +763,33 @@ class CrmMeView(GatedAPIView):
         })
 
 
+class CrmDatasetView(GatedAPIView):
+    """
+    Switch this account between the real customer file and the showroom.
+
+    A POST rather than a query parameter, and stored on the account, so the
+    choice survives a refresh and cannot be set by a link someone was sent.
+    """
+
+    def post(self, request):
+        choice = (request.data.get("dataset") or "").strip()
+        if choice not in {"real", "demo"}:
+            return Response(
+                {"detail": "داده باید «real» یا «demo» باشد."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        request.user.crm_dataset = choice
+        request.user.save(update_fields=["crm_dataset"])
+        return Response({"dataset": choice})
+
+
 class CrmOptionsView(GatedAPIView):
     """Every filter dropdown the CRM UI needs, in one request."""
 
     def get(self, request):
         # The month list is served rather than computed in the browser so the
         # Jalali calendar lives in exactly one place.
+        ds = active_dataset(request)
         jy, jm = jalali_month_of(timezone.localdate())
         months = []
         for _ in range(24):
@@ -772,17 +819,24 @@ class CrmOptionsView(GatedAPIView):
                 .filter(is_active=True)
                 .exclude(full_name_fa__in=["", "0"])
             ],
-            "groups": CustomerGroupSerializer(CustomerGroup.objects.all(), many=True).data,
-            "sources": LeadSourceSerializer(LeadSource.objects.all(), many=True).data,
-            "reasons": LostReasonSerializer(LostReason.objects.all(), many=True).data,
+            "groups": CustomerGroupSerializer(
+                CustomerGroup.objects.filter(dataset=ds), many=True
+            ).data,
+            "sources": LeadSourceSerializer(
+                LeadSource.objects.filter(dataset=ds), many=True
+            ).data,
+            "reasons": LostReasonSerializer(
+                LostReason.objects.filter(dataset=ds), many=True
+            ).data,
             "stages": PipelineStageSerializer(
-                PipelineStage.objects.filter(is_active=True), many=True
+                PipelineStage.objects.filter(is_active=True, dataset=ds), many=True
             ).data,
             "products": ProductSerializer(
-                Product.objects.filter(is_active=True).select_related("category"),
+                Product.objects.filter(is_active=True, dataset=ds)
+                .select_related("category"),
                 many=True,
             ).data,
-            "tags": TagSerializer(Tag.objects.all(), many=True).data,
+            "tags": TagSerializer(Tag.objects.filter(dataset=ds), many=True).data,
             "activity_kinds": [
                 {"code": c, "label": l} for c, l in Activity.Kind.choices
             ],

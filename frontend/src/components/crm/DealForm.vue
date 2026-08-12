@@ -7,7 +7,7 @@ import FormModal from "./FormModal.vue";
 import { apiError } from "./formError";
 
 /**
- * ثبت / ویرایش فرصت فروش، همراه با اقلام.
+ * ثبت / ویرایش معامله، همراه با اقلام.
  *
  * The line editor is the important half: margin reporting is only as good as
  * the lines behind it, so quantity/price/discount are captured per product
@@ -171,7 +171,7 @@ async function save() {
   // them. Reps never see this message (they are pre-filled); a manager
   // entering on someone's behalf has to say on whose.
   if (!form.owner) {
-    error.value = "انتخاب کارشناس الزامی است — بدون آن، این فرصت در گزارش‌های کارشناسان دیده نمی‌شود.";
+    error.value = "انتخاب کارشناس الزامی است — بدون آن، این معامله در گزارش‌های کارشناسان دیده نمی‌شود.";
     return;
   }
   if (isLostStage.value && !form.lost_reason) {
@@ -228,7 +228,7 @@ const lbl = "block text-xs text-slate-500 mb-1";
 
 <template>
   <FormModal
-    :title="isEdit ? 'ویرایش فرصت فروش' : 'فرصت فروش جدید'"
+    :title="isEdit ? 'ویرایش معامله' : 'معامله جدید'"
     :subtitle="form.customer_label"
     :saving="saving" :error="error" :can-delete="isEdit" wide
     @close="emit('close')" @save="save" @delete="remove"

@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
 import { apiError } from "@/components/crm/formError";
 import MoneyInput from "@/components/MoneyInput.vue";
 import { useMoney } from "@/composables/useMoney";
 import {
   commercialApi,
   type Material,
+  type PaymentTerm,
   type PurchaseOrder,
   type PurchaseRequest,
   type Quote,
   type Supplier,
 } from "@/api/commercial";
+import { PAYMENT_METHODS } from "@/components/commercial/payment";
 
 /**
  * ثبت سفارش خرید.
@@ -35,6 +38,7 @@ const inp =
 const { unitLabel, exact } = useMoney();
 const materials = ref<Material[]>([]);
 const suppliers = ref<Supplier[]>([]);
+const terms = ref<PaymentTerm[]>([]);
 const saving = ref(false);
 const error = ref("");
 
@@ -56,8 +60,21 @@ const form = ref({
   ordered_on: props.order?.ordered_on ?? today,
   delivered_on: props.order?.delivered_on ?? "",
   status: props.order?.status ?? "pending",
+  // Carried over from the winning quote — the terms that were offered are the
+  // terms being agreed to, unless someone deliberately changes them here.
+  payment_term: props.order?.payment_term ?? props.quote?.payment_term ?? (null as number | null),
+  payment_method: props.order?.payment_method ?? props.quote?.payment_method ?? "",
+  payment_note: props.order?.payment_note ?? props.quote?.payment_note ?? "",
   note: props.order?.note ?? "",
 });
+
+const termOptions = computed(() => terms.value.map((t) => ({
+  value: t.id,
+  label: t.name_fa,
+  hint: Number(t.advance_pct)
+    ? `${t.advance_pct}٪ پیش‌پرداخت${t.days ? ` · مابقی ${t.days} روز` : ""}`
+    : (t.days ? `${t.days} روز پس از تحویل` : "بدون مهلت"),
+})));
 
 const total = computed(() =>
   exact(Number(form.value.quantity || 0) * Number(form.value.unit_price_rial || 0), true),
@@ -66,6 +83,23 @@ const total = computed(() =>
 const materialUnit = computed(
   () => materials.value.find((m) => m.id === form.value.material)?.unit_label ?? "",
 );
+
+const materialOptions = computed(() => materials.value.map((m) => ({
+  value: m.id,
+  label: m.name_fa,
+  hint: m.category_name || "",
+  badge: m.unit_label,
+  keywords: m.code,
+})));
+
+const supplierOptions = computed(() => suppliers.value.map((s) => ({
+  value: s.id,
+  label: s.name_fa,
+  hint: s.activity,
+  keywords: `${s.code} ${s.contact_name} ${s.mobile}`,
+})));
+
+const statusOptions = STATUSES.map((s) => ({ value: s.value, label: s.label }));
 
 // «تحویل شد» without a date is a status the reports cannot use — every lead
 // time would skip it — so the field fills itself the moment it is needed.
@@ -76,9 +110,10 @@ watch(() => form.value.status, (status) => {
 });
 
 onMounted(async () => {
-  [materials.value, suppliers.value] = await Promise.all([
+  [materials.value, suppliers.value, terms.value] = await Promise.all([
     commercialApi.materials({ is_active: true }),
     commercialApi.suppliers({ is_active: true }),
+    commercialApi.paymentTerms({ is_active: true }),
   ]);
 });
 
@@ -120,19 +155,21 @@ async function save() {
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
         <label class="text-xs text-slate-500 mb-1 block">کالا *</label>
-        <select v-model="form.material" :class="inp">
-          <option :value="null">انتخاب کنید…</option>
-          <option v-for="m in materials" :key="m.id" :value="m.id">
-            {{ m.name_fa }} ({{ m.unit_label }})
-          </option>
-        </select>
+        <PickerField
+          v-model="form.material"
+          :options="materialOptions"
+          placeholder="کالا را انتخاب کنید…"
+          search-placeholder="نام یا کد کالا…"
+        />
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">تامین‌کننده *</label>
-        <select v-model="form.supplier" :class="inp">
-          <option :value="null">انتخاب کنید…</option>
-          <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name_fa }}</option>
-        </select>
+        <PickerField
+          v-model="form.supplier"
+          :options="supplierOptions"
+          placeholder="تامین‌کننده را انتخاب کنید…"
+          search-placeholder="نام، فعالیت یا شماره تماس…"
+        />
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">
@@ -158,9 +195,9 @@ async function save() {
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">وضعیت</label>
-        <select v-model="form.status" :class="inp">
-          <option v-for="s in STATUSES" :key="s.value" :value="s.value">{{ s.label }}</option>
-        </select>
+        <PickerField
+          v-model="form.status" :options="statusOptions" :clearable="false"
+        />
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">
@@ -169,6 +206,33 @@ async function save() {
         </label>
         <input v-model="form.delivered_on" :class="inp" type="date" dir="ltr" />
       </div>
+    </div>
+
+    <div class="border-t border-slate-100 pt-3">
+      <p class="text-xs text-slate-400 mb-2">شرایط پرداخت</p>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">زمان‌بندی</label>
+          <PickerField
+            v-model="form.payment_term" :options="termOptions"
+            placeholder="مثلاً ۶۰ روزه…"
+          />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">روش پرداخت</label>
+          <PickerField
+            v-model="form.payment_method" :options="PAYMENT_METHODS"
+            placeholder="نقدی، چک، حواله…"
+          />
+        </div>
+      </div>
+      <input
+        v-model="form.payment_note" :class="inp" class="mt-2"
+        placeholder="توضیح شرایط (اختیاری)"
+      />
+      <p v-if="quote?.payment_term_name" class="text-xs text-slate-400 mt-1">
+        در استعلام پیشنهاد شده بود: {{ quote.payment_term_name }}
+      </p>
     </div>
 
     <div>

@@ -23,6 +23,14 @@ pip install -r requirements.txt -q
 echo "▸ اعمال مایگریشن‌ها…"
 python manage.py migrate --noinput
 
+# One-time data loads. Both are no-ops once their dataset exists, which is
+# what makes them safe here: the underlying commands can wipe and reload, and
+# a deploy that did that every time would delete whatever the sales team had
+# entered since the last one.
+echo "▸ بارگذاری داده‌ی CRM (فقط بار اول)…"
+python manage.py import_didar_crm --if-empty
+python manage.py seed_crm --if-empty
+
 echo "▸ جمع‌آوری فایل‌های استاتیک…"
 python manage.py collectstatic --noinput
 

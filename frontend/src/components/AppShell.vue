@@ -11,7 +11,6 @@ import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
-import { useCrmStore } from "@/stores/crm";
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -54,33 +53,20 @@ interface Item {
   placeholder?: boolean;
 }
 
-/**
- * CRM ships as a locked demo: until its separate password is entered the
- * sidebar shows a single «دمو CRM» entry, and the real section only appears
- * afterwards. The list below is what unlocking reveals.
- */
-const crmItems: Item[] = [
-  { name: "crm-dashboard", label: "داشبورد CRM", icon: "grid" },
-  { name: "crm-pipeline", label: "مراحل فروش", icon: "target" },
-  { name: "crm-deals", label: "فرصت‌های فروش", icon: "box" },
-  { name: "crm-customers", label: "مشتریان", icon: "team" },
-  { name: "crm-activities", label: "فعالیت‌ها", icon: "notes" },
-  { name: "crm-reports", label: "گزارش‌های CRM", icon: "chart" },
-];
 
 /**
  * بازرگانی داخلی. The same list serves the CEO (who reads it) and صدف جمالی
  * (who keys it) — the section is read-only for the CEO by permission, not by
  * a different menu, so there is one place to change when a page is added.
  */
+// نمونه‌ها is deliberately absent: it is reached from درخواست و استعلام, where
+// asking a supplier for one actually happens.
 const commercialItems: Item[] = [
   { name: "commercial-dashboard", label: "داشبورد", icon: "grid" },
-  { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
   { name: "commercial-materials", label: "کالاها", icon: "box" },
   { name: "commercial-suppliers", label: "تامین‌کنندگان", icon: "team" },
   { name: "commercial-requests", label: "درخواست و استعلام", icon: "target" },
   { name: "commercial-orders", label: "سفارش‌های خرید", icon: "notes" },
-  { name: "commercial-reports", label: "گزارش‌های بازرگانی", icon: "chart" },
 ];
 
 /**
@@ -107,6 +93,9 @@ const CHILD_PARENT: Record<string, string> = {
   "commercial-material": "commercial-materials",
   "commercial-supplier": "commercial-suppliers",
   "commercial-request": "commercial-requests",
+  // نمونه‌ها has no row of its own — it is reached from درخواست و استعلام,
+  // which stays highlighted while you are in it.
+  "commercial-samples": "commercial-requests",
   "foreign-order": "foreign-orders",
 };
 
@@ -115,23 +104,11 @@ function childActive(name: string): boolean {
   return current === name || CHILD_PARENT[current] === name;
 }
 
-const crm = useCrmStore();
-
-/** Who even sees the demo entry. */
+/** Who sees the section at all. Mirrors CrmAccess on the server. */
 const showCrm = computed(
   () => auth.isExecutive || auth.department === "sales_team" || !!auth.me?.is_superuser,
 );
-const crmUnlocked = computed(() => crm.unlocked === true);
 
-// Detail pages keep their list item highlighted.
-const CRM_PARENT: Record<string, string> = {
-  "crm-deal": "crm-deals",
-  "crm-customer": "crm-customers",
-};
-function crmActive(name: string): boolean {
-  const current = String(route.name ?? "");
-  return current === name || CRM_PARENT[current] === name;
-}
 
 /** The CEO oversees every section, so «تیم من» would be the wrong word. */
 const rosterLabel = computed(() => (auth.isExecutive ? "تیم فروش" : "تیم من"));
@@ -209,8 +186,12 @@ const primary = computed<Item[]>(() => {
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
-    // and یادداشت‌ها off the first screen. The composed report joins داخلی,
-    // which is where this manager's own figures are.
+    // and یادداشت‌ها off the first screen.
+    //
+    // No report rows here. This manager works the section rather than reading
+    // it, and the داشبورد is already clickable — every figure on it opens the
+    // rows it was counted from, which is what a separate report page was
+    // being used for. The composed cross-section report belongs to the CEO.
     items.push(
       {
         name: "group-commercial",
@@ -299,7 +280,6 @@ const pageTitle = computed(() => {
     "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
     "crm-activities": "فعالیت‌ها و کارها", "crm-reports": "گزارش‌های CRM",
-    "crm-unlock": "دمو CRM",
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
     "sales-b2b-entry": "ورود فروش B2B",
     "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
@@ -310,8 +290,8 @@ const pageTitle = computed(() => {
     "commercial-suppliers": "تامین‌کنندگان", "commercial-supplier": "پرونده تامین‌کننده",
     "commercial-requests": "درخواست خرید و استعلام",
     "commercial-request": "مقایسه استعلام‌ها",
+    "commercial-samples": "نمونه‌ها",
     "commercial-orders": "سفارش‌های خرید",
-    "commercial-reports": "گزارش‌های بازرگانی",
     "commercial-full-report": "گزارش کامل بازرگانی",
     "foreign-dashboard": "داشبورد بازرگانی خارجی",
     "foreign-workbench": "میز کار بازرگانی خارجی",
@@ -340,18 +320,11 @@ async function refreshBadges() {
 
 function go(name: string) { router.push({ name }); mobileOpen.value = false; }
 
-function lockCrm() {
-  crm.lock();
-  if (String(route.name ?? "").startsWith("crm")) router.push({ name: "home" });
-}
 function logout() { auth.logout(); router.push({ name: "login" }); }
 
 onMounted(() => {
   refreshBadges();
   window.setInterval(refreshBadges, 30_000);
-  // Resolve the demo lock once, so a reload on any page shows the sidebar in
-  // the state it is actually in rather than always starting locked.
-  if (showCrm.value) crm.checkGate();
 });
 </script>
 
@@ -470,55 +443,23 @@ onMounted(() => {
           </button>
         </template>
 
-        <!-- CRM — one locked entry until the demo password is entered -->
-        <template v-if="showCrm">
-          <button
-            v-if="!crmUnlocked"
-            class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2"
-            :class="[
-              route.name === 'crm-unlock' ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
-              collapsed ? 'justify-center' : '',
-            ]"
-            title="دمو CRM — رمز جداگانه دارد"
-            @click="go('crm-unlock')"
-          >
-            <NavIcon name="chart" :size="20" />
-            <template v-if="!collapsed">
-              <span class="flex-1 text-right">دمو CRM</span>
-              <svg class="w-3.5 h-3.5 opacity-50 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-            </template>
-          </button>
-
-          <template v-else>
-            <div class="pt-3 pb-1 px-3 flex items-center gap-2">
-              <p v-if="!collapsed" class="text-[10px] font-semibold text-slate-300 tracking-wide flex-1">دمو CRM</p>
-              <button
-                v-if="!collapsed"
-                class="text-[10px] text-slate-300 hover:text-red-500"
-                title="بستن دمو"
-                @click="lockCrm"
-              >قفل</button>
-              <div v-if="collapsed" class="h-px bg-slate-200 mx-1 flex-1"></div>
-            </div>
-            <button
-              v-for="it in crmItems"
-              :key="it.name"
-              class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
-              :class="[
-                crmActive(it.name) ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100',
-                collapsed ? 'justify-center' : '',
-              ]"
-              :title="collapsed ? it.label : ''"
-              @click="go(it.name)"
-            >
-              <NavIcon :name="it.icon" :size="20" />
-              <span v-if="!collapsed" class="flex-1 text-right">{{ it.label }}</span>
-            </button>
+        <!-- CRM is a workspace of its own, not a group of rows here: one
+             door in, and its own shell takes over from there. -->
+        <button
+          v-if="showCrm"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2 text-slate-500 hover:bg-slate-100"
+          :class="collapsed ? 'justify-center' : ''"
+          title="CRM — مشتریان و فروش"
+          @click="router.push({ name: 'crm-dashboard' })"
+        >
+          <NavIcon name="team" :size="20" />
+          <template v-if="!collapsed">
+            <span class="flex-1 text-right">CRM</span>
+            <svg class="w-3.5 h-3.5 opacity-40 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            </svg>
           </template>
-        </template>
+        </button>
       </nav>
 
       <!-- Bottom: profile, settings (admin+CEO only), logout -->
@@ -625,7 +566,7 @@ onMounted(() => {
       </main>
 
       <!-- CRM drill-down panel — mounted once, opened from any CRM page -->
-      <DrillDrawer v-if="crmUnlocked" />
+      <DrillDrawer v-if="showCrm" />
 
       <!-- Footer -->
       <footer class="text-center text-xs text-slate-400 py-3">

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
+import SupplierForm from "@/components/commercial/SupplierForm.vue";
 import { apiError } from "@/components/crm/formError";
-import { commercialApi, type Supplier } from "@/api/commercial";
+import { commercialApi, type Suggestions, type Supplier } from "@/api/commercial";
 import {
   foreignApi,
   type Bank,
@@ -29,6 +31,8 @@ const lbl = "text-xs text-slate-500 mb-1 block";
 const banks = ref<Bank[]>([]);
 const suppliers = ref<Supplier[]>([]);
 const options = ref<ForeignOptions | null>(null);
+const seen = ref<Suggestions | null>(null);
+const showSupplierForm = ref(false);
 const saving = ref(false);
 const error = ref("");
 
@@ -54,12 +58,62 @@ const form = ref({
   note: props.order?.note ?? "",
 });
 
+/**
+ * Foreign sellers first, but not only them.
+ *
+ * A company that supplies both halves exists, and a file whose seller is
+ * filed as داخلی is a data-entry slip that has to stay fixable from here —
+ * so domestic rows follow, labelled, instead of being filtered out.
+ */
+const supplierOptions = computed(() => {
+  const rows = [...suppliers.value].sort(
+    (a, b) => Number(b.origin === "foreign") - Number(a.origin === "foreign"),
+  );
+  return rows.map((s) => ({
+    value: s.id,
+    label: s.name_fa,
+    hint: [s.name_en, s.country || (s.origin === "domestic" ? "داخلی" : "")]
+      .filter(Boolean).join(" · "),
+    keywords: `${s.code} ${s.name_en} ${s.country}`,
+  }));
+});
+
+const bankOptions = computed(() => banks.value.map((b) => ({
+  value: b.id, label: b.name_fa, keywords: b.code,
+})));
+const currencyOptions = computed(
+  () => (options.value?.currencies ?? []).map((c) => ({ value: c.value, label: c.label })),
+);
+const statusOptions = computed(
+  () => (options.value?.order_statuses ?? []).map((s) => ({ value: s.value, label: s.label })),
+);
+const textOptions = (rows: string[] | undefined) =>
+  (rows ?? []).map((v) => ({ value: v, label: v }));
+
+async function loadSuppliers() {
+  suppliers.value = await commercialApi.suppliers({ is_active: true });
+}
+
+/** A file is often opened before its seller exists as a row. Sending the user
+ *  away to تامین‌کنندگان to create one loses everything typed so far. */
+async function afterSupplierAdded() {
+  showSupplierForm.value = false;
+  await loadSuppliers();
+  const newest = suppliers.value.reduce(
+    (a, b) => (a && a.id > b.id ? a : b), null as Supplier | null,
+  );
+  if (newest && !form.value.supplier) form.value.supplier = newest.id;
+}
+
 onMounted(async () => {
-  [banks.value, suppliers.value, options.value] = await Promise.all([
+  [banks.value, options.value] = await Promise.all([
     foreignApi.banks(),
-    commercialApi.suppliers({ is_active: true }),
     foreignApi.options(),
   ]);
+  await loadSuppliers();
+  try {
+    seen.value = await commercialApi.suggestions();
+  } catch { /* suggestions are optional */ }
 });
 
 async function save() {
@@ -117,19 +171,35 @@ async function save() {
     <!-- کالا و فروشنده -->
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
-        <label :class="lbl">فروشنده خارجی</label>
-        <select v-model="form.supplier" :class="inp">
-          <option :value="null">انتخاب کنید…</option>
-          <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name_fa }}</option>
-        </select>
+        <label :class="lbl" class="flex items-center justify-between">
+          <span>فروشنده خارجی</span>
+          <button
+            type="button"
+            class="text-[11px] text-accent-600 hover:underline"
+            @click="showSupplierForm = true"
+          >+ فروشنده جدید</button>
+        </label>
+        <PickerField
+          v-model="form.supplier"
+          :options="supplierOptions"
+          placeholder="فروشنده را انتخاب کنید…"
+          search-placeholder="نام فارسی، لاتین یا کشور…"
+          empty-text="فروشنده‌ای پیدا نشد — می‌توانید جدید بسازید"
+        />
       </div>
       <div>
         <label :class="lbl">کشور</label>
-        <input v-model="form.country" :class="inp" placeholder="مثلاً چین" />
+        <PickerField
+          v-model="form.country" :options="textOptions(seen?.countries)" creatable
+          placeholder="مثلاً چین"
+        />
       </div>
       <div>
         <label :class="lbl">برند</label>
-        <input v-model="form.brand" :class="inp" placeholder="مثلاً Oriental" />
+        <PickerField
+          v-model="form.brand" :options="textOptions(seen?.brands)" creatable
+          placeholder="مثلاً Oriental"
+        />
       </div>
       <div>
         <label :class="lbl">وزن (تن)</label>
@@ -137,8 +207,8 @@ async function save() {
       </div>
       <div class="sm:col-span-2">
         <label :class="lbl">شرح کالا</label>
-        <input
-          v-model="form.goods_desc" :class="inp"
+        <PickerField
+          v-model="form.goods_desc" :options="textOptions(seen?.goods)" creatable
           placeholder="مثلاً کاغذ حرارتی ۵۵ گرم"
         />
       </div>
@@ -148,11 +218,9 @@ async function save() {
     <div class="grid sm:grid-cols-3 gap-3">
       <div>
         <label :class="lbl">ارز</label>
-        <select v-model="form.currency" :class="inp">
-          <option v-for="c in options?.currencies ?? []" :key="c.value" :value="c.value">
-            {{ c.label }}
-          </option>
-        </select>
+        <PickerField
+          v-model="form.currency" :options="currencyOptions" :clearable="false"
+        />
       </div>
       <div>
         <label :class="lbl">ارزش ارزی</label>
@@ -160,10 +228,10 @@ async function save() {
       </div>
       <div>
         <label :class="lbl">بانک عامل</label>
-        <select v-model="form.bank" :class="inp">
-          <option :value="null">انتخاب کنید…</option>
-          <option v-for="b in banks" :key="b.id" :value="b.id">{{ b.name_fa }}</option>
-        </select>
+        <PickerField
+          v-model="form.bank" :options="bankOptions"
+          placeholder="بانک را انتخاب کنید…" search-placeholder="نام بانک…"
+        />
       </div>
     </div>
 
@@ -209,11 +277,10 @@ async function save() {
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
         <label :class="lbl">وضعیت</label>
-        <select v-model="form.status" :class="inp">
-          <option
-            v-for="s in options?.order_statuses ?? []" :key="s.value" :value="s.value"
-          >{{ s.label }}</option>
-        </select>
+        <PickerField
+          v-model="form.status" :options="statusOptions" :clearable="false"
+          search-placeholder="مرحله پرونده…"
+        />
       </div>
     </div>
 
@@ -221,5 +288,12 @@ async function save() {
       <label :class="lbl">توضیحات</label>
       <textarea v-model="form.note" :class="inp" rows="2" />
     </div>
+
+    <SupplierForm
+      v-if="showSupplierForm"
+      default-origin="foreign"
+      @close="showSupplierForm = false"
+      @saved="afterSupplierAdded"
+    />
   </FormModal>
 </template>

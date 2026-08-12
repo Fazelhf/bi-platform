@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
 import { apiError } from "@/components/crm/formError";
 import {
   commercialApi,
@@ -31,6 +32,15 @@ const form = ref({
   is_active: props.material?.is_active ?? true,
   note: props.material?.note ?? "",
 });
+
+const unitOptions = computed(
+  () => units.value.map((u) => ({ value: u.value, label: u.label })),
+);
+const categoryOptions = computed(() => categories.value.map((c) => ({
+  value: c.id,
+  label: c.name_fa,
+  badge: c.material_count ? `${c.material_count} کالا` : "",
+})));
 
 onMounted(async () => {
   [categories.value, units.value] = await Promise.all([
@@ -78,16 +88,13 @@ async function save() {
     <div class="grid grid-cols-2 gap-3">
       <div>
         <label class="text-xs text-slate-500 mb-1 block">واحد</label>
-        <select v-model="form.unit" :class="inp">
-          <option v-for="u in units" :key="u.value" :value="u.value">{{ u.label }}</option>
-        </select>
+        <PickerField v-model="form.unit" :options="unitOptions" :clearable="false" />
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">دسته</label>
-        <select v-model="form.category" :class="inp">
-          <option :value="null">—</option>
-          <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name_fa }}</option>
-        </select>
+        <PickerField
+          v-model="form.category" :options="categoryOptions" placeholder="—"
+        />
       </div>
     </div>
 

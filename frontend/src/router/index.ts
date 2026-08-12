@@ -126,63 +126,6 @@ const router = createRouter({
         ...boardRoutes,
 
         // --- CRM (فروش همکار) — locked demo ---
-        // Everything under /crm needs the demo password. `meta.crm` marks the
-        // pages the guard protects; the API enforces the same lock, so this
-        // is convenience, not the security boundary.
-        {
-          path: "crm/unlock",
-          name: "crm-unlock",
-          component: () => import("@/views/crm/CrmLockView.vue"),
-        },
-        {
-          path: "crm",
-          name: "crm-dashboard",
-          component: () => import("@/views/crm/CrmDashboardView.vue"),
-          meta: { crm: true },
-        },
-        {
-          path: "crm/pipeline",
-          name: "crm-pipeline",
-          component: () => import("@/views/crm/PipelineView.vue"),
-          meta: { crm: true },
-        },
-        {
-          path: "crm/deals",
-          name: "crm-deals",
-          component: () => import("@/views/crm/DealsView.vue"),
-          meta: { crm: true },
-        },
-        {
-          path: "crm/deals/:id",
-          name: "crm-deal",
-          component: () => import("@/views/crm/DealDetailView.vue"),
-          meta: { crm: true },
-        },
-        {
-          path: "crm/customers",
-          name: "crm-customers",
-          component: () => import("@/views/crm/CustomersView.vue"),
-          meta: { crm: true },
-        },
-        {
-          path: "crm/customers/:id",
-          name: "crm-customer",
-          component: () => import("@/views/crm/CustomerDetailView.vue"),
-          meta: { crm: true },
-        },
-        {
-          path: "crm/activities",
-          name: "crm-activities",
-          component: () => import("@/views/crm/ActivitiesView.vue"),
-          meta: { crm: true },
-        },
-        {
-          path: "crm/reports",
-          name: "crm-reports",
-          component: () => import("@/views/crm/CrmReportsView.vue"),
-          meta: { crm: true },
-        },
-
         // --- Department manager entry (department-guarded) ---
         {
           path: "sales/entry",
@@ -285,15 +228,15 @@ const router = createRouter({
           meta: { commercial: true, commercialOnly: true },
         },
         {
-          path: "commercial/orders",
-          name: "commercial-orders",
-          component: () => import("@/views/commercial/OrdersView.vue"),
+          path: "commercial/samples",
+          name: "commercial-samples",
+          component: () => import("@/views/commercial/SamplesView.vue"),
           meta: { commercial: true, commercialOnly: true },
         },
         {
-          path: "commercial/reports",
-          name: "commercial-reports",
-          component: () => import("@/views/commercial/CommercialReportsView.vue"),
+          path: "commercial/orders",
+          name: "commercial-orders",
+          component: () => import("@/views/commercial/OrdersView.vue"),
           meta: { commercial: true, commercialOnly: true },
         },
 
@@ -381,6 +324,63 @@ const router = createRouter({
     // ================= Admin Panel =================
     // A separate application area with its own shell, reachable only by
     // administrators. The CEO and ordinary users are redirected home.
+    // ===== CRM — its own workspace =====
+    // Mounted outside AppShell on purpose: a salesperson lives in here and
+    // never opens تولید or نقدینگی, and CRM is six places you switch between
+    // rather than one of twenty sections you pick. Its shell gives the page
+    // the full width and puts the way out in a fixed corner.
+    {
+      path: "/crm",
+      component: () => import("@/components/crm/CrmShell.vue"),
+      meta: { requiresAuth: true, crm: true },
+      children: [
+        {
+          // The dashboard is the landing page. A separate «میز کار» was tried
+          // and removed: this dataset is a sixteen-month history, so every
+          // outstanding follow-up in it is a year old, and a to-do list where
+          // all four hundred rows are equally late is not a to-do list.
+          path: "",
+          name: "crm-dashboard",
+          component: () => import("@/views/crm/CrmDashboardView.vue"),
+        },
+        {
+          path: "pipeline",
+          name: "crm-pipeline",
+          component: () => import("@/views/crm/PipelineView.vue"),
+        },
+        {
+          path: "deals",
+          name: "crm-deals",
+          component: () => import("@/views/crm/DealsView.vue"),
+        },
+        {
+          path: "deals/:id",
+          name: "crm-deal",
+          component: () => import("@/views/crm/DealDetailView.vue"),
+        },
+        {
+          path: "customers",
+          name: "crm-customers",
+          component: () => import("@/views/crm/CustomersView.vue"),
+        },
+        {
+          path: "customers/:id",
+          name: "crm-customer",
+          component: () => import("@/views/crm/CustomerDetailView.vue"),
+        },
+        {
+          path: "activities",
+          name: "crm-activities",
+          component: () => import("@/views/crm/ActivitiesView.vue"),
+        },
+        {
+          path: "reports",
+          name: "crm-reports",
+          component: () => import("@/views/crm/CrmReportsView.vue"),
+        },
+      ],
+    },
+
     {
       path: "/admin",
       component: () => import("@/components/admin/AdminShell.vue"),
@@ -465,6 +465,17 @@ router.beforeEach(async (to) => {
       auth.isExecutive || !!auth.me?.is_superuser || auth.department === "finance";
     if (!canFinance) return { name: homeRouteFor(auth.department) };
   }
+  // CRM holds the company's real customer file — names, numbers, what each
+  // account is worth. It belongs to فروش همکار, who work it, and the CEO, who
+  // reads it. The API enforces the same rule (apps.crm.views.CrmAccess); this
+  // only keeps the URL from landing someone on an error page.
+  if (to.meta.crm) {
+    const canCrm =
+      auth.isExecutive
+      || !!auth.me?.is_superuser
+      || auth.department === "sales_team";
+    if (!canCrm) return { name: homeRouteFor(auth.department) };
+  }
   // بازرگانی: what the company pays its suppliers is commercially sensitive,
   // so the same rule as finance — that department, the CEO and admins only.
   // بازرگانی has two halves and one department. Each half has a dashboard the
@@ -496,14 +507,6 @@ router.beforeEach(async (to) => {
       !!auth.me?.is_superuser ||
       ["sales_team", "sales_org", "sales_b2b"].includes(auth.department);
     if (!canRoster) return { name: homeRouteFor(auth.department) };
-  }
-  // CRM demo: locked until its own password is entered. `next` is carried so
-  // a deep link (a drill-down URL someone was sent) survives the prompt.
-  if (to.meta.crm) {
-    const { useCrmStore } = await import("@/stores/crm");
-    if (!(await useCrmStore().checkGate())) {
-      return { name: "crm-unlock", query: { next: to.fullPath } };
-    }
   }
 });
 

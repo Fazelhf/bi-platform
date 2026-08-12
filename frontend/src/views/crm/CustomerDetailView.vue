@@ -79,7 +79,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       <span class="flex-1"></span>
       <template v-if="crm.canEdit && customer">
         <button class="text-sm bg-panel text-white rounded-xl px-3 py-1.5" @click="modal = 'activity'">ثبت فعالیت</button>
-        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'deal'">فرصت فروش جدید</button>
+        <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'deal'">معامله جدید</button>
         <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'task'">کار جدید</button>
         <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'customer'">ویرایش</button>
       </template>

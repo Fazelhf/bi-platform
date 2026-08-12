@@ -157,8 +157,8 @@ class DatasetCatalogTests(TestCase):
 
         A wrong ORM path in the catalog cannot be caught by reading it — it
         fails only when the query runs, and by then it is a red card on
-        someone's board. CRM is the one exclusion: its lock is a password, not
-        a role, so it is unreachable without a demo grant.
+        someone's board. CRM is skipped here only because its datasets need
+        CRM rows to be meaningful, not because the CEO cannot reach them.
         """
         ceo = _user("ceo2", Role.EXECUTIVE)
         ceo.is_superuser = True  # reaches finance/بازرگانی as the CEO does
@@ -199,8 +199,17 @@ class PermissionTests(TestCase):
         self.assertFalse(can_read_section(self.sales, "overview"))
         self.assertTrue(can_read_section(self.ceo, "finance"))
 
-    def test_crm_needs_its_own_password_even_for_the_ceo(self):
-        self.assertFalse(can_read_section(self.ceo, "crm"))
+    def test_crm_follows_the_account_not_a_password(self):
+        """
+        CRM used to sit behind a shared demo password. It holds the company's
+        real customer file now, so it answers to the same rule as the section
+        itself: فروش همکار and the CEO in, everyone else out.
+        """
+        self.assertTrue(can_read_section(self.ceo, "crm"))
+        self.assertTrue(
+            can_read_section(_user("crm_rep", Role.MANAGER, "sales_team"), "crm")
+        )
+        self.assertFalse(can_read_section(self.finance, "crm"))
 
     def test_finance_dataset_is_not_readable_by_another_department(self):
         with self.assertRaises(QueryError):
@@ -280,7 +289,15 @@ class BoardApiTests(APITestCase):
         keys = {d["key"] for d in self.client.get(reverse("dashboards-catalog")).data["datasets"]}
         self.assertIn("sales", keys)
         self.assertNotIn("cash", keys)
+        # CRM belongs to فروش همکار, so this manager does see it — but a
+        # department that has no claim on the customer file still does not.
+        self.assertIn("crm_deals", keys)
+
+        finance = _user("fin9", Role.MANAGER, Department.FINANCE)
+        self.client.force_authenticate(finance)
+        keys = {d["key"] for d in self.client.get(reverse("dashboards-catalog")).data["datasets"]}
         self.assertNotIn("crm_deals", keys)
+        self.assertIn("cash", keys)
 
     def test_batch_query_reports_a_broken_widget_without_failing_the_page(self):
         self.client.force_authenticate(self.ceo)

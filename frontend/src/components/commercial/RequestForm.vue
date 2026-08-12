@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import PickerField from "@/components/PickerField.vue";
 import { apiError } from "@/components/crm/formError";
 import { commercialApi, type Material, type PurchaseRequest } from "@/api/commercial";
 
@@ -13,6 +14,7 @@ const inp =
   "focus:ring-2 focus:ring-slate-300";
 
 const materials = ref<Material[]>([]);
+const units = ref<string[]>([]);
 const saving = ref(false);
 const error = ref("");
 
@@ -31,8 +33,24 @@ const unitLabel = computed(
   () => materials.value.find((m) => m.id === form.value.material)?.unit_label ?? "",
 );
 
+/** The category is the hint: two «چسب» rows are told apart by it, not by name. */
+const materialOptions = computed(() => materials.value.map((m) => ({
+  value: m.id,
+  label: m.name_fa,
+  hint: m.category_name || "",
+  badge: m.unit_label,
+  keywords: m.code,
+})));
+
+const unitOptions = computed(() => units.value.map((u) => ({ value: u, label: u })));
+
 onMounted(async () => {
   materials.value = await commercialApi.materials({ is_active: true });
+  // Suggestions are a convenience, never a gate: if the endpoint is slow or
+  // fails, the field stays a plain text input and the form still saves.
+  try {
+    units.value = (await commercialApi.suggestions()).requester_units;
+  } catch { /* leave the list empty */ }
 });
 
 async function save() {
@@ -73,12 +91,13 @@ async function save() {
   >
     <div>
       <label class="text-xs text-slate-500 mb-1 block">کالا *</label>
-      <select v-model="form.material" :class="inp">
-        <option :value="null">انتخاب کنید…</option>
-        <option v-for="m in materials" :key="m.id" :value="m.id">
-          {{ m.name_fa }} ({{ m.unit_label }})
-        </option>
-      </select>
+      <PickerField
+        v-model="form.material"
+        :options="materialOptions"
+        placeholder="کالا را انتخاب کنید…"
+        search-placeholder="نام یا کد کالا…"
+        empty-text="کالایی با این نام نیست"
+      />
     </div>
 
     <div class="grid grid-cols-2 gap-3">
@@ -90,7 +109,12 @@ async function save() {
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">واحد درخواست‌کننده</label>
-        <input v-model="form.requester_unit" :class="inp" placeholder="مثلاً خط بسته‌بندی" />
+        <PickerField
+          v-model="form.requester_unit"
+          :options="unitOptions"
+          creatable
+          placeholder="مثلاً خط بسته‌بندی"
+        />
       </div>
     </div>
 

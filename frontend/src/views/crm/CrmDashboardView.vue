@@ -5,13 +5,13 @@ import { crmApi, type CrmDashboard, type DashCard, type ReportRow } from "@/api/
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import CrmChart from "@/components/crm/CrmChart.vue";
+import FunnelChart from "@/components/crm/FunnelChart.vue";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
 import DealForm from "@/components/crm/DealForm.vue";
 import ActivityForm from "@/components/crm/ActivityForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
-import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 /**
  * داشبورد CRM — the home screen.
@@ -97,7 +97,6 @@ const sellerSeries = computed(() => [
 ]);
 
 const funnelRows = computed(() => data.value?.funnel.filter((r) => r.kind === "open") ?? []);
-const maxFunnel = computed(() => Math.max(...funnelRows.value.map((r) => r.count as number), 1));
 
 const lostCats = computed(() => data.value?.lost_reasons.map((r) => r.label) ?? []);
 const lostSeries = computed(() => [
@@ -124,7 +123,19 @@ const groupSeries = computed(() => [
   { name: "فروش", values: data.value?.by_group.map((r) => r.amount) ?? [] },
 ]);
 
-const card = "bg-surface rounded-card shadow-soft p-4";
+const card = "bg-surface rounded-card shadow-soft p-4 flex flex-col";
+
+/**
+ * One chart height per row rather than per chart.
+ *
+ * The page had five heights (270/240/230/220/260) scattered across five rows,
+ * so every row ended on a different line and the whole grid looked like it
+ * had been assembled from spare parts. Cards in a row are the same height by
+ * construction now; `flex flex-col` on the card lets the chart take whatever
+ * the tallest sibling leaves.
+ */
+const H_MAIN = 280;
+const H_WIDE = 250;
 
 // Quick entry straight from the home screen.
 const modal = ref<"customer" | "deal" | "activity" | null>(null);
@@ -147,7 +158,7 @@ async function onSaved(id?: number) {
   <div class="space-y-4">
     <div v-if="crm.canEdit" class="flex flex-wrap items-center gap-2 no-print">
       <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="modal = 'activity'">ثبت فعالیت</button>
-      <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'deal'">+ فرصت فروش</button>
+      <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'deal'">+ معامله</button>
       <button class="bg-surface shadow-soft text-slate-600 hover:text-ink rounded-xl px-4 py-2 text-sm" @click="modal = 'customer'">+ مشتری</button>
       <span class="text-xs text-slate-400">
         {{ crm.me?.employee_name ? `ثبت به نام ${crm.me.employee_name}` : "" }}
@@ -192,71 +203,60 @@ async function onSaved(id?: number) {
     <!-- ============ Trend + incoming ============ -->
     <div class="grid lg:grid-cols-2 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">روند فروش و سود</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">روند فروش و سود</h3>
         <CrmChart
-          :categories="trendCats" :series="trendSeries" format="rial" :height="270"
-          @pick="(i) => openRow(data!.trend, i, 'فروش موفق')"
+          :categories="trendCats" :series="trendSeries" format="rial" :height="H_MAIN"
+          @pick="(i) => openRow(data!.trend, i, 'فروش ماه')"
         />
       </div>
+
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">فرصت‌های جدید به تفکیک وضعیت</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">معامله‌های جدید به تفکیک وضعیت</h3>
         <CrmChart
-          :categories="incomingCats" :series="incomingSeries" format="count" :height="270"
-          @pick="(i) => openRow(data!.incoming_trend, i, 'فرصت‌های جدید')"
+          :categories="incomingCats" :series="incomingSeries" format="count" :height="H_MAIN"
+          @pick="(i) => openRow(data!.incoming_trend, i, 'معامله‌های جدید')"
         />
       </div>
     </div>
 
-    <!-- ============ Sellers / funnel ============ -->
-    <div class="grid lg:grid-cols-3 gap-4">
-      <div :class="card" class="lg:col-span-2">
-        <h3 class="text-sm font-semibold text-ink mb-2">بهترین فروشنده‌ها</h3>
-        <CrmChart
-          :categories="sellerCats" :series="sellerSeries" format="rial" :height="240" horizontal
-          @pick="(i) => openRow(data!.top_sellers, i, 'فروش کارشناس')"
+    <!-- ============ Funnel + sellers ============ -->
+    <div class="grid lg:grid-cols-2 gap-4">
+      <div :class="card">
+        <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+          <h3 class="text-sm font-semibold text-ink">قیف فروش</h3>
+          <p class="text-[11px] text-slate-400">رسیده · همین‌جا</p>
+        </div>
+        <FunnelChart
+          :stages="funnelRows"
+          @pick="(s) => crm.openDrill(s.drill!, `مرحله فروش — ${s.label}`)"
         />
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">قیف فروش</h3>
-        <div v-if="!funnelRows.length" class="text-xs text-slate-400">داده‌ای نیست</div>
-        <div v-else class="space-y-2">
-          <button
-            v-for="s in funnelRows" :key="String(s.id)"
-            class="w-full text-right group"
-            @click="crm.openDrill(s.drill!, `مرحله فروش — ${s.label}`)"
-          >
-            <div class="flex items-center justify-between text-xs mb-1">
-              <span class="text-slate-500 truncate">{{ s.label }}</span>
-              <span class="text-ink font-medium shrink-0">{{ num(s.count) }}</span>
-            </div>
-            <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-              <div
-                class="h-full rounded-full transition-all group-hover:opacity-80"
-                :style="{ width: `${Math.max((s.count / maxFunnel) * 100, 2)}%`, background: '#8b5cf6' }"
-              ></div>
-            </div>
-          </button>
-        </div>
+        <h3 class="text-sm font-semibold text-ink mb-3">بهترین فروشنده‌ها</h3>
+        <CrmChart
+          :categories="sellerCats" :series="sellerSeries" format="rial" :height="H_WIDE" horizontal
+          @pick="(i) => openRow(data!.top_sellers, i, 'فروش کارشناس')"
+        />
       </div>
     </div>
 
     <!-- ============ Lost reasons / activities / sources ============ -->
     <div class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">اصلی‌ترین دلایل از دست رفتن</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">اصلی‌ترین دلایل از دست رفتن</h3>
         <CrmChart
           v-if="lostCats.length" :categories="lostCats" :series="lostSeries"
-          format="count" :height="230" horizontal
+          format="count" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.lost_reasons, i, 'دلیل از دست رفتن')"
         />
         <EmptyState v-else title="معامله شکست‌خورده‌ای نیست" />
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">فعالیت‌های انجام شده</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">فعالیت‌های انجام شده</h3>
         <CrmChart
-          :categories="actCats" :series="actSeries" format="count" :height="230" horizontal
+          :categories="actCats" :series="actSeries" format="count" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.activities_by_kind, i, 'فعالیت')"
         />
       </div>
@@ -291,17 +291,17 @@ async function onSaved(id?: number) {
     <!-- ============ People ============ -->
     <div class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">فعال‌ترین کارشناسان</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">فعال‌ترین کارشناسان</h3>
         <CrmChart
-          :categories="activeCats" :series="activeSeries" format="count" :height="220" horizontal
+          :categories="activeCats" :series="activeSeries" format="count" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.top_active, i, 'فعالیت‌های')"
         />
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">مشتریان جدید بر اساس کارشناس</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">مشتریان جدید بر اساس کارشناس</h3>
         <CrmChart
-          :categories="newCustCats" :series="newCustSeries" format="count" :height="220" horizontal
+          :categories="newCustCats" :series="newCustSeries" format="count" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.new_customers_by_user, i, 'مشتریان جدید')"
         />
       </div>
@@ -368,14 +368,12 @@ async function onSaved(id?: number) {
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-2">فروش بر اساس گروه مشتری</h3>
+        <h3 class="text-sm font-semibold text-ink mb-3">فروش بر اساس گروه مشتری</h3>
         <CrmChart
-          :categories="groupCats" :series="groupSeries" kind="pie" format="rial" :height="260"
+          :categories="groupCats" :series="groupSeries" kind="pie" format="rial" :height="H_MAIN"
           @pick="(i) => openRow(data!.by_group, i, 'گروه مشتری')"
         />
       </div>
     </div>
-      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
-    <SectionBoard section="crm" :period="null" />
 </div>
 </template>
