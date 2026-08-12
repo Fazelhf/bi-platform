@@ -138,11 +138,22 @@ class _Base(viewsets.ModelViewSet):
         """
         return super().get_queryset().filter(dataset=active_dataset(self.request))
 
+    def create_defaults(self, serializer) -> dict:
+        """
+        Fields stamped onto anything created through this viewset.
+
+        Subclasses extend this rather than overriding `perform_create`, which
+        is the whole point: four viewsets had their own `perform_create` for
+        owner and timestamp defaults, and every one of them silently dropped
+        the dataset — a customer added while the screen said «داده نمایشی»
+        was filed with the real ones, where nobody would look for it. A hook
+        that *contributes* cannot be forgotten by the next viewset the way an
+        override can.
+        """
+        return {"dataset": active_dataset(self.request)}
+
     def perform_create(self, serializer):
-        # Whatever you are looking at is what you add to. Creating a real
-        # customer while the screen says «داده نمایشی» would put a genuine
-        # record somewhere nobody thinks to look for it.
-        serializer.save(dataset=active_dataset(self.request))
+        serializer.save(**self.create_defaults(serializer))
 
 
 class CustomerGroupViewSet(_Base):
@@ -241,17 +252,21 @@ class CustomerViewSet(_Base):
             )
         return qs.distinct()
 
-    def perform_create(self, serializer):
+    def create_defaults(self, serializer) -> dict:
         # A rep adding a customer should not have to fill in "who owns this"
         # or "when did we first talk" — it is them, and it is now.
-        extra = {}
+        extra = super().create_defaults(serializer)
         if not serializer.validated_data.get("owner"):
             mine = employee_for(self.request.user)
             if mine:
                 extra["owner"] = mine
         if not serializer.validated_data.get("first_contact_at"):
             extra["first_contact_at"] = timezone.now()
-        obj = serializer.save(**extra)
+        return extra
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        obj = serializer.instance
         if not obj.code:
             obj.code = f"cust-{obj.pk}"
             obj.save(update_fields=["code"])
@@ -361,9 +376,9 @@ class DealViewSet(_Base):
             "stage", "lead_source", "lost_reason",
         ).distinct()
 
-    def perform_create(self, serializer):
+    def create_defaults(self, serializer) -> dict:
         data = serializer.validated_data
-        extra = {}
+        extra = super().create_defaults(serializer)
         if not data.get("owner"):
             mine = employee_for(self.request.user)
             if mine:
@@ -383,8 +398,11 @@ class DealViewSet(_Base):
             extra["lead_source"] = data["customer"].lead_source
         if not data.get("title") and data.get("customer"):
             extra["title"] = f"فروش به {data['customer'].name_fa}"
+        return extra
 
-        obj = serializer.save(**extra)
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        obj = serializer.instance
         obj.code = obj.code or f"deal-{obj.pk}"
         obj.period = period_for(obj.opened_at)
         self._sync_close(obj)
@@ -544,8 +562,8 @@ class DealItemViewSet(_Base):
     filterset_fields = ["deal", "product"]
 
     def perform_create(self, serializer):
-        item = serializer.save()
-        item.deal.recalculate()
+        super().perform_create(serializer)
+        serializer.instance.deal.recalculate()
 
     def perform_update(self, serializer):
         item = serializer.save()
@@ -576,15 +594,19 @@ class ActivityViewSet(_Base):
             qs = qs.filter(deal_id=deal_id)
         return qs.select_related("customer", "owner", "deal")
 
-    def perform_create(self, serializer):
-        extra = {}
+    def create_defaults(self, serializer) -> dict:
+        extra = super().create_defaults(serializer)
         if not serializer.validated_data.get("owner"):
             mine = employee_for(self.request.user)
             if mine:
                 extra["owner"] = mine
         if not serializer.validated_data.get("at"):
             extra["at"] = timezone.now()
-        obj = serializer.save(**extra)
+        return extra
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
         Customer.objects.filter(pk=obj.customer_id).update(last_activity_at=obj.at)
