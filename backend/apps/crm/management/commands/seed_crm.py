@@ -186,9 +186,23 @@ class Command(BaseCommand):
             model.objects.filter(dataset="demo").delete()
         DemoProvinceTarget.objects.all().delete()
 
-    def _tag_demo(self, since) -> None:
+    def _tag_demo(self, since, reference_rows=()) -> None:
+        """
+        Mark everything this run owns as the showroom.
+
+        Two sources, because there are two ways a row gets here: the generated
+        entities are new, so their `created_at` identifies them; the reference
+        lists are upserted and may predate the run entirely, so they are named
+        explicitly by the caller.
+        """
         for model in self.DEMO_MODELS:
             model.objects.filter(created_at__gte=since).update(dataset="demo")
+
+        by_model: dict = {}
+        for row in reference_rows:
+            by_model.setdefault(type(row), []).append(row.pk)
+        for model, pks in by_model.items():
+            model.objects.filter(pk__in=pks).update(dataset="demo")
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -252,7 +266,19 @@ class Command(BaseCommand):
         self._seed_tasks(customers, reps)
         self._seed_province_targets(months)
 
-        self._tag_demo(started_at)
+        # Reference rows are upserted by code, so a run that finds them
+        # already present does not touch `created_at` — tagging by time alone
+        # left them wearing whatever label they arrived with. That is how demo
+        # DealItems ended up pointing at Products tagged «واقعی», which PROTECT
+        # then refused to let the real import delete. The seeder knows exactly
+        # which reference rows it used; they are passed in by identity.
+        # `_seed_*` return dicts for the keyed lists and plain lists for the
+        # rest; flatten both rather than making the generators agree.
+        self._tag_demo(started_at, [
+            row
+            for group in (stages, groups, sources, reasons, products, tags)
+            for row in (group.values() if isinstance(group, dict) else group)
+        ])
         self.stdout.write(self.style.SUCCESS(
             f"✔ CRM seeded — {Customer.objects.count()} مشتری، "
             f"{Deal.objects.count()} معامله، {DealItem.objects.count()} ردیف، "
