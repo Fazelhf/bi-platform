@@ -183,9 +183,17 @@ class Command(BaseCommand):
         # deletes every real CRM row — and the moment the sales team starts
         # entering data on the server, that is their work. A one-time load has
         # to be able to tell that it has already happened.
-        if options["if_empty"] and Customer.objects.filter(dataset="real").exists():
+        #
+        # «Has it happened» is asked by looking for rows this command wrote,
+        # not for rows tagged real. The first version asked the latter and was
+        # wrong on every database that already held the generated demo set:
+        # the migration that introduced `dataset` defaults it to "real", so
+        # the old seed arrived wearing the real label, the guard saw it, and
+        # the import silently never ran. Codes are the honest signal — only
+        # this command mints «didar-…».
+        if options["if_empty"] and self._already_imported():
             self.stdout.write(
-                "داده‌ی واقعی CRM از قبل موجود است — وارد کردن رد شد."
+                "داده‌ی واقعی CRM از قبل وارد شده است — وارد کردن رد شد."
             )
             return
 
@@ -212,8 +220,37 @@ class Command(BaseCommand):
         with transaction.atomic():
             if options["fresh"]:
                 self._wipe()
+            elif options["if_empty"]:
+                self._clear_mislabelled()
             self._run(sheets)
         self._compare(sheets)
+
+    @staticmethod
+    def _already_imported() -> bool:
+        """True only if a previous run of *this* command left rows behind."""
+        return Customer.objects.filter(code__startswith="didar-").exists()
+
+    def _clear_mislabelled(self) -> None:
+        """
+        Drop rows wearing the real label that this command did not write.
+
+        On a database that held the generated demo set before `dataset`
+        existed, migration 0004 tagged all of it "real". Those rows are not
+        the company's customer file and must not sit in it — but they are also
+        indistinguishable from anything typed by hand, so this only runs on
+        the first-import path, and it says what it removed.
+        """
+        stale = Customer.objects.filter(dataset="real").exclude(
+            code__startswith="didar-"
+        )
+        n = stale.count()
+        if not n:
+            return
+        self.stdout.write(self.style.WARNING(
+            f"{n} مشتری با برچسب «واقعی» پیدا شد که از دیدار نیامده — "
+            "داده‌ی نمونه‌ی قدیمی است و پاک می‌شود."
+        ))
+        self._wipe()
 
     # -- reading ---------------------------------------------------------
     def _read_all(self) -> dict:

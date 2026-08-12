@@ -70,7 +70,11 @@ class DepartmentPermissionTests(APITestCase):
         self.assertTrue(r.data["can_enter_data"])
 
 
-@override_settings(SMS_USERNAME="u", SMS_PASSWORD="k", SMS_FROM="5000", SMS_BODY_ID="77")
+# SMS_MODE is pinned, not inherited: a developer with a real gateway in their
+# own .env would otherwise run these against the wrong endpoint.
+@override_settings(
+    SMS_MODE="otp", SMS_USERNAME="u", SMS_PASSWORD="k", SMS_FROM="5000", SMS_BODY_ID="77"
+)
 class SmsGatewayTests(APITestCase):
     """The wire format of a send, and how the panel's replies are read."""
 
@@ -141,7 +145,7 @@ class SmsGatewayTests(APITestCase):
     def test_shared_mode_without_a_template_id_is_not_configured(self):
         self.assertFalse(is_configured())
 
-    @override_settings(SMS_FROM="")
+    @override_settings(SMS_MODE="otp", SMS_FROM="")
     def test_dedicated_mode_without_a_sender_is_not_configured(self):
         self.assertFalse(is_configured())
 
