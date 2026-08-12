@@ -456,6 +456,62 @@ class SystemAndMaintenanceTests(AdminPanelTestCase):
 
 
 # ==========================================================================
+class TwoFactorPanelTests(AdminPanelTestCase):
+    """The panel must report the 2FA that the login flow actually enforces.
+
+    It used to read UserSecurity.twofa_enabled, a column no login ever
+    consulted — so the panel could show an account as protected while its
+    sign-in asked for a password and nothing else.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.operator.phone = "09121112233"
+        self.operator.two_factor_enabled = True
+        self.operator.save()
+
+    def test_overview_counts_users_whose_login_really_asks_for_a_code(self):
+        self.as_admin()
+        response = self.client.get("/api/admin/security/")
+        self.assertEqual(response.data["twofa_enabled"], 1)
+
+        # A flag with no phone behind it protects nothing, so it is not counted.
+        self.operator.phone = ""
+        self.operator.save()
+        self.assertEqual(
+            self.client.get("/api/admin/security/").data["twofa_enabled"], 0
+        )
+
+    def test_listing_reports_that_2fa_is_enforced(self):
+        self.as_admin()
+        response = self.client.get("/api/admin/security/two-factor/")
+        self.assertTrue(response.data["enforced_at_login"])
+        self.assertEqual(
+            [u["username"] for u in response.data["users"]], ["op"]
+        )
+
+    def test_an_admin_can_switch_2fa_off(self):
+        self.as_admin()
+        response = self.client.post("/api/admin/security/two-factor/", {
+            "user_id": self.operator.id, "enabled": False,
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.operator.refresh_from_db()
+        self.assertFalse(self.operator.two_factor_enabled)
+        self.assertIsNone(self.operator.two_factor_enabled_at)
+
+    def test_an_admin_cannot_switch_2fa_on_for_someone_else(self):
+        self.operator.two_factor_enabled = False
+        self.operator.save()
+        self.as_admin()
+        response = self.client.post("/api/admin/security/two-factor/", {
+            "user_id": self.operator.id, "enabled": True,
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.operator.refresh_from_db()
+        self.assertFalse(self.operator.two_factor_enabled)
+
+
 class SecurityTests(AdminPanelTestCase):
     def test_failed_logins_are_recorded_and_lock_the_account(self):
         policy = PasswordPolicy.get()

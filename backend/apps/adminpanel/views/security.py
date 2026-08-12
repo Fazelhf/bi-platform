@@ -284,7 +284,9 @@ class SecurityOverviewView(APIView):
                     Q(is_locked=True) | Q(locked_until__gt=timezone.now())
                 )
             ],
-            "twofa_enabled": UserSecurity.objects.filter(twofa_enabled=True).count(),
+            "twofa_enabled": User.objects.filter(
+                two_factor_enabled=True, is_active=True
+            ).exclude(phone="").count(),
             "must_change_password": UserSecurity.objects.filter(
                 must_change_password=True
             ).count(),
@@ -311,11 +313,18 @@ class SecurityOverviewView(APIView):
 
 class TwoFactorView(APIView):
     """
-    2FA administration. The panel manages the *state* of two-factor for an
-    account — enrolling (which issues a TOTP secret), disabling, and forcing a
-    re-enrolment. Verification at login is not enabled yet; until it is, the
-    response says so explicitly rather than implying protection that is not
-    there.
+    2FA administration, over the SMS two-factor the login flow enforces.
+
+    An administrator can only ever turn 2FA **off** here. Turning it on takes
+    a code delivered to the account's own phone, which is the whole point of
+    the second factor — the user proves the number is theirs — and a switch
+    that skipped that step would lock out anyone whose number is stale or
+    missing, from a screen where nobody would notice.
+
+    An earlier version of this view drove UserSecurity.twofa_enabled and a
+    TOTP secret nothing verified. Those columns are left alone here; the login
+    path reads User.two_factor_enabled, so that is what the panel reports and
+    changes.
     """
 
     permission_classes = [AdminPanelPermission]
@@ -323,34 +332,36 @@ class TwoFactorView(APIView):
     write_permission = "security.manage"
 
     def get(self, request):
-        rows = UserSecurity.objects.select_related("user").filter(twofa_enabled=True)
+        rows = User.objects.filter(two_factor_enabled=True).exclude(phone="")
         return Response({
-            "enforced_at_login": False,
-            "note": "وضعیت 2FA در این بخش مدیریت می‌شود؛ اعتبارسنجی هنگام ورود هنوز فعال نشده است.",
+            "enforced_at_login": True,
             "users": [
-                {"id": s.user_id, "username": s.user.username, "name": str(s.user),
-                 "enabled_at": s.updated_at}
-                for s in rows
+                {"id": u.id, "username": u.username, "name": str(u),
+                 "enabled_at": u.two_factor_enabled_at}
+                for u in rows
             ],
         })
 
     def post(self, request):
         require(request.user, "security.manage")
-        import secrets as _secrets
 
         user = User.objects.filter(pk=request.data.get("user_id")).first()
         if not user:
             raise ValidationError({"user_id": "کاربر یافت نشد."})
         enable = bool(request.data.get("enabled"))
-        state = UserSecurity.get(user)
-        state.twofa_enabled = enable
-        state.twofa_secret = _secrets.token_hex(20) if enable else ""
-        state.save(update_fields=["twofa_enabled", "twofa_secret", "updated_at"])
+        if enable:
+            raise ValidationError({"enabled": (
+                "فعال‌سازی ورود دو مرحله‌ای فقط توسط خود کاربر و با تأیید کد "
+                "پیامکی ممکن است. از این بخش تنها می‌توان آن را غیرفعال کرد."
+            )})
+        was_enabled = user.two_factor_enabled
+        user.two_factor_enabled = False
+        user.two_factor_enabled_at = None
+        user.save(update_fields=["two_factor_enabled", "two_factor_enabled_at"])
         audit_log(request.user, user, AuditLog.Action.UPDATE,
-                  {"twofa": {"before": str(not enable), "after": str(enable)}})
+                  {"twofa": {"before": str(was_enabled), "after": "False"}})
         return Response({
             "ok": True,
             "user_id": user.id,
-            "twofa_enabled": state.twofa_enabled,
-            "secret": state.twofa_secret or None,
+            "twofa_enabled": user.two_factor_active,
         })
