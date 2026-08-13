@@ -118,17 +118,37 @@ class Command(BaseCommand):
         )
         try:
             with urllib.request.urlopen(request, timeout=settings.SMS_TIMEOUT) as resp:
-                payload = json.loads(resp.read().decode("utf-8", "replace"))
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+                raw = resp.read().decode("utf-8", "replace")
+        except (urllib.error.URLError, OSError) as exc:
             self.stdout.write(self.style.ERROR(f"\nاتصال به پنل برقرار نشد: {exc}"))
             return
 
-        value = str(payload.get("Value", ""))
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            payload = {}
+
+        value = str(payload.get("Value") or "")
         if str(payload.get("RetStatus")) == "1":
             self.stdout.write(self.style.SUCCESS(f"\nاعتبار پنل: {value}"))
-        else:
+            return
+
+        # Fall back to RetStatus when Value is blank — the same rule
+        # _read_result follows, and the reason it matters here: bad
+        # credentials come back as {"Value":"","RetStatus":0}, so reading
+        # Value alone printed an empty complaint.
+        #
+        # Failing that, show the raw body. The replies worth diagnosing are
+        # the undocumented ones, and an empty «پنل پاسخ داد:» is the least
+        # useful line this command could print at the moment someone is stuck.
+        explained = sms.COMMON_ERRORS.get(value) or sms.COMMON_ERRORS.get(
+            str(payload.get("RetStatus"))
+        )
+        self.stdout.write(self.style.ERROR(
+            f"\nپنل پاسخ داد: {explained or value or raw.strip()[:200] or '(پاسخ خالی)'}"
+        ))
+        if not explained:
             self.stdout.write(
-                self.style.ERROR(
-                    f"\nپنل پاسخ داد: {sms.COMMON_ERRORS.get(value, value)}"
-                )
+                "اگر مقدار بالا شبیه پاسخ معتبر نیست، معمولاً یعنی SMS_PASSWORD "
+                "هنوز ApiKey واقعی نیست (مثلاً جای‌نگهدار <ApiKey> مانده)."
             )
