@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/crm/", include("apps.crm.urls")),
     path("api/finance/", include("apps.finance.urls")),
     path("api/commercial/", include("apps.commercial.urls")),
+    path("api/office/", include("apps.office.urls")),
     path("api/executive/", include("apps.core.urls")),
     # Manager-composed boards: the layout the CEO builds for each section.
     path("api/dashboards/", include("apps.dashboards.urls")),
