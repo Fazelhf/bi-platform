@@ -119,8 +119,15 @@ const primary = computed<Item[]>(() => {
     items.push(
       { name: "overview", label: "نمای کلی", icon: "grid" },
       {
-        // The three channels are one decision — "which part of sales?" —
-        // so they live under one heading instead of three top-level rows.
+        // The three channels are one decision — "which part of sales?" — so
+        // they live under one heading instead of three top-level rows.
+        //
+        // تارگت and تیم فروش sit here too rather than at the top level. Both
+        // are about sales and nothing else: a target is set per salesperson
+        // per channel, and the roster is the list those targets are set on.
+        // As top-level rows they read as company-wide sections alongside
+        // تولید and مالی, which is what made the CEO's menu look like eight
+        // unrelated things instead of five areas of the business.
         name: "group-sales",
         label: "فروش",
         icon: "chart",
@@ -128,6 +135,8 @@ const primary = computed<Item[]>(() => {
           { name: "sales-dashboard", label: "فروش همکار", icon: "chart" },
           { name: "sales-org-dashboard", label: "فروش بانکی", icon: "chart" },
           { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "chart" },
+          { name: "targets", label: "تارگت", icon: "target" },
+          { name: "roster", label: "تیم فروش", icon: "team" },
         ],
       },
       { name: "production-dashboard", label: "تولید", icon: "box" },
@@ -154,7 +163,6 @@ const primary = computed<Item[]>(() => {
           { name: "finance-cash-report", label: "نقدینگی", icon: "chart" },
         ],
       },
-      { name: "targets", label: "تارگت", icon: "target" },
     );
   } else if (auth.department === "production") {
     items.push(
@@ -210,8 +218,10 @@ const primary = computed<Item[]>(() => {
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
   }
-  // Each department manager keeps their own list of کارشناسان; the CEO sees all.
-  if (auth.isExecutive || ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)) {
+  // Each department manager keeps their own list of کارشناسان. The CEO sees
+  // all of them, but reaches the list from inside the فروش group rather than
+  // from a row of its own — see the group above.
+  if (!auth.isExecutive && ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)) {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
   const collaboration: Item[] = [
