@@ -225,6 +225,8 @@ const primary = computed<Item[]>(() => {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
   const collaboration: Item[] = [
+    // مکاتبات is collaboration, not a department: everyone has a کارتابل.
+    { name: "office-letters", label: "مکاتبات", icon: "inbox" },
     { name: "chat", label: "پیام‌ها", icon: "chat", badge: () => chatCount.value },
     { name: "notes", label: "یادداشت‌ها", icon: "notes" },
     { name: "team", label: "همکاران", icon: "team" },
@@ -285,7 +287,7 @@ const pageTitle = computed(() => {
     overview: "نمای کلی", "sales-dashboard": "داشبورد فروش همکار",
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
-    inbox: "کارتابل تایید", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
+    inbox: "کارتابل تایید", "office-letters": "مکاتبات", "office-letter": "نامه", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
     "crm-dashboard": "داشبورد CRM", "crm-pipeline": "مراحل فروش",
     "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",

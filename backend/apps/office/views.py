@@ -115,7 +115,16 @@ class LetterViewSet(viewsets.ModelViewSet):
         LetterRecipient.objects.filter(
             letter=letter, user=request.user, read_at__isnull=True
         ).update(read_at=timezone.now())
-        return Response(self.get_serializer(letter).data)
+
+        data = self.get_serializer(letter).data
+        # The caller's own copy, the same way MailboxView stamps the list.
+        # Without it the page cannot tell «I archived this» from «somebody
+        # archived this», and the archive button labels itself from the wrong
+        # person's state.
+        mine = letter.recipients.filter(user=request.user).first()
+        data["my_read_at"] = mine.read_at if mine else None
+        data["my_archived_at"] = mine.archived_at if mine else None
+        return Response(data)
 
     # -- moving it along --------------------------------------------------
     @action(detail=True, methods=["post"])

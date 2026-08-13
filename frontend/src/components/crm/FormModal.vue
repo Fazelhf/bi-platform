@@ -55,6 +55,10 @@ const confirmDelete = ref(false);
             انصراف
           </button>
 
+          <!-- A second, weaker action beside Save — «ذخیره پیش‌نویس» on a
+               letter, for instance. Empty in every form that has none. -->
+          <slot name="actions" />
+
           <span class="flex-1"></span>
 
           <template v-if="canDelete">

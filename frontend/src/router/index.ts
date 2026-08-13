@@ -126,6 +126,20 @@ const router = createRouter({
         ...boardRoutes,
 
         // --- CRM (فروش همکار) — locked demo ---
+        // مکاتبات — every signed-in employee has a کارتابل, so no meta
+        // guard: a letter is addressed to a person, and being addressed is
+        // the permission. The API enforces the same rule.
+        {
+          path: "office/letters",
+          name: "office-letters",
+          component: () => import("@/views/office/LettersView.vue"),
+        },
+        {
+          path: "office/letters/:id",
+          name: "office-letter",
+          component: () => import("@/views/office/LetterDetailView.vue"),
+        },
+
         // --- Department manager entry (department-guarded) ---
         {
           path: "sales/entry",
