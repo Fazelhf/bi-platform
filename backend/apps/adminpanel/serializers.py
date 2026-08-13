@@ -161,8 +161,11 @@ class AdminUserSerializer(serializers.ModelSerializer):
         return bool(s and s.must_change_password)
 
     def get_twofa_enabled(self, obj) -> bool:
-        s = self._security(obj)
-        return bool(s and s.twofa_enabled)
+        # User.two_factor_active — the flag the login flow actually reads —
+        # rather than UserSecurity.twofa_enabled, which predates SMS 2FA and
+        # gates nothing. Reporting the unused one told administrators an
+        # account was protected when its login asked for a password only.
+        return obj.two_factor_active
 
     def get_last_login_ip(self, obj) -> str | None:
         event = LoginEvent.objects.filter(user=obj, success=True).first()

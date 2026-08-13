@@ -346,15 +346,16 @@ export const securityApi = {
   async twoFactor() {
     const { data } = await api.get(`${BASE}/security/two-factor/`);
     return data as {
-      enforced_at_login: boolean; note: string;
+      enforced_at_login: boolean;
       users: { id: number; username: string; name: string; enabled_at: string }[];
     };
   },
-  async setTwoFactor(userId: number, enabled: boolean) {
+  /** Admins can only switch 2FA off — turning it on needs the user's own phone. */
+  async disableTwoFactor(userId: number) {
     const { data } = await api.post(`${BASE}/security/two-factor/`, {
-      user_id: userId, enabled,
+      user_id: userId, enabled: false,
     });
-    return data as { ok: boolean; user_id: number; twofa_enabled: boolean; secret: string | null };
+    return data as { ok: boolean; user_id: number; twofa_enabled: boolean };
   },
 };
 

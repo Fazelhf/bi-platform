@@ -352,8 +352,9 @@ const loginColumns: Column[] = [
           <!-- 2FA -->
           <section class="bg-surface rounded-card shadow-soft p-4">
             <h2 class="font-semibold text-ink mb-1">ورود دومرحله‌ای (2FA)</h2>
-            <p class="text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2 mb-3">
-              وضعیت 2FA در این پنل مدیریت می‌شود، اما اعتبارسنجی آن هنگام ورود هنوز فعال نشده است.
+            <p class="text-xs text-slate-500 bg-canvas rounded-xl px-3 py-2 mb-3">
+              هنگام ورود اعمال می‌شود: کاربرِ دارای 2FA بعد از رمز، کد پیامکی هم می‌خواهد.
+              فعال‌سازی فقط توسط خود کاربر انجام می‌شود؛ از این بخش تنها می‌توان آن را غیرفعال کرد.
             </p>
             <dl class="space-y-1.5 text-sm">
               <div class="flex justify-between">
