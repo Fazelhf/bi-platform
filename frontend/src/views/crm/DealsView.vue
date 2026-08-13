@@ -117,7 +117,46 @@ const statusClass: Record<string, string> = {
     <EmptyState v-else-if="!rows.length" title="معامله‌ای در این بازه نیست" />
 
     <div v-else class="bg-surface rounded-card shadow-soft overflow-hidden">
-      <div class="overflow-x-auto">
+      <!-- Phones get a card per deal instead of the table.
+           An eight-column table cannot be narrowed to 375px — it can only be
+           scrolled sideways, which on a phone means reading one column at a
+           time and never seeing a row whole. The card keeps the same fields
+           in reading order: what it is, then the money, then who and when. -->
+      <ul class="md:hidden divide-y divide-slate-100">
+        <li
+          v-for="d in rows" :key="`m-${d.id}`"
+          class="p-4 active:bg-slate-50 cursor-pointer"
+          @click="router.push({ name: 'crm-deal', params: { id: d.id } })"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-ink font-medium truncate">{{ d.title }}</p>
+              <p class="text-xs text-slate-400 truncate">{{ d.customer_name }} · {{ d.province_name }}</p>
+            </div>
+            <span class="text-[11px] rounded-full px-2 py-0.5 shrink-0" :class="statusClass[d.status]">
+              {{ d.status_display }}
+            </span>
+          </div>
+
+          <div class="flex items-baseline gap-3 mt-2 flex-wrap">
+            <span class="text-ink font-semibold ltr-nums">{{ rial(d.amount_rial) }}</span>
+            <span class="text-xs ltr-nums" :class="Number(d.profit_rial) >= 0 ? 'text-emerald-600' : 'text-red-500'">
+              سود {{ rial(d.profit_rial) }}
+            </span>
+            <span class="text-xs ltr-nums" :class="d.margin_pct >= 20 ? 'text-emerald-600' : d.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
+              {{ pct(d.margin_pct) }}
+            </span>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 mt-1.5 text-xs text-slate-400">
+            <span class="truncate">{{ d.owner_name }} · {{ d.stage_name }}</span>
+            <span class="shrink-0 ltr-nums">{{ d.closed_jalali || d.opened_jalali }}</span>
+          </div>
+          <p v-if="d.reason_name" class="text-[10px] text-red-400 mt-1">{{ d.reason_name }}</p>
+        </li>
+      </ul>
+
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm min-w-[820px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">

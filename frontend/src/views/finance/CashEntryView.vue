@@ -230,7 +230,14 @@ async function save(submit: boolean) {
           <table class="w-full text-sm">
             <thead class="bg-slate-50/60 text-[11px] text-slate-400">
               <tr>
-                <th class="text-right font-medium px-3 py-2 whitespace-nowrap w-32">تاریخ</th>
+                <!-- Pinned. This sheet is a grid, not a list — a card per day
+                     would break the column-by-column typing it exists for — so
+                     on a phone it stays a table you scroll sideways. What made
+                     that unusable was losing the date: eight categories in,
+                     every row looked the same. The date column now rides
+                     along. `right` (not `left`) because the page is RTL. -->
+                <th class="text-right font-medium px-3 py-2 whitespace-nowrap w-32
+                           sticky right-0 z-10 bg-slate-50">تاریخ</th>
                 <th
                   v-for="c in data.categories[side]" :key="c.id"
                   class="text-left font-medium px-3 py-2 whitespace-nowrap min-w-[150px]"
@@ -243,7 +250,8 @@ async function save(submit: boolean) {
                 v-for="day in visibleDays" :key="day.period_id"
                 class="border-t border-slate-50"
               >
-                <td class="px-3 py-1.5 text-ink whitespace-nowrap">{{ day.label }}</td>
+                <td class="px-3 py-1.5 text-ink whitespace-nowrap
+                           sticky right-0 z-10 bg-surface">{{ day.label }}</td>
                 <!-- A cell holds one row per account: the same category can
                      hit two banks on the same day, and folding them into one
                      figure would lose which bank the money is in. -->

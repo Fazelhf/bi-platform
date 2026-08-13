@@ -325,7 +325,32 @@ const tabBtn = (on: boolean) =>
 
       <!-- Table -->
       <div v-if="data.rows.length" class="bg-surface rounded-card shadow-soft overflow-hidden">
-        <div class="overflow-x-auto">
+        <!-- Phones: one card per row, the columns laid out as label/value
+             pairs. The column set is chosen at runtime, so the card reads the
+             same `cols` the table does rather than hardcoding a subset. -->
+        <ul class="md:hidden divide-y divide-slate-100">
+          <li
+            v-for="row in data.rows" :key="`m-${String(row.id)}${row.label}`"
+            class="p-4" :class="row.drill?.kind ? 'cursor-pointer active:bg-slate-50' : ''"
+            @click="row.drill?.kind && crm.openDrill(row.drill, `${data.title} — ${row.label}`)"
+          >
+            <p class="text-ink font-medium">{{ row.label }}</p>
+            <dl class="grid grid-cols-2 gap-x-3 gap-y-1 mt-2">
+              <div v-for="c in cols" :key="c.k" class="flex items-baseline justify-between gap-2 min-w-0">
+                <dt class="text-[11px] text-slate-400 truncate">{{ c.label }}</dt>
+                <dd
+                  class="text-xs ltr-nums shrink-0"
+                  :class="c.k === 'profit' ? (Number(row[c.k]) >= 0 ? 'text-emerald-600' : 'text-red-500')
+                    : c.k === 'unhappy' && Number(row[c.k]) > 0 ? 'text-red-500'
+                    : c.k === 'achievement_pct' ? (Number(row[c.k]) >= 100 ? 'text-emerald-600' : Number(row[c.k]) >= 70 ? 'text-amber-600' : 'text-red-500')
+                    : 'text-slate-600'"
+                >{{ fmtCell(row[c.k], c.f) }}</dd>
+              </div>
+            </dl>
+          </li>
+        </ul>
+
+        <div class="hidden md:block overflow-x-auto">
           <table class="w-full text-sm min-w-[640px]">
             <thead>
               <tr class="text-xs text-slate-400 bg-slate-50">

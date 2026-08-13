@@ -374,7 +374,63 @@ const card = "bg-surface rounded-card shadow-soft";
     />
 
     <div v-else :class="card" class="overflow-hidden">
-      <div class="overflow-x-auto">
+      <!-- A card per person on phones. This list is editable, so the controls
+           come with it: the name is still tap-to-rename, the team is still a
+           select, and فعال/حذف are full-size buttons rather than the 12px
+           text links a table row squeezes them into. -->
+      <ul class="md:hidden divide-y divide-slate-100">
+        <li
+          v-for="m in shown" :key="`m-${m.id}`"
+          class="p-4" :class="m.is_active ? '' : 'bg-slate-50/60 text-slate-400'"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <input
+              v-if="editingId === m.id"
+              v-model="editName"
+              class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm flex-1 min-w-0 outline-none focus:ring-2 focus:ring-accent-500/30"
+              @keyup.enter="saveEdit(m)"
+              @blur="saveEdit(m)"
+            />
+            <button
+              v-else
+              class="font-medium text-right min-w-0 truncate"
+              :class="m.is_active ? 'text-ink' : ''"
+              title="برای ویرایش نام کلیک کنید"
+              @click="startEdit(m)"
+            >{{ m.employee_name }}</button>
+            <span v-if="!m.is_active" class="text-[11px] bg-slate-200 text-slate-500 rounded-full px-2 py-0.5 shrink-0">غیرفعال</span>
+          </div>
+
+          <div class="flex items-center gap-2 mt-2 flex-wrap">
+            <select
+              :value="m.team ?? ''"
+              class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none"
+              @change="setTeam(m, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">— بدون تیم</option>
+              <option v-for="t in teams" :key="t.id" :value="t.id">{{ t.name_fa }}</option>
+            </select>
+            <span v-if="m.has_login" class="text-xs text-green-600 ltr-nums">✓ {{ m.username }}</span>
+            <span v-else class="text-xs text-amber-600">✗ بدون حساب</span>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 mt-2 text-xs ltr-nums">
+            <span :class="m.periods_filled ? 'text-slate-400' : 'text-red-500'">
+              {{ num(m.periods_filled) }} دوره · {{ m.last_period || "—" }}
+            </span>
+            <span class="text-ink font-medium">{{ rial(Number(m.total_revenue)) }}</span>
+          </div>
+
+          <div class="flex gap-2 mt-3 no-print">
+            <button class="text-xs px-3 py-2 rounded-lg bg-slate-100 text-slate-600" @click="toggleActive(m)">
+              {{ m.is_active ? "غیرفعال کردن" : "فعال کردن" }}
+            </button>
+            <button class="text-xs px-3 py-2 rounded-lg bg-red-50 text-red-500" @click="remove(m)">حذف</button>
+          </div>
+        </li>
+      </ul>
+
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm min-w-[760px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">

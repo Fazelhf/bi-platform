@@ -157,7 +157,32 @@ function isOverdue(t: any) {
     <template v-else-if="tab === 'activities'">
       <EmptyState v-if="!rows.length" title="فعالیتی در این بازه نیست" />
       <div v-else class="bg-surface rounded-card shadow-soft overflow-hidden">
-        <div class="overflow-x-auto">
+        <!-- A card per activity on phones; see DealsView for the reasoning. -->
+        <ul class="md:hidden divide-y divide-slate-100">
+          <li
+            v-for="a in rows" :key="`m-${a.id}`"
+            class="p-4" :class="crm.canEdit ? 'cursor-pointer active:bg-slate-50' : ''"
+            @click="crm.canEdit && openExisting('activity', a)"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <p class="text-ink min-w-0 truncate">{{ a.kind_display }}</p>
+              <span class="text-[11px] rounded-full px-2 py-0.5 shrink-0" :class="resultClass[a.result]">
+                {{ a.result_display }}
+              </span>
+            </div>
+            <button
+              class="text-sm text-slate-600 hover:text-ink hover:underline mt-1 block truncate max-w-full text-right"
+              @click.stop="router.push({ name: 'crm-customer', params: { id: a.customer } })"
+            >{{ a.customer_name }}</button>
+            <p v-if="a.note" class="text-xs text-slate-400 mt-1">{{ a.note }}</p>
+            <div class="flex items-center justify-between gap-2 mt-1.5 text-xs text-slate-400">
+              <span class="truncate">{{ a.owner_name }} · {{ num(a.duration_min) }}′</span>
+              <span class="shrink-0 ltr-nums">{{ a.at_jalali }}</span>
+            </div>
+          </li>
+        </ul>
+
+        <div class="hidden md:block overflow-x-auto">
           <table class="w-full text-sm min-w-[700px]">
             <thead>
               <tr class="text-xs text-slate-400 bg-slate-50">
