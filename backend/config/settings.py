@@ -5,6 +5,7 @@ Local dev runs on SQLite with zero config. Set DATABASE_URL (e.g. via
 docker-compose) to switch to PostgreSQL. All secrets come from the
 environment through django-environ.
 """
+import re
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from pathlib import Path
@@ -137,6 +138,24 @@ STORAGES = {
 SPA_DIR = BASE_DIR / "spa"
 if (SPA_DIR / "index.html").exists():
     WHITENOISE_ROOT = SPA_DIR
+
+# Vite writes a content hash into every /assets/ filename, so the bytes behind
+# a given URL never change — a new build means new names, never new contents
+# under an old name. WhiteNoise cannot know that (it only recognises Django's
+# own staticfiles manifest), so it was serving the whole SPA with
+# `max-age=60`: after one minute of use every page change re-requested forty
+# chunks from Tehran, and the app felt like it was loading for the first time
+# over and over. Only the hashed bundle is touched here; /static/ keeps
+# WhiteNoise's manifest rule, and the unhashed icons keep the 60s default.
+_HASHED_ASSET = re.compile(r"^/assets/.+-[A-Za-z0-9_-]{8,}\.(?:js|css)$")
+
+
+def _spa_asset_headers(headers, path, url):
+    if _HASHED_ASSET.match(url):
+        headers["Cache-Control"] = "max-age=31536000, public, immutable"
+
+
+WHITENOISE_ADD_HEADERS_FUNCTION = _spa_asset_headers
 
 # Behind HTTPS/reverse-proxy on the host.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])

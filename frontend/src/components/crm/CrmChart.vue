@@ -118,10 +118,43 @@ function mount() {
 }
 function resize() { chart?.resize(); }
 
-onMounted(() => { mount(); window.addEventListener("resize", resize); });
-watch(option, (o) => chart?.setOption(o, true), { deep: true });
+/**
+ * ECharts measures the container once, at init, and then believes that number
+ * forever. `window.resize` is not enough: the card this chart sits in is a
+ * grid item whose track is still settling while the dashboard's data arrives,
+ * so a chart could open holding a width the phone screen does not have — and
+ * one 420px chart in a 375px screen stretched its card, which pushed the whole
+ * CRM page sideways. On a desktop the container was wide enough that the stale
+ * number never showed. Watching the element itself covers every case the
+ * window event misses: late data, a collapsing rail, fonts, rotation.
+ */
+let observer: ResizeObserver | null = null;
+
+onMounted(() => {
+  mount();
+  window.addEventListener("resize", resize);
+  if (el.value && typeof ResizeObserver !== "undefined") {
+    observer = new ResizeObserver(resize);
+    observer.observe(el.value);
+  }
+  // The observer alone is not enough for the case that caused the bug: the
+  // chart was not resized *later*, it was born wrong, and a box that is wrong
+  // from the first frame never changes for the observer to notice. ECharts
+  // writes its measurement into its own element, so the card then grows to
+  // fit the chart and the chart keeps measuring the card — a loop that holds
+  // its own wrong answer in place. Re-measuring once after the browser has
+  // actually laid the page out breaks it.
+  requestAnimationFrame(() => requestAnimationFrame(resize));
+});
+watch(option, (o) => {
+  chart?.setOption(o, true);
+  // Data arriving changes the layout around the chart; re-measure with it.
+  resize();
+}, { deep: true });
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resize);
+  observer?.disconnect();
+  observer = null;
   chart?.dispose();
   chart = null;
 });
