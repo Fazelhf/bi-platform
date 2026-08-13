@@ -221,7 +221,31 @@ const card = "bg-surface rounded-card shadow-soft p-4";
         <div class="lg:col-span-2 space-y-4">
           <div class="bg-surface rounded-card shadow-soft overflow-hidden">
             <h3 class="text-sm font-semibold text-ink px-4 pt-4 pb-2">اقلام معامله و حاشیه سود هر ردیف</h3>
-            <div class="overflow-x-auto">
+            <!-- A card per line item on phones; see DealsView for why. -->
+            <ul class="md:hidden divide-y divide-slate-100">
+              <li v-for="i in items" :key="`m-${i.id}`" class="px-4 py-3">
+                <div class="flex items-start justify-between gap-3">
+                  <p class="text-ink min-w-0 truncate">{{ i.product_name }}</p>
+                  <span class="text-sm font-medium shrink-0 ltr-nums" :class="i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
+                    {{ pct(i.margin_pct) }}
+                  </span>
+                </div>
+                <div class="text-xs text-slate-500 mt-1 ltr-nums">
+                  {{ num(Number(i.quantity)) }} × {{ rial(i.unit_price_rial) }}
+                  <template v-if="Number(i.discount_pct)">
+                    <span class="text-amber-600"> − {{ pct(i.discount_pct) }}</span>
+                  </template>
+                </div>
+                <div class="flex items-baseline justify-between gap-3 mt-1">
+                  <span class="text-ink font-semibold ltr-nums">{{ rial(i.line_total) }}</span>
+                  <span class="text-xs ltr-nums" :class="Number(i.line_profit) >= 0 ? 'text-emerald-600' : 'text-red-500'">
+                    سود {{ rial(i.line_profit) }}
+                  </span>
+                </div>
+              </li>
+            </ul>
+
+            <div class="hidden md:block overflow-x-auto">
               <table class="w-full text-sm min-w-[620px]">
                 <thead>
                   <tr class="text-xs text-slate-400 bg-slate-50">

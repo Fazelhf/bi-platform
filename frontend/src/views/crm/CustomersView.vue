@@ -94,7 +94,34 @@ const statusClass: Record<string, string> = {
     <EmptyState v-else-if="!rows.length" title="مشتری‌ای یافت نشد" />
 
     <div v-else class="bg-surface rounded-card shadow-soft overflow-hidden">
-      <div class="overflow-x-auto">
+      <!-- A card per customer on phones; see DealsView for why a seven-column
+           table cannot simply be narrowed. -->
+      <ul class="md:hidden divide-y divide-slate-100">
+        <li
+          v-for="c in rows" :key="`m-${c.id}`"
+          class="p-4 active:bg-slate-50 cursor-pointer"
+          @click="router.push({ name: 'crm-customer', params: { id: c.id } })"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-ink font-medium truncate">{{ c.name_fa }}</p>
+              <p class="text-xs text-slate-400 truncate">{{ c.contact_name }} · {{ c.mobile }}</p>
+            </div>
+            <span class="text-[11px] rounded-full px-2 py-0.5 shrink-0" :class="statusClass[c.status]">
+              {{ c.status_display }}
+            </span>
+          </div>
+          <div class="mt-2 text-xs text-slate-500 truncate">
+            {{ [c.group_name, c.province_name].filter(Boolean).join(" · ") }}
+          </div>
+          <div class="flex items-center justify-between gap-2 mt-1 text-xs text-slate-400">
+            <span class="truncate">{{ c.owner_name }}<template v-if="c.source_name"> · {{ c.source_name }}</template></span>
+            <span class="shrink-0 ltr-nums">{{ c.first_won_jalali || "—" }}</span>
+          </div>
+        </li>
+      </ul>
+
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm min-w-[760px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">

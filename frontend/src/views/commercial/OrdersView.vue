@@ -141,7 +141,42 @@ async function remove(order: PurchaseOrder) {
       <div class="px-4 py-2 text-xs text-slate-400 border-b border-slate-100">
         مبالغ به {{ unitLabel }}
       </div>
-      <div class="overflow-x-auto">
+      <!-- A card per order on phones; a nine-column table cannot be narrowed
+           to 375px, only dragged sideways. -->
+      <ul class="md:hidden divide-y divide-slate-100">
+        <li v-for="o in filtered" :key="`m-${o.id}`" class="p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-ink font-medium truncate">{{ o.material_name }}</p>
+              <p class="text-xs text-slate-400 ltr-nums truncate">
+                {{ o.order_no }}<template v-if="o.request_no"> · {{ o.request_no }}</template>
+              </p>
+            </div>
+            <span class="text-xs rounded-full px-2 py-0.5 shrink-0" :class="STATUS_CLASS[o.status]">
+              {{ o.status_label }}
+            </span>
+          </div>
+
+          <p class="text-xs text-slate-500 mt-2 truncate">{{ o.supplier_name }}</p>
+          <div class="flex items-baseline gap-3 mt-1 flex-wrap ltr-nums">
+            <span class="text-ink font-semibold">{{ exact(o.total_rial) }}</span>
+            <span class="text-xs text-slate-400">
+              {{ num(o.quantity) }} {{ o.material_unit }} × {{ exact(o.unit_price_rial) }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-2 mt-1.5 text-xs text-slate-400">
+            <span class="ltr-nums">{{ faDate(o.ordered_on) }}</span>
+            <span v-if="o.delivery_days !== null">تحویل در {{ num(o.delivery_days) }} روز</span>
+          </div>
+
+          <div v-if="canEdit" class="flex gap-2 mt-3">
+            <button class="text-xs px-3 py-2 rounded-lg bg-slate-100 text-slate-600" @click="open(o)">ویرایش</button>
+            <button class="text-xs px-3 py-2 rounded-lg bg-red-50 text-red-500" @click="remove(o)">حذف</button>
+          </div>
+        </li>
+      </ul>
+
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm min-w-[900px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">

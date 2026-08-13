@@ -115,7 +115,31 @@ async function remove(supplier: Supplier) {
     />
 
     <div v-else class="bg-surface rounded-card shadow-soft overflow-hidden">
-      <div class="overflow-x-auto">
+      <!-- A card per supplier on phones; see OrdersView for the reasoning. -->
+      <ul class="md:hidden divide-y divide-slate-100">
+        <li
+          v-for="s in filtered" :key="`m-${s.id}`"
+          class="p-4 active:bg-slate-50 cursor-pointer"
+          @click="router.push({ name: 'commercial-supplier', params: { id: s.id } })"
+        >
+          <p class="text-ink font-medium truncate">
+            {{ s.name_fa }}
+            <span v-if="!s.is_active" class="text-xs text-slate-400">(غیرفعال)</span>
+          </p>
+          <p v-if="s.contact_name" class="text-xs text-slate-400 truncate">{{ s.contact_name }}</p>
+          <p class="text-xs text-slate-500 mt-1 truncate">{{ s.activity || "—" }}</p>
+          <div class="flex items-center justify-between gap-2 mt-1.5 text-xs text-slate-400 ltr-nums">
+            <span>{{ s.mobile || s.phone || "—" }}</span>
+            <span>{{ num(s.quote_count) }} استعلام · {{ num(s.order_count) }} خرید</span>
+          </div>
+          <div v-if="canEdit" class="flex gap-2 mt-3" @click.stop>
+            <button class="text-xs px-3 py-2 rounded-lg bg-slate-100 text-slate-600" @click="open(s)">ویرایش</button>
+            <button class="text-xs px-3 py-2 rounded-lg bg-red-50 text-red-500" @click="remove(s)">حذف</button>
+          </div>
+        </li>
+      </ul>
+
+      <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm min-w-[760px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">

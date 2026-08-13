@@ -246,7 +246,61 @@ function display(row: T, column: Column): string {
     </div>
 
     <!-- Table -->
-    <div v-else class="overflow-x-auto">
+    <!-- Phones: a card per row.
+         These tables run eight to twelve columns — 950px for کاربران — and at
+         375px that is not a table anyone can read, only one they can drag
+         sideways a column at a time. The first column carries the identity, so
+         it becomes the card's title; the rest become label/value pairs. Every
+         `cell-*` and `actions` slot is passed through unchanged, so a caller
+         that customised a cell gets that same cell here. -->
+    <ul v-else class="md:hidden divide-y divide-slate-100">
+      <li
+        v-for="row in visibleRows"
+        :key="`m-${row[rowKey]}`"
+        class="px-4 py-3"
+        :class="{ 'bg-brand-50/40': selectable && selected.has(row[rowKey]) }"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-start gap-2 min-w-0">
+            <input
+              v-if="selectable"
+              type="checkbox"
+              class="rounded mt-1 shrink-0 w-4 h-4"
+              :checked="selected.has(row[rowKey])"
+              @change="toggleRow(row)"
+            />
+            <div class="min-w-0 font-medium text-ink" @click="emit('row', row)">
+              <slot :name="`cell-${columns[0].key}`" :row="row" :value="row[columns[0].key]">
+                {{ display(row, columns[0]) }}
+              </slot>
+            </div>
+          </div>
+          <div v-if="$slots.actions" class="shrink-0">
+            <slot name="actions" :row="row" />
+          </div>
+        </div>
+
+        <dl class="mt-2 space-y-1" @click="emit('row', row)">
+          <div
+            v-for="c in columns.slice(1)"
+            :key="c.key"
+            class="flex items-baseline justify-between gap-3 min-w-0"
+          >
+            <dt class="text-[11px] text-slate-400 shrink-0">{{ c.label }}</dt>
+            <dd
+              class="text-xs text-slate-600 min-w-0 text-left"
+              :class="c.type === 'number' || c.type === 'bytes' ? 'ltr-nums' : ''"
+            >
+              <slot :name="`cell-${c.key}`" :row="row" :value="row[c.key]">
+                {{ display(row, c) }}
+              </slot>
+            </dd>
+          </div>
+        </dl>
+      </li>
+    </ul>
+
+    <div v-if="visibleRows.length" class="hidden md:block overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
           <tr class="text-slate-400 border-b border-slate-100 bg-slate-50/60">
