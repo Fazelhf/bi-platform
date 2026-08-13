@@ -25,7 +25,21 @@ const router = useRouter();
 const data = ref<CrmDashboard | null>(null);
 const loading = ref(true);
 
-async function load() {
+/**
+ * `crm.query` is a getter that builds a fresh object on every read, so a deep
+ * watch on it fired for any store change at all — and opening the page ran
+ * this query three times: once on mount, once when loadOptions filled in the
+ * months the query is derived from, once more when the shell's own lookup call
+ * landed. Three identical passes over sixteen months of CRM data, on a phone.
+ * Comparing the serialised query instead means a fetch happens when the
+ * question changes and not when the object identity does.
+ */
+let lastKey = "";
+
+async function load(force = false) {
+  const key = JSON.stringify(crm.query);
+  if (!force && key === lastKey) return;
+  lastKey = key;
   loading.value = true;
   try {
     data.value = await crmApi.dashboard(crm.query);
@@ -35,7 +49,7 @@ async function load() {
 }
 
 onMounted(async () => { await crm.loadOptions(); await load(); });
-watch(() => crm.query, load, { deep: true });
+watch(() => JSON.stringify(crm.query), () => load());
 
 function cardValue(c: DashCard): string {
   if (c.unit === "rial") return rial(c.value);
@@ -123,7 +137,19 @@ const groupSeries = computed(() => [
   { name: "فروش", values: data.value?.by_group.map((r) => r.amount) ?? [] },
 ]);
 
-const card = "bg-surface rounded-card shadow-soft p-4 flex flex-col";
+/**
+ * `min-w-0` is load-bearing, not decoration.
+ *
+ * These cards are grid items, and a grid item's automatic minimum size is its
+ * content — so the card holding «فروش و تارگت استان‌ها», whose table is
+ * `min-w-[420px]` to stay readable, demanded 452px of column. On a desktop
+ * there is 452px to give. On a phone there are 351, and since every item in a
+ * one-column grid shares that one column, the table's demand widened the chart
+ * card sitting next to it: the whole CRM page hung 89px off the side of the
+ * screen and scrolled sideways into nothing. The table still scrolls inside
+ * its own `overflow-x-auto`; it just no longer sets the width of the page.
+ */
+const card = "bg-surface rounded-card shadow-soft p-4 flex flex-col min-w-0";
 
 /**
  * One chart height per row rather than per chart.
@@ -150,7 +176,8 @@ async function onSaved(id?: number) {
     router.push({ name: "crm-customer", params: { id } });
     return;
   }
-  await load();
+  // A new record does not change the question, so this one must be forced.
+  await load(true);
 }
 </script>
 

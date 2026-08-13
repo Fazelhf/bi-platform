@@ -407,6 +407,22 @@ const router = createRouter({
   ],
 });
 
+/**
+ * Where to send someone a guard has just turned away.
+ *
+ * Normally that is their own home page. But `homeRouteFor` answers `overview`
+ * for anyone without a department, and `overview` is executive-only: a viewer
+ * or a newly-created account with no section set was sent home, refused,
+ * sent home again — and vue-router, finding the same target on every hop,
+ * gave up and rendered nothing. A white screen, for the one kind of account
+ * an administrator creates most often. When home is the page that just
+ * refused, fall back to a page every signed-in account may open.
+ */
+function sentHome(to: { name?: unknown }) {
+  const home = homeRouteFor(useAuthStore().department);
+  return { name: home === to.name ? "profile-me" : home };
+}
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: "login" };
@@ -429,25 +445,25 @@ router.beforeEach(async (to) => {
   }
   const signedOutOnly = ["login", "login-otp", "forgot-password"];
   if (signedOutOnly.includes(String(to.name)) && auth.isAuthenticated) {
-    return { name: homeRouteFor(auth.department) };
+    return sentHome(to);
   }
   // Entry pages are department-scoped; keep others out.
   const dept = to.meta.department as string | undefined;
   if (dept && !auth.me?.is_superuser && auth.department !== dept) {
-    return { name: homeRouteFor(auth.department) };
+    return sentHome(to);
   }
   // Site settings: executives/superusers only.
   if (to.meta.executive && !auth.isExecutive) {
-    return { name: homeRouteFor(auth.department) };
+    return sentHome(to);
   }
   // Admin Panel: administrators only. The CEO has their own dashboards and
   // is kept out unless someone granted them access explicitly.
   if (to.meta.adminPanel && !auth.isAdminPanelUser) {
-    return { name: homeRouteFor(auth.department) };
+    return sentHome(to);
   }
   // Inbox: approvers only.
   if (to.meta.approver && !auth.me?.can_approve && !auth.me?.is_superuser) {
-    return { name: homeRouteFor(auth.department) };
+    return sentHome(to);
   }
   // A sales channel belongs to the department that owns it. The sidebar
   // already only offered your own, but the URL was still reachable — and the
@@ -455,7 +471,7 @@ router.beforeEach(async (to) => {
   const salesChannel = to.meta.salesChannel as string | undefined;
   if (salesChannel && !auth.isExecutive && !auth.me?.is_superuser) {
     const owner = { team: "sales_team", organizational: "sales_org", b2b: "sales_b2b" }[salesChannel];
-    if (auth.department !== owner) return { name: homeRouteFor(auth.department) };
+    if (auth.department !== owner) return sentHome(to);
   }
   // Finance: cash position is the most sensitive figure in the platform, so
   // it is the finance department, the CEO and admins — nobody else. The API
@@ -463,7 +479,7 @@ router.beforeEach(async (to) => {
   if (to.meta.finance) {
     const canFinance =
       auth.isExecutive || !!auth.me?.is_superuser || auth.department === "finance";
-    if (!canFinance) return { name: homeRouteFor(auth.department) };
+    if (!canFinance) return sentHome(to);
   }
   // CRM holds the company's real customer file — names, numbers, what each
   // account is worth. It belongs to فروش همکار, who work it, and the CEO, who
@@ -474,7 +490,7 @@ router.beforeEach(async (to) => {
       auth.isExecutive
       || !!auth.me?.is_superuser
       || auth.department === "sales_team";
-    if (!canCrm) return { name: homeRouteFor(auth.department) };
+    if (!canCrm) return sentHome(to);
   }
   // بازرگانی: what the company pays its suppliers is commercially sensitive,
   // so the same rule as finance — that department, the CEO and admins only.
@@ -486,7 +502,7 @@ router.beforeEach(async (to) => {
     !!auth.me?.is_superuser || auth.department === "commercial";
   if (to.meta.commercial) {
     if (!worksCommercial && !auth.isExecutive) {
-      return { name: homeRouteFor(auth.department) };
+      return sentHome(to);
     }
     if (to.meta.commercialOnly && !worksCommercial) {
       return { name: "commercial-dashboard" };
@@ -494,7 +510,7 @@ router.beforeEach(async (to) => {
   }
   if (to.meta.foreign) {
     if (!worksCommercial && !auth.isExecutive) {
-      return { name: homeRouteFor(auth.department) };
+      return sentHome(to);
     }
     if (to.meta.foreignOnly && !worksCommercial) {
       return { name: "foreign-dashboard" };
@@ -506,7 +522,7 @@ router.beforeEach(async (to) => {
       auth.isExecutive ||
       !!auth.me?.is_superuser ||
       ["sales_team", "sales_org", "sales_b2b"].includes(auth.department);
-    if (!canRoster) return { name: homeRouteFor(auth.department) };
+    if (!canRoster) return sentHome(to);
   }
 });
 

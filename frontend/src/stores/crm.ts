@@ -22,6 +22,9 @@ interface Filters {
   province: number | "";
 }
 
+/** The lookup fetch that is currently running, shared by concurrent callers. */
+let inFlight: Promise<CrmOptions | null> | null = null;
+
 export const useCrmStore = defineStore("crm", {
   state: () => ({
     options: null as CrmOptions | null,
@@ -96,18 +99,28 @@ export const useCrmStore = defineStore("crm", {
 
     async loadOptions(force = false) {
       if (this.options && !force) return this.options;
+      // The `options` guard above only catches callers that arrive *after* the
+      // first one finished. The shell and the page it contains both ask on the
+      // same tick, so both saw null and both fetched — four requests where two
+      // were needed, on the connection least able to spare them. Hold the
+      // in-flight promise and hand it to whoever else asks meanwhile.
+      if (inFlight && !force) return inFlight;
       this.loading = true;
-      try {
-        const [options, me] = await Promise.all([crmApi.options(), crmApi.me()]);
-        this.options = options;
-        this.me = me;
-        if (!this.filters.month && this.options.months?.length) {
-          this.filters.month = this.options.months[0].key;
+      inFlight = (async () => {
+        try {
+          const [options, me] = await Promise.all([crmApi.options(), crmApi.me()]);
+          this.options = options;
+          this.me = me;
+          if (!this.filters.month && this.options.months?.length) {
+            this.filters.month = this.options.months[0].key;
+          }
+          return this.options;
+        } finally {
+          this.loading = false;
+          inFlight = null;
         }
-      } finally {
-        this.loading = false;
-      }
-      return this.options;
+      })();
+      return inFlight;
     },
 
     openDrill(drill: Drill, title: string) {

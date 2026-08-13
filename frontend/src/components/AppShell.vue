@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { usePresence } from "@/composables/usePresence";
@@ -322,10 +322,17 @@ function go(name: string) { router.push({ name }); mobileOpen.value = false; }
 
 function logout() { auth.logout(); router.push({ name: "login" }); }
 
+// The shell is not the whole app: CRM and the admin panel are their own
+// layouts, so this component unmounts and remounts every time someone moves
+// between them. The timer was never cleared, so each trip left another one
+// running — after a morning of switching, the badge poll was firing a dozen
+// times per tick and the browser was spending its network on nothing.
+let badgeTimer = 0;
 onMounted(() => {
   refreshBadges();
-  window.setInterval(refreshBadges, 30_000);
+  badgeTimer = window.setInterval(refreshBadges, 30_000);
 });
+onBeforeUnmount(() => window.clearInterval(badgeTimer));
 </script>
 
 <template>
