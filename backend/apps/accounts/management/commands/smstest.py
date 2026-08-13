@@ -71,6 +71,15 @@ class Command(BaseCommand):
     # -- helpers ---------------------------------------------------------
     def _report_settings(self):
         shared = sms.is_shared_line()
+        # Which file the values came from, named before the values themselves.
+        # «پیکربندی نشده» after a deploy is almost always .env: it is
+        # gitignored, so a server that was never given one by hand keeps
+        # answering that no matter how many times the code is pulled.
+        env_file = settings.BASE_DIR / ".env"
+        self.stdout.write(
+            f"فایل تنظیمات: {env_file} "
+            f"({'موجود' if env_file.exists() else 'وجود ندارد'})"
+        )
         self.stdout.write(f"حالت ارسال (SMS_MODE): {settings.SMS_MODE}")
         self.stdout.write(f"نام کاربری: {settings.SMS_USERNAME or '—'}")
         self.stdout.write(f"کلید/رمز: {'تنظیم شده' if settings.SMS_PASSWORD else '—'}")
