@@ -30,6 +30,25 @@
         "--strictPort"
       ],
       "port": 5174
+    },
+    {
+      "//": "Temporary: serves the responsive-mobile worktree. Remove once merged.",
+      "name": "frontend-responsive",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "C:/Users/Asus/AppData/Local/Temp/claude/responsive/frontend",
+        "run",
+        "dev",
+        "--",
+        "C:/Users/Asus/AppData/Local/Temp/claude/responsive/frontend",
+        "--config",
+        "C:/Users/Asus/AppData/Local/Temp/claude/responsive/frontend/vite.config.ts",
+        "--port",
+        "5175",
+        "--strictPort"
+      ],
+      "port": 5175
     }
   ]
 }

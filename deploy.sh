@@ -31,6 +31,9 @@ echo "▸ بارگذاری داده‌ی CRM (فقط بار اول)…"
 python manage.py import_didar_crm --if-empty
 python manage.py seed_crm --if-empty
 
+echo "▸ بارگذاری کارنامه‌های تولید (فقط ماه‌های جدید)…"
+python manage.py import_production_excel --dir data/production --if-empty
+
 echo "▸ جمع‌آوری فایل‌های استاتیک…"
 python manage.py collectstatic --noinput
 
