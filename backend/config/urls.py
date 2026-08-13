@@ -57,8 +57,21 @@ if _INDEX.exists():
     _html = _INDEX.read_text(encoding="utf-8")
 
     def spa_index(_request):
-        return HttpResponse(_html, content_type="text/html; charset=utf-8")
+        response = HttpResponse(_html, content_type="text/html; charset=utf-8")
+        # index.html is the one file in the bundle whose name never changes,
+        # and it is the file that names every hashed chunk. A browser holding
+        # yesterday's copy asks for chunks that this deploy deleted, and the
+        # app never starts. It must never be served from a cache.
+        response["Cache-Control"] = "no-store, must-revalidate"
+        return response
 
     urlpatterns += [
-        re_path(r"^(?!api/|admin/|static/).*$", spa_index, name="spa"),
+        # `assets/` is excluded deliberately. WhiteNoise serves the files that
+        # exist; without the exclusion a file that does *not* exist fell
+        # through to here and came back as index.html with status 200 and
+        # `Content-Type: text/html` — so a stale chunk request answered with a
+        # web page, the module failed to parse, and the screen stayed white
+        # with nothing in the network tab looking wrong. A missing chunk is a
+        # 404 and should say so.
+        re_path(r"^(?!api/|admin/|static/|assets/).*$", spa_index, name="spa"),
     ]

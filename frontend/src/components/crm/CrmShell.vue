@@ -183,7 +183,10 @@ onMounted(() => {
     </aside>
 
     <!-- ===== Content ===== -->
-    <div class="flex-1 min-w-0">
+    <!-- `p-3 md:p-0` matches AppShell. Without it the CRM pages were the only
+         ones on the platform whose cards ran edge to edge on a phone, with
+         nothing between the text and the side of the screen. -->
+    <div class="flex-1 min-w-0 p-3 md:p-0">
       <header class="bg-surface md:rounded-card md:shadow-soft px-3 sm:px-4 h-14 flex items-center gap-3 mb-4">
         <button
           class="md:hidden text-slate-500 p-1"

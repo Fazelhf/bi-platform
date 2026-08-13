@@ -19,22 +19,40 @@ export function useChart(
     chart.value?.resize();
   }
 
+  // ECharts trusts the width it measured at init. `window.resize` misses every
+  // other way a container changes size — data arriving, a rail collapsing, a
+  // grid track settling — and a chart holding a width wider than the phone
+  // screen drags the whole page sideways. Watch the element, not the window.
+  let observer: ResizeObserver | null = null;
+
   onMounted(() => {
     if (!el.value) return;
     chart.value = init(el.value, undefined, { renderer: "canvas" });
     chart.value.setOption(option.value);
     ready.value = true;
     window.addEventListener("resize", resize);
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(resize);
+      observer.observe(el.value);
+    }
+    // A chart that is wrong from its first frame never changes size, so the
+    // observer has nothing to report. Re-measure once the page is laid out.
+    requestAnimationFrame(() => requestAnimationFrame(resize));
   });
 
   watch(
     option,
-    (o) => chart.value?.setOption(o, true),
+    (o) => {
+      chart.value?.setOption(o, true);
+      resize();
+    },
     { deep: true },
   );
 
   onBeforeUnmount(() => {
     window.removeEventListener("resize", resize);
+    observer?.disconnect();
+    observer = null;
     chart.value?.dispose();
     chart.value = null;
   });
