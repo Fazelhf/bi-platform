@@ -14,12 +14,15 @@ and 'تغییر سایز' reads row 7 (which is خرابی). The ورودی labe
 corroborated by the sheet's own notes (H3 "شامل ۰/۵ شیفت تغییر سایز",
 H9 "عدم وجود سفارش"), so ورودی is treated as authoritative here.
 """
+import re
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 import openpyxl
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.core.models import DimPeriod
+from apps.core.models import DimPeriod, PeriodKind
+from apps.core.periods import backfill_dates
 from apps.production.models import (
     DimCostCategory,
     DimMachine,
@@ -91,12 +94,75 @@ class Command(BaseCommand):
     help = "Import the Production KPI workbook."
 
     def add_arguments(self, parser):
-        parser.add_argument("--file", required=True)
-        parser.add_argument("--year", type=int, required=True)
-        parser.add_argument("--month", type=int, required=True)
+        parser.add_argument("--file")
+        parser.add_argument("--year", type=int)
+        parser.add_argument("--month", type=int)
         parser.add_argument("--approve", action="store_true")
+        parser.add_argument(
+            "--dir", default=None,
+            help=(
+                "پوشه‌ی کارنامه‌های تولید. هر فایل «1405-03.xlsx» به همان ماه "
+                "وارد می‌شود — سال و ماه از نام فایل خوانده می‌شود."
+            ),
+        )
+        parser.add_argument(
+            "--if-empty", action="store_true",
+            help="ماه‌هایی که از قبل داده دارند رد شوند (برای deploy).",
+        )
 
     def handle(self, *args, **opts):
+        if opts["dir"]:
+            self._handle_dir(opts)
+            return
+        if not (opts["file"] and opts["year"] and opts["month"]):
+            raise CommandError("یا --dir بدهید، یا هر سه --file و --year و --month.")
+        self._one(opts["file"], opts["year"], opts["month"], opts)
+
+    def _handle_dir(self, opts) -> None:
+        """
+        Import every workbook in a folder, taking the period from its name.
+
+        The period lives in the filename rather than in an argument so a new
+        month is a file drop, not a command someone has to remember the flags
+        for — and so `deploy.sh` can call this without knowing which months
+        exist.
+        """
+        folder = Path(opts["dir"])
+        if not folder.is_dir():
+            self.stdout.write(self.style.WARNING(
+                f"پوشه‌ی «{folder}» نیست — وارد کردن تولید رد شد."
+            ))
+            return
+
+        found = sorted(folder.glob("*.xlsx"))
+        if not found:
+            self.stdout.write(f"کارنامه‌ای در «{folder}» نیست.")
+            return
+
+        for path in found:
+            match = re.fullmatch(r"(\d{4})-(\d{2})", path.stem)
+            if not match:
+                self.stdout.write(self.style.WARNING(
+                    f"  {path.name}: نام باید «1405-03.xlsx» باشد — رد شد."
+                ))
+                continue
+            year, month = int(match.group(1)), int(match.group(2))
+
+            if opts["if_empty"] and FactProduction.objects.filter(
+                period__kind=PeriodKind.MONTH,
+                period__jalali_year=year,
+                period__jalali_month=month,
+            ).exists():
+                self.stdout.write(f"  {path.name}: از قبل وارد شده — رد شد.")
+                continue
+
+            self._one(str(path), year, month, opts)
+
+    def _one(self, file_path, year, month, opts):
+        opts = {**opts, "file": file_path, "year": year, "month": month}
+        self._import(opts)
+
+    def _import(self, opts):
         try:
             wb = openpyxl.load_workbook(opts["file"], data_only=True)
         except FileNotFoundError:
@@ -109,9 +175,20 @@ class Command(BaseCommand):
         wsin, wsres, wsrev, wssum = (
             wb["ورودی"], wb["منابع"], wb["درامد"], wb["مجموع"]
         )
+        # `kind` is not optional here. A year+month pair also matches every
+        # week and day beneath that month once the period tree has been split,
+        # so without it this raises MultipleObjectsReturned — and before the
+        # tree was ever split, it silently worked, which is why it lasted.
         period, _ = DimPeriod.objects.get_or_create(
-            jalali_year=opts["year"], jalali_month=opts["month"]
+            kind=PeriodKind.MONTH,
+            jalali_year=opts["year"],
+            jalali_month=opts["month"],
         )
+        if not period.start_date:
+            # A month row created here has no bounds or code yet; every report
+            # that walks the tree by date needs them.
+            backfill_dates(period)
+            period.save()
         status = ApprovalStatus.APPROVED if opts["approve"] else ApprovalStatus.DRAFT
 
         # ---- Benchmarks (مجموع H3..H6 + ورودی K2) ----
