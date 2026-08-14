@@ -32,6 +32,19 @@ from django.db import models, transaction
 
 from apps.core.models import TimeStampedModel
 
+# پروژه‌ها و وظایف live in their own module — correspondence and work
+# management are different enough that one file would be read by nobody.
+# Imported here because Django finds models through `models`, and re-exported
+# so `from apps.office.models import Task` keeps working.
+from .models_work import (  # noqa: F401,E402  (re-export)
+    Project,
+    ProjectMember,
+    Task,
+    TaskComment,
+    TaskGroup,
+    TaskTag,
+)
+
 
 class LetterTag(TimeStampedModel):
     """

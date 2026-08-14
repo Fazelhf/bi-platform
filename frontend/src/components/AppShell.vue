@@ -225,8 +225,11 @@ const primary = computed<Item[]>(() => {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
   const collaboration: Item[] = [
-    // مکاتبات is collaboration, not a department: everyone has a کارتابل.
+    // اتوماسیون اداری is collaboration, not a department: everyone has a
+    // کارتابل, tasks and projects, whatever section they belong to.
     { name: "office-letters", label: "مکاتبات", icon: "inbox" },
+    { name: "office-tasks", label: "وظایف", icon: "check" },
+    { name: "office-projects", label: "پروژه‌ها", icon: "clipboard" },
     { name: "chat", label: "پیام‌ها", icon: "chat", badge: () => chatCount.value },
     { name: "notes", label: "یادداشت‌ها", icon: "notes" },
     { name: "team", label: "همکاران", icon: "team" },
@@ -287,7 +290,8 @@ const pageTitle = computed(() => {
     overview: "نمای کلی", "sales-dashboard": "داشبورد فروش همکار",
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
-    inbox: "کارتابل تایید", "office-letters": "مکاتبات", "office-letter": "نامه", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
+    inbox: "کارتابل تایید", "office-letters": "مکاتبات", "office-letter": "نامه",
+    "office-tasks": "وظایف", "office-projects": "پروژه‌ها", "office-project": "پروژه", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
     "crm-dashboard": "داشبورد CRM", "crm-pipeline": "مراحل فروش",
     "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",

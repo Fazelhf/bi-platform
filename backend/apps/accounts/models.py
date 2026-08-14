@@ -220,21 +220,98 @@ class OtpChallenge(models.Model):
         return f"{self.get_purpose_display()} — {self.user} ({self.token[:8]}…)"
 
 
+class ChatGroup(models.Model):
+    """
+    A named conversation with more than two people in it (گفتگوی گروهی).
+
+    Kept here beside Message rather than in apps.office, where the rest of
+    اتوماسیون اداری lives: Message is already in this file, and a group is a
+    property of a message, so splitting them would make apps.accounts import
+    from apps.office for its own foreign key.
+    """
+
+    title = models.CharField(max_length=150)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        verbose_name = "chat group (گروه گفتگو)"
+
+    @property
+    def member_count(self) -> int:
+        return self.memberships.count()
+
+    def __str__(self) -> str:
+        return self.title
+
+
+class ChatGroupMember(models.Model):
+    """
+    One person's membership, and the only piece of state that is theirs
+    alone: how far they have read.
+
+    `Message.is_read` is a single flag, which is right for a conversation with
+    two people in it and wrong for one with ten — it would answer «has anyone
+    read this». A timestamp per member answers «what is new for me», which is
+    what the unread badge is actually asking.
+    """
+
+    group = models.ForeignKey(
+        ChatGroup, on_delete=models.CASCADE, related_name="memberships"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_groups"
+    )
+    last_read_at = models.DateTimeField(null=True, blank=True)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("group", "user")
+        ordering = ("id",)
+        verbose_name = "chat group member (عضو گروه)"
+
+    def __str__(self) -> str:
+        return f"{self.user} @ {self.group}"
+
+
 class Message(models.Model):
-    """A 1:1 chat message between two system users (پیام‌ها)."""
+    """
+    A chat message — either 1:1 (`recipient`) or to a group (`group`).
+
+    Exactly one of the two is set. Adding `group` beside `recipient` rather
+    than replacing it with a Conversation table keeps every existing direct
+    message working untouched; a migration that rehomed thousands of live
+    messages to buy a tidier schema would be risk taken for no user-visible
+    gain.
+    """
 
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_sent"
     )
     recipient = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_received"
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.CASCADE, related_name="messages_received",
+    )
+    group = models.ForeignKey(
+        ChatGroup, null=True, blank=True,
+        on_delete=models.CASCADE, related_name="messages",
     )
     body = models.TextField()
+    #: Only meaningful for a direct message. A group's read state lives on
+    #: ChatGroupMember, one row per person.
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ("created_at",)
+        indexes = [
+            models.Index(fields=["group", "created_at"]),
+            models.Index(fields=["recipient", "is_read"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.sender} → {self.recipient}: {self.body[:30]}"

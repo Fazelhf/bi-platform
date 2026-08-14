@@ -139,6 +139,21 @@ const router = createRouter({
           name: "office-letter",
           component: () => import("@/views/office/LetterDetailView.vue"),
         },
+        {
+          path: "office/tasks",
+          name: "office-tasks",
+          component: () => import("@/views/office/TasksView.vue"),
+        },
+        {
+          path: "office/projects",
+          name: "office-projects",
+          component: () => import("@/views/office/ProjectsView.vue"),
+        },
+        {
+          path: "office/projects/:id",
+          name: "office-project",
+          component: () => import("@/views/office/ProjectDetailView.vue"),
+        },
 
         // --- Department manager entry (department-guarded) ---
         {
