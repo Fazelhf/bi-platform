@@ -140,8 +140,23 @@ class User(AbstractUser):
 
 
 class Note(models.Model):
-    """A note. Either a personal note (subject is null) or a note attached to
-    a colleague's profile (subject = that user), matching the یادداشت‌ها card."""
+    """
+    A note — personal (`subject` null) or attached to a colleague's profile.
+
+    Grown into something closer to a real notes app, because that is what a
+    note is used as: things get colour-coded, the important one gets pinned to
+    the top, the finished one gets filed rather than deleted, and some of them
+    are really reminders with a date on them.
+
+    `people` is the piece that makes it more than a text box. «تماس با
+    مهسا درباره‌ی سفارش ۵۷» is about a person, and linking them means the note
+    can be found from either end later.
+    """
+
+    #: Eight, matching the project palette — enough to sort by at a glance,
+    #: few enough that two notes rarely collide. Empty means the default card.
+    COLORS = ["#f59e0b", "#ef4444", "#8b5cf6", "#10b981",
+              "#0ea5e9", "#3b6fed", "#ec4899", "#64748b"]
 
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notes_written"
@@ -152,11 +167,42 @@ class Note(models.Model):
     )
     title = models.CharField(max_length=200, blank=True)
     body = models.TextField(blank=True)
+
+    color = models.CharField(max_length=7, blank=True)
+    #: When it was pinned, not whether — pinned notes sort newest-pinned
+    #: first, so pinning something again moves it up rather than doing
+    #: nothing visible.
+    pinned_at = models.DateTimeField(null=True, blank=True)
+    #: Filed, not deleted. A note someone spent thought on should be
+    #: recoverable; the archive is what makes deleting feel unnecessary.
+    archived_at = models.DateTimeField(null=True, blank=True)
+    #: Makes the note a reminder and puts it on the calendar.
+    remind_on = models.DateField(null=True, blank=True)
+    #: Who this note is about. Distinct from `subject`, which is the single
+    #: colleague whose profile carries it.
+    people = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True, related_name="notes_mentioning"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ("-created_at",)
+        # Pinned first, then newest. `-pinned_at` puts nulls last on both
+        # SQLite and Postgres for descending order, which is what we want.
+        ordering = ("-pinned_at", "-created_at")
+        indexes = [
+            models.Index(fields=["author", "archived_at"]),
+            models.Index(fields=["remind_on"]),
+        ]
+
+    @property
+    def is_pinned(self) -> bool:
+        return self.pinned_at is not None
+
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
 
     def __str__(self) -> str:
         return f"{self.title or self.body[:30]} — {self.author}"
@@ -300,10 +346,17 @@ class Message(models.Model):
         ChatGroup, null=True, blank=True,
         on_delete=models.CASCADE, related_name="messages",
     )
-    body = models.TextField()
+    body = models.TextField(blank=True)
+    #: What this message answers. A thread in a busy group is unreadable
+    #: without it — «کدام سؤال؟» is the commonest question in group chat.
+    reply_to = models.ForeignKey(
+        "self", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="replies",
+    )
     #: Only meaningful for a direct message. A group's read state lives on
     #: ChatGroupMember, one row per person.
     is_read = models.BooleanField(default=False)
+    edited_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -314,4 +367,63 @@ class Message(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.sender} → {self.recipient}: {self.body[:30]}"
+        return f"{self.sender} → {self.recipient or self.group}: {self.body[:30]}"
+
+
+class MessageAttachment(models.Model):
+    """
+    A file on a chat message.
+
+    Base64 in the database like every other attachment in this platform — the
+    cPanel host has no writable media directory, so a FileField would work in
+    development and fail on the server. Size is capped in the serializer.
+    """
+
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="attachments"
+    )
+    name = models.CharField(max_length=200)
+    content = models.TextField(blank=True)  # data:<mime>;base64,…
+    mime = models.CharField(max_length=120, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("id",)
+        verbose_name = "message attachment (پیوست پیام)"
+
+    @property
+    def is_image(self) -> bool:
+        """Images are shown inline; everything else is a download."""
+        return self.mime.startswith("image/")
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class MessageReaction(models.Model):
+    """
+    One person's one reaction to a message.
+
+    `unique_together` on all three is the whole rule: a person may react with
+    several different emoji but not twice with the same one, and tapping the
+    one you already gave takes it back. Without the constraint a double-tap
+    silently doubles the count.
+    """
+
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="reactions"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+"
+    )
+    emoji = models.CharField(max_length=8)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("message", "user", "emoji")
+        ordering = ("id",)
+        verbose_name = "message reaction (واکنش پیام)"
+
+    def __str__(self) -> str:
+        return f"{self.emoji} {self.user}"

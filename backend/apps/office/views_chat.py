@@ -16,7 +16,13 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.models import ChatGroup, ChatGroupMember, Message
+from apps.accounts.models import (
+    ChatGroup,
+    ChatGroupMember,
+    Message,
+    MessageAttachment,
+    MessageReaction,
+)
 
 from .serializers import PersonSerializer
 from .views import OfficeAccess
@@ -24,17 +30,75 @@ from .views import OfficeAccess
 User = get_user_model()
 
 
-def _message_rows(qs) -> list[dict]:
-    return [
-        {
+#: base64 inflates by 4/3, so this is what actually lands in the row.
+MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+
+
+def _reaction_summary(message, me) -> list[dict]:
+    """
+    Reactions grouped by emoji, with whether *you* gave each one.
+
+    Grouped rather than listed: a message with twelve 👍 should read as
+    «👍 ۱۲», and `mine` is what lets the same tap take it back.
+    """
+    out: dict[str, dict] = {}
+    for r in message.reactions.all():
+        row = out.setdefault(r.emoji, {"emoji": r.emoji, "count": 0, "mine": False, "who": []})
+        row["count"] += 1
+        row["who"].append(r.user_id)
+        if r.user_id == me.pk:
+            row["mine"] = True
+    return list(out.values())
+
+
+def _message_rows(qs, me=None) -> list[dict]:
+    rows = []
+    for m in qs.select_related("sender", "reply_to", "reply_to__sender").prefetch_related(
+        "attachments", "reactions"
+    ):
+        rows.append({
             "id": m.id,
             "body": m.body,
             "created_at": m.created_at,
+            "edited_at": m.edited_at,
             "sender": m.sender_id,
             "sender_detail": PersonSerializer(m.sender).data,
-        }
-        for m in qs.select_related("sender")
-    ]
+            # Enough of the parent to draw the quoted strip — not the whole
+            # message, which would nest without end in a long back-and-forth.
+            "reply_to": (
+                {
+                    "id": m.reply_to.id,
+                    "body": m.reply_to.body[:120],
+                    "sender_name": (
+                        m.reply_to.sender.display_name_fa
+                        or m.reply_to.sender.get_username()
+                    ),
+                }
+                if m.reply_to else None
+            ),
+            "attachments": [
+                {
+                    "id": a.id, "name": a.name, "mime": a.mime,
+                    "size_bytes": a.size_bytes, "is_image": a.is_image,
+                }
+                for a in m.attachments.all()
+            ],
+            "reactions": _reaction_summary(m, me) if me else [],
+        })
+    return rows
+
+
+def _attach(message, files) -> None:
+    """Store the files sent with a message, refusing anything oversized."""
+    for f in files or []:
+        content = f.get("content") or ""
+        size = len(content.encode("utf-8"))
+        if size > MAX_ATTACHMENT_BYTES:
+            raise ValueError(f"حجم «{f.get('name', 'پیوست')}» بیش از حد مجاز است.")
+        MessageAttachment.objects.create(
+            message=message, name=(f.get("name") or "فایل")[:200],
+            content=content, mime=(f.get("mime") or "")[:120], size_bytes=size,
+        )
 
 
 class ChatGroupViewSet(viewsets.ViewSet):
@@ -101,7 +165,7 @@ class ChatGroupViewSet(viewsets.ViewSet):
         group = self._mine().filter(pk=pk).first()
         if not group:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        rows = _message_rows(group.messages.order_by("created_at"))
+        rows = _message_rows(group.messages.order_by("created_at"), request.user)
         ChatGroupMember.objects.filter(group=group, user=request.user).update(
             last_read_at=timezone.now()
         )
@@ -113,14 +177,25 @@ class ChatGroupViewSet(viewsets.ViewSet):
         if not group:
             return Response(status=status.HTTP_404_NOT_FOUND)
         body = (request.data.get("body") or "").strip()
-        if not body:
+        files = request.data.get("attachments") or []
+        # A message may be a file with no words — sending a photo and typing
+        # nothing is the normal case, not an error.
+        if not body and not files:
             return Response(
-                {"detail": "متن پیام خالی است."},
+                {"detail": "پیام خالی است."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        msg = Message.objects.create(sender=request.user, group=group, body=body)
+        msg = Message.objects.create(
+            sender=request.user, group=group, body=body,
+            reply_to_id=request.data.get("reply_to") or None,
+        )
+        try:
+            _attach(msg, files)
+        except ValueError as exc:
+            msg.delete()
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
-            _message_rows(Message.objects.filter(pk=msg.pk))[0],
+            _message_rows(Message.objects.filter(pk=msg.pk), request.user)[0],
             status=status.HTTP_201_CREATED,
         )
 
@@ -149,6 +224,66 @@ class ChatGroupViewSet(viewsets.ViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
         group.memberships.filter(user=request.user).delete()
         return Response({"left": True})
+
+
+class MessageExtrasView(APIView):
+    """
+    React to a message, and fetch an attachment's bytes.
+
+    Both are per-message rather than per-conversation, and both check that
+    the caller can actually see the message: a reaction endpoint that trusts
+    the id would let anyone react to — and so confirm the existence of — a
+    private thread they are not in.
+    """
+
+    permission_classes = [OfficeAccess]
+
+    def _visible(self, request, pk):
+        me = request.user
+        return (
+            Message.objects.filter(pk=pk)
+            .filter(
+                Q(sender=me) | Q(recipient=me)
+                | Q(group__memberships__user=me)
+            )
+            .distinct()
+            .first()
+        )
+
+    def post(self, request, pk=None):
+        """Toggle one emoji. Tapping the one you gave takes it back."""
+        msg = self._visible(request, pk)
+        if not msg:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        emoji = (request.data.get("emoji") or "").strip()[:8]
+        if not emoji:
+            return Response(
+                {"detail": "واکنش مشخص نشده است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        row = MessageReaction.objects.filter(
+            message=msg, user=request.user, emoji=emoji
+        ).first()
+        if row:
+            row.delete()
+        else:
+            MessageReaction.objects.create(
+                message=msg, user=request.user, emoji=emoji
+            )
+        return Response({"reactions": _reaction_summary(msg, request.user)})
+
+    def get(self, request, pk=None):
+        """One attachment's bytes, by `?attachment=<id>`."""
+        msg = self._visible(request, pk)
+        if not msg:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        att = msg.attachments.filter(pk=request.query_params.get("attachment")).first()
+        if not att:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "id": att.id, "name": att.name, "mime": att.mime,
+            "size_bytes": att.size_bytes, "content": att.content,
+        })
 
 
 class ChatOverviewView(APIView):

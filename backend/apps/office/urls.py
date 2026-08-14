@@ -19,4 +19,9 @@ urlpatterns = [
     path("task-box/", views_work.TaskBoxView.as_view(), name="office-task-box"),
     path("workbench/", views_work.WorkbenchView.as_view(), name="office-workbench"),
     path("chat/", views_chat.ChatOverviewView.as_view(), name="office-chat"),
+    path(
+        "chat/messages/<int:pk>/",
+        views_chat.MessageExtrasView.as_view(),
+        name="office-message-extras",
+    ),
 ]

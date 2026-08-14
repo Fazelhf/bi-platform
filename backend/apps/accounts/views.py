@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -142,7 +143,33 @@ class TeamViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ["role", "department"]
 
 
-class NoteViewSet(viewsets.ModelViewSet):
+class _NoteActions:
+    """
+    The two verbs a note has beyond editing.
+
+    Separate endpoints rather than PATCHing `pinned_at` directly, because
+    «pin this» is one intent and the client should not have to know it is
+    stored as a timestamp — or get the timezone wrong writing it.
+    """
+
+    @action(detail=True, methods=["post"])
+    def pin(self, request, pk=None):
+        note = self.get_object()
+        # Re-pinning moves it to the top rather than doing nothing visible,
+        # which is why the field is a time and not a boolean.
+        note.pinned_at = None if note.pinned_at and request.data.get("undo") else timezone.now()
+        note.save(update_fields=["pinned_at", "updated_at"])
+        return Response(NoteSerializer(note).data)
+
+    @action(detail=True, methods=["post"])
+    def archive(self, request, pk=None):
+        note = self.get_object()
+        note.archived_at = None if request.data.get("undo") else timezone.now()
+        note.save(update_fields=["archived_at", "updated_at"])
+        return Response(NoteSerializer(note).data)
+
+
+class NoteViewSet(_NoteActions, viewsets.ModelViewSet):
     """Personal notes and notes attached to a colleague's profile."""
 
     serializer_class = NoteSerializer
@@ -165,8 +192,9 @@ class NoteViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
+
 class MessageViewSet(viewsets.ModelViewSet):
-    """1:1 chat between system users."""
+    """1:1 chat between system users, plus files, replies and reactions."""
 
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]

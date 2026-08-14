@@ -88,12 +88,33 @@ export interface ChatGroup {
   last_at: string | null;
 }
 
+export interface ChatAttachment {
+  id: number;
+  name: string;
+  mime: string;
+  size_bytes: number;
+  /** Images render inline; everything else is a download chip. */
+  is_image: boolean;
+}
+
+export interface ChatReaction {
+  emoji: string;
+  count: number;
+  /** Whether *you* gave this one — the same tap takes it back. */
+  mine: boolean;
+  who: number[];
+}
+
 export interface ChatMessageRow {
   id: number;
   body: string;
   created_at: string;
+  edited_at: string | null;
   sender: number;
   sender_detail: Person;
+  reply_to: { id: number; body: string; sender_name: string } | null;
+  attachments: ChatAttachment[];
+  reactions: ChatReaction[];
 }
 
 export interface ChatOverview {
@@ -180,9 +201,31 @@ export const workApi = {
     const { data } = await api.post("/office/chat-groups/", { title, members });
     return data;
   },
-  async postToGroup(id: number, body: string): Promise<ChatMessageRow> {
-    const { data } = await api.post(`/office/chat-groups/${id}/post_message/`, { body });
+  async postToGroup(
+    id: number,
+    body: string,
+    extra: {
+      reply_to?: number | null;
+      attachments?: { name: string; mime: string; content: string }[];
+    } = {},
+  ): Promise<ChatMessageRow> {
+    const { data } = await api.post(`/office/chat-groups/${id}/post_message/`, {
+      body, ...extra,
+    });
     return data;
+  },
+
+  /** Toggle one emoji on a message; returns the regrouped summary. */
+  async react(messageId: number, emoji: string): Promise<{ reactions: ChatReaction[] }> {
+    const { data } = await api.post(`/office/chat/messages/${messageId}/`, { emoji });
+    return data;
+  },
+
+  async chatAttachment(messageId: number, attachmentId: number) {
+    const { data } = await api.get(`/office/chat/messages/${messageId}/`, {
+      params: { attachment: attachmentId },
+    });
+    return data as { name: string; mime: string; content: string };
   },
   async groupMembers(id: number, add: number[] = [], remove: number[] = []) {
     const { data } = await api.post(`/office/chat-groups/${id}/members/`, { add, remove });

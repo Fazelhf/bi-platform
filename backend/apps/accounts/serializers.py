@@ -40,14 +40,37 @@ class UserCardSerializer(serializers.ModelSerializer):
         return DEPT_LABEL.MAP.get(obj.department, obj.department)
 
 
+class NotePersonSerializer(serializers.ModelSerializer):
+    """Just enough of a person to draw a chip on a note."""
+
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ["id", "name", "avatar_color", "avatar_image"]
+
+    def get_name(self, obj) -> str:
+        return obj.display_name_fa or obj.get_username()
+
+
 class NoteSerializer(serializers.ModelSerializer):
     author_name = serializers.CharField(source="author.display_name_fa", read_only=True)
+    people_detail = NotePersonSerializer(source="people", many=True, read_only=True)
+    is_pinned = serializers.BooleanField(read_only=True)
+    is_archived = serializers.BooleanField(read_only=True)
+    #: The palette the client offers. Served rather than hard-coded twice.
+    palette = serializers.SerializerMethodField()
 
     class Meta:
         model = Note
         fields = ["id", "author", "author_name", "subject", "title", "body",
-                  "created_at", "updated_at"]
-        read_only_fields = ["author"]
+                  "color", "pinned_at", "archived_at", "remind_on",
+                  "people", "people_detail", "is_pinned", "is_archived",
+                  "palette", "created_at", "updated_at"]
+        read_only_fields = ["author", "pinned_at", "archived_at"]
+
+    def get_palette(self, _obj) -> list:
+        return Note.COLORS
 
 
 class MessageSerializer(serializers.ModelSerializer):

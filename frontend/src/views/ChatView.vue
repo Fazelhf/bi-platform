@@ -39,6 +39,57 @@ const activeId = ref<number | null>(null);
 const activeGroupId = ref<number | null>(null);
 const messages = ref<(ChatMessage | ChatMessageRow)[]>([]);
 const draft = ref("");
+
+/** What the next message answers, and the files going with it. */
+const replyTo = ref<ChatMessageRow | null>(null);
+const pending = ref<{ name: string; mime: string; content: string; size: number }[]>([]);
+const MAX_BYTES = 5 * 1024 * 1024;
+const sendError = ref("");
+
+/** The six that cover almost every reaction anyone actually sends. */
+const EMOJI = ["👍", "❤️", "😂", "🙏", "👏", "✅"];
+const reactingTo = ref<number | null>(null);
+
+function pickFiles(event: Event) {
+  const input = event.target as HTMLInputElement;
+  for (const file of Array.from(input.files ?? [])) {
+    if (file.size > MAX_BYTES) {
+      sendError.value = `حجم «${file.name}» بیش از ۵ مگابایت است.`;
+      continue;
+    }
+    const reader = new FileReader();
+    reader.onload = () => pending.value.push({
+      name: file.name, mime: file.type,
+      content: String(reader.result), size: file.size,
+    });
+    reader.readAsDataURL(file);
+  }
+  input.value = "";
+}
+
+async function react(m: ChatMessageRow, emoji: string) {
+  reactingTo.value = null;
+  const { reactions } = await workApi.react(m.id, emoji);
+  // Patch in place so the thread does not jump while you are reading it.
+  const row = messages.value.find((x) => x.id === m.id) as ChatMessageRow | undefined;
+  if (row) row.reactions = reactions;
+}
+
+async function openAttachment(m: ChatMessageRow, attId: number, name: string) {
+  const file = await workApi.chatAttachment(m.id, attId);
+  const a = document.createElement("a");
+  a.href = file.content;
+  a.download = name;
+  a.click();
+}
+
+/** Images are shown, not downloaded — that is the point of sending one. */
+const previews = ref<Record<number, string>>({});
+async function loadPreview(m: ChatMessageRow, att: { id: number; is_image: boolean }) {
+  if (!att.is_image || previews.value[att.id]) return;
+  const file = await workApi.chatAttachment(m.id, att.id);
+  previews.value[att.id] = file.content;
+}
 const threadEl = ref<HTMLElement | null>(null);
 let timer: number | undefined;
 
@@ -133,12 +184,29 @@ async function openGroup(id: number) {
 
 async function send() {
   const body = draft.value.trim();
-  if (!body) return;
+  // A file with no words is a normal message, not an empty one.
+  if (!body && !pending.value.length) return;
+  const files = pending.value.map(({ name, mime, content }) => ({ name, mime, content }));
+  const parent = replyTo.value?.id ?? null;
+
   draft.value = "";
-  if (activeGroupId.value) {
-    messages.value.push(await workApi.postToGroup(activeGroupId.value, body));
-  } else if (activeId.value) {
-    messages.value.push(await socialApi.sendMessage(activeId.value, body));
+  pending.value = [];
+  replyTo.value = null;
+  sendError.value = "";
+
+  try {
+    if (activeGroupId.value) {
+      messages.value.push(
+        await workApi.postToGroup(activeGroupId.value, body, {
+          reply_to: parent, attachments: files,
+        }),
+      );
+    } else if (activeId.value) {
+      // Direct chat has no file/reply endpoint yet; the group one does.
+      messages.value.push(await socialApi.sendMessage(activeId.value, body));
+    }
+  } catch {
+    sendError.value = "ارسال نشد. دوباره تلاش کنید.";
   }
   await scrollDown();
 }
@@ -365,23 +433,126 @@ watch(() => route.query.group, (v) => { if (v) openGroup(Number(v)); });
                 v-if="activeGroup && senderOf(m) !== myId && senderName(m)"
                 class="text-[11px] font-medium opacity-70 mb-0.5"
               >{{ senderName(m) }}</p>
-              <p class="leading-6 whitespace-pre-wrap">{{ m.body }}</p>
-              <p class="text-[10px] mt-1 opacity-60 ltr-nums">{{ fmt(m.created_at) }}</p>
+
+              <!-- What this answers. Truncated on purpose: quoting the whole
+                   parent nests without end in a long back-and-forth. -->
+              <div
+                v-if="(m as any).reply_to"
+                class="border-r-2 border-current/40 pr-2 mb-1.5 opacity-70 text-[11px]"
+              >
+                <span class="font-medium">{{ (m as any).reply_to.sender_name }}</span>
+                <span class="block truncate">{{ (m as any).reply_to.body }}</span>
+              </div>
+
+              <p v-if="m.body" class="leading-6 whitespace-pre-wrap">{{ m.body }}</p>
+
+              <div v-if="(m as any).attachments?.length" class="space-y-1.5 mt-1">
+                <template v-for="a in (m as any).attachments" :key="a.id">
+                  <img
+                    v-if="a.is_image"
+                    :src="previews[a.id]"
+                    class="rounded-xl max-h-56 cursor-pointer"
+                    :alt="a.name"
+                    @vue:mounted="loadPreview(m as any, a)"
+                    @click="openAttachment(m as any, a.id, a.name)"
+                  />
+                  <button
+                    v-else
+                    class="flex items-center gap-2 bg-black/10 rounded-lg px-2 py-1.5 text-[11px] w-full"
+                    @click="openAttachment(m as any, a.id, a.name)"
+                  >
+                    📎 <span class="truncate flex-1 text-right">{{ a.name }}</span>
+                    <span class="opacity-60 ltr-nums">
+                      {{ Math.max(1, Math.round(a.size_bytes / 1024)) }}KB
+                    </span>
+                  </button>
+                </template>
+              </div>
+
+              <div class="flex items-center gap-1.5 mt-1">
+                <p class="text-[10px] opacity-60 ltr-nums">{{ fmt(m.created_at) }}</p>
+                <button
+                  class="text-[10px] opacity-50 hover:opacity-100"
+                  title="پاسخ"
+                  @click="replyTo = (m as any)"
+                >پاسخ</button>
+                <button
+                  class="text-[10px] opacity-50 hover:opacity-100"
+                  title="واکنش"
+                  @click="reactingTo = reactingTo === m.id ? null : m.id"
+                >واکنش</button>
+              </div>
+
+              <!-- Given reactions, grouped. Yours is outlined, so the same
+                   tap that gave it takes it back. -->
+              <div v-if="(m as any).reactions?.length" class="flex flex-wrap gap-1 mt-1">
+                <button
+                  v-for="r in (m as any).reactions" :key="r.emoji"
+                  class="text-[11px] rounded-full px-1.5 py-0.5 bg-black/10 ltr-nums"
+                  :class="r.mine ? 'ring-1 ring-current' : ''"
+                  @click="react(m as any, r.emoji)"
+                >{{ r.emoji }} {{ r.count }}</button>
+              </div>
+
+              <div
+                v-if="reactingTo === m.id"
+                class="flex gap-1 mt-1 bg-surface rounded-xl p-1 shadow-pop"
+              >
+                <button
+                  v-for="e in EMOJI" :key="e"
+                  class="text-base leading-none px-1 hover:scale-125 transition-transform"
+                  @click="react(m as any, e)"
+                >{{ e }}</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <form class="p-3 border-t border-slate-100 flex items-center gap-2" @submit.prevent="send">
-          <input
-            v-model="draft"
-            placeholder="پیام خود را بنویسید…"
-            class="flex-1 bg-slate-100 rounded-full px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-accent-500"
-          />
-          <button
-            type="submit"
-            class="w-11 h-11 rounded-full bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center shrink-0"
-          >➤</button>
-        </form>
+        <div class="border-t border-slate-100">
+          <!-- What you are answering, with a way out of it. -->
+          <div
+            v-if="replyTo"
+            class="px-3 pt-2 flex items-start gap-2 text-xs text-slate-500"
+          >
+            <span class="border-r-2 border-slate-300 pr-2 flex-1 min-w-0">
+              <span class="font-medium">پاسخ به {{ replyTo.sender_detail?.name }}</span>
+              <span class="block truncate">{{ replyTo.body || "پیوست" }}</span>
+            </span>
+            <button class="text-slate-400 hover:text-red-500" @click="replyTo = null">×</button>
+          </div>
+
+          <div v-if="pending.length" class="px-3 pt-2 flex flex-wrap gap-1.5">
+            <span
+              v-for="(f, i) in pending" :key="i"
+              class="flex items-center gap-1.5 bg-slate-100 rounded-lg px-2 py-1 text-[11px]"
+            >
+              <span class="truncate max-w-[9rem]">{{ f.name }}</span>
+              <button class="text-slate-400 hover:text-red-500" @click="pending.splice(i, 1)">×</button>
+            </span>
+          </div>
+
+          <p v-if="sendError" class="px-3 pt-2 text-[11px] text-red-600">{{ sendError }}</p>
+
+          <form class="p-3 flex items-center gap-2" @submit.prevent="send">
+            <label
+              class="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 grid place-items-center
+                     shrink-0 cursor-pointer text-slate-500"
+              title="پیوست فایل"
+            >
+              📎
+              <input type="file" multiple class="hidden" @change="pickFiles" />
+            </label>
+            <input
+              v-model="draft"
+              placeholder="پیام خود را بنویسید…"
+              class="flex-1 bg-slate-100 rounded-full px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-accent-500"
+            />
+            <button
+              type="submit"
+              class="w-11 h-11 rounded-full bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center shrink-0"
+            >➤</button>
+          </form>
+        </div>
       </template>
 
       <div v-else class="flex-1 flex items-center justify-center text-slate-400 text-sm">
