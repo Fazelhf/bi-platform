@@ -7,6 +7,8 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import TaskForm from "@/components/office/TaskForm.vue";
+import QuickTaskForm from "@/components/office/QuickTaskForm.vue";
+import api from "@/api/client";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 
@@ -18,8 +20,60 @@ const groups = ref<{ id: number; name: string; tasks: Task[] }[]>([]);
 const ungrouped = ref<Task[]>([]);
 const loading = ref(true);
 const error = ref("");
-const creating = ref(false);
 const editing = ref<Task | null>(null);
+/** Which column has its inline composer open. 0 = «بدون دسته‌بندی». */
+const addingTo = ref<number | null>(null);
+const composing = ref(false);
+
+/** Categories are made where they are needed, not in a settings page. */
+const newGroup = ref("");
+const savingGroup = ref(false);
+
+async function addGroup() {
+  const name = newGroup.value.trim();
+  if (!name || !project.value) return;
+  savingGroup.value = true;
+  try {
+    await api.post("/office/task-groups/", {
+      project: project.value.id, name, order: groups.value.length,
+    });
+    newGroup.value = "";
+    await load();
+  } catch (e) {
+    error.value = apiError(e);
+  } finally {
+    savingGroup.value = false;
+  }
+}
+
+/**
+ * Renaming happens in place. A browser `prompt()` would be a modal dialog
+ * for a two-word edit, and it cannot be cancelled with Escape on every
+ * platform — the heading itself becomes the input instead.
+ */
+const renamingId = ref<number | null>(null);
+const renameText = ref("");
+
+function startRename(id: number, current: string) {
+  renamingId.value = id;
+  renameText.value = current;
+}
+
+async function commitRename() {
+  const id = renamingId.value;
+  const next = renameText.value.trim();
+  renamingId.value = null;
+  if (!id || !next) return;
+  await api.patch(`/office/task-groups/${id}/`, { name: next });
+  await load();
+}
+
+async function removeGroup(id: number) {
+  // Tasks survive: the FK is SET_NULL, so they fall back to «بدون دسته‌بندی»
+  // rather than disappearing with the column.
+  await api.delete(`/office/task-groups/${id}/`);
+  await load();
+}
 
 async function load() {
   loading.value = true;
@@ -47,7 +101,8 @@ async function toggle(task: Task) {
 }
 
 function onSaved() {
-  creating.value = false;
+  composing.value = false;
+  addingTo.value = null;
   editing.value = null;
   load();
 }
@@ -111,24 +166,65 @@ function onSaved() {
           </span>
           <span class="flex-1"></span>
           <button
-            class="bg-panel text-white rounded-xl px-4 py-2 text-sm"
-            @click="creating = true"
+            class="office-btn rounded-xl px-4 py-2 text-sm"
+            @click="composing = true"
           >+ وظیفه</button>
         </div>
       </div>
 
+      <QuickTaskForm
+        v-if="composing" :project-id="project.id"
+        @close="composing = false" @saved="onSaved"
+      />
+
+      <!-- A category with nothing in it still shows: it is a column somebody
+           made on purpose, and hiding it makes «where did it go» a question. -->
       <div
         v-for="section in [...groups, { id: 0, name: 'بدون دسته‌بندی', tasks: ungrouped }]"
         :key="section.id"
-        v-show="section.tasks.length"
+        v-show="section.tasks.length || section.id"
         class="bg-surface rounded-card shadow-soft overflow-hidden"
       >
-        <h3 class="px-4 py-3 border-b border-slate-100 font-bold text-ink text-sm">
-          {{ section.name }}
-          <span class="text-slate-400 font-normal ltr-nums">
-            ({{ num(section.tasks.length) }})
-          </span>
-        </h3>
+        <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+          <input
+            v-if="renamingId === section.id"
+            v-model="renameText"
+            class="flex-1 min-w-0 bg-slate-100 rounded-lg px-2 py-1 text-sm text-ink outline-none
+                   focus:ring-2 focus:ring-slate-300"
+            autofocus
+            @keydown.enter.prevent="commitRename"
+            @keydown.esc="renamingId = null"
+            @blur="commitRename"
+          />
+          <h3 v-else class="font-bold text-ink text-sm flex-1 min-w-0 truncate">
+            {{ section.name }}
+            <span class="text-slate-400 font-normal ltr-nums">
+              ({{ num(section.tasks.length) }})
+            </span>
+          </h3>
+          <button
+            class="text-xs text-slate-400 hover:text-ink"
+            @click="addingTo = addingTo === section.id ? null : section.id"
+          >+ وظیفه</button>
+          <template v-if="section.id">
+            <button
+              class="text-xs text-slate-400 hover:text-ink"
+              @click="startRename(section.id, section.name)"
+            >نام</button>
+            <button
+              class="text-xs text-slate-400 hover:text-red-500"
+              @click="removeGroup(section.id)"
+            >حذف</button>
+          </template>
+        </div>
+
+        <div v-if="addingTo === section.id" class="p-3 border-b border-slate-100">
+          <QuickTaskForm
+            :project-id="project.id"
+            :group-id="section.id || null"
+            @close="addingTo = null" @saved="onSaved"
+          />
+        </div>
         <div class="divide-y divide-slate-100">
           <div
             v-for="task in section.tasks" :key="task.id"
@@ -166,14 +262,26 @@ function onSaved() {
       </div>
 
       <p
-        v-if="!groups.length && !ungrouped.length"
+        v-if="!groups.length && !ungrouped.length && !composing"
         class="text-sm text-slate-400 text-center py-8"
       >هنوز وظیفه‌ای در این پروژه نیست.</p>
 
-      <TaskForm
-        v-if="creating" :project-id="project.id"
-        @close="creating = false" @saved="onSaved"
-      />
+      <!-- New category, at the end of the board where a new column goes. -->
+      <div class="bg-surface rounded-card shadow-soft p-3 flex items-center gap-2">
+        <input
+          v-model="newGroup"
+          class="flex-1 bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none
+                 focus:ring-2 focus:ring-slate-300"
+          placeholder="دسته‌بندی تازه… (مثلاً «در انتظار تأیید»)"
+          @keydown.enter.prevent="addGroup"
+        />
+        <button
+          class="office-btn rounded-xl px-4 py-2 text-sm"
+          :disabled="savingGroup || !newGroup.trim()"
+          @click="addGroup"
+        >افزودن</button>
+      </div>
+
       <TaskForm v-if="editing" :task="editing" @close="editing = null" @saved="onSaved" />
     </template>
   </div>

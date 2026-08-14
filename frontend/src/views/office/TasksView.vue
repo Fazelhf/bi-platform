@@ -25,6 +25,7 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import TaskForm from "@/components/office/TaskForm.vue";
+import QuickTaskForm from "@/components/office/QuickTaskForm.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -214,6 +215,10 @@ const EDGE: Record<string, string> = {
       >+ وظیفه جدید</button>
     </div>
 
+    <!-- Capture is inline: a modal to write down «فردا با انبار تماس بگیر»
+         is a context switch for a one-line thought. -->
+    <QuickTaskForm v-if="creating" @close="creating = false" @saved="onSaved" />
+
     <p v-if="error" class="bg-red-50 text-red-600 text-sm rounded-xl px-4 py-3">
       {{ error }}
     </p>
@@ -344,7 +349,8 @@ const EDGE: Record<string, string> = {
       </div>
     </div>
 
-    <TaskForm v-if="creating" @close="creating = false" @saved="onSaved" />
+    <!-- Editing keeps the full form: reviewing every field is a different
+         act from capturing a thought. -->
     <TaskForm v-if="editing" :task="editing" @close="editing = null" @saved="onSaved" />
   </div>
 </template>

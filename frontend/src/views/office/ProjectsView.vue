@@ -31,9 +31,19 @@ const creating = ref(false);
 const saving = ref(false);
 const search = ref("");
 
+/**
+ * The eight a project may wear. Enough to tell a board apart at a glance,
+ * few enough that two projects rarely collide — a free colour picker gives
+ * you fourteen shades of blue and no way to tell them apart.
+ */
+const COLORS = [
+  "#8b5cf6", "#ef4444", "#f97316", "#f59e0b",
+  "#10b981", "#0ea5e9", "#3b6fed", "#64748b",
+];
+
 const form = ref({
   name: "", description: "", owner: null as number | null,
-  due_on: "", member_ids: [] as number[],
+  due_on: "", color: COLORS[0], member_ids: [] as number[],
 });
 
 const shown = computed(() => {
@@ -58,14 +68,17 @@ onMounted(async () => {
 });
 
 function startNew() {
-  form.value = { name: "", description: "", owner: null, due_on: "", member_ids: [] };
+  form.value = {
+    name: "", description: "", owner: null, due_on: "",
+    color: COLORS[projects.value.length % COLORS.length], member_ids: [],
+  };
   creating.value = true;
 }
 
 function startEdit(p: Project) {
   form.value = {
     name: p.name, description: p.description, owner: p.owner,
-    due_on: p.due_on ?? "",
+    due_on: p.due_on ?? "", color: p.color || COLORS[0],
     member_ids: p.memberships.map((m) => m.user),
   };
   editing.value = p;
@@ -93,11 +106,14 @@ async function save() {
   }
 }
 
-/** Green when finished, amber while anything is late, otherwise neutral. */
-function barClass(p: Project): string {
-  if (p.progress_pct >= 100) return "bg-emerald-500";
-  if (p.overdue_count) return "bg-amber-500";
-  return "bg-panel";
+/**
+ * Finished is green and late is amber regardless of the project's colour —
+ * state outranks identity, or a red project would look permanently on fire.
+ */
+function barStyle(p: Project): Record<string, string> {
+  if (p.progress_pct >= 100) return { background: "#10b981" };
+  if (p.overdue_count) return { background: "#f59e0b" };
+  return { background: p.color || "rgb(var(--sec))" };
 }
 
 const inp =
@@ -108,7 +124,7 @@ const inp =
 <template>
   <div class="space-y-4">
     <div class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2">
-      <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="startNew">
+      <button class="office-btn rounded-xl px-4 py-2 text-sm" @click="startNew">
         + پروژه جدید
       </button>
       <input
@@ -150,11 +166,15 @@ const inp =
           class="w-full text-right p-4 flex flex-col gap-3 rounded-card"
           @click="router.push({ name: 'office-project', params: { id: p.id } })"
         >
-          <span class="block min-w-0 w-full pl-14">
+          <span class="block min-w-0 w-full pl-14 flex items-center gap-2">
+            <span
+              class="w-2.5 h-2.5 rounded-full shrink-0"
+              :style="{ background: p.color || 'rgb(var(--sec))' }"
+            ></span>
             <span class="block font-bold text-ink text-sm truncate">{{ p.name }}</span>
-            <span v-if="p.due_on" class="block text-[11px] text-slate-400 mt-0.5 ltr-nums">
-              مهلت {{ faDate(p.due_on) }}
-            </span>
+          </span>
+          <span v-if="p.due_on" class="block text-[11px] text-slate-400 ltr-nums">
+            مهلت {{ faDate(p.due_on) }}
           </span>
 
         <span class="block w-full">
@@ -165,8 +185,7 @@ const inp =
           <span class="block h-2 bg-slate-100 rounded-full overflow-hidden">
             <span
               class="block h-full rounded-full transition-all"
-              :class="barClass(p)"
-              :style="{ width: `${Math.max(p.progress_pct, 1)}%` }"
+              :style="{ width: `${Math.max(p.progress_pct, 1)}%`, ...barStyle(p) }"
             ></span>
           </span>
           <span class="block text-[11px] text-slate-400 mt-1 ltr-nums">
@@ -237,6 +256,20 @@ const inp =
             <input v-model="form.due_on" type="date" :class="inp" dir="ltr" />
           </div>
         </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">رنگ پروژه</label>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="c in COLORS" :key="c"
+              class="w-7 h-7 rounded-full transition-transform"
+              :class="form.color === c ? 'ring-2 ring-offset-2 ring-slate-400 scale-110' : ''"
+              :style="{ background: c }"
+              :aria-label="`رنگ ${c}`"
+              @click="form.color = c"
+            ></button>
+          </div>
+        </div>
+
         <div>
           <label class="block text-xs text-slate-500 mb-1">اعضا</label>
           <PeoplePicker v-model="form.member_ids" :people="people" />
