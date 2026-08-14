@@ -69,6 +69,17 @@ const commercialItems: Item[] = [
   { name: "commercial-orders", label: "سفارش‌های خرید", icon: "notes" },
 ];
 
+/*
+ * A note on the icons in this file: no glyph is used twice in one menu.
+ *
+ * They were repeating — four rows shared the line chart, three shared the
+ * box — and a repeated icon is worse than no icon at all: the eye learns
+ * «box means بازرگانی», then meets box on تولید and stops trusting the
+ * column, so every row has to be read as text. Since بازرگانی داخلی and
+ * خارجی appear side by side for صدف, their children must differ across
+ * both lists too, not just within one.
+ */
+
 /**
  * بازرگانی خارجی. Its own group rather than more rows under one «بازرگانی»
  * heading: together the two halves are thirteen destinations, which is a
@@ -76,12 +87,12 @@ const commercialItems: Item[] = [
  * is about price, the other about time.
  */
 const foreignItems: Item[] = [
-  { name: "foreign-dashboard", label: "داشبورد", icon: "grid" },
-  { name: "foreign-workbench", label: "میز کار", icon: "inbox" },
-  { name: "foreign-orders", label: "پرونده‌ها", icon: "notes" },
-  { name: "foreign-shipments", label: "بار و گمرک", icon: "box" },
-  { name: "foreign-payments", label: "پرداخت‌ها", icon: "chart" },
-  { name: "foreign-history", label: "تاریخچه", icon: "target" },
+  { name: "foreign-dashboard", label: "داشبورد", icon: "activity" },
+  { name: "foreign-workbench", label: "میز کار", icon: "clipboard" },
+  { name: "foreign-orders", label: "پرونده‌ها", icon: "folder" },
+  { name: "foreign-shipments", label: "بار و گمرک", icon: "ship" },
+  { name: "foreign-payments", label: "پرداخت‌ها", icon: "banknote" },
+  { name: "foreign-history", label: "تاریخچه", icon: "history" },
 ];
 
 /**
@@ -132,14 +143,15 @@ const primary = computed<Item[]>(() => {
         label: "فروش",
         icon: "chart",
         children: [
-          { name: "sales-dashboard", label: "فروش همکار", icon: "chart" },
-          { name: "sales-org-dashboard", label: "فروش بانکی", icon: "chart" },
-          { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "chart" },
+          // A channel each: the shop counter, the bank, the business.
+          { name: "sales-dashboard", label: "فروش همکار", icon: "store" },
+          { name: "sales-org-dashboard", label: "فروش بانکی", icon: "bank" },
+          { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "building" },
           { name: "targets", label: "تارگت", icon: "target" },
           { name: "roster", label: "تیم فروش", icon: "team" },
         ],
       },
-      { name: "production-dashboard", label: "تولید", icon: "box" },
+      { name: "production-dashboard", label: "تولید", icon: "factory" },
       // Three destinations, no working screens: the CEO reads this section
       // but files no ثبت سفارش and chases no container.
       {
@@ -147,50 +159,50 @@ const primary = computed<Item[]>(() => {
         label: "بازرگانی",
         icon: "box",
         children: [
-          { name: "commercial-dashboard", label: "بازرگانی داخلی", icon: "grid" },
-          { name: "foreign-dashboard", label: "بازرگانی خارجی", icon: "grid" },
-          { name: "commercial-full-report", label: "گزارش کامل", icon: "chart" },
+          { name: "commercial-dashboard", label: "بازرگانی داخلی", icon: "truck" },
+          { name: "foreign-dashboard", label: "بازرگانی خارجی", icon: "globe" },
+          { name: "commercial-full-report", label: "گزارش کامل", icon: "file" },
         ],
       },
       {
         name: "group-finance",
         label: "مالی",
-        icon: "chart",
+        icon: "wallet",
         // Read-only, like every other section the CEO oversees: entry belongs
         // to the department that owns the numbers. تسهیلات و قرض are not their
         // own row either — they are read on the نقدینگی page itself.
         children: [
-          { name: "finance-cash-report", label: "نقدینگی", icon: "chart" },
+          { name: "finance-cash-report", label: "نقدینگی", icon: "banknote" },
         ],
       },
     );
   } else if (auth.department === "production") {
     items.push(
-      { name: "production-entry", label: "ورود تولید", icon: "box" },
+      { name: "production-entry", label: "ورود تولید", icon: "factory" },
       { name: "production-dashboard", label: "داشبورد تولید", icon: "chart" },
     );
   } else if (auth.department === "sales_org") {
     items.push(
-      { name: "sales-org-entry", label: "ورود فروش بانکی", icon: "box" },
+      { name: "sales-org-entry", label: "ورود فروش بانکی", icon: "bank" },
       { name: "sales-org-dashboard", label: "داشبورد فروش بانکی", icon: "chart" },
     );
   } else if (auth.department === "sales_team") {
     items.push(
-      { name: "sales-entry", label: "ورود فروش همکار", icon: "box" },
+      { name: "sales-entry", label: "ورود فروش همکار", icon: "store" },
       { name: "sales-dashboard", label: "داشبورد فروش همکار", icon: "chart" },
     );
   } else if (auth.department === "sales_b2b") {
     items.push(
-      { name: "sales-b2b-entry", label: "ورود فروش B2B", icon: "box" },
+      { name: "sales-b2b-entry", label: "ورود فروش B2B", icon: "building" },
       { name: "sales-b2b-dashboard", label: "داشبورد فروش B2B", icon: "chart" },
     );
   } else if (auth.department === "finance") {
     items.push(
-      { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "box" },
+      { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "banknote" },
       { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
       // The treasury averages: this manager's own tool, and not on the page
       // the CEO opens to read the company's position.
-      { name: "finance-treasury", label: "تحلیل خزانه", icon: "target" },
+      { name: "finance-treasury", label: "تحلیل خزانه", icon: "wallet" },
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
@@ -204,13 +216,13 @@ const primary = computed<Item[]>(() => {
       {
         name: "group-commercial",
         label: "بازرگانی داخلی",
-        icon: "box",
+        icon: "truck",
         children: [...commercialItems],
       },
       {
         name: "group-commercial-foreign",
         label: "بازرگانی خارجی",
-        icon: "box",
+        icon: "globe",
         children: [...foreignItems],
       },
     );
@@ -452,7 +464,9 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           title="اتوماسیون اداری — نامه، کار و گفتگو"
           @click="router.push({ name: 'office-home' })"
         >
-          <NavIcon name="inbox" :size="20" />
+          <!-- Not the tray: کارتابل already owns that, and two trays one above
+               the other were the pair people misclicked most. -->
+          <NavIcon name="briefcase" :size="20" />
           <template v-if="!collapsed">
             <span class="flex-1 text-right">اتوماسیون اداری</span>
             <span
@@ -469,7 +483,8 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           title="CRM — مشتریان و فروش"
           @click="router.push({ name: 'crm-dashboard' })"
         >
-          <NavIcon name="team" :size="20" />
+          <!-- A contact card, not the group of people «تیم فروش» wears. -->
+          <NavIcon name="contact" :size="20" />
           <template v-if="!collapsed">
             <span class="flex-1 text-right">CRM</span>
             <svg class="w-3.5 h-3.5 opacity-40 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -486,7 +501,8 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           :class="collapsed ? 'justify-center' : ''"
           @click="go('profile-me')"
         >
-          <NavIcon name="team" :size="20" />
+          <!-- One person: this row is you, not a group. -->
+          <NavIcon name="users" :size="20" />
           <span v-if="!collapsed" class="text-right flex-1">پروفایل من</span>
         </button>
         <button

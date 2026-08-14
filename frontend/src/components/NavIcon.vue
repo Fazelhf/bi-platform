@@ -11,7 +11,21 @@ const PATHS: Record<string, string> = {
   chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   notes: "M4 4h12l4 4v12H4zM16 4v4h4M8 13h8M8 17h5",
   team: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
-  users: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+  // One person, not three. It used to be `team` shifted by a pixel, so
+  // «کاربران» and «تیم‌ها» sat in the same admin menu looking identical.
+  users: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M4 21a8 8 0 0 1 16 0",
+  // --- Business areas. One glyph each, so no two rows of a menu repeat. ---
+  factory: "M2 21h20M4 21V11l5 3.5V11l5 3.5V7l6 4v10M8 21v-4h3v4",
+  truck: "M2 6h11v11H2zM13 10h4.5l3.5 3.5V17h-8zM7 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4M17 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
+  ship: "M3 18.5c1.5 0 2.2.8 3.7.8s2.2-.8 3.7-.8 2.2.8 3.7.8 2.2-.8 3.7-.8M4 18l-1-7h18l-2 7M8 11V7h8v4M11 7V4h2",
+  globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M3.5 9h17M3.5 15h17M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18",
+  wallet: "M3 8a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 11h5v4h-5a2 2 0 0 1 0-4z",
+  banknote: "M2 6h20v12H2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M6 9h.01M18 15h.01",
+  briefcase: "M4 7h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18",
+  contact: "M3 5h18v14H3zM9 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5M5.5 16c.7-1.7 2-2.5 3.5-2.5s2.8.8 3.5 2.5M15 9h3.5M15 12.5h3.5",
+  store: "M3.5 9h17M4 9L5.5 4h13L20 9M4.5 9v10a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1V9M9.5 20v-6h5v6",
+  bank: "M12 3l9 5H3zM3 21h18M5 11v7M9.5 11v7M14.5 11v7M19 11v7",
+  building: "M3 21h18M5 21V5a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v16M14 10h4a2 2 0 0 1 2 2v9M8 7h2M8 11h2M8 15h2M17 14h.5M17 18h.5",
   formula: "M4 4h16M9 4v16M4 20h16M14 9l3 3-3 3",
   history: "M3 3v5h5M3.05 13a9 9 0 1 0 2.6-6.36L3 8M12 7v5l4 2",
   database: "M12 3c4.97 0 9 1.34 9 3s-4.03 3-9 3-9-1.34-9-3 4.03-3 9-3zM3 6v12c0 1.66 4.03 3 9 3s9-1.34 9-3V6",
