@@ -8,7 +8,8 @@
  */
 import { onMounted, ref } from "vue";
 import { officeApi, type Person } from "@/api/office";
-import { workApi, type Project, type Task } from "@/api/officeWork";
+import { workApi, type Project, type Task, type TaskTag } from "@/api/officeWork";
+import api from "@/api/client";
 import { apiError } from "@/components/crm/formError";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -23,6 +24,8 @@ const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
 const people = ref<Person[]>([]);
 const projects = ref<Project[]>([]);
+const tags = ref<TaskTag[]>([]);
+const newTag = ref("");
 const saving = ref(false);
 const error = ref("");
 
@@ -40,15 +43,18 @@ const form = ref({
   assignee: null as number | null,
   due_on: "",
   priority: "normal",
+  tags: [] as number[],
 });
 
 onMounted(async () => {
-  const [p, pr] = await Promise.all([
+  const [p, pr, tg] = await Promise.all([
     officeApi.people().catch(() => ({ people: [] as Person[] })),
     workApi.projects().catch(() => [] as Project[]),
+    api.get("/office/task-tags/").then((r) => r.data.results ?? r.data).catch(() => []),
   ]);
   people.value = p.people;
   projects.value = pr;
+  tags.value = tg;
 
   if (props.task) {
     form.value = {
@@ -58,9 +64,30 @@ onMounted(async () => {
       assignee: props.task.assignee,
       due_on: props.task.due_on ?? "",
       priority: props.task.priority,
+      tags: props.task.tags_detail.map((t) => t.id),
     };
   }
 });
+
+/**
+ * Labels are data, and they get invented mid-thought — «فوری-انبار» while
+ * writing the task that needs it. Creating one from a settings page nobody
+ * opens means the field stays empty and the feature goes unused.
+ */
+async function addTag() {
+  const name = newTag.value.trim();
+  if (!name) return;
+  const existing = tags.value.find((t) => t.name_fa === name);
+  if (existing) {
+    if (!form.value.tags.includes(existing.id)) form.value.tags.push(existing.id);
+    newTag.value = "";
+    return;
+  }
+  const { data } = await api.post("/office/task-tags/", { name_fa: name });
+  tags.value.push(data);
+  form.value.tags.push(data.id);
+  newTag.value = "";
+}
 
 async function save() {
   if (!form.value.title.trim()) {
@@ -139,6 +166,26 @@ const inp =
             clearable
           />
         </div>
+      </div>
+
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">برچسب‌ها</label>
+        <div class="flex flex-wrap gap-1.5 mb-2">
+          <button
+            v-for="t in tags" :key="t.id"
+            class="text-xs rounded-full px-3 py-1 transition-colors"
+            :class="form.tags.includes(t.id)
+              ? 'bg-panel text-white'
+              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'"
+            @click="form.tags.includes(t.id)
+              ? form.tags = form.tags.filter((x) => x !== t.id)
+              : form.tags.push(t.id)"
+          >{{ t.name_fa }}</button>
+        </div>
+        <input
+          v-model="newTag" :class="inp" placeholder="برچسب تازه… (Enter)"
+          @keydown.enter.prevent="addTag"
+        />
       </div>
 
       <div class="grid sm:grid-cols-2 gap-3">

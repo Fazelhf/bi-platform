@@ -1,17 +1,21 @@
 <script setup lang="ts">
 /**
- * مکاتبات — the five mailboxes, and the list that fills them.
+ * مکاتبات — five mailboxes over the same two tables.
  *
- * The boxes are tabs rather than a sidebar because they are the same set of
- * letters asked five questions, not five places. Switching between them is
- * the most frequent thing anyone does here.
+ * The redesign is mostly about weight. The first version gave a read letter,
+ * an unread one and a draft the same visual mass, so a full inbox was a wall
+ * of grey text. Now:
  *
- * A row shows who and what, and one line of the body. Not the whole letter:
- * the point of a list is to decide which one to open.
+ * **Unread has a coloured spine and a solid title.** Read letters recede.
+ * That single difference is what makes an inbox scannable.
+ * **Filters hide until asked for.** Five controls on permanent display taught
+ * everyone to ignore the row they sit in.
+ * **The tags are on the row**, because «کدام نامه مربوط به گمرک بود» is how
+ * people look for letters, and it was already stored and never shown well.
  */
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { officeApi, type Box, type LetterRow, type Person } from "@/api/office";
+import { officeApi, type Box, type LetterRow, type LetterTag, type Person } from "@/api/office";
 import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
@@ -35,12 +39,20 @@ const rows = ref<LetterRow[]>([]);
 const unread = ref(0);
 const total = ref(0);
 const people = ref<Person[]>([]);
+const tags = ref<LetterTag[]>([]);
 const loading = ref(true);
 const error = ref("");
 const composing = ref(false);
 const showFilters = ref(false);
 
-const filters = ref({ q: "", sender: "" as number | "", read: "", from: "", to: "" });
+const filters = ref({
+  q: "", sender: "" as number | "", tag: "" as number | "",
+  read: "", from: "", to: "",
+});
+
+const activeFilters = computed(
+  () => Object.entries(filters.value).filter(([, v]) => v !== "").length,
+);
 
 async function load() {
   loading.value = true;
@@ -58,11 +70,21 @@ async function load() {
 }
 
 onMounted(async () => {
-  officeApi.people().then((d) => (people.value = d.people)).catch(() => {});
+  officeApi.people().then((d) => {
+    people.value = d.people;
+    tags.value = d.tags;
+  }).catch(() => {});
   await load();
 });
 
 watch(box, load);
+
+const editing = ref<number | null>(null);
+const editDraft = ref<any>(null);
+
+watch(editing, async (id) => {
+  editDraft.value = id ? await officeApi.letter(id) : null;
+});
 
 function open(row: LetterRow) {
   // A draft has nothing to show yet — it reopens in the composer instead.
@@ -73,13 +95,6 @@ function open(row: LetterRow) {
   router.push({ name: "office-letter", params: { id: row.id } });
 }
 
-const editing = ref<number | null>(null);
-const editDraft = ref<any>(null);
-
-watch(editing, async (id) => {
-  editDraft.value = id ? await officeApi.letter(id) : null;
-});
-
 function onSaved(sent: boolean) {
   composing.value = false;
   editing.value = null;
@@ -88,11 +103,13 @@ function onSaved(sent: boolean) {
   else load();
 }
 
-/** Unread is bold; everything else reads as already handled. */
-function rowWeight(row: LetterRow): string {
-  return box.value === "inbox" && !row.my_read_at
-    ? "font-semibold text-ink"
-    : "text-slate-600";
+function isUnread(row: LetterRow): boolean {
+  return box.value === "inbox" && !row.my_read_at;
+}
+
+function clearFilters() {
+  filters.value = { q: "", sender: "", tag: "", read: "", from: "", to: "" };
+  load();
 }
 
 const inp =
@@ -102,57 +119,82 @@ const inp =
 
 <template>
   <div class="space-y-4">
-    <!-- Boxes -->
-    <div class="bg-surface rounded-card shadow-soft p-2 flex flex-wrap gap-1">
+    <!-- Boxes + compose, one strip -->
+    <div class="bg-surface rounded-card shadow-soft p-2 flex flex-wrap items-center gap-1">
       <button
         v-for="b in BOXES" :key="b.key"
-        class="px-4 py-2 rounded-xl text-sm transition-colors flex items-center gap-2"
-        :class="box === b.key ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100'"
+        class="px-3.5 py-2 rounded-xl text-sm transition-colors flex items-center gap-2"
+        :class="box === b.key ? 'text-white' : 'text-slate-500 hover:bg-slate-100'"
+        :style="box === b.key ? { background: 'var(--sec)' } : {}"
         @click="box = b.key"
       >
         {{ b.label }}
         <span
           v-if="b.key === 'inbox' && unread"
           class="text-[11px] rounded-full px-1.5 py-0.5 ltr-nums"
-          :class="box === b.key ? 'bg-white/20' : 'bg-red-500 text-white'"
+          :class="box === b.key ? 'bg-white/25' : 'bg-red-500 text-white'"
         >{{ num(unread) }}</span>
       </button>
-    </div>
 
-    <div class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2">
+      <span class="flex-1"></span>
+
       <button
-        class="bg-panel text-white rounded-xl px-4 py-2 text-sm"
+        class="text-white rounded-xl px-4 py-2 text-sm"
+        :style="{ background: 'var(--sec)' }"
         @click="composing = true"
       >+ نامه جدید</button>
-
-      <input
-        v-model="filters.q" :class="inp" placeholder="جستجو در موضوع و متن…"
-        class="flex-1 min-w-[12rem]" @keydown.enter="load"
-      />
-
-      <button
-        class="text-sm text-slate-500 hover:text-ink px-3 py-2"
-        @click="showFilters = !showFilters"
-      >{{ showFilters ? "بستن فیلتر" : "فیلتر بیشتر" }}</button>
-
-      <span class="text-xs text-slate-400 ltr-nums">{{ num(total) }} نامه</span>
     </div>
 
-    <div v-if="showFilters" class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2">
-      <select v-model="filters.sender" :class="inp">
-        <option value="">همه فرستنده‌ها</option>
-        <option v-for="p in people" :key="p.id" :value="p.id">{{ p.name }}</option>
-      </select>
-      <select v-model="filters.read" :class="inp">
-        <option value="">خوانده و نخوانده</option>
-        <option value="0">فقط نخوانده</option>
-        <option value="1">فقط خوانده</option>
-      </select>
-      <input v-model="filters.from" type="date" :class="inp" dir="ltr" />
-      <input v-model="filters.to" type="date" :class="inp" dir="ltr" />
-      <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="load">
-        اعمال فیلتر
-      </button>
+    <!-- Search always; the rest on request -->
+    <div class="bg-surface rounded-card shadow-soft p-3 space-y-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <input
+          v-model="filters.q" :class="inp" class="flex-1 min-w-[12rem]"
+          placeholder="جستجو در موضوع، متن و شماره…" @keydown.enter="load"
+        />
+        <button
+          class="text-sm px-3 py-2 rounded-xl transition-colors flex items-center gap-1.5"
+          :class="showFilters || activeFilters
+            ? 'bg-slate-100 text-ink' : 'text-slate-500 hover:bg-slate-100'"
+          @click="showFilters = !showFilters"
+        >
+          فیلتر
+          <span
+            v-if="activeFilters"
+            class="text-[10px] text-white rounded-full px-1.5 ltr-nums"
+            :style="{ background: 'var(--sec)' }"
+          >{{ num(activeFilters) }}</span>
+        </button>
+        <span class="text-xs text-slate-400 ltr-nums">{{ num(total) }} نامه</span>
+      </div>
+
+      <div v-if="showFilters" class="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+        <select v-model="filters.sender" :class="inp">
+          <option value="">همه فرستنده‌ها</option>
+          <option v-for="p in people" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
+        <select v-model="filters.tag" :class="inp">
+          <option value="">همه برچسب‌ها</option>
+          <option v-for="t in tags" :key="t.id" :value="t.id">{{ t.name_fa }}</option>
+        </select>
+        <select v-model="filters.read" :class="inp">
+          <option value="">خوانده و نخوانده</option>
+          <option value="0">فقط نخوانده</option>
+          <option value="1">فقط خوانده</option>
+        </select>
+        <input v-model="filters.from" type="date" :class="inp" dir="ltr" />
+        <input v-model="filters.to" type="date" :class="inp" dir="ltr" />
+        <button
+          class="text-white rounded-xl px-4 py-2 text-sm"
+          :style="{ background: 'var(--sec)' }"
+          @click="load"
+        >اعمال</button>
+        <button
+          v-if="activeFilters"
+          class="text-sm text-slate-500 hover:text-ink px-3 py-2"
+          @click="clearFilters"
+        >پاک کردن</button>
+      </div>
     </div>
 
     <p
@@ -167,50 +209,63 @@ const inp =
     <EmptyState
       v-else-if="!rows.length"
       :title="box === 'inbox' ? 'نامه‌ای در صندوق ورودی نیست' : 'چیزی اینجا نیست'"
-      hint="با «نامه جدید» اولین نامه را بنویسید."
+      :hint="activeFilters ? 'شاید فیلترها را پاک کنید.' : 'با «نامه جدید» اولین نامه را بنویسید.'"
     />
 
     <div v-else class="bg-surface rounded-card shadow-soft overflow-hidden divide-y divide-slate-100">
       <button
         v-for="row in rows" :key="row.id"
-        class="w-full text-right px-4 py-3 hover:bg-slate-50 flex items-start gap-3 transition-colors"
+        class="w-full text-right flex items-stretch gap-0 hover:bg-slate-50 transition-colors"
         @click="open(row)"
       >
+        <!-- Unread gets a spine in the section's colour. -->
         <span
-          class="mt-1.5 w-2 h-2 rounded-full shrink-0"
-          :class="box === 'inbox' && !row.my_read_at ? 'bg-red-500' : 'bg-transparent'"
+          class="w-1 shrink-0"
+          :style="{ background: isUnread(row) ? 'var(--sec)' : 'transparent' }"
         ></span>
 
-        <UserAvatar :user="row.sender_detail as any" :size="34" class="shrink-0 mt-0.5" />
+        <span class="flex items-start gap-3 px-3 py-3 flex-1 min-w-0">
+          <UserAvatar :user="row.sender_detail as any" :size="36" class="shrink-0 mt-0.5" />
 
-        <span class="min-w-0 flex-1">
-          <span class="flex items-baseline gap-2">
-            <span class="text-sm truncate" :class="rowWeight(row)">{{ row.subject }}</span>
-            <span
-              v-for="t in row.tags_detail" :key="t.id"
-              class="text-[10px] rounded-full px-2 py-0.5 bg-slate-100 text-slate-500 shrink-0"
-            >{{ t.name_fa }}</span>
+          <span class="min-w-0 flex-1">
+            <span class="flex items-baseline gap-2">
+              <span
+                class="text-sm truncate"
+                :class="isUnread(row) ? 'font-bold text-ink' : 'text-slate-600'"
+              >{{ row.subject }}</span>
+              <span
+                v-for="t in row.tags_detail" :key="t.id"
+                class="text-[10px] rounded-full px-2 py-0.5 shrink-0"
+                :style="t.color
+                  ? { background: t.color + '22', color: t.color }
+                  : { background: 'rgb(var(--c-slate-100))' }"
+                :class="t.color ? '' : 'text-slate-500'"
+              >{{ t.name_fa }}</span>
+            </span>
+            <span class="block text-xs text-slate-400 truncate mt-0.5">
+              <span :class="isUnread(row) ? 'text-slate-600' : ''">
+                {{ box === "outbox" || box === "draft"
+                  ? `به ${row.recipient_names.join("، ") || "—"}`
+                  : row.sender_detail.name }}
+              </span>
+              <template v-if="row.preview"> — {{ row.preview }}</template>
+            </span>
           </span>
-          <span class="block text-xs text-slate-400 truncate mt-0.5">
-            {{ box === "outbox" || box === "draft"
-              ? `به ${row.recipient_names.join("، ") || "—"}`
-              : row.sender_detail.name }}
-            <template v-if="row.preview"> · {{ row.preview }}</template>
-          </span>
-        </span>
 
-        <span class="text-left shrink-0 text-xs">
-          <span class="block text-slate-400 ltr-nums">
-            {{ row.sent_at ? faDate(row.sent_at) : "پیش‌نویس" }}
-          </span>
-          <span class="flex items-center justify-end gap-1.5 mt-1 text-slate-400">
-            <span v-if="row.attachment_count" class="ltr-nums">
-              📎 {{ num(row.attachment_count) }}
+          <span class="text-left shrink-0 text-xs flex flex-col items-end gap-1">
+            <span class="text-slate-400 ltr-nums">
+              {{ row.sent_at ? faDate(row.sent_at) : "پیش‌نویس" }}
             </span>
-            <span v-if="box === 'outbox'" class="ltr-nums">
-              {{ num(row.read_count) }}/{{ num(row.recipient_count) }} خوانده
+            <span class="flex items-center gap-1.5 text-slate-400">
+              <span v-if="row.attachment_count" class="ltr-nums">
+                📎 {{ num(row.attachment_count) }}
+              </span>
+              <span
+                v-if="box === 'outbox'"
+                class="ltr-nums rounded-full px-1.5 bg-slate-100"
+              >{{ num(row.read_count) }}/{{ num(row.recipient_count) }}</span>
+              <span v-if="row.number" class="ltr-nums opacity-70">{{ row.number }}</span>
             </span>
-            <span v-if="row.number" class="ltr-nums">{{ row.number }}</span>
           </span>
         </span>
       </button>
