@@ -1,7 +1,13 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.accounts.models import Department, Message, Note, User
+from apps.accounts.models import (
+    Department,
+    Message,
+    MessageAttachment,
+    Note,
+    User,
+)
 
 
 class DEPT_LABEL:
@@ -73,11 +79,73 @@ class NoteSerializer(serializers.ModelSerializer):
         return Note.COLORS
 
 
+class MessageAttachmentSerializer(serializers.ModelSerializer):
+    is_image = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = MessageAttachment
+        fields = ["id", "name", "mime", "size_bytes", "is_image", "content"]
+        # The bytes are fetched one at a time; a thread of forty messages
+        # must not carry forty files.
+        extra_kwargs = {"content": {"write_only": True}}
+
+
 class MessageSerializer(serializers.ModelSerializer):
+    """
+    A direct message, in the same shape a group message has.
+
+    The two halves of chat were drifting: groups grew replies, files and
+    reactions while direct threads stayed plain text, so the same UI had to
+    behave differently depending on who you were talking to. One shape means
+    one set of components.
+    """
+
+    attachments = MessageAttachmentSerializer(many=True, required=False)
+    reply_to_detail = serializers.SerializerMethodField()
+    reactions = serializers.SerializerMethodField()
+    sender_detail = serializers.SerializerMethodField()
+
     class Meta:
         model = Message
-        fields = ["id", "sender", "recipient", "body", "is_read", "created_at"]
+        fields = [
+            "id", "sender", "sender_detail", "recipient", "body",
+            "reply_to", "reply_to_detail", "attachments", "reactions",
+            "is_read", "edited_at", "created_at",
+        ]
         read_only_fields = ["sender", "is_read"]
+
+    def get_sender_detail(self, obj) -> dict:
+        return {
+            "id": obj.sender_id,
+            "name": obj.sender.display_name_fa or obj.sender.get_username(),
+            "avatar_color": obj.sender.avatar_color,
+            "avatar_image": obj.sender.avatar_image,
+        }
+
+    def get_reply_to_detail(self, obj):
+        parent = obj.reply_to
+        if not parent:
+            return None
+        return {
+            "id": parent.id,
+            "body": parent.body[:120],
+            "sender_name": (
+                parent.sender.display_name_fa or parent.sender.get_username()
+            ),
+        }
+
+    def get_reactions(self, obj) -> list:
+        me = getattr(self.context.get("request"), "user", None)
+        out: dict = {}
+        for r in obj.reactions.all():
+            row = out.setdefault(
+                r.emoji, {"emoji": r.emoji, "count": 0, "mine": False, "who": []}
+            )
+            row["count"] += 1
+            row["who"].append(r.user_id)
+            if me and r.user_id == me.pk:
+                row["mine"] = True
+        return list(out.values())
 
 
 class UserSerializer(serializers.ModelSerializer):

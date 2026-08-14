@@ -103,9 +103,22 @@ export const socialApi = {
     });
     return data as ChatMessage[];
   },
-  async sendMessage(recipient: number, body: string) {
-    const { data } = await api.post("/auth/messages/", { recipient, body });
+  async sendMessage(
+    recipient: number,
+    body: string,
+    extra: {
+      reply_to?: number | null;
+      attachments?: { name: string; mime: string; content: string }[];
+    } = {},
+  ) {
+    const { data } = await api.post("/auth/messages/", { recipient, body, ...extra });
     return data as ChatMessage;
+  },
+
+  /** One attachment's bytes from a direct thread the caller is part of. */
+  async directAttachment(attachmentId: number) {
+    const { data } = await api.get(`/auth/messages/attachment/${attachmentId}/`);
+    return data as { name: string; mime: string; content: string };
   },
   async unreadMessages(): Promise<{ total: number; by_sender: Record<string, number> }> {
     const { data } = await api.get("/auth/messages/unread_count/");

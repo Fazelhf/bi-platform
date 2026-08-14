@@ -76,7 +76,9 @@ async function react(m: ChatMessageRow, emoji: string) {
 }
 
 async function openAttachment(m: ChatMessageRow, attId: number, name: string) {
-  const file = await workApi.chatAttachment(m.id, attId);
+  const file = activeGroupId.value
+    ? await workApi.chatAttachment(m.id, attId)
+    : await socialApi.directAttachment(attId);
   const a = document.createElement("a");
   a.href = file.content;
   a.download = name;
@@ -87,7 +89,9 @@ async function openAttachment(m: ChatMessageRow, attId: number, name: string) {
 const previews = ref<Record<number, string>>({});
 async function loadPreview(m: ChatMessageRow, att: { id: number; is_image: boolean }) {
   if (!att.is_image || previews.value[att.id]) return;
-  const file = await workApi.chatAttachment(m.id, att.id);
+  const file = activeGroupId.value
+    ? await workApi.chatAttachment(m.id, att.id)
+    : await socialApi.directAttachment(att.id);
   previews.value[att.id] = file.content;
 }
 const threadEl = ref<HTMLElement | null>(null);
@@ -97,7 +101,18 @@ const active = computed(() => contacts.value.find((c) => c.id === activeId.value
 const activeGroup = computed(
   () => groups.value.find((g) => g.id === activeGroupId.value) || null,
 );
-const hasThread = computed(() => !!active.value || !!activeGroup.value);
+const isSavedOpen = computed(() => !!myId.value && activeId.value === myId.value);
+/**
+ * Whether a conversation is open at all.
+ *
+ * `active` is looked up in `contacts`, which deliberately excludes you — so
+ * the saved-messages thread has no contact row and has to be counted
+ * separately, or opening it leaves the pane on the empty placeholder while
+ * the URL says a thread is open.
+ */
+const hasThread = computed(
+  () => !!active.value || !!activeGroup.value || isSavedOpen.value,
+);
 const myId = ref<number | null>(null);
 
 /** A group message carries its sender; a direct one is «me or them». */
@@ -115,6 +130,20 @@ const directMeta = ref<Record<number, { last_at: string; last_message: string }>
  * «همه» — one list ordered by when you last spoke, groups and people mixed.
  * Anything never spoken to belongs in «اعضا», not here.
  */
+/**
+ * «پیام‌های ذخیره‌شده» — the thread with yourself.
+ *
+ * Where a link, a phone number or a half-formed thought goes when it is not
+ * for anybody else. It needs no new model: a message whose sender and
+ * recipient are the same person already describes one. Pinned to the top of
+ * every tab, because it is the one conversation you always want reachable
+ * and it must never sink under a busy day.
+ */
+async function openSaved() {
+  if (!myId.value) return;
+  await openThread(myId.value);
+}
+
 const allThreads = computed(() => {
   const rows: {
     key: string; id: number; kind: "group" | "direct";
@@ -130,7 +159,8 @@ const allThreads = computed(() => {
   }
   for (const c of contacts.value) {
     const meta = directMeta.value[c.id];
-    if (!meta) continue;
+    // Saved messages has its own permanent row above the list.
+    if (!meta || c.id === myId.value) continue;
     rows.push({
       key: `d${c.id}`, id: c.id, kind: "direct", title: c.name,
       sub: meta.last_message, at: meta.last_at,
@@ -143,7 +173,11 @@ const allThreads = computed(() => {
 async function loadContacts() {
   const team = await socialApi.team();
   contacts.value = team.filter((m) => m.username !== auth.me?.username);
-  myId.value = team.find((m) => m.username === auth.me?.username)?.id ?? null;
+  // From the account itself, not by matching a username against the sales
+  // roster: someone who is not on it used to get `null` here, which put
+  // every bubble in their thread on the wrong side and made the saved-
+  // messages row do nothing at all.
+  myId.value = auth.me?.id ?? team.find((m) => m.username === auth.me?.username)?.id ?? null;
   unread.value = (await socialApi.unreadMessages()).by_sender;
 }
 
@@ -202,8 +236,11 @@ async function send() {
         }),
       );
     } else if (activeId.value) {
-      // Direct chat has no file/reply endpoint yet; the group one does.
-      messages.value.push(await socialApi.sendMessage(activeId.value, body));
+      messages.value.push(
+        await socialApi.sendMessage(activeId.value, body, {
+          reply_to: parent, attachments: files,
+        }),
+      );
     }
   } catch {
     sendError.value = "ارسال نشد. دوباره تلاش کنید.";
@@ -301,6 +338,22 @@ watch(() => route.query.group, (v) => { if (v) openGroup(Number(v)); });
       </div>
 
       <div class="flex-1 overflow-y-auto">
+        <!-- Always first, in every tab. -->
+        <button
+          class="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-100
+                 hover:bg-slate-50 transition text-right"
+          :class="isSavedOpen ? 'bg-slate-100' : ''"
+          @click="openSaved"
+        >
+          <span class="w-[42px] h-[42px] rounded-full bg-panel text-white grid place-items-center shrink-0">
+            🔖
+          </span>
+          <span class="flex-1 min-w-0">
+            <span class="block text-sm font-medium text-ink truncate">پیام‌های ذخیره‌شده</span>
+            <span class="block text-xs text-slate-400 truncate">یادداشت‌ها و لینک‌های خودتان</span>
+          </span>
+        </button>
+
         <!-- همه: whatever has been spoken in, newest first -->
         <template v-if="tab === 'all'">
           <p v-if="!allThreads.length" class="text-center text-slate-400 text-xs py-8">
@@ -394,7 +447,16 @@ watch(() => route.query.group, (v) => { if (v) openGroup(Number(v)); });
             @click="activeId = null; activeGroupId = null"
           >→</button>
 
-          <template v-if="activeGroup">
+          <template v-if="isSavedOpen">
+            <span class="w-10 h-10 rounded-full bg-panel text-white grid place-items-center shrink-0">
+              🔖
+            </span>
+            <div>
+              <p class="font-semibold text-ink">پیام‌های ذخیره‌شده</p>
+              <p class="text-xs text-slate-400">فقط خودتان می‌بینید</p>
+            </div>
+          </template>
+          <template v-else-if="activeGroup">
             <span class="w-10 h-10 rounded-full bg-panel text-white grid place-items-center text-xs shrink-0">
               گروه
             </span>
@@ -555,8 +617,11 @@ watch(() => route.query.group, (v) => { if (v) openGroup(Number(v)); });
         </div>
       </template>
 
-      <div v-else class="flex-1 flex items-center justify-center text-slate-400 text-sm">
-        یک گفتگو را از فهرست انتخاب کنید.
+      <div v-else class="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400 text-sm">
+        <p>یک گفتگو را از فهرست انتخاب کنید.</p>
+        <button class="text-xs underline hover:text-ink" @click="openSaved">
+          یا در پیام‌های ذخیره‌شده چیزی برای خودتان بنویسید
+        </button>
       </div>
     </div>
 

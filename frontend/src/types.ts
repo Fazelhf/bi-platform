@@ -201,6 +201,8 @@ export interface UserRow {
 }
 
 export interface Me {
+  /** The account's own id — served so the client never has to guess it. */
+  id: number;
   avatar_image?: string;
   username: string;
   display_name_fa: string;

@@ -2,12 +2,12 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.models import Message, Note, User
+from apps.accounts.models import Message, MessageAttachment, Note, User
 from apps.accounts.serializers import (
     MessageSerializer,
     NoteSerializer,
@@ -86,6 +86,11 @@ class MeView(APIView):
     @staticmethod
     def _payload(u):
         return {
+            # The account's own id. Without it the client had to find itself
+            # by matching usernames against the sales roster, which fails for
+            # anyone not on it — and `myId` is what decides which side of the
+            # chat each bubble sits on, so their thread rendered mirrored.
+            "id": u.pk,
             "username": u.get_username(),
             "display_name_fa": u.display_name_fa,
             "job_title_fa": u.job_title_fa,
@@ -193,23 +198,58 @@ class NoteViewSet(_NoteActions, viewsets.ModelViewSet):
 
 
 
+#: Matches the group-chat limit; both end up as base64 in the same column.
+MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+
+
 class MessageViewSet(viewsets.ModelViewSet):
-    """1:1 chat between system users, plus files, replies and reactions."""
+    """
+    1:1 chat, with the same files, replies and reactions groups have.
+
+    Sending to yourself is allowed and is the «پیام‌های ذخیره‌شده» thread —
+    the place a link or a thought goes when it is not for anybody else. It
+    needs no new model: a message whose sender and recipient are the same
+    person is already a complete description of one.
+    """
 
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "post", "head", "options"]
 
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
     def get_queryset(self):
         me = self.request.user
-        qs = Message.objects.filter(Q(sender=me) | Q(recipient=me))
+        qs = Message.objects.filter(
+            Q(sender=me) | Q(recipient=me), group__isnull=True
+        )
         other = self.request.query_params.get("with")
         if other:
             qs = qs.filter(Q(sender_id=other) | Q(recipient_id=other))
-        return qs.select_related("sender", "recipient")
+        return qs.select_related("sender", "recipient", "reply_to").prefetch_related(
+            "attachments", "reactions"
+        )
 
     def perform_create(self, serializer):
-        serializer.save(sender=self.request.user)
+        me = self.request.user
+        files = serializer.validated_data.pop("attachments", [])
+        # A message to yourself is read the moment it exists — it is a note,
+        # and an unread badge on your own writing is noise.
+        recipient = serializer.validated_data.get("recipient")
+        msg = serializer.save(sender=me, is_read=(recipient == me))
+        for f in files:
+            content = f.get("content") or ""
+            size = len(content.encode("utf-8"))
+            if size > MAX_ATTACHMENT_BYTES:
+                msg.delete()
+                raise ValidationError(
+                    {"attachments": f"حجم «{f.get('name', 'پیوست')}» بیش از حد مجاز است."}
+                )
+            MessageAttachment.objects.create(
+                message=msg, name=(f.get("name") or "فایل")[:200],
+                content=content, mime=(f.get("mime") or "")[:120], size_bytes=size,
+            )
 
     @action(detail=False, methods=["get"])
     def conversation(self, request):
@@ -218,20 +258,46 @@ class MessageViewSet(viewsets.ModelViewSet):
         if not other:
             return Response({"detail": "پارامتر with الزامی است."}, status=400)
         me = request.user
-        thread = Message.objects.filter(
-            Q(sender=me, recipient_id=other) | Q(sender_id=other, recipient=me)
-        ).order_by("created_at")
+        thread = (
+            Message.objects.filter(
+                Q(sender=me, recipient_id=other) | Q(sender_id=other, recipient=me),
+                group__isnull=True,
+            )
+            .select_related("sender", "reply_to", "reply_to__sender")
+            .prefetch_related("attachments", "reactions")
+            .order_by("created_at")
+        )
         Message.objects.filter(sender_id=other, recipient=me, is_read=False).update(
             is_read=True
         )
-        return Response(MessageSerializer(thread, many=True).data)
+        return Response(
+            MessageSerializer(thread, many=True, context={"request": request}).data
+        )
+
+    @action(detail=False, methods=["get"], url_path="attachment/(?P<att_id>[^/.]+)")
+    def attachment(self, request, att_id=None):
+        """
+        One attachment's bytes, from a thread the caller is part of.
+
+        Scoped through `get_queryset` rather than looked up by id, so an
+        attachment id from someone else's conversation returns nothing.
+        """
+        att = MessageAttachment.objects.filter(
+            pk=att_id, message__in=self.get_queryset()
+        ).first()
+        if not att:
+            return Response(status=404)
+        return Response({
+            "id": att.id, "name": att.name, "mime": att.mime,
+            "size_bytes": att.size_bytes, "content": att.content,
+        })
 
     @action(detail=False, methods=["get"])
     def unread_count(self, request):
         counts = {}
-        rows = Message.objects.filter(recipient=request.user, is_read=False).values_list(
-            "sender_id", flat=True
-        )
+        rows = Message.objects.filter(
+            recipient=request.user, is_read=False, group__isnull=True
+        ).exclude(sender=request.user).values_list("sender_id", flat=True)
         for sid in rows:
             counts[sid] = counts.get(sid, 0) + 1
         return Response({"total": sum(counts.values()), "by_sender": counts})
