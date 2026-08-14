@@ -224,28 +224,11 @@ const primary = computed<Item[]>(() => {
   if (!auth.isExecutive && ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)) {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
-  const collaboration: Item[] = [
-    // مکاتبات، وظایف، پروژه‌ها، گفتگو and یادداشت‌ها all live in the
-    // اتوماسیون اداری workspace now — one door below, not five rows here.
-    { name: "team", label: "همکاران", icon: "team" },
-  ];
-  if (auth.isExecutive) {
-    // The CEO's menu carries every section of the company, so these three
-    // general rows are what pushes it past a screen. A department manager's
-    // menu is short enough to keep them at the top level, where they are one
-    // click instead of two.
-    items.push({
-      name: "group-collaboration",
-      // «همکاری» named a value, not a place — nothing in the company is
-      // filed under it. These three are the people side of the platform:
-      // talking to someone, noting something about them, looking them up.
-      label: "ارتباطات",
-      icon: "chat",
-      children: collaboration,
-    });
-  } else {
-    items.push(...collaboration);
-  }
+  // No «ارتباطات» group any more. Once مکاتبات، وظایف، پروژه‌ها، گفتگو and
+  // یادداشت‌ها moved into the اتوماسیون اداری workspace it held only
+  // «همکاران» — a group of one, which is a heading with nothing to head.
+  // The colleague directory went in with the rest: looking someone up is
+  // what you do just before writing to them.
   return items;
 });
 

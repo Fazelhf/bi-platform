@@ -71,6 +71,13 @@ export const OFFICE_SECTIONS: OfficeSection[] = [
     color: "245 158 11",
     hint: "یادداشت‌های شخصی",
   },
+  {
+    name: "team",
+    label: "همکاران",
+    icon: "team",
+    color: "236 72 153",
+    hint: "دفترچه‌ی افراد شرکت",
+  },
 ];
 
 /** Detail pages keep their parent section lit and coloured. */

@@ -302,7 +302,6 @@ const router = createRouter({
         },
 
         // --- Collaboration: chat, notes, team, profiles ---
-        { path: "team", name: "team", component: () => import("@/views/TeamView.vue") },
         { path: "profile", name: "profile-me", component: () => import("@/views/ProfileView.vue") },
         // Everyone's own account security (two-step login) — not the admin panel.
         { path: "security", name: "security", component: () => import("@/views/SecurityView.vue") },
@@ -401,6 +400,7 @@ const router = createRouter({
         // Same URLs as before, so links people already have keep working.
         { path: "/chat", name: "chat", component: () => import("@/views/ChatView.vue") },
         { path: "/notes", name: "notes", component: () => import("@/views/NotesView.vue") },
+        { path: "/team", name: "team", component: () => import("@/views/TeamView.vue") },
       ],
     },
 
