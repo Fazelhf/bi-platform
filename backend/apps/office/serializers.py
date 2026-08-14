@@ -73,14 +73,19 @@ class LetterActionSerializer(serializers.ModelSerializer):
     actor_detail = PersonSerializer(source="actor", read_only=True)
     to_user_detail = PersonSerializer(source="to_user", read_only=True)
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
+    is_private = serializers.SerializerMethodField()
 
     class Meta:
         model = LetterAction
         fields = [
             "id", "letter", "kind", "kind_label", "actor", "actor_detail",
-            "to_user", "to_user_detail", "note", "created_at",
+            "to_user", "to_user_detail", "note", "visibility", "is_private",
+            "created_at",
         ]
         read_only_fields = ["actor"]
+
+    def get_is_private(self, obj) -> bool:
+        return obj.visibility == LetterAction.Visibility.PRIVATE
 
 
 class LetterRecipientSerializer(serializers.ModelSerializer):
@@ -91,7 +96,7 @@ class LetterRecipientSerializer(serializers.ModelSerializer):
         model = LetterRecipient
         fields = [
             "id", "user", "user_detail", "kind", "kind_label",
-            "read_at", "archived_at",
+            "read_at", "archived_at", "sees_history",
         ]
 
 

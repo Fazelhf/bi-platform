@@ -24,10 +24,15 @@ export interface LetterRecipient {
   kind_label: string;
   read_at: string | null;
   archived_at: string | null;
+  /** False when a referral deliberately withheld the earlier گردش. */
+  sees_history: boolean;
 }
 
 export interface LetterAction {
   id: number;
+  /** «خصوصی» — only the author and `to_user` may read it. */
+  visibility: "all" | "private";
+  is_private: boolean;
   letter: number;
   kind: "paraph" | "refer" | "note" | "archive";
   kind_label: string;
@@ -129,22 +134,26 @@ export const officeApi = {
     return data;
   },
 
-  async paraph(id: number, note = ""): Promise<LetterAction> {
-    const { data } = await api.post(`/office/letters/${id}/paraph/`, { note });
-    return data;
-  },
-
-  async refer(id: number, toUser: number, note = ""): Promise<LetterAction> {
-    const { data } = await api.post(`/office/letters/${id}/refer/`, {
-      to_user: toUser,
-      note,
+  /** `to` is required when private — see LetterAction.Visibility. */
+  async paraph(id: number, note = "", isPrivate = false, to?: number) {
+    const { data } = await api.post(`/office/letters/${id}/paraph/`, {
+      note, private: isPrivate, to_user: to ?? null,
     });
-    return data;
+    return data as LetterAction;
   },
 
-  async note(id: number, note: string): Promise<LetterAction> {
-    const { data } = await api.post(`/office/letters/${id}/note/`, { note });
-    return data;
+  async refer(id: number, toUser: number, note = "", seesHistory = true) {
+    const { data } = await api.post(`/office/letters/${id}/refer/`, {
+      to_user: toUser, note, sees_history: seesHistory,
+    });
+    return data as LetterAction;
+  },
+
+  async note(id: number, note: string, isPrivate = false, to?: number) {
+    const { data } = await api.post(`/office/letters/${id}/note/`, {
+      note, private: isPrivate, to_user: to ?? null,
+    });
+    return data as LetterAction;
   },
 
   async archive(id: number, undo = false): Promise<{ archived_at: string | null }> {

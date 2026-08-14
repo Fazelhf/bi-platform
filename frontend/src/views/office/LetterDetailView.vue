@@ -33,6 +33,21 @@ const panel = ref<"" | "paraph" | "refer" | "note">("");
 const noteText = ref("");
 const referTo = ref<number[]>([]);
 
+/**
+ * Whether the people being referred to may read the گردش that happened
+ * before they arrived. Defaults to true — silence must not quietly hide
+ * things, and the open behaviour is the one people expect.
+ */
+const seesHistory = ref(true);
+
+/**
+ * A private entry is *addressed*: `privateTo` is who may read it besides the
+ * author. Without a named reader «خصوصی» would mean «only me», which is a
+ * personal note and already exists as one.
+ */
+const isPrivate = ref(false);
+const privateTo = ref<number[]>([]);
+
 async function load() {
   loading.value = true;
   try {
@@ -65,6 +80,9 @@ async function run(fn: () => Promise<unknown>) {
     panel.value = "";
     noteText.value = "";
     referTo.value = [];
+    isPrivate.value = false;
+    privateTo.value = [];
+    seesHistory.value = true;
     await load();
   } catch (e) {
     error.value = apiError(e);
@@ -76,14 +94,33 @@ async function run(fn: () => Promise<unknown>) {
 /** What «ثبت» does depends on which panel is open. */
 function submitPanel() {
   const id = letter.value!.id;
-  if (panel.value === "paraph") return run(() => officeApi.paraph(id, noteText.value));
-  if (panel.value === "note") return run(() => officeApi.note(id, noteText.value));
+  const secret = isPrivate.value ? privateTo.value[0] : undefined;
+
+  if (panel.value === "paraph") {
+    return run(() => officeApi.paraph(id, noteText.value, isPrivate.value, secret));
+  }
+  if (panel.value === "note") {
+    return run(() => officeApi.note(id, noteText.value, isPrivate.value, secret));
+  }
   // A referral to three people is three referrals: each gets their own row in
   // the chain, so «به چه کسی ارجاع شد» stays answerable per person.
   return run(() =>
-    Promise.all(referTo.value.map((to) => officeApi.refer(id, to, noteText.value))),
+    Promise.all(
+      referTo.value.map((to) =>
+        officeApi.refer(id, to, noteText.value, seesHistory.value),
+      ),
+    ),
   );
 }
+
+/** «ثبت» is only legal once the panel has what it needs. */
+const canSubmit = computed(() => {
+  if (busy.value) return false;
+  if (isPrivate.value && !privateTo.value.length) return false;
+  if (panel.value === "refer") return referTo.value.length > 0;
+  if (panel.value === "note") return !!noteText.value.trim();
+  return true;
+});
 
 async function openAttachment(attId: number, name: string) {
   const file = await officeApi.attachment(letter.value!.id, attId);
@@ -158,6 +195,13 @@ const inp =
               {{ num(letter.read_count) }} از {{ num(letter.recipient_count) }} خوانده‌اند
             </span>
             <span
+              v-if="letter.recipients.some((r) => !r.sees_history)"
+              class="text-[11px] rounded-full px-2 py-0.5 bg-slate-100 text-slate-500"
+              :title="letter.recipients.filter((r) => !r.sees_history).map((r) => r.user_detail.name).join('، ')"
+            >
+              {{ num(letter.recipients.filter((r) => !r.sees_history).length) }} نفر بدون گردش قبلی
+            </span>
+            <span
               v-for="t in letter.tags_detail" :key="t.id"
               class="text-[11px] rounded-full px-2 py-0.5 bg-slate-100 text-slate-500"
             >{{ t.name_fa }}</span>
@@ -213,18 +257,47 @@ const inp =
       </div>
 
       <div v-if="panel" class="bg-surface rounded-card shadow-soft p-4 space-y-3">
-        <PeoplePicker
-          v-if="panel === 'refer'"
-          v-model="referTo" :people="people" placeholder="ارجاع به…"
-        />
+        <template v-if="panel === 'refer'">
+          <PeoplePicker
+            v-model="referTo" :people="people" placeholder="ارجاع به…"
+          />
+          <!-- «این را ببین» and «این را ببین و بدان چه کسی قبلاً چه گفت» are
+               different instructions. The referrer chooses which one. -->
+          <label class="flex items-start gap-2 text-xs text-slate-600 cursor-pointer">
+            <input v-model="seesHistory" type="checkbox" class="mt-0.5" />
+            <span>
+              گردش قبلی نامه را ببیند
+              <span class="block text-slate-400">
+                اگر بردارید، فقط از همین ارجاع به بعد را می‌بیند.
+              </span>
+            </span>
+          </label>
+        </template>
+
         <textarea
           v-model="noteText" :class="inp" rows="3"
           :placeholder="panel === 'paraph' ? 'یادداشت پاراف (اختیاری)…' : 'متن…'"
         ></textarea>
+
+        <template v-if="panel !== 'refer'">
+          <label class="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+            <input v-model="isPrivate" type="checkbox" />
+            <span>خصوصی — فقط برای یک نفر</span>
+          </label>
+          <div v-if="isPrivate">
+            <PeoplePicker
+              v-model="privateTo" :people="people" placeholder="فقط این شخص ببیند…"
+            />
+            <p class="text-[11px] text-slate-400 mt-1">
+              بقیه‌ی گیرندگان این را نمی‌بینند، حتی اگر گردش کامل را داشته باشند.
+            </p>
+          </div>
+        </template>
+
         <div class="flex gap-2">
           <button
-            class="bg-panel text-white rounded-xl px-4 py-2 text-sm disabled:opacity-50"
-            :disabled="busy || (panel === 'refer' && !referTo.length) || (panel === 'note' && !noteText.trim())"
+            class="office-btn rounded-xl px-4 py-2 text-sm"
+            :disabled="!canSubmit"
             @click="submitPanel"
           >ثبت</button>
           <button class="text-sm text-slate-500 px-3 py-2" @click="panel = ''">انصراف</button>
@@ -247,12 +320,17 @@ const inp =
           >
             <UserAvatar :user="a.actor_detail as any" :size="30" class="shrink-0 mt-0.5" />
             <div class="min-w-0 flex-1">
-              <p class="text-sm text-ink">
+              <p class="text-sm text-ink flex flex-wrap items-center gap-1.5">
                 <span class="font-medium">{{ a.actor_detail.name }}</span>
-                <span class="text-slate-500"> {{ a.kind_label }}</span>
+                <span class="text-slate-500">{{ a.kind_label }}</span>
                 <span v-if="a.to_user_detail" class="text-slate-500">
                   به {{ a.to_user_detail.name }}
                 </span>
+                <!-- Said out loud, so nobody assumes the whole room saw it. -->
+                <span
+                  v-if="a.is_private"
+                  class="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700"
+                >خصوصی</span>
               </p>
               <p v-if="a.note" class="text-sm text-slate-600 mt-1 whitespace-pre-line">
                 {{ a.note }}

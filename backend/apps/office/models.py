@@ -116,6 +116,23 @@ class Letter(TimeStampedModel):
     def is_sent(self) -> bool:
         return self.status == self.Status.SENT
 
+    def actions_for(self, user):
+        """
+        The گردش as this person is allowed to see it.
+
+        Computed here rather than in the serializer so every caller — detail
+        page, export, a future print view — filters the same way. A view that
+        forgot would leak a private note, and nothing on screen would say so.
+        """
+        row = self.recipients.filter(user=user).first()
+        joined_at = None
+        if row and not row.sees_history:
+            joined_at = row.created_at
+        return [
+            a for a in self.actions.all().select_related("actor", "to_user")
+            if a.visible_to(user, joined_at)
+        ]
+
     @property
     def recipient_count(self) -> int:
         return self.recipients.count()
@@ -166,6 +183,16 @@ class LetterRecipient(TimeStampedModel):
     read_at = models.DateTimeField(null=True, blank=True)
     archived_at = models.DateTimeField(null=True, blank=True)
 
+    #: Whether this person may read the گردش that happened before they were
+    #: brought in. The referrer decides, per referral.
+    #:
+    #: True for everyone the letter was originally addressed to — they were
+    #: there from the start, so there is no «before». It is only meaningful
+    #: for someone added later by ارجاع: «این را ببین» and «این را ببین و
+    #: بدان چه کسی قبلاً چه گفت» are different instructions, and the second
+    #: one is not always the intended one.
+    sees_history = models.BooleanField(default=True)
+
     class Meta:
         # One copy per person. Adding someone twice — as recipient and on cc —
         # would show the letter twice in their inbox and count them twice in
@@ -202,10 +229,27 @@ class LetterAction(TimeStampedModel):
         NOTE = "note", "یادداشت"
         ARCHIVE = "archive", "بایگانی"
 
+    class Visibility(models.TextChoices):
+        """
+        Who may read this entry in the گردش.
+
+        The default is everyone on the letter, because correspondence is
+        supposed to be auditable. `PRIVATE` exists for the case that made the
+        department ask: «این را بین خودمان بگویم» — a manager's اشاره to one
+        person about a letter ten people received. Without it that
+        conversation happens on the telephone and leaves the file.
+        """
+
+        ALL = "all", "همه‌ی گیرندگان"
+        PRIVATE = "private", "خصوصی"
+
     letter = models.ForeignKey(
         Letter, on_delete=models.CASCADE, related_name="actions"
     )
     kind = models.CharField(max_length=8, choices=Kind.choices)
+    visibility = models.CharField(
+        max_length=7, choices=Visibility.choices, default=Visibility.ALL
+    )
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="letter_actions"
     )
@@ -224,6 +268,24 @@ class LetterAction(TimeStampedModel):
             models.Index(fields=["letter", "created_at"]),
             models.Index(fields=["actor", "kind"]),
         ]
+
+    def visible_to(self, user, joined_at=None) -> bool:
+        """
+        Whether `user` may read this entry.
+
+        Three ways in, checked in this order because the first two are
+        absolute: you always see what you wrote, and you always see what was
+        addressed to you — even a private note, and even one written before
+        you joined. Otherwise the entry must be public *and* not predate you,
+        unless you were given the history.
+        """
+        if self.actor_id == user.pk or self.to_user_id == user.pk:
+            return True
+        if self.visibility == self.Visibility.PRIVATE:
+            return False
+        if joined_at is None:
+            return True
+        return self.created_at >= joined_at
 
     def __str__(self) -> str:
         return f"{self.get_kind_display()} · {self.actor}"

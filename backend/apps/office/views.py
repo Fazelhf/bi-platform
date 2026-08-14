@@ -117,6 +117,11 @@ class LetterViewSet(viewsets.ModelViewSet):
         ).update(read_at=timezone.now())
 
         data = self.get_serializer(letter).data
+        # The گردش, filtered to what this person may read. The serializer
+        # renders every action; the letter decides which ones reach whom.
+        data["actions"] = LetterActionSerializer(
+            letter.actions_for(request.user), many=True
+        ).data
         # The caller's own copy, the same way MailboxView stamps the list.
         # Without it the page cannot tell «I archived this» from «somebody
         # archived this», and the archive button labels itself from the wrong
@@ -160,14 +165,27 @@ class LetterViewSet(viewsets.ModelViewSet):
                 {"detail": "گیرنده‌ی ارجاع مشخص نشده است."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # `sees_history` is the referrer's call, and only applies when the
+        # person is genuinely new. Someone already on the letter has already
+        # read what they read; revoking it afterwards would be a lie about
+        # what they saw.
+        sees_history = request.data.get("sees_history")
         LetterRecipient.objects.get_or_create(
             letter=letter, user_id=to_id,
-            defaults={"kind": LetterRecipient.Kind.TO},
+            defaults={
+                "kind": LetterRecipient.Kind.TO,
+                "sees_history": True if sees_history is None else bool(sees_history),
+            },
         )
         act = LetterAction.objects.create(
             letter=letter, kind=LetterAction.Kind.REFER,
             actor=request.user, to_user_id=to_id,
             note=(request.data.get("note") or "").strip(),
+            visibility=(
+                LetterAction.Visibility.PRIVATE
+                if request.data.get("private")
+                else LetterAction.Visibility.ALL
+            ),
         )
         return Response(
             LetterActionSerializer(act).data, status=status.HTTP_201_CREATED
@@ -175,11 +193,29 @@ class LetterViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def paraph(self, request, pk=None):
-        """پاراف — sign off on the letter, optionally with a note."""
+        """
+        پاراف — sign off, optionally with a note, optionally in private.
+
+        A private paraph is addressed: `to_user` is who may read it besides
+        the author. Without a named reader, «خصوصی» would mean «only me»,
+        which is a personal note and already exists as one.
+        """
         letter = self.get_object()
+        private = bool(request.data.get("private"))
+        to_id = request.data.get("to_user") or None
+        if private and not to_id:
+            return Response(
+                {"detail": "برای پاراف خصوصی، مخاطب را مشخص کنید."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         act = LetterAction.objects.create(
             letter=letter, kind=LetterAction.Kind.PARAPH, actor=request.user,
+            to_user_id=to_id,
             note=(request.data.get("note") or "").strip(),
+            visibility=(
+                LetterAction.Visibility.PRIVATE if private
+                else LetterAction.Visibility.ALL
+            ),
         )
         return Response(
             LetterActionSerializer(act).data, status=status.HTTP_201_CREATED
@@ -194,9 +230,20 @@ class LetterViewSet(viewsets.ModelViewSet):
                 {"detail": "متن یادداشت خالی است."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        private = bool(request.data.get("private"))
+        to_id = request.data.get("to_user") or None
+        if private and not to_id:
+            return Response(
+                {"detail": "برای یادداشت خصوصی، مخاطب را مشخص کنید."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         act = LetterAction.objects.create(
             letter=letter, kind=LetterAction.Kind.NOTE,
-            actor=request.user, note=text,
+            actor=request.user, note=text, to_user_id=to_id,
+            visibility=(
+                LetterAction.Visibility.PRIVATE if private
+                else LetterAction.Visibility.ALL
+            ),
         )
         return Response(
             LetterActionSerializer(act).data, status=status.HTTP_201_CREATED
