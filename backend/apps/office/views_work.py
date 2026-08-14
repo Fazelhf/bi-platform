@@ -246,7 +246,7 @@ class WorkbenchView(APIView):
     permission_classes = [OfficeAccess]
 
     def get(self, request):
-        from apps.accounts.models import ChatGroupMember, Message
+        from apps.accounts.models import ChatGroupMember, Message, Note
         from .models import LetterRecipient
 
         user = request.user
@@ -281,6 +281,11 @@ class WorkbenchView(APIView):
                  "value": unread_letters, "tone": "warn" if unread_letters else ""},
                 {"key": "messages", "label": "پیام‌های نخوانده",
                  "value": unread_direct + unread_group},
+                {"key": "reminders", "label": "یادآوری امروز",
+                 "value": Note.objects.filter(
+                     author=user, archived_at__isnull=True,
+                     remind_on__lte=today,
+                 ).count()},
             ],
             "my_tasks": TaskSerializer(
                 mine.select_related("project", "creator").order_by("due_on")[:10],
@@ -293,6 +298,20 @@ class WorkbenchView(APIView):
                 .order_by("due_on")[:10],
                 many=True, context={"request": request},
             ).data,
+            # Reminders that have come due — notes are the one place people
+            # put «فردا زنگ بزن» when it is not a task, and until now nothing
+            # surfaced them.
+            "reminders": [
+                {
+                    "id": n.id, "title": n.title or n.body[:60],
+                    "remind_on": n.remind_on, "color": n.color,
+                    "overdue": n.remind_on < date.today(),
+                }
+                for n in Note.objects.filter(
+                    author=user, archived_at__isnull=True,
+                    remind_on__isnull=False, remind_on__lte=date.today() + timedelta(days=7),
+                ).order_by("remind_on")[:8]
+            ],
             "projects": ProjectSerializer(
                 Project.objects.filter(
                     memberships__user=user, status=Project.Status.ACTIVE

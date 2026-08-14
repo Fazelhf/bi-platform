@@ -132,6 +132,11 @@ export interface Workbench {
   tiles: { key: string; label: string; value: number; tone?: string }[];
   my_tasks: Task[];
   following: Task[];
+  /** Note reminders due within a week — «فردا زنگ بزن» lives in notes. */
+  reminders: {
+    id: number; title: string; remind_on: string;
+    color: string; overdue: boolean;
+  }[];
   projects: Project[];
 }
 

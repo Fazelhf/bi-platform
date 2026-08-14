@@ -50,6 +50,7 @@ const TILE: Record<string, { to: string; icon: string; note: string }> = {
   others: { to: "office-tasks", icon: "team", note: "به دیگران سپرده‌اید" },
   letters: { to: "office-letters", icon: "inbox", note: "نامه‌ی باز نشده" },
   messages: { to: "chat", icon: "chat", note: "پیام خوانده نشده" },
+  reminders: { to: "notes", icon: "notes", note: "یادداشت سررسیددار" },
 };
 
 const greeting = computed(() => {
@@ -107,7 +108,7 @@ function tileTone(key: string, value: number): boolean {
           >+ وظیفه جدید</button>
         </div>
 
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div class="grid grid-cols-2 lg:grid-cols-6 gap-3">
           <button
             v-for="t in data.tiles" :key="t.key"
             class="rounded-2xl p-3.5 text-right transition hover:-translate-y-0.5"
@@ -212,6 +213,34 @@ function tileTone(key: string, value: number): boolean {
               >{{ faDate(t.due_on) }}</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Reminders that have come due. They live in notes, and until the
+           workbench surfaced them nothing did. -->
+      <div v-if="data.reminders.length" class="bg-surface rounded-card shadow-soft p-4">
+        <div class="flex items-baseline justify-between mb-3">
+          <h3 class="font-bold text-ink text-sm">یادآوری‌ها</h3>
+          <button
+            class="text-xs text-slate-400 hover:text-ink"
+            @click="router.push({ name: 'notes' })"
+          >همه‌ی یادداشت‌ها</button>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="r in data.reminders" :key="r.id"
+            class="rounded-xl px-3 py-2 text-right text-xs border"
+            :style="r.color
+              ? { background: r.color + '1f', borderColor: r.color + '66' }
+              : {}"
+            @click="router.push({ name: 'notes' })"
+          >
+            <span class="block text-ink truncate max-w-[14rem]">{{ r.title }}</span>
+            <span
+              class="block ltr-nums mt-0.5"
+              :class="r.overdue ? 'text-red-600 font-medium' : 'text-slate-400'"
+            >⏰ {{ faDate(r.remind_on) }}</span>
+          </button>
         </div>
       </div>
 

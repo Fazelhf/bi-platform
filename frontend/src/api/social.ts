@@ -16,6 +16,13 @@ export interface TeamMember {
   phone: string;
 }
 
+export interface NotePerson {
+  id: number;
+  name: string;
+  avatar_color: string;
+  avatar_image: string;
+}
+
 export interface Note {
   id: number;
   author: number;
@@ -23,6 +30,17 @@ export interface Note {
   subject: number | null;
   title: string;
   body: string;
+  /** Empty means the default card. The palette is served with the note. */
+  color: string;
+  pinned_at: string | null;
+  archived_at: string | null;
+  /** Turns the note into a reminder and puts it on the calendar. */
+  remind_on: string | null;
+  people: number[];
+  people_detail: NotePerson[];
+  is_pinned: boolean;
+  is_archived: boolean;
+  palette: string[];
   created_at: string;
   updated_at: string;
 }
@@ -57,8 +75,21 @@ export const socialApi = {
     });
     return unwrap<Note>(data);
   },
-  async createNote(payload: { title?: string; body: string; subject?: number | null }) {
+  async createNote(payload: Partial<Note>) {
     const { data } = await api.post("/auth/notes/", payload);
+    return data as Note;
+  },
+  async updateNote(id: number, payload: Partial<Note>) {
+    const { data } = await api.patch(`/auth/notes/${id}/`, payload);
+    return data as Note;
+  },
+  /** Pin, or unpin with `undo`. Re-pinning moves it back to the top. */
+  async pinNote(id: number, undo = false) {
+    const { data } = await api.post(`/auth/notes/${id}/pin/`, { undo });
+    return data as Note;
+  },
+  async archiveNote(id: number, undo = false) {
+    const { data } = await api.post(`/auth/notes/${id}/archive/`, { undo });
     return data as Note;
   },
   async deleteNote(id: number) {
