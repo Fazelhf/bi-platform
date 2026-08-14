@@ -225,13 +225,8 @@ const primary = computed<Item[]>(() => {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
   const collaboration: Item[] = [
-    // اتوماسیون اداری is collaboration, not a department: everyone has a
-    // کارتابل, tasks and projects, whatever section they belong to.
-    { name: "office-letters", label: "مکاتبات", icon: "inbox" },
-    { name: "office-tasks", label: "وظایف", icon: "check" },
-    { name: "office-projects", label: "پروژه‌ها", icon: "clipboard" },
-    { name: "chat", label: "پیام‌ها", icon: "chat", badge: () => chatCount.value },
-    { name: "notes", label: "یادداشت‌ها", icon: "notes" },
+    // مکاتبات، وظایف، پروژه‌ها، گفتگو and یادداشت‌ها all live in the
+    // اتوماسیون اداری workspace now — one door below, not five rows here.
     { name: "team", label: "همکاران", icon: "team" },
   ];
   if (auth.isExecutive) {
@@ -466,8 +461,24 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           </button>
         </template>
 
-        <!-- CRM is a workspace of its own, not a group of rows here: one
-             door in, and its own shell takes over from there. -->
+        <!-- Two workspaces of their own, each one door rather than a group
+             of rows: their shells take over from there. -->
+        <button
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2 text-slate-500 hover:bg-slate-100"
+          :class="collapsed ? 'justify-center' : ''"
+          title="اتوماسیون اداری — نامه، کار و گفتگو"
+          @click="router.push({ name: 'office-home' })"
+        >
+          <NavIcon name="inbox" :size="20" />
+          <template v-if="!collapsed">
+            <span class="flex-1 text-right">اتوماسیون اداری</span>
+            <span
+              v-if="chatCount"
+              class="bg-accent-500 text-white text-[10px] rounded-full min-w-[18px] px-1 leading-[18px] text-center shrink-0 ltr-nums"
+            >{{ chatCount }}</span>
+          </template>
+        </button>
+
         <button
           v-if="showCrm"
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2 text-slate-500 hover:bg-slate-100"

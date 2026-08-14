@@ -126,35 +126,6 @@ const router = createRouter({
         ...boardRoutes,
 
         // --- CRM (فروش همکار) — locked demo ---
-        // مکاتبات — every signed-in employee has a کارتابل, so no meta
-        // guard: a letter is addressed to a person, and being addressed is
-        // the permission. The API enforces the same rule.
-        {
-          path: "office/letters",
-          name: "office-letters",
-          component: () => import("@/views/office/LettersView.vue"),
-        },
-        {
-          path: "office/letters/:id",
-          name: "office-letter",
-          component: () => import("@/views/office/LetterDetailView.vue"),
-        },
-        {
-          path: "office/tasks",
-          name: "office-tasks",
-          component: () => import("@/views/office/TasksView.vue"),
-        },
-        {
-          path: "office/projects",
-          name: "office-projects",
-          component: () => import("@/views/office/ProjectsView.vue"),
-        },
-        {
-          path: "office/projects/:id",
-          name: "office-project",
-          component: () => import("@/views/office/ProjectDetailView.vue"),
-        },
-
         // --- Department manager entry (department-guarded) ---
         {
           path: "sales/entry",
@@ -331,8 +302,6 @@ const router = createRouter({
         },
 
         // --- Collaboration: chat, notes, team, profiles ---
-        { path: "chat", name: "chat", component: () => import("@/views/ChatView.vue") },
-        { path: "notes", name: "notes", component: () => import("@/views/NotesView.vue") },
         { path: "team", name: "team", component: () => import("@/views/TeamView.vue") },
         { path: "profile", name: "profile-me", component: () => import("@/views/ProfileView.vue") },
         // Everyone's own account security (two-step login) — not the admin panel.
@@ -407,6 +376,31 @@ const router = createRouter({
           name: "crm-reports",
           component: () => import("@/views/crm/CrmReportsView.vue"),
         },
+      ],
+    },
+
+    // ===== اتوماسیون اداری — its own workspace =====
+    // Five sections earn a rail. While it was one page a single sidebar row
+    // was right; five rows competed with تولید and مالی for the same space
+    // and made the main menu a list of everything instead of a list of areas.
+    //
+    // No meta guard: correspondence is addressed to a person and a task is
+    // assigned to one, so being an employee is the permission. The API
+    // enforces the same rule.
+    {
+      path: "/office",
+      component: () => import("@/components/office/OfficeShell.vue"),
+      meta: { requiresAuth: true },
+      children: [
+        { path: "", name: "office-home", component: () => import("@/views/office/WorkbenchView.vue") },
+        { path: "letters", name: "office-letters", component: () => import("@/views/office/LettersView.vue") },
+        { path: "letters/:id", name: "office-letter", component: () => import("@/views/office/LetterDetailView.vue") },
+        { path: "tasks", name: "office-tasks", component: () => import("@/views/office/TasksView.vue") },
+        { path: "projects", name: "office-projects", component: () => import("@/views/office/ProjectsView.vue") },
+        { path: "projects/:id", name: "office-project", component: () => import("@/views/office/ProjectDetailView.vue") },
+        // Same URLs as before, so links people already have keep working.
+        { path: "/chat", name: "chat", component: () => import("@/views/ChatView.vue") },
+        { path: "/notes", name: "notes", component: () => import("@/views/NotesView.vue") },
       ],
     },
 
