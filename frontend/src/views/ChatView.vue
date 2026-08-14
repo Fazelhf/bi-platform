@@ -1,12 +1,18 @@
 <script setup lang="ts">
 /**
- * گفتگو — direct threads and groups in one list.
+ * گفتگو — direct threads and groups, told apart by a tab.
  *
- * Groups were added beside the 1:1 chat rather than as a second page: they
- * are the same activity, and two pages would mean checking two places for
- * «آیا کسی پیام داده». The list is one column with a heading in the middle;
- * the thread pane is shared, because a group thread and a direct thread
- * differ only in whose name sits above each bubble.
+ * They were stacked in one column under two small headings, which put a
+ * fourteen-person group and a colleague on the same visual footing and made
+ * the list unreadable once either half grew. Three tabs instead:
+ *
+ *   همه      — everything with a message in it, newest first
+ *   گروه‌ها   — groups only
+ *   اعضا     — the directory, for starting a conversation that has none yet
+ *
+ * «همه» is sorted by last message rather than grouped by kind, because once
+ * you are looking for a conversation you remember *when* you last spoke, not
+ * whether it was a group.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -21,6 +27,9 @@ import UserAvatar from "@/components/UserAvatar.vue";
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+
+type Tab = "all" | "groups" | "people";
+const tab = ref<Tab>("all");
 
 const contacts = ref<TeamMember[]>([]);
 const groups = ref<ChatGroup[]>([]);
@@ -48,6 +57,38 @@ function senderName(m: ChatMessage | ChatMessageRow): string {
   return (m as ChatMessageRow).sender_detail?.name ?? "";
 }
 
+/** Last-activity time for a direct thread, from the overview payload. */
+const directMeta = ref<Record<number, { last_at: string; last_message: string }>>({});
+
+/**
+ * «همه» — one list ordered by when you last spoke, groups and people mixed.
+ * Anything never spoken to belongs in «اعضا», not here.
+ */
+const allThreads = computed(() => {
+  const rows: {
+    key: string; id: number; kind: "group" | "direct";
+    title: string; sub: string; at: string; unread: number; person?: TeamMember;
+  }[] = [];
+
+  for (const g of groups.value) {
+    rows.push({
+      key: `g${g.id}`, id: g.id, kind: "group", title: g.title,
+      sub: g.last_message || `${g.member_count} عضو`,
+      at: g.last_at ?? "", unread: g.unread,
+    });
+  }
+  for (const c of contacts.value) {
+    const meta = directMeta.value[c.id];
+    if (!meta) continue;
+    rows.push({
+      key: `d${c.id}`, id: c.id, kind: "direct", title: c.name,
+      sub: meta.last_message, at: meta.last_at,
+      unread: unread.value[c.id] ?? 0, person: c,
+    });
+  }
+  return rows.sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+});
+
 async function loadContacts() {
   const team = await socialApi.team();
   contacts.value = team.filter((m) => m.username !== auth.me?.username);
@@ -57,7 +98,11 @@ async function loadContacts() {
 
 async function loadGroups() {
   try {
-    groups.value = (await workApi.chatOverview()).groups;
+    const data = await workApi.chatOverview();
+    groups.value = data.groups;
+    directMeta.value = Object.fromEntries(
+      data.direct.map((d) => [d.user.id, { last_at: d.last_at, last_message: d.last_message }]),
+    );
   } catch {
     // The office app may not be reachable for this account; direct chat
     // must keep working regardless.
@@ -164,24 +209,73 @@ watch(() => route.query.group, (v) => { if (v) openGroup(Number(v)); });
       class="w-full md:w-72 border-l border-slate-100 flex-col shrink-0"
       :class="!hasThread ? 'flex' : 'hidden md:flex'"
     >
-      <div class="p-4 flex items-center justify-between border-b border-slate-100">
-        <span class="font-bold text-ink">گفتگوها</span>
-        <button
-          class="text-xs text-slate-500 hover:text-ink"
-          @click="makingGroup = true"
-        >+ گروه</button>
+      <div class="px-3 pt-3 pb-2 border-b border-slate-100">
+        <div class="flex items-center justify-between mb-2">
+          <span class="font-bold text-ink text-sm">گفتگو</span>
+          <button
+            class="text-xs text-slate-500 hover:text-ink"
+            @click="makingGroup = true"
+          >+ گروه</button>
+        </div>
+        <div class="flex bg-slate-100 rounded-xl p-0.5 text-xs">
+          <button
+            v-for="t in ([
+              { key: 'all', label: 'همه' },
+              { key: 'groups', label: 'گروه‌ها' },
+              { key: 'people', label: 'اعضا' },
+            ] as const)"
+            :key="t.key"
+            class="flex-1 py-1.5 rounded-lg transition-colors"
+            :class="tab === t.key ? 'bg-surface text-ink shadow-soft font-medium' : 'text-slate-500'"
+            @click="tab = t.key"
+          >{{ t.label }}</button>
+        </div>
       </div>
 
       <div class="flex-1 overflow-y-auto">
-        <template v-if="groups.length">
-          <p class="px-4 pt-3 pb-1 text-[11px] text-slate-400">گروه‌ها</p>
+        <!-- همه: whatever has been spoken in, newest first -->
+        <template v-if="tab === 'all'">
+          <p v-if="!allThreads.length" class="text-center text-slate-400 text-xs py-8">
+            هنوز گفتگویی شروع نشده. از «اعضا» یک نفر را انتخاب کنید.
+          </p>
+          <button
+            v-for="row in allThreads" :key="row.key"
+            class="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-right"
+            :class="(row.kind === 'group' ? activeGroupId : activeId) === row.id ? 'bg-slate-100' : ''"
+            @click="row.kind === 'group' ? openGroup(row.id) : openThread(row.id)"
+          >
+            <span
+              v-if="row.kind === 'group'"
+              class="w-[42px] h-[42px] rounded-full bg-panel text-white grid place-items-center text-[10px] shrink-0"
+            >گروه</span>
+            <UserAvatar
+              v-else-if="row.person"
+              :name="row.person.name" :initials="row.person.initials"
+              :color="row.person.avatar_color" :online="row.person.is_online" :size="42"
+            />
+            <span class="flex-1 min-w-0">
+              <span class="block text-sm font-medium text-ink truncate">{{ row.title }}</span>
+              <span class="block text-xs text-slate-400 truncate">{{ row.sub }}</span>
+            </span>
+            <span
+              v-if="row.unread"
+              class="bg-accent-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center ltr-nums shrink-0"
+            >{{ row.unread }}</span>
+          </button>
+        </template>
+
+        <!-- گروه‌ها -->
+        <template v-else-if="tab === 'groups'">
+          <p v-if="!groups.length" class="text-center text-slate-400 text-xs py-8">
+            گروهی نساخته‌اید.
+          </p>
           <button
             v-for="g in groups" :key="`g${g.id}`"
             class="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-right"
             :class="activeGroupId === g.id ? 'bg-slate-100' : ''"
             @click="openGroup(g.id)"
           >
-            <span class="w-[42px] h-[42px] rounded-full bg-panel text-white grid place-items-center text-xs shrink-0">
+            <span class="w-[42px] h-[42px] rounded-full bg-panel text-white grid place-items-center text-[10px] shrink-0">
               گروه
             </span>
             <span class="flex-1 min-w-0">
@@ -192,29 +286,30 @@ watch(() => route.query.group, (v) => { if (v) openGroup(Number(v)); });
             </span>
             <span
               v-if="g.unread"
-              class="bg-accent-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center ltr-nums"
+              class="bg-accent-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center ltr-nums shrink-0"
             >{{ g.unread }}</span>
           </button>
-          <p class="px-4 pt-3 pb-1 text-[11px] text-slate-400">افراد</p>
         </template>
 
-        <button
-          v-for="c in contacts"
-          :key="c.id"
-          class="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-right"
-          :class="activeId === c.id ? 'bg-slate-100' : ''"
-          @click="openThread(c.id)"
-        >
-          <UserAvatar :name="c.name" :initials="c.initials" :color="c.avatar_color" :online="c.is_online" :size="42" />
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-ink truncate">{{ c.name }}</p>
-            <p class="text-xs text-slate-400 truncate">{{ c.job_title_fa }}</p>
-          </div>
-          <span
-            v-if="unread[c.id]"
-            class="bg-accent-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center"
-          >{{ unread[c.id] }}</span>
-        </button>
+        <!-- اعضا: the directory, including people never spoken to -->
+        <template v-else>
+          <button
+            v-for="c in contacts" :key="c.id"
+            class="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-right"
+            :class="activeId === c.id ? 'bg-slate-100' : ''"
+            @click="openThread(c.id)"
+          >
+            <UserAvatar :name="c.name" :initials="c.initials" :color="c.avatar_color" :online="c.is_online" :size="42" />
+            <span class="flex-1 min-w-0">
+              <span class="block text-sm font-medium text-ink truncate">{{ c.name }}</span>
+              <span class="block text-xs text-slate-400 truncate">{{ c.job_title_fa }}</span>
+            </span>
+            <span
+              v-if="unread[c.id]"
+              class="bg-accent-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 leading-5 text-center shrink-0"
+            >{{ unread[c.id] }}</span>
+          </button>
+        </template>
       </div>
     </div>
 

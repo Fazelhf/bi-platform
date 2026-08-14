@@ -133,49 +133,52 @@ const inp =
     />
 
     <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <!--
+        The whole card opens the project.
+
+        Before this, only the title text was a button — about a fifth of a
+        151px card — so clicking anywhere else did nothing and the project
+        «could not be opened». A card that looks like one target must be one
+        target; ویرایش sits above it and stops the click from reaching it.
+      -->
       <div
         v-for="p in shown" :key="p.id"
-        class="bg-surface rounded-card shadow-soft p-4 flex flex-col gap-3
-               hover:shadow-pop transition-shadow"
+        class="relative bg-surface rounded-card shadow-soft hover:shadow-pop
+               transition-shadow"
       >
-        <div class="flex items-start justify-between gap-2">
-          <button
-            class="min-w-0 text-right"
-            @click="router.push({ name: 'office-project', params: { id: p.id } })"
-          >
-            <h3 class="font-bold text-ink text-sm truncate">{{ p.name }}</h3>
-            <p v-if="p.due_on" class="text-[11px] text-slate-400 mt-0.5 ltr-nums">
+        <button
+          class="w-full text-right p-4 flex flex-col gap-3 rounded-card"
+          @click="router.push({ name: 'office-project', params: { id: p.id } })"
+        >
+          <span class="block min-w-0 w-full pl-14">
+            <span class="block font-bold text-ink text-sm truncate">{{ p.name }}</span>
+            <span v-if="p.due_on" class="block text-[11px] text-slate-400 mt-0.5 ltr-nums">
               مهلت {{ faDate(p.due_on) }}
-            </p>
-          </button>
-          <button
-            class="text-xs text-slate-400 hover:text-ink shrink-0"
-            @click="startEdit(p)"
-          >ویرایش</button>
-        </div>
+            </span>
+          </span>
 
-        <div>
-          <div class="flex items-baseline justify-between text-xs mb-1">
+        <span class="block w-full">
+          <span class="flex items-baseline justify-between text-xs mb-1">
             <span class="text-slate-500">وضعیت کل پروژه</span>
             <span class="text-ink ltr-nums">{{ num(p.progress_pct) }}٪</span>
-          </div>
-          <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              class="h-full rounded-full transition-all"
+          </span>
+          <span class="block h-2 bg-slate-100 rounded-full overflow-hidden">
+            <span
+              class="block h-full rounded-full transition-all"
               :class="barClass(p)"
               :style="{ width: `${Math.max(p.progress_pct, 1)}%` }"
-            ></div>
-          </div>
-          <p class="text-[11px] text-slate-400 mt-1 ltr-nums">
+            ></span>
+          </span>
+          <span class="block text-[11px] text-slate-400 mt-1 ltr-nums">
             {{ num(p.done_count) }} از {{ num(p.task_count) }} وظیفه
             <span v-if="p.overdue_count" class="text-amber-600">
               · {{ num(p.overdue_count) }} عقب‌افتاده
             </span>
-          </p>
-        </div>
+          </span>
+        </span>
 
-        <div class="flex items-center justify-between gap-2 mt-auto">
-          <div class="flex -space-x-2 space-x-reverse">
+        <span class="flex items-center justify-between gap-2 w-full mt-auto">
+          <span class="flex -space-x-2 space-x-reverse">
             <UserAvatar
               v-for="m in p.memberships.slice(0, 5)" :key="m.id"
               :user="m.user_detail as any" :size="26" :title="m.user_detail.name"
@@ -186,12 +189,20 @@ const inp =
               class="w-[26px] h-[26px] rounded-full bg-slate-100 text-[10px] text-slate-500
                      grid place-items-center ring-2 ring-surface ltr-nums"
             >+{{ num(p.memberships.length - 5) }}</span>
-          </div>
+          </span>
           <span
             class="text-[11px] rounded-full px-2 py-1 ltr-nums"
             :class="p.my_open_count ? 'bg-slate-100 text-slate-600' : 'text-slate-300'"
           >{{ num(p.my_open_count) }} کار من</span>
-        </div>
+        </span>
+        </button>
+
+        <!-- Layered over the card, so it does not open the project too. -->
+        <button
+          class="absolute top-3 left-3 text-xs text-slate-400 hover:text-ink
+                 bg-surface/80 rounded-lg px-2 py-1"
+          @click.stop="startEdit(p)"
+        >ویرایش</button>
       </div>
     </div>
 
