@@ -123,9 +123,8 @@ const inp =
     <div class="bg-surface rounded-card shadow-soft p-2 flex flex-wrap items-center gap-1">
       <button
         v-for="b in BOXES" :key="b.key"
-        class="px-3.5 py-2 rounded-xl text-sm transition-colors flex items-center gap-2"
-        :class="box === b.key ? 'text-white' : 'text-slate-500 hover:bg-slate-100'"
-        :style="box === b.key ? { background: 'var(--sec)' } : {}"
+        class="office-tab px-3.5 py-2 rounded-xl text-sm flex items-center gap-2"
+        :class="box === b.key ? 'is-active' : 'text-slate-500'"
         @click="box = b.key"
       >
         {{ b.label }}
@@ -139,8 +138,7 @@ const inp =
       <span class="flex-1"></span>
 
       <button
-        class="text-white rounded-xl px-4 py-2 text-sm"
-        :style="{ background: 'var(--sec)' }"
+        class="office-btn rounded-xl px-4 py-2 text-sm"
         @click="composing = true"
       >+ نامه جدید</button>
     </div>
@@ -162,7 +160,7 @@ const inp =
           <span
             v-if="activeFilters"
             class="text-[10px] text-white rounded-full px-1.5 ltr-nums"
-            :style="{ background: 'var(--sec)' }"
+            :style="{ background: 'var(--sec-solid)' }"
           >{{ num(activeFilters) }}</span>
         </button>
         <span class="text-xs text-slate-400 ltr-nums">{{ num(total) }} نامه</span>
@@ -185,8 +183,7 @@ const inp =
         <input v-model="filters.from" type="date" :class="inp" dir="ltr" />
         <input v-model="filters.to" type="date" :class="inp" dir="ltr" />
         <button
-          class="text-white rounded-xl px-4 py-2 text-sm"
-          :style="{ background: 'var(--sec)' }"
+          class="office-btn rounded-xl px-4 py-2 text-sm"
           @click="load"
         >اعمال</button>
         <button
@@ -221,7 +218,7 @@ const inp =
         <!-- Unread gets a spine in the section's colour. -->
         <span
           class="w-1 shrink-0"
-          :style="{ background: isUnread(row) ? 'var(--sec)' : 'transparent' }"
+          :class="isUnread(row) ? 'office-spine' : ''"
         ></span>
 
         <span class="flex items-start gap-3 px-3 py-3 flex-1 min-w-0">
@@ -236,10 +233,8 @@ const inp =
               <span
                 v-for="t in row.tags_detail" :key="t.id"
                 class="text-[10px] rounded-full px-2 py-0.5 shrink-0"
-                :style="t.color
-                  ? { background: t.color + '22', color: t.color }
-                  : { background: 'rgb(var(--c-slate-100))' }"
-                :class="t.color ? '' : 'text-slate-500'"
+                :class="t.color ? 'office-tag' : 'bg-slate-100 text-slate-500'"
+                :style="t.color ? { '--tag': t.color } : {}"
               >{{ t.name_fa }}</span>
             </span>
             <span class="block text-xs text-slate-400 truncate mt-0.5">

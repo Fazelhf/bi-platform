@@ -1,0 +1,147 @@
+/**
+ * اتوماسیون اداری — design tokens, in three layers.
+ *
+ * The first pass wrote raw hex straight into `:style` bindings. It looked
+ * right in one skin and was wrong in three ways the moment you checked:
+ *
+ *   • A tint made by string-concatenating alpha onto hex (`color + "22"`)
+ *     cannot adapt, so section-tinted chips were nearly invisible on the dark
+ *     skin and muddy on شیشه‌ای.
+ *   • The section-coloured buttons had **no focus state at all** — they were
+ *     the only unreachable-by-keyboard controls in the workspace.
+ *   • Hover was `filter: brightness(.95)`, which dims the text along with the
+ *     background and fails on the light hues.
+ *
+ * Channels rather than hex, matching the convention in style.css, so
+ * `rgb(var(--sec) / 0.12)` composes properly and Tailwind's `<alpha-value>`
+ * keeps working next to it.
+ */
+
+/* ── Layer 1: primitives ────────────────────────────────────────────────
+   The six section hues. Raw values, no meaning attached — they change only
+   if the workspace is rebranded. */
+:root {
+  --office-hue-home: 14 165 233;      /* sky   — میز کار */
+  --office-hue-letters: 249 115 22;   /* orange — مکاتبات */
+  --office-hue-tasks: 16 185 129;     /* green — وظایف */
+  --office-hue-projects: 139 92 246;  /* violet — پروژه‌ها */
+  --office-hue-chat: 59 111 237;      /* blue  — گفتگو */
+  --office-hue-notes: 245 158 11;     /* amber — یادداشت‌ها */
+
+  /* How strong a tint is. Dark surfaces need more of the hue to read at all,
+     which is the whole reason this is a variable and not a fixed alpha. */
+  --office-tint: 0.12;
+  --office-tint-strong: 0.2;
+}
+
+.dark {
+  --office-tint: 0.22;
+  --office-tint-strong: 0.32;
+}
+
+/* ── Layer 2: semantic ──────────────────────────────────────────────────
+   `--sec` is set on the workspace root by OfficeShell, to whichever primitive
+   the open section owns. Everything below reads it, so one assignment
+   re-themes the page. */
+.office-workspace {
+  --sec-solid: rgb(var(--sec));
+  --sec-soft: rgb(var(--sec) / var(--office-tint));
+  --sec-soft-strong: rgb(var(--sec) / var(--office-tint-strong));
+  --sec-ring: rgb(var(--sec) / 0.45);
+  --sec-on: #fff; /* text on a solid fill */
+}
+
+/* ── Layer 3: component ────────────────────────────────────────────────── */
+.office-workspace {
+  --office-nav-bg: var(--sec-solid);
+  --office-tab-bg: var(--sec-solid);
+  --office-btn-bg: var(--sec-solid);
+  --office-spine: var(--sec-solid);
+  --office-chip-bg: var(--sec-soft);
+}
+
+/* ── Components ───────────────────────────────────────────────────────── */
+
+/* Shared interactive contract. Durations from the state spec: colour 150ms,
+   transform 200ms. */
+.office-nav,
+.office-tab,
+.office-btn {
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-in-out;
+}
+
+/* Focus is never removed, only replaced. `:focus-visible` so a mouse click
+   does not leave a ring behind, while Tab always does. */
+.office-nav:focus-visible,
+.office-tab:focus-visible,
+.office-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--sec-ring);
+}
+
+/* Rail row. Each row carries its own hue in `--row`, because the rail shows
+   all six sections at once and only the active one wears its colour. */
+.office-nav.is-active {
+  background: rgb(var(--row));
+  color: #fff;
+}
+.office-nav.is-active:hover {
+  /* Darkening via a black overlay rather than `filter`, which would dim the
+     label to grey along with the background. */
+  background: linear-gradient(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.12)), rgb(var(--row));
+}
+.office-nav.is-active:active {
+  background: linear-gradient(rgb(0 0 0 / 0.2), rgb(0 0 0 / 0.2)), rgb(var(--row));
+}
+.office-nav:not(.is-active):hover {
+  background: rgb(var(--c-slate-100));
+}
+
+/* Section-coloured tab (mailboxes, task boxes). */
+.office-tab.is-active {
+  background: var(--office-tab-bg);
+  color: var(--sec-on);
+}
+.office-tab.is-active:hover {
+  background: linear-gradient(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.12)), var(--office-tab-bg);
+}
+.office-tab:not(.is-active):hover {
+  background: rgb(var(--c-slate-100));
+}
+
+/* Primary action in the section's colour. */
+.office-btn {
+  background: var(--office-btn-bg);
+  color: var(--sec-on);
+}
+.office-btn:hover {
+  background: linear-gradient(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.12)), var(--office-btn-bg);
+}
+.office-btn:active {
+  background: linear-gradient(rgb(0 0 0 / 0.2), rgb(0 0 0 / 0.2)), var(--office-btn-bg);
+}
+.office-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.office-btn:disabled:hover {
+  background: var(--office-btn-bg);
+}
+
+/* An unread row's spine, and the tint behind a section chip. */
+.office-spine {
+  background: var(--office-spine);
+}
+.office-chip {
+  background: var(--office-chip-bg);
+  color: var(--sec-solid);
+}
+
+/* A tag renders in its own colour rather than the section's, so «گمرک» looks
+   the same wherever it appears. Set `--tag` on the element. */
+.office-tag {
+  background: rgb(var(--tag) / var(--office-tint));
+  color: rgb(var(--tag));
+}

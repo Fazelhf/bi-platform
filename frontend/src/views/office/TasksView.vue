@@ -192,9 +192,8 @@ const EDGE: Record<string, string> = {
     <div class="bg-surface rounded-card shadow-soft p-2 flex flex-wrap items-center gap-1">
       <button
         v-for="t in TABS" :key="t.key"
-        class="px-3.5 py-2 rounded-xl text-sm transition-colors flex items-center gap-2"
-        :class="box === t.key ? 'text-white' : 'text-slate-500 hover:bg-slate-100'"
-        :style="box === t.key ? { background: 'var(--sec)' } : {}"
+        class="office-tab px-3.5 py-2 rounded-xl text-sm flex items-center gap-2"
+        :class="box === t.key ? 'is-active' : 'text-slate-500'"
         @click="box = t.key"
       >
         {{ t.label }}
@@ -210,8 +209,7 @@ const EDGE: Record<string, string> = {
       <span class="flex-1"></span>
 
       <button
-        class="text-white rounded-xl px-4 py-2 text-sm"
-        :style="{ background: 'var(--sec)' }"
+        class="office-btn rounded-xl px-4 py-2 text-sm"
         @click="creating = true"
       >+ وظیفه جدید</button>
     </div>
@@ -247,7 +245,7 @@ const EDGE: Record<string, string> = {
             c.inMonth ? 'bg-slate-50' : 'bg-transparent opacity-40',
             c.isToday ? 'ring-2' : '',
           ]"
-          :style="c.isToday ? { '--tw-ring-color': 'var(--sec)' } : {}"
+          :style="c.isToday ? { '--tw-ring-color': 'var(--sec-solid)' } : {}"
         >
           <span class="text-[11px] ltr-nums" :class="c.isToday ? 'font-bold text-ink' : 'text-slate-400'">
             {{ c.label }}

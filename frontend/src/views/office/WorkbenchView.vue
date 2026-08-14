@@ -38,8 +38,10 @@ const loading = ref(true);
 const error = ref("");
 const creating = ref(false);
 
+/** Channels, so callers can build both solid fills and tints from one value. */
 const colorOf = (name: string) =>
-  OFFICE_SECTIONS.find((s) => s.name === name)?.color ?? "#64748b";
+  OFFICE_SECTIONS.find((s) => s.name === name)?.color ?? "100 116 139";
+const solid = (name: string) => `rgb(${colorOf(name)})`;
 
 /** Each tile: where it goes, what it looks like, and what the number means. */
 const TILE: Record<string, { to: string; icon: string; note: string }> = {
@@ -100,8 +102,7 @@ function tileTone(key: string, value: number): boolean {
             {{ greeting }}، {{ auth.me?.display_name_fa || auth.me?.username }}
           </h2>
           <button
-            class="text-white rounded-xl px-4 py-2 text-sm"
-            :style="{ background: 'var(--sec)' }"
+            class="office-btn rounded-xl px-4 py-2 text-sm"
             @click="creating = true"
           >+ وظیفه جدید</button>
         </div>
@@ -118,7 +119,7 @@ function tileTone(key: string, value: number): boolean {
                 class="w-7 h-7 rounded-lg grid place-items-center text-white shrink-0"
                 :style="{ background: tileTone(t.key, t.value)
                   ? '#ef4444'
-                  : colorOf(TILE[t.key]?.to ?? 'office-tasks') }"
+                  : solid(TILE[t.key]?.to ?? 'office-tasks') }"
               >
                 <NavIcon :name="TILE[t.key]?.icon ?? 'check'" :size="15" />
               </span>
@@ -235,7 +236,7 @@ function tileTone(key: string, value: number): boolean {
                 class="h-full rounded-full"
                 :style="{
                   width: `${Math.max(p.progress_pct, 2)}%`,
-                  background: p.overdue_count ? '#f59e0b' : colorOf('office-projects'),
+                  background: p.overdue_count ? '#f59e0b' : solid('office-projects'),
                 }"
               ></div>
             </div>

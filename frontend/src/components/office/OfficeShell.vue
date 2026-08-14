@@ -88,7 +88,7 @@ function leave() {
 
 <template>
   <div
-    class="min-h-screen md:flex md:gap-4 md:p-4"
+    class="office-workspace min-h-screen md:flex md:gap-4 md:p-4"
     dir="rtl"
     :style="{ '--sec': section.color }"
   >
@@ -111,7 +111,7 @@ function leave() {
       <div class="flex items-center gap-3 p-4" :class="collapsed ? 'justify-center' : ''">
         <span
           class="w-9 h-9 rounded-2xl grid place-items-center shrink-0 text-white transition-colors"
-          :style="{ background: section.color }"
+          :style="{ background: 'rgb(' + section.color + ')' }"
         >
           <NavIcon name="inbox" :size="19" />
         </span>
@@ -181,7 +181,7 @@ function leave() {
         class="bg-surface md:rounded-card md:shadow-soft mb-4 overflow-hidden"
       >
         <!-- The section's colour as a top edge: present without shouting. -->
-        <div class="h-1" :style="{ background: section.color }"></div>
+        <div class="h-1" :style="{ background: 'rgb(' + section.color + ')' }"></div>
         <div class="px-4 sm:px-5 py-3 flex items-center gap-3">
           <button
             class="md:hidden text-slate-500 p-1 shrink-0"
@@ -191,7 +191,7 @@ function leave() {
 
           <span
             class="w-9 h-9 rounded-xl grid place-items-center shrink-0 text-white hidden sm:grid"
-            :style="{ background: section.color }"
+            :style="{ background: 'rgb(' + section.color + ')' }"
           >
             <NavIcon :name="section.icon" :size="18" />
           </span>
@@ -243,16 +243,3 @@ function leave() {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* The active row is filled with its own section colour. Written in CSS rather
-   than a Tailwind class because the colour is per-item and Tailwind cannot
-   build `bg-[#f97316]` out of a runtime variable. */
-.office-nav.is-active {
-  background: var(--row);
-  color: #fff;
-}
-.office-nav.is-active:hover {
-  filter: brightness(0.95);
-}
-</style>
