@@ -264,8 +264,45 @@ class Customer(DatasetModel):
     mobile = models.CharField(max_length=40, blank=True)
     email = models.EmailField(blank=True)
     address = models.CharField(max_length=400, blank=True)
-    national_id = models.CharField(max_length=20, blank=True)  # شناسه ملی / کد اقتصادی
+    # شناسه ملی (حقوقی) / کد ملی (حقیقی). Didar has neither — every one of its
+    # 2,717 rows is blank — so this is filled only from the accounting export.
+    national_id = models.CharField(max_length=20, blank=True)
+    # کد اقتصادی is a *different* number from شناسه ملی and the two used to
+    # share this one field. They disagree often enough in the آرپا export
+    # (517 economic codes against 551 national ids) that merging them loses
+    # the only two identifiers a legal entity actually has.
+    economic_code = models.CharField(max_length=20, blank=True)
+    registration_no = models.CharField(max_length=20, blank=True)  # شماره ثبت
+    postal_code = models.CharField(max_length=10, blank=True)
     note = models.TextField(blank=True)
+
+    # ---- Commercial terms, straight from accounting ------------------------
+    # «نقدی» / «30روزه» / «45 روزه» … kept as text rather than a choice list:
+    # the accounting system mints new terms without asking, and an import that
+    # fails on an unrecognised one is worse than one that carries it through.
+    payment_terms = models.CharField(max_length=40, blank=True)
+    is_good_payer = models.BooleanField(default=False)  # خوش حساب
+    # غیر فعال in آرپا. Distinct from `status`: a customer can be راکد (no
+    # recent activity, still worth calling) without the account being closed.
+    is_active = models.BooleanField(default=True)
+    # تاریخ اعتبار گواهی ارزش افزوده — an invoice issued after this date
+    # cannot legally carry VAT, so it belongs beside the customer, not buried
+    # in the accounting system.
+    vat_cert_expires_at = models.DateField(null=True, blank=True)
+
+    # Sales to a sister company are real invoices and belong in the ledger,
+    # but they are not the sales team's work and must not land in a target or
+    # a conversion rate. «آرال رول آریا - فی ما بین» alone is 250bn Rial —
+    # large enough to distort every figure it is counted into.
+    is_intercompany = models.BooleanField(default=False)
+
+    # Set when this row was folded into another during a source merge. Kept
+    # rather than deleted so the deals and activities already attached to it
+    # survive, and so an incorrect merge can be undone.
+    merged_into = models.ForeignKey(
+        "self", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="merged_from",
+    )
 
     # Lifecycle markers used by the "مشتری جدید" and retention reports.
     first_contact_at = models.DateTimeField()
@@ -659,3 +696,284 @@ class Task(DatasetModel):
 
     def __str__(self) -> str:
         return self.title
+
+
+# --------------------------------------------------------------------------
+# Identity across source systems
+#
+# The customer file arrives from two places that have never agreed on a key:
+# دیدار (the old CRM) and آرپا (accounting). Matching them is not a detail of
+# the import — it is the hard part, and it cannot be done by `code` alone,
+# because `Customer.code` encodes *where a row came from* («didar-co-…») and
+# so can only ever name one source.
+#
+# Measured on the real exports before designing this:
+#
+#   * دیدار carries **no** شناسه ملی at all — 0 of 2,717 rows. The one key
+#     that would have been unambiguous does not exist.
+#   * Matching on phone produces false pairs. «پلی کلینیک سوم خرداد خرمشهر»
+#     and «شبکه بهداشت و درمان خرمشهر» share a switchboard; so do a hospital
+#     and a person. 55 of 138 active buyers match this way and they cannot be
+#     trusted unreviewed.
+#   * Fuzzy name matching pairs «بانک کشاورزی ایلام» with «بانک کشاورزی
+#     گیلان» at 86% similarity — two branches in different provinces.
+#
+# So: an exact normalised name is the only signal strong enough to merge on
+# its own. Everything weaker becomes a CustomerMatchCandidate for a human.
+# --------------------------------------------------------------------------
+class ExternalSource(models.TextChoices):
+    DIDAR = "didar", "دیدار"
+    ARPA = "arpa", "آرپا (حسابداری)"
+    # Not a source system: a duplicate raised from inside the CRM, by someone
+    # looking at two rows on the customer list that are plainly one company.
+    # It rides in the same queue because it is the same question and deserves
+    # the same care — the دیدار import alone left 35 pairs sharing a name.
+    CRM = "crm", "داخل CRM"
+
+
+class CustomerExternalRef(DatasetModel):
+    """
+    One customer's id in one source system.
+
+    A customer may hold several — its دیدار id and its آرپا کد طرف حساب — which
+    is what makes both imports re-runnable against the same row instead of
+    each minting its own.
+    """
+
+    customer = models.ForeignKey(
+        Customer, on_delete=models.CASCADE, related_name="external_refs"
+    )
+    source = models.CharField(max_length=8, choices=ExternalSource.choices)
+    external_id = models.CharField(max_length=64)
+    # What the source calls this customer. Kept so the review screen can show
+    # both spellings side by side, and so a later export that renames a party
+    # is visible as a change rather than silently overwriting.
+    external_name = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        verbose_name = "شناسه در سامانه مبدأ"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "external_id"], name="crm_extref_unique_source_id"
+            ),
+        ]
+        indexes = [models.Index(fields=["customer", "source"])]
+
+    def __str__(self) -> str:
+        return f"{self.get_source_display()}:{self.external_id} → {self.customer}"
+
+
+class CustomerMatchCandidate(TimeStampedModel):
+    """
+    A suspected — not confirmed — pairing between a source party and a customer.
+
+    The row deliberately holds the *source* side as raw text rather than as a
+    second Customer. Creating a customer in order to merge it away would leave
+    a real duplicate in the table for as long as the queue is unreviewed, and
+    would make «رد» mean deleting a row someone might already have touched.
+
+    `payload` keeps the whole source record so the review screen can show
+    address, city and group without re-reading the workbook.
+    """
+
+    class Method(models.TextChoices):
+        NATIONAL_ID = "nid", "شناسه/کد ملی"
+        # Same شناسه ملی, different place. Every branch of a bank carries the
+        # head office's number, so the id proves one legal entity — not one
+        # customer. Whether two branches are one account is a judgement about
+        # how the company sells, not something an id can answer.
+        BRANCH = "branch", "شناسه ملی یکسان، شعبه‌ی متفاوت"
+        PHONE = "phone", "تلفن"
+        NAME = "name", "نام یکسان"
+        # The source name matches a customer exactly — and matches a second
+        # one too. The duplicate is inside the CRM, and it has to be settled
+        # before this party can be filed against either half.
+        AMBIGUOUS = "ambig", "نام یکسان با چند مشتری"
+        FUZZY = "fuzzy", "نام مشابه"
+        MANUAL = "manual", "دستی"
+
+    class State(models.TextChoices):
+        PENDING = "pending", "در انتظار بازبینی"
+        ACCEPTED = "accepted", "تایید شد — همان مشتری"
+        REJECTED = "rejected", "رد شد — مشتری دیگری است"
+
+    source = models.CharField(max_length=8, choices=ExternalSource.choices)
+    external_id = models.CharField(max_length=64)
+    external_name = models.CharField(max_length=200)
+    external_phone = models.CharField(max_length=40, blank=True)
+    external_city = models.CharField(max_length=100, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+
+    customer = models.ForeignKey(
+        Customer, on_delete=models.CASCADE, related_name="match_candidates"
+    )
+    # Set only when both sides are CRM rows. The source side of this model is
+    # normally raw text — a party read out of a workbook — but a duplicate
+    # raised from the customer list has a real row behind it, and pointing at
+    # it beats copying its fields into `payload` where they would go stale
+    # while the pair sits in the queue.
+    duplicate = models.ForeignKey(
+        Customer, null=True, blank=True,
+        on_delete=models.CASCADE, related_name="duplicate_candidates",
+    )
+    method = models.CharField(max_length=8, choices=Method.choices)
+    score = models.DecimalField(max_digits=5, decimal_places=4, default=0)
+
+    state = models.CharField(
+        max_length=8, choices=State.choices, default=State.PENDING, db_index=True
+    )
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="crm_match_decisions",
+    )
+
+    class Meta:
+        ordering = ("state", "-score")
+        verbose_name = "پیشنهاد تطبیق مشتری"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "external_id", "customer"],
+                name="crm_matchcand_unique_pair",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.external_name} ≟ {self.customer}"
+
+
+# --------------------------------------------------------------------------
+# Invoices — what was actually billed
+#
+# Deliberately *not* folded into Deal. A معامله is a pipeline opportunity and
+# its `amount_rial` comes straight from دیدار, which is also what دیدار's own
+# reports are built on; the import checks itself against those totals. Writing
+# invoice money onto the same field would break that check and leave no way to
+# tell which of the two systems a given figure came from.
+#
+# One invoice → one customer → optionally one deal. The link to Deal is what
+# eventually answers «چقدر از کاریز واقعاً فاکتور شد».
+# --------------------------------------------------------------------------
+class SalesInvoice(DatasetModel):
+    """
+    فاکتور فروش یا مرجوعی، از نرم‌افزار حسابداری.
+
+    Money is stored **excluding VAT**: `amount_rial` is آرپا's «مبلغ فروش»,
+    which is net of discount and carries tax separately in `vat_rial`. That
+    is the figure comparable with a deal's ارزش, and the one the sales team
+    is measured on.
+
+    Returns keep the negative sign آرپا gives them, so a plain SUM over a
+    period is already net of returns and nothing has to remember to subtract.
+    """
+
+    class Kind(models.TextChoices):
+        SALE = "sale", "فاکتور فروش"
+        RETURN = "return", "مرجوع از فروش"
+
+    code = models.SlugField(unique=True)
+    number = models.CharField(max_length=30)  # شماره برگه
+    kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.SALE)
+    customer = models.ForeignKey(
+        Customer, on_delete=models.PROTECT, related_name="invoices"
+    )
+    deal = models.ForeignKey(
+        Deal, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="invoices",
+    )
+
+    issued_at = models.DateField()
+    period = models.ForeignKey(
+        DimPeriod, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="crm_invoices",
+    )
+
+    # ---- Money (Rial, excluding VAT unless the name says otherwise) --------
+    amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    discount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    vat_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    # مبلغ برگه — what the customer owes, VAT included. Stored because it is
+    # what a receivable is actually collected against.
+    total_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    settled_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    unsettled_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+
+    # ---- Terms -------------------------------------------------------------
+    payment_terms = models.CharField(max_length=40, blank=True)
+    due_date = models.DateField(null=True, blank=True)     # موعد تسویه
+    grace_date = models.DateField(null=True, blank=True)   # مهلت تسویه
+    shipping_method = models.CharField(max_length=60, blank=True)
+
+    # ---- People ------------------------------------------------------------
+    # «بازاریاب» — the salesperson, filled on every invoice. Not «ایجاد کننده»,
+    # which is whoever typed it, and not «مسوول فروش», which despite its name
+    # holds the channel («گروه فروش بانکی») rather than a person.
+    owner = models.ForeignKey(
+        DimEmployee, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="invoices",
+    )
+    created_by_name = models.CharField(max_length=60, blank=True)
+    channel = models.CharField(
+        max_length=16, choices=SalesChannel.choices, blank=True
+    )
+    branch = models.CharField(max_length=60, blank=True)   # شعبه
+    tax_ref = models.CharField(max_length=40, blank=True)  # شناسه سامانه مودیان
+    note = models.CharField(max_length=400, blank=True)
+
+    class Meta:
+        ordering = ("-issued_at", "-number")
+        verbose_name = "فاکتور فروش"
+        indexes = [
+            models.Index(fields=["customer", "issued_at"]),
+            models.Index(fields=["period", "kind"]),
+            models.Index(fields=["owner", "issued_at"]),
+        ]
+
+    @property
+    def is_settled(self) -> bool:
+        return self.unsettled_rial <= 0
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} {self.number} · {self.customer}"
+
+
+class SalesInvoiceItem(DatasetModel):
+    """
+    ردیف فاکتور.
+
+    `product` is nullable and the source's own کد/نام کالا are kept beside it.
+    The accounting catalogue and دیدار's catalogue are separate lists that
+    only partly line up, and a line whose product cannot be mapped is still a
+    real sale — dropping it, or refusing the whole invoice, would quietly
+    understate revenue. The raw columns also let the mapping improve later
+    without re-importing.
+    """
+
+    invoice = models.ForeignKey(
+        SalesInvoice, on_delete=models.CASCADE, related_name="items"
+    )
+    product = models.ForeignKey(
+        Product, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="invoice_items",
+    )
+    product_code = models.CharField(max_length=40, blank=True)
+    product_name = models.CharField(max_length=200, blank=True)
+
+    quantity = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    # «معادل» — the same quantity in the catalogue's base unit. Kept because
+    # tonnage reporting cannot be derived from `quantity`, whose unit differs
+    # per product line.
+    equivalent = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    sub_unit = models.CharField(max_length=20, blank=True)
+
+    unit_price_rial = models.DecimalField(max_digits=18, decimal_places=0, default=0)
+    amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    accounting_group = models.CharField(max_length=40, blank=True)
+
+    class Meta:
+        ordering = ("id",)
+        verbose_name = "ردیف فاکتور"
+        indexes = [models.Index(fields=["invoice"])]
+
+    def __str__(self) -> str:
+        return f"{self.product_name or self.product_code} × {self.quantity}"

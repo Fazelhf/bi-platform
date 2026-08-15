@@ -53,6 +53,84 @@ function onSaved() {
   load();
 }
 
+/**
+ * Selection, and the two things you can do with one.
+ *
+ * The list holds 3,760 accounts now, most of them arrived from accounting and
+ * a good share of them duplicates or dormant. Cleaning that up one row at a
+ * time is not work anybody finishes, so the list needs to act on a handful at
+ * once — but the two actions are deliberately not equals. Deleting is refused
+ * for anything carrying deals or invoices, and «send to review» is the answer
+ * for those: a duplicate account should be *merged*, which keeps its orders,
+ * not deleted, which loses them.
+ */
+const selected = ref<Set<number>>(new Set());
+const acting = ref(false);
+const result = ref<{ ok: string; warn: { name_fa: string; reason: string }[] } | null>(null);
+
+function toggle(id: number) {
+  const next = new Set(selected.value);
+  next.has(id) ? next.delete(id) : next.add(id);
+  selected.value = next;
+}
+
+const allOnPage = computed(
+  () => rows.value.length > 0 && rows.value.every((r) => selected.value.has(r.id)),
+);
+
+function toggleAll() {
+  const next = new Set(selected.value);
+  const ids = rows.value.map((r) => r.id);
+  allOnPage.value ? ids.forEach((i) => next.delete(i)) : ids.forEach((i) => next.add(i));
+  selected.value = next;
+}
+
+/** Selecting across pages then acting on rows you can no longer see is a good
+ *  way to delete something by accident. The selection clears with the page. */
+watch([page, status, search], () => {
+  selected.value = new Set();
+  result.value = null;
+});
+
+async function sendToReview() {
+  acting.value = true;
+  result.value = null;
+  try {
+    const res = await crmApi.bulkReview([...selected.value]);
+    result.value = {
+      ok: res.queued
+        ? `${num(res.queued)} مورد به صف بازبینی رفت.`
+        : "چیزی به صف اضافه نشد.",
+      warn: res.skipped,
+    };
+    selected.value = new Set();
+  } catch (e: any) {
+    result.value = { ok: "", warn: [{ name_fa: "", reason: e?.response?.data?.detail ?? "انجام نشد." }] };
+  } finally {
+    acting.value = false;
+  }
+}
+
+async function removeSelected() {
+  const n = selected.value.size;
+  if (!window.confirm(`${num(n)} مشتری حذف شود؟ مشتریانی که معامله یا فاکتور دارند حذف نمی‌شوند.`)) return;
+  acting.value = true;
+  result.value = null;
+  try {
+    const res = await crmApi.bulkDelete([...selected.value]);
+    result.value = {
+      ok: `${num(res.deleted)} مشتری حذف شد.`,
+      warn: res.blocked,
+    };
+    selected.value = new Set();
+    await load();
+  } catch (e: any) {
+    result.value = { ok: "", warn: [{ name_fa: "", reason: e?.response?.data?.detail ?? "حذف انجام نشد." }] };
+  } finally {
+    acting.value = false;
+  }
+}
+
 const statusClass: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-700",
   lead: "bg-sky-100 text-sky-700",
@@ -85,6 +163,41 @@ const statusClass: Record<string, string> = {
       >+ مشتری جدید</button>
     </div>
 
+    <!-- Appears only once something is selected: an action bar that is always
+         there invites a click, and one of these two deletes. -->
+    <div
+      v-if="crm.canEdit && selected.size"
+      class="bg-panel text-white rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2"
+    >
+      <span class="text-sm px-1">{{ num(selected.size) }} انتخاب شده</span>
+      <button
+        class="bg-white/15 rounded-xl px-4 py-2 text-sm disabled:opacity-50"
+        :disabled="acting"
+        @click="sendToReview"
+      >ارسال به بازبینی</button>
+      <button
+        class="bg-red-500/90 rounded-xl px-4 py-2 text-sm disabled:opacity-50"
+        :disabled="acting"
+        @click="removeSelected"
+      >حذف</button>
+      <button class="text-sm px-3 py-2 text-white/70" @click="selected = new Set()">
+        لغو انتخاب
+      </button>
+      <span class="text-xs text-white/60 basis-full sm:basis-auto sm:mr-auto">
+        دو مشتری = همان جفت؛ یک یا چند تا = دنبال مشابهشان می‌گردد
+      </span>
+    </div>
+
+    <div v-if="result" class="bg-surface rounded-card shadow-soft p-3 text-sm">
+      <p v-if="result.ok" class="text-emerald-600">{{ result.ok }}</p>
+      <ul v-if="result.warn.length" class="mt-1 space-y-0.5 text-xs text-slate-500">
+        <li v-for="(w, i) in result.warn" :key="i">
+          <span v-if="w.name_fa" class="text-ink">{{ w.name_fa }}</span>
+          — {{ w.reason }}
+        </li>
+      </ul>
+    </div>
+
     <CustomerForm v-if="showForm" @close="showForm = false" @saved="onSaved" />
 
     <div v-if="loading" class="space-y-2">
@@ -103,7 +216,12 @@ const statusClass: Record<string, string> = {
           @click="router.push({ name: 'crm-customer', params: { id: c.id } })"
         >
           <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
+            <input
+              v-if="crm.canEdit" type="checkbox" class="mt-1 shrink-0"
+              :checked="selected.has(c.id)"
+              @click.stop @change="toggle(c.id)"
+            />
+            <div class="min-w-0 flex-1">
               <p class="text-ink font-medium truncate">{{ c.name_fa }}</p>
               <p class="text-xs text-slate-400 truncate">{{ c.contact_name }} · {{ c.mobile }}</p>
             </div>
@@ -125,6 +243,9 @@ const statusClass: Record<string, string> = {
         <table class="w-full text-sm min-w-[760px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">
+              <th v-if="crm.canEdit" class="w-10 px-3">
+                <input type="checkbox" :checked="allOnPage" @change="toggleAll" />
+              </th>
               <th class="text-right font-medium px-4 py-3">مشتری</th>
               <th class="text-right font-medium px-3">گروه</th>
               <th class="text-right font-medium px-3">استان</th>
@@ -140,6 +261,12 @@ const statusClass: Record<string, string> = {
               class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
               @click="router.push({ name: 'crm-customer', params: { id: c.id } })"
             >
+              <td v-if="crm.canEdit" class="px-3" @click.stop>
+                <input
+                  type="checkbox" :checked="selected.has(c.id)"
+                  @change="toggle(c.id)"
+                />
+              </td>
               <td class="px-4 py-2.5">
                 <p class="text-ink font-medium">{{ c.name_fa }}</p>
                 <p class="text-xs text-slate-400">{{ c.contact_name }} · {{ c.mobile }}</p>

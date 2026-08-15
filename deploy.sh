@@ -31,6 +31,21 @@ echo "▸ بارگذاری داده‌ی CRM (فقط بار اول)…"
 python manage.py import_didar_crm --if-empty
 python manage.py seed_crm --if-empty
 
+# The accounting side. Unlike the دیدار load these have no --if-empty guard
+# and do not need one: both are idempotent by key, a second run creates
+# nothing, and neither touches a party that is waiting on the review queue.
+# Running them every deploy is what picks up a fresher export — and picks up
+# the invoices that a reviewer's decision has just made importable.
+#
+# Parties first: an invoice whose طرف‌حساب is not in the CRM is skipped and
+# counted, so the wrong order silently imports nothing.
+#
+# Both print and return cleanly when data/arpa is empty, which matters under
+# `set -e` — the workbooks are uploaded by hand and may not be there yet.
+echo "▸ بارگذاری داده‌ی حسابداری آرپا…"
+python manage.py import_arpa_parties --dir data/arpa
+python manage.py import_arpa_invoices --dir data/arpa
+
 # --approve, because these workbooks are the finished monthly report, not a
 # draft someone is still editing: they are committed to the repository by the
 # person who owns the figures. Left as drafts they import fine and then show

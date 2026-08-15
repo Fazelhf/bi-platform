@@ -26,14 +26,16 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.crm import reports as rpt
+from apps.crm import merge as crm_merge, reports as rpt
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label, period_for
 from apps.crm.models import (
+    CustomerMatchCandidate,
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
     ProductCategory, Tag, Task,
 )
 from apps.crm.serializers import (
+    MatchCandidateSerializer,
     ActivitySerializer, CustomerDetailSerializer, CustomerFeedbackSerializer,
     CustomerGroupSerializer, CustomerListSerializer, CustomerWriteSerializer,
     DealDetailSerializer, DealItemSerializer, DealListSerializer,
@@ -212,6 +214,11 @@ class CustomerViewSet(_Base):
         qs = super().get_queryset()
         if self.detail:  # a lookup by id is never a time slice — see DealViewSet
             return qs
+        # A row folded into another is not a customer any more; its deals and
+        # invoices now hang off the survivor. It is kept so the merge can be
+        # undone, not so it keeps appearing in the list the merge was meant to
+        # clean up.
+        qs = qs.filter(merged_into__isnull=True)
         q = self.request.query_params
         f = rpt.Filters.from_query(q)
 
@@ -301,6 +308,120 @@ class CustomerViewSet(_Base):
         ).data
         return Response({"activities": acts, "deals": deals})
 
+
+    # -- bulk actions on the list -------------------------------------------
+    @action(detail=False, methods=["post"], url_path="bulk-review")
+    def bulk_review(self, request):
+        """
+        Send selected customers to the merge queue.
+
+        Two shapes, because the reviewer arrives with two different amounts of
+        knowledge. Picking exactly two rows says «these are one company» — the
+        pair is queued as it stands. Picking one, or several, says «this looks
+        wrong but I do not know its twin» — so the matching ladder is run for
+        each against the rest of the file and whatever it suspects is queued.
+
+        Neither merges anything. The point of the queue is that a fusion of
+        two customers' order histories is invisible once done, so it happens
+        only after someone has looked at both sides.
+        """
+        ids = request.data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"detail": "هیچ مشتری‌ای انتخاب نشده است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        dataset = active_dataset(request)
+        rows = list(
+            Customer.objects.filter(
+                pk__in=ids, dataset=dataset, merged_into__isnull=True
+            )
+        )
+        if len(rows) < 1:
+            return Response(
+                {"detail": "مشتری معتبری در انتخاب نبود."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(rows) == 2:
+            queued, skipped = crm_merge.queue_pair(*rows), []
+            queued = [queued] if queued else []
+            if not queued:
+                skipped = [{
+                    "name_fa": rows[0].name_fa,
+                    "reason": "این جفت از قبل در صف است یا تعیین تکلیف شده.",
+                }]
+        else:
+            queued, skipped = crm_merge.queue_scan(rows, dataset)
+
+        return Response({
+            "queued": len(queued),
+            "pairs": [
+                {"primary": c.customer.name_fa,
+                 "duplicate": c.duplicate.name_fa if c.duplicate else c.external_name,
+                 "method": c.get_method_display()}
+                for c in queued
+            ],
+            "skipped": skipped,
+        })
+
+    @action(detail=False, methods=["post"], url_path="bulk-delete")
+    def bulk_delete(self, request):
+        """
+        Delete selected customers — but only the ones that are safe to lose.
+
+        A customer with deals cascades: deleting it takes the deals, their
+        lines and their stage history with it, silently. A customer with
+        invoices cannot be deleted at all, because `SalesInvoice.customer` is
+        PROTECT, and the ones that got that far are exactly the accounts worth
+        keeping. So anything carrying history is refused *by name and reason*
+        rather than half-deleted, and the answer for those is the merge queue,
+        not the delete button.
+        """
+        ids = request.data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"detail": "هیچ مشتری‌ای انتخاب نشده است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rows = Customer.objects.filter(
+            pk__in=ids, dataset=active_dataset(request)
+        ).annotate(
+            n_deals=Count("deals", distinct=True),
+            n_invoices=Count("invoices", distinct=True),
+            n_activities=Count("activities", distinct=True),
+            n_tasks=Count("tasks", distinct=True),
+        )
+
+        REASONS = (
+            ("n_invoices", "فاکتور"),
+            ("n_deals", "معامله"),
+            ("n_activities", "فعالیت"),
+            ("n_tasks", "کار"),
+        )
+        deletable, blocked = [], []
+        for c in rows:
+            held = [
+                f"{getattr(c, attr)} {label}"
+                for attr, label in REASONS if getattr(c, attr)
+            ]
+            if held:
+                blocked.append({
+                    "id": c.id, "name_fa": c.name_fa,
+                    "reason": "، ".join(held) + " دارد",
+                })
+            else:
+                deletable.append(c.id)
+
+        deleted = 0
+        if deletable:
+            deleted = Customer.objects.filter(pk__in=deletable).delete()[0]
+
+        return Response({
+            "deleted": len(deletable),
+            "rows_removed": deleted,
+            "blocked": blocked,
+        })
 
 class CustomerFeedbackViewSet(_Base):
     queryset = CustomerFeedback.objects.select_related("customer", "employee")
@@ -865,4 +986,140 @@ class CrmOptionsView(GatedAPIView):
             "activity_results": [
                 {"code": c, "label": l} for c, l in Activity.Result.choices
             ],
+        })
+
+
+# --------------------------------------------------------------------------
+# Merge review
+# --------------------------------------------------------------------------
+class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    The queue of suspected duplicates, and the two answers to one.
+
+    Read-only as a viewset on purpose: a candidate is not an editable record,
+    it is a question. The only writes are the two decisions, and both go
+    through `apps.crm.merge` so the screen and any future importer take the
+    same path — accepting a match has to write accounting's fields exactly as
+    the bulk import would, or the two ways into the same row diverge.
+
+    Not a `_Base` subclass: a candidate pairs a source row with a customer and
+    has no dataset column of its own, so the usual dataset filter has nothing
+    to filter on. It is applied through the customer instead.
+    """
+
+    permission_classes = [CrmAccess, CrmWritePermission]
+    serializer_class = MatchCandidateSerializer
+    queryset = CustomerMatchCandidate.objects.select_related(
+        "customer", "customer__province", "customer__owner", "decided_by"
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset().filter(
+            customer__dataset=active_dataset(self.request)
+        )
+        # The list defaults to what is still open; a single candidate is
+        # fetched by id whatever its state. Filtering both alike made a
+        # second decision on the same row answer 404 — which reads as «that
+        # never existed» when the truth is «someone already ruled on it», and
+        # sends the reviewer looking for a bug instead of a colleague.
+        if self.action != "list":
+            return qs
+
+        state = self.request.query_params.get("state", "pending")
+        if state and state != "all":
+            qs = qs.filter(state=state)
+        method = self.request.query_params.get("method")
+        if method:
+            qs = qs.filter(method=method)
+        search = self.request.query_params.get("search")
+        if search:
+            qs = qs.filter(
+                Q(external_name__icontains=search)
+                | Q(customer__name_fa__icontains=search)
+            )
+        return qs.order_by("state", "method", "-score")
+
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Counts per tier and per state — what the screen's header shows."""
+        qs = super().get_queryset().filter(
+            customer__dataset=active_dataset(request)
+        )
+        by_method = dict(
+            qs.filter(state=CustomerMatchCandidate.State.PENDING)
+            .values_list("method")
+            .annotate(n=Count("id"))
+        )
+        by_state = dict(qs.values_list("state").annotate(n=Count("id")))
+        return Response({
+            "by_method": [
+                {"key": k, "label": label, "count": by_method.get(k, 0)}
+                for k, label in CustomerMatchCandidate.Method.choices
+                if by_method.get(k)
+            ],
+            "by_state": by_state,
+            "pending": by_state.get(CustomerMatchCandidate.State.PENDING, 0),
+        })
+
+    @action(detail=True, methods=["get"])
+    def alternatives(self, request, pk=None):
+        """
+        Other customers carrying the same name.
+
+        The «ambig» tier exists because the name matched more than one CRM
+        row — a duplicate the دیدار import left behind. Picking which of them
+        is the real account is the reviewer's actual contribution there, so
+        the rivals have to be visible.
+        """
+        rows = crm_merge.alternatives(self.get_object())
+        return Response([
+            {
+                "id": c.id, "name_fa": c.name_fa, "code": c.code,
+                "phone": c.phone, "city": c.city,
+                "deals": c.deals.count(), "invoices": c.invoices.count(),
+            }
+            for c in rows
+        ])
+
+    @action(detail=True, methods=["post"])
+    def accept(self, request, pk=None):
+        """«Same customer.» An optional `customer` picks a different target."""
+        candidate = self.get_object()
+        target = None
+        chosen = request.data.get("customer")
+        if chosen:
+            target = Customer.objects.filter(
+                pk=chosen, dataset=active_dataset(request)
+            ).first()
+            if not target:
+                return Response(
+                    {"detail": "مشتری انتخاب‌شده پیدا نشد."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        try:
+            customer = crm_merge.accept(candidate, request.user, target)
+        except crm_merge.MergeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response({
+            "state": candidate.state,
+            "customer": {"id": customer.id, "name_fa": customer.name_fa},
+        })
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        """
+        «Different customers.»
+
+        Which makes the آرپا party an account in its own right, so one is
+        created. Rejecting is not discarding: an unresolved party is invisible
+        to the invoice import and its invoices stay out of every total.
+        """
+        candidate = self.get_object()
+        try:
+            customer = crm_merge.reject(candidate, request.user)
+        except crm_merge.MergeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response({
+            "state": candidate.state,
+            "created": {"id": customer.id, "name_fa": customer.name_fa},
         })

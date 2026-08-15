@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from apps.crm.jalali import jalali_str
 from apps.crm.models import (
-    Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
+    Activity, Customer, CustomerMatchCandidate, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
     ProductCategory, Tag, Task,
 )
@@ -358,3 +358,99 @@ class CustomerFeedbackSerializer(serializers.ModelSerializer):
 
     def get_at_jalali(self, obj):
         return jalali_str(obj.at)
+
+
+# --------------------------------------------------------------------------
+# Merge review
+# --------------------------------------------------------------------------
+class MatchCandidateSerializer(serializers.ModelSerializer):
+    """
+    One suspected duplicate, with both sides on screen.
+
+    The comparison is the whole product here: a reviewer decides by looking at
+    a phone number against a phone number, a city against a city. Sending the
+    CRM row and a candidate id and letting the browser fetch the rest would
+    mean 160 extra requests and a screen that renders in pieces — so both
+    sides ship together, out of the payload captured at import time.
+    """
+
+    method_display = serializers.CharField(source="get_method_display", read_only=True)
+    state_display = serializers.CharField(source="get_state_display", read_only=True)
+    decided_by_name = serializers.CharField(
+        source="decided_by.get_full_name", read_only=True, default="",
+    )
+    crm = serializers.SerializerMethodField()
+    arpa = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomerMatchCandidate
+        fields = (
+            "id", "source", "external_id", "external_name", "method",
+            "method_display", "score", "state", "state_display",
+            "decided_at", "decided_by_name", "crm", "arpa",
+        )
+
+    def get_crm(self, obj) -> dict:
+        c = obj.customer
+        return {
+            "id": c.id,
+            "name_fa": c.name_fa,
+            "code": c.code,
+            "phone": c.phone,
+            "mobile": c.mobile,
+            "city": c.city,
+            "province": c.province.name_fa if c.province else "",
+            "national_id": c.national_id,
+            "economic_code": c.economic_code,
+            "address": c.address,
+            "owner": c.owner.full_name_fa if c.owner else "",
+            "status_display": c.get_status_display(),
+            # What the reviewer is really weighing: an account with deals and
+            # invoices behind it is one a wrong merge does real damage to.
+            "deals": c.deals.count(),
+            "invoices": c.invoices.count(),
+        }
+
+    def get_arpa(self, obj) -> dict:
+        """
+        The other side, under names the screen can use.
+
+        Usually an accounting row read out of a workbook. When the pair was
+        raised from the customer list both sides are CRM rows, so it is read
+        off the live record instead — a copy taken when the pair was queued
+        would be stale by the time anyone rules on it.
+        """
+        if obj.duplicate_id:
+            d = obj.duplicate
+            return {
+                "id": d.id,
+                "code": d.code,
+                "name_fa": d.name_fa,
+                "phone": d.phone,
+                "mobile": d.mobile,
+                "city": d.city,
+                "province": d.province.name_fa if d.province else "",
+                "national_id": d.national_id,
+                "economic_code": d.economic_code,
+                "address": d.address,
+                "owner": d.owner.full_name_fa if d.owner else "",
+                "group": d.group.name_fa if d.group else "",
+                "terms": d.payment_terms,
+                "deals": d.deals.count(),
+                "invoices": d.invoices.count(),
+            }
+        p = obj.payload or {}
+        return {
+            "code": obj.external_id,
+            "name_fa": obj.external_name,
+            "phone": p.get("شماره تلفن", ""),
+            "mobile": p.get("موبایل", ""),
+            "city": p.get("شهر", "") or obj.external_city,
+            "province": p.get("استان", ""),
+            "national_id": p.get("شناسه ملی", "") or p.get("کد ملی", ""),
+            "economic_code": p.get("کد اقتصادی", ""),
+            "address": p.get("آدرس", ""),
+            "group": p.get("نام گروه", ""),
+            "rep": p.get("نام بازاریاب", ""),
+            "terms": p.get("شرایط تسویه پیش فرض", ""),
+        }

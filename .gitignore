@@ -27,3 +27,12 @@ frontend/vite.config.d.ts
 backend/data/didar/*
 !backend/data/didar/README.md
 !backend/data/didar/.gitkeep
+
+# آرپا (accounting) exports — same rule, same reason. ~2000 parties'
+# names, phones and national ids, plus 1100 invoices with amounts.
+backend/data/arpa/*
+!backend/data/arpa/README.md
+!backend/data/arpa/.gitkeep
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/

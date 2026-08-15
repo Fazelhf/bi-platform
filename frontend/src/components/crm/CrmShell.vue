@@ -44,6 +44,7 @@ const NAV = [
   { name: "crm-pipeline", label: "کاریز فروش", icon: "target" },
   { name: "crm-activities", label: "پیگیری‌ها", icon: "notes" },
   { name: "crm-reports", label: "گزارش‌ها", icon: "chart" },
+  { name: "crm-match-review", label: "بازبینی تطبیق", icon: "check" },
 ];
 
 /** A detail page keeps its list row lit, so you can tell where you are. */
