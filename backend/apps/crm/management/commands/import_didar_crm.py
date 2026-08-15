@@ -44,9 +44,9 @@ from django.utils.text import slugify
 from apps.core import jalali
 from apps.crm.jalali import period_for
 from apps.crm.models import (
-    Activity, Customer, CustomerFeedback, Deal, DealItem, DealStageEvent,
-    LeadSource, LostReason, PipelineStage, Product,
-    ProductCategory, Tag, Task,
+    Activity, Customer, CustomerExternalRef, CustomerFeedback, Deal, DealItem,
+    DealStageEvent, ExternalSource, LeadSource, LostReason, PipelineStage,
+    Product, ProductCategory, SalesInvoice, SalesInvoiceItem, Tag, Task,
 )
 from apps.sales.models import DimEmployee
 
@@ -304,6 +304,12 @@ class Command(BaseCommand):
         counts = {}
         for model in (
             DealStageEvent, DealItem, Activity, Task, CustomerFeedback,
+            # Invoices come from accounting, not from here — but they point at
+            # Customer with PROTECT, so leaving them would make this raise
+            # rather than delete. They go first and are named in the output:
+            # re-running --fresh discards the accounting import too, and that
+            # has to be visible rather than discovered later.
+            SalesInvoiceItem, SalesInvoice,
             Deal, Customer, Product, ProductCategory, PipelineStage,
             LeadSource, LostReason, Tag,
         ):
@@ -487,6 +493,7 @@ class Command(BaseCommand):
                     ),
                 },
             )[0]
+            self._link(by_company[did])
 
         for row in sheets["contacts"]:
             did = norm(row.get("کد دیدار مشتری"))
@@ -524,6 +531,7 @@ class Command(BaseCommand):
                     ),
                 },
             )[0]
+            self._link(by_person[did])
 
         merged = sum(1 for c in by_person.values() if c.kind == Customer.Kind.COMPANY)
         self.stdout.write(
@@ -531,6 +539,28 @@ class Command(BaseCommand):
             f"({merged} شخص در شرکتشان ادغام شد)"
         )
         return {"co": by_company, "pe": by_person}
+
+    @staticmethod
+    def _link(customer) -> None:
+        """
+        Record the دیدار id in the identity layer as well as in `code`.
+
+        `code` can only ever name one source system, and accounting is now a
+        second one. Without this, a customer that exists in both is reachable
+        by its دیدار id only through a string prefix — which is exactly the
+        coupling the identity layer exists to remove.
+
+        Derived from `code` rather than from the row so it cannot drift from
+        what migration 0006 backfilled for the rows already in the database.
+        """
+        CustomerExternalRef.objects.update_or_create(
+            source=ExternalSource.DIDAR,
+            external_id=customer.code[len("didar-"):][:64],
+            defaults={
+                "customer": customer,
+                "external_name": customer.name_fa[:200],
+            },
+        )
 
     def _from_deal_name(self, head, customers):
         """
@@ -564,6 +594,7 @@ class Command(BaseCommand):
                 ),
             },
         )[0]
+        self._link(customer)
         bucket = "co" if is_company else "pe"
         if did:
             customers[bucket][did] = customer

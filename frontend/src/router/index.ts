@@ -375,6 +375,11 @@ const router = createRouter({
           name: "crm-reports",
           component: () => import("@/views/crm/CrmReportsView.vue"),
         },
+        {
+          path: "match-review",
+          name: "crm-match-review",
+          component: () => import("@/views/crm/MatchReviewView.vue"),
+        },
       ],
     },
 

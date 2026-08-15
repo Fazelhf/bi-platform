@@ -232,6 +232,56 @@ export interface DealInput {
   }[];
 }
 
+
+/**
+ * A suspected duplicate awaiting a person.
+ *
+ * Both sides travel together — the CRM row and the accounting row — because
+ * the screen's whole job is the comparison, and fetching the second half per
+ * card would mean 160 extra requests and a list that fills in piecemeal.
+ */
+export interface MatchSide {
+  id?: number;
+  code: string;
+  name_fa: string;
+  phone: string;
+  mobile?: string;
+  city: string;
+  province: string;
+  national_id: string;
+  economic_code: string;
+  address: string;
+  owner?: string;
+  status_display?: string;
+  deals?: number;
+  invoices?: number;
+  group?: string;
+  rep?: string;
+  terms?: string;
+}
+
+export interface MatchCandidate {
+  id: number;
+  source: string;
+  external_id: string;
+  external_name: string;
+  method: string;
+  method_display: string;
+  score: string;
+  state: "pending" | "accepted" | "rejected";
+  state_display: string;
+  decided_at: string | null;
+  decided_by_name: string;
+  crm: MatchSide;
+  arpa: MatchSide;
+}
+
+export interface MatchSummary {
+  by_method: { key: string; label: string; count: number }[];
+  by_state: Record<string, number>;
+  pending: number;
+}
+
 export const crmApi = {
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
@@ -393,5 +443,59 @@ export const crmApi = {
       default:
         return { kind: "deals", ...(await this.deals(params)) };
     }
+  },
+
+  /**
+   * Send customers to the merge queue.
+   *
+   * Two selected rows are queued as a pair; any other count makes the matcher
+   * hunt for each one's twin. Never merges — the whole point of the queue is
+   * that fusing two customers' histories is invisible once done.
+   */
+  async bulkReview(ids: number[]) {
+    const { data } = await api.post("/crm/customers/bulk-review/", { ids });
+    return data as {
+      queued: number;
+      pairs: { primary: string; duplicate: string; method: string }[];
+      skipped: { name_fa: string; reason: string }[];
+    };
+  },
+
+  /** Delete customers that carry no history; the rest come back with a reason. */
+  async bulkDelete(ids: number[]) {
+    const { data } = await api.post("/crm/customers/bulk-delete/", { ids });
+    return data as {
+      deleted: number;
+      blocked: { id: number; name_fa: string; reason: string }[];
+    };
+  },
+
+  // ---- merge review ------------------------------------------------------
+  async matchCandidates(params: Params = {}) {
+    const { data } = await api.get("/crm/match-candidates/", { params: clean(params) });
+    return data as { count: number; results: MatchCandidate[] };
+  },
+
+  async matchSummary(): Promise<MatchSummary> {
+    const { data } = await api.get("/crm/match-candidates/summary/");
+    return data;
+  },
+
+  /** Customers sharing the party's name — the choice the «ambig» tier needs. */
+  async matchAlternatives(id: number) {
+    const { data } = await api.get(`/crm/match-candidates/${id}/alternatives/`);
+    return data as MatchSide[];
+  },
+
+  /** «Same customer.» `customer` overrides the suggested target. */
+  async acceptMatch(id: number, customer?: number) {
+    const { data } = await api.post(`/crm/match-candidates/${id}/accept/`, { customer });
+    return data as { state: string; customer: { id: number; name_fa: string } };
+  },
+
+  /** «Different customers» — which creates the account, rather than dropping it. */
+  async rejectMatch(id: number) {
+    const { data } = await api.post(`/crm/match-candidates/${id}/reject/`);
+    return data as { state: string; created: { id: number; name_fa: string } };
   },
 };
