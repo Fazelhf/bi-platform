@@ -1,14 +1,1 @@
-{
-  "name": "شرکت کاغذ حساس نمابر مهر",
-  "short_name": "NTP",
-  "lang": "fa",
-  "dir": "rtl",
-  "icons": [
-    { "src": "/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png" }
-  ],
-  "theme_color": "#1c1c1e",
-  "background_color": "#e9e8e4",
-  "display": "standalone",
-  "start_url": "/"
-}
+{"name":"شرکت کاغذ حساس نمابر مهر","short_name":"NTP","description":"داشبورد مدیریتی، اتوماسیون اداری و CRM شرکت کاغذ حساس نمابر مهر","start_url":"/","display":"standalone","background_color":"#e9e8e4","theme_color":"#1c1c1e","lang":"fa","scope":"/","id":"/","dir":"rtl","orientation":"portrait-primary","icons":[{"src":"/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":"/android-chrome-512x512.png","sizes":"512x512","type":"image/png"},{"src":"/android-chrome-512x512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}],"shortcuts":[{"name":"اتوماسیون اداری","short_name":"اتوماسیون","url":"/office","icons":[{"src":"/android-chrome-192x192.png","sizes":"192x192"}]},{"name":"کارتابل","url":"/inbox","icons":[{"src":"/android-chrome-192x192.png","sizes":"192x192"}]}]}

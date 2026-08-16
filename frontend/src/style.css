@@ -368,6 +368,15 @@ html[data-skin="aurora"].dark body {
 
 body {
   @apply bg-canvas text-ink font-sans antialiased;
+  /* Installed on a phone the page owns the whole screen, notch included —
+     `viewport-fit=cover` in index.html asks for that. These insets are the
+     other half of the bargain: without them the top bar sits under the
+     status bar and the last row of a table under the home indicator. In a
+     browser tab every inset is 0, so this costs nothing there. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px);
+  /* Not bottom: the sidebar and drawers run full height, and padding here
+     would cut them short. Anything fixed to the bottom adds its own. */
 }
 
 /* Numbers read better left-to-right even inside an RTL layout. */

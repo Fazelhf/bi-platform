@@ -5,6 +5,7 @@ Local dev runs on SQLite with zero config. Set DATABASE_URL (e.g. via
 docker-compose) to switch to PostgreSQL. All secrets come from the
 environment through django-environ.
 """
+import mimetypes
 import re
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
@@ -148,12 +149,33 @@ if (SPA_DIR / "index.html").exists():
 # chunks from Tehran, and the app felt like it was loading for the first time
 # over and over. Only the hashed bundle is touched here; /static/ keeps
 # WhiteNoise's manifest rule, and the unhashed icons keep the 60s default.
+# Python's mimetypes reads the OS registry and knows nothing about
+# `.webmanifest` on Windows or on a bare cPanel host — the manifest then goes
+# out as application/octet-stream, which browsers are entitled to ignore,
+# taking the «نصب برنامه» prompt with it.
+#
+# Both lines are needed and neither is redundant: WhiteNoise builds its own
+# MimeTypes instance from the system files, so a global `add_type` never
+# reaches it — that is what WHITENOISE_MIMETYPES is for. The global call
+# covers everything else in the process that asks Python the same question.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+WHITENOISE_MIMETYPES = {".webmanifest": "application/manifest+json"}
+
 _HASHED_ASSET = re.compile(r"^/assets/.+-[A-Za-z0-9_-]{8,}\.(?:js|css)$")
+
+# The PWA's two unhashed control files. Both name the hashed bundle, the way
+# index.html does, so both have to be re-read on every visit — a service
+# worker cached for even a minute is a deploy that reaches some phones and not
+# others, with no way to tell which. `sw.js` additionally lists the precache
+# manifest: served stale, it would keep reinstalling the previous release.
+_PWA_CONTROL = {"/sw.js", "/registerSW.js", "/site.webmanifest"}
 
 
 def _spa_asset_headers(headers, path, url):
     if _HASHED_ASSET.match(url):
         headers["Cache-Control"] = "max-age=31536000, public, immutable"
+    elif url in _PWA_CONTROL:
+        headers["Cache-Control"] = "no-cache, must-revalidate"
 
 
 WHITENOISE_ADD_HEADERS_FUNCTION = _spa_asset_headers

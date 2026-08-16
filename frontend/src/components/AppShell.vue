@@ -4,6 +4,7 @@ import { RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { usePresence } from "@/composables/usePresence";
 import { useClickOutside } from "@/composables/useClickOutside";
+import { usePwa } from "@/composables/usePwa";
 import { socialApi } from "@/api/social";
 import { inboxApi } from "@/api/platform";
 import NavIcon from "@/components/NavIcon.vue";
@@ -17,6 +18,8 @@ const route = useRoute();
 const router = useRouter();
 
 usePresence(); // keep me online
+// «نصب برنامه» in the sidebar footer, shown only when the browser offers it.
+const { canInstall, install } = usePwa();
 
 const collapsed = ref(false);
 const mobileOpen = ref(false); // drawer state on phones
@@ -496,6 +499,20 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
 
       <!-- Bottom: profile, settings (admin+CEO only), logout -->
       <div class="p-3 border-t border-slate-100 space-y-1">
+        <!-- Only when the browser has actually offered the prompt: already
+             installed, or a browser that cannot, and this row is not here at
+             all. Nobody is told about a button that would do nothing. -->
+        <button
+          v-if="canInstall"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm
+                 text-brand-600 hover:bg-brand-50 transition"
+          :class="collapsed ? 'justify-center' : ''"
+          :title="collapsed ? 'نصب برنامه' : ''"
+          @click="install"
+        >
+          <NavIcon name="download" :size="20" />
+          <span v-if="!collapsed" class="text-right flex-1">نصب برنامه</span>
+        </button>
         <button
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-slate-500 hover:bg-slate-100"
           :class="collapsed ? 'justify-center' : ''"
