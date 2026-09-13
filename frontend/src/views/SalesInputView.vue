@@ -332,6 +332,20 @@ async function removeGroup(groupId: number, name: string) {
   }
 }
 
+/**
+ * After a week is sent for approval, move on to the next one still empty.
+ *
+ * Only on ارسال — finishing a week is the one moment when moving somewhere
+ * else is what the person wants — and only when an empty week actually
+ * exists. With no such week the old code fell back to «the last one», which
+ * is how ذخیره became a button that teleported you to هفته ۴.
+ */
+function advanceToNextEmpty() {
+  if (!isWeekly.value) return;
+  const next = weeks.value.find((w) => w.state === "empty");
+  if (next && next.id !== selectedWeek.value) selectedWeek.value = next.id;
+}
+
 async function save(submit: boolean) {
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
   try {
@@ -347,9 +361,15 @@ async function save(submit: boolean) {
     removedEmployeeIds.value = [];
     saving.value = "";
     toast.success(submit ? "برای تایید مدیرعامل ارسال شد." : "پیش‌نویس ذخیره شد.");
-    // Refresh the strip so this week's dot changes colour.
-    await loadMonth();
-    if (submit) await load();
+    // Refresh the dots and the sheet, but stay on the week being filled in.
+    //
+    // This used to call loadMonth(), which does not just re-read the strip —
+    // it re-picks the week, landing on the first one still empty or, when
+    // none is, on the last. So pressing «ذخیره پیش‌نویس» in هفته ۲ of a month
+    // whose weeks were all started threw the person into هفته ۴, looking at
+    // figures they had not asked for. Saving is not navigation.
+    await Promise.all([refreshProgress(), load()]);
+    if (submit) advanceToNextEmpty();
   } catch (e: any) {
     saving.value = "";
     toast.error(e?.response?.status === 403 ? "دسترسی ندارید." : "ذخیره نشد.");
