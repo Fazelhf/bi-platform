@@ -116,7 +116,7 @@ def seed(apps, schema_editor):
         parent = CashCategory.objects.filter(code=parent_code).first()
         leaf = CashCategory.objects.filter(code=leaf_code).first()
         if parent and leaf:
-            CashMovement.objects.filter(category=parent).update(category=leaf)
+            CashMovement.objects.filter(category_id=parent.id).update(category_id=leaf.id)
 
 
 def unseed(apps, schema_editor):
@@ -131,17 +131,22 @@ def unseed(apps, schema_editor):
         parent = CashCategory.objects.filter(code=parent_code).first()
         leaf = CashCategory.objects.filter(code=leaf_code).first()
         if parent and leaf:
-            CashMovement.objects.filter(category=leaf).update(category=parent)
+            CashMovement.objects.filter(category_id=leaf.id).update(category_id=parent.id)
 
     used = set(CashMovement.objects.values_list("category_id", flat=True))
     codes = [c for c, *_ in TREE]
     # Children first, or the parent's PROTECT would block the delete.
     for _ in range(len(codes)):
         doomed = CashCategory.objects.filter(code__in=codes).exclude(id__in=used)
-        doomed = doomed.filter(children__isnull=True)
+        doomed = doomed.filter(children__isnull=True, budget_lines__isnull=True)
         if not doomed.exists():
             break
-        doomed.delete()
+        # A plain DELETE, not .delete(): the collector trips over the
+        # self-referencing FK on historical models («Must be CashCategory
+        # instance»), and the filter above already guarantees nothing points
+        # at these rows.
+        ids = list(doomed.values_list("id", flat=True))
+        CashCategory.objects.filter(id__in=ids)._raw_delete(schema_editor.connection.alias)
 
 
 class Migration(migrations.Migration):
