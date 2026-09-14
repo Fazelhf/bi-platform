@@ -29,7 +29,7 @@ from rest_framework.views import APIView
 from apps.crm import merge as crm_merge, reports as rpt
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label, period_for
 from apps.crm.models import (
-    CustomerMatchCandidate,
+    CustomerMatchCandidate, Dataset,
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
     ProductCategory, Tag, Task,
@@ -43,7 +43,7 @@ from apps.crm.serializers import (
     LostReasonSerializer, PipelineStageSerializer, ProductCategorySerializer,
     ProductSerializer, TagSerializer, TaskSerializer,
 )
-from apps.sales.models import DimEmployee, DimProvince
+from apps.sales.models import DimEmployee, DimProvince, SalesChannel
 
 
 def employee_for(user) -> DimEmployee | None:
@@ -52,23 +52,110 @@ def employee_for(user) -> DimEmployee | None:
     return DimEmployee.objects.filter(user=user).first()
 
 
-def can_write_crm(user) -> bool:
+#: The sales departments whose people work in CRM. فروش همکار built it and
+#: owns most of the records; بی‌تو‌بی and فروش بانکی sell to their own books
+#: through the same screens. Membership is the department on the account —
+#: adding a fourth sales department later is one entry here, not a hunt
+#: through permission classes.
+CRM_DEPARTMENTS = {"sales_team", "sales_b2b", "sales_org"}
+
+#: Which sales channel each department's CRM covers. The three departments
+#: keep separate books: a customer فروش بانکی opened is not in فروش همکار's
+#: file and must not appear in its lists, its reports or its pipeline.
+#:
+#: The channel values are the company's existing ones from
+#: `apps.sales.models.SalesChannel` — the same ones the sales workbooks and
+#: the budget already use — so a CRM figure and a sales figure for «فروش B2B»
+#: mean the same thing rather than nearly the same thing.
+CHANNEL_FOR_DEPARTMENT = {
+    "sales_team": SalesChannel.TEAM,
+    "sales_org": SalesChannel.ORGANIZATIONAL,
+    "sales_b2b": SalesChannel.B2B,
+}
+
+#: Roles that supervise rather than sell. Everyone else in a CRM department
+#: is a کارشناس and sees only their own book.
+MANAGER_ROLES = {"executive", "manager"}
+
+
+def channels_for(user) -> tuple[str, ...] | None:
+    """
+    Which books this account reads and writes. None means all of them.
+
+    Department first, deliberately. An account carrying a sales department is
+    *of* that department whatever else its role says, and pinning it is the
+    safe reading of the one configuration that is otherwise ambiguous — an
+    executive with a department set. A superuser is the escape hatch and keeps
+    the global view; the CEO, who has no department, gets it too.
+    """
+    if getattr(user, "is_superuser", False):
+        return None
+    channel = CHANNEL_FOR_DEPARTMENT.get(getattr(user, "department", "") or "")
+    if channel:
+        return (channel,)
+    if getattr(user, "role", "") == "executive":
+        return None
+    return ()   # in no book at all — CrmAccess has already refused them
+
+
+def is_crm_manager(user) -> bool:
+    """
+    Supervision, not seniority.
+
+    The distinction this draws is the one the section is built around: a
+    manager is answerable for a team's numbers and therefore has to see all of
+    them, while a کارشناس is answerable for their own and must not see the
+    rest. Everything else that differs between the two — which filters appear,
+    whether «کارشناس» is a question or a statement, who may reassign an
+    account — follows from that one fact.
+    """
     return bool(
         user
         and user.is_authenticated
-        and (user.is_superuser or user.role == "executive" or user.department == "sales_team")
+        and (user.is_superuser or user.role in MANAGER_ROLES)
     )
 
 
-def can_read_crm(user) -> bool:
-    """The CEO reads it, فروش همکار works it, an admin maintains it."""
+def crm_scope(user) -> rpt.Scope:
+    """
+    Which records this account may see at all.
+
+    Note the shape of the unhappy path: a non-manager with no DimEmployee row
+    gets a scope that matches nothing, not one that matches everything. An
+    account nobody has linked to a salesperson is a half-finished setup, and
+    the cost of guessing wrong in the generous direction is the whole customer
+    file.
+    """
+    channels = channels_for(user)
+    if is_crm_manager(user):
+        return rpt.Scope(sees_all=True, channels=channels)
+    emp = employee_for(user)
+    return rpt.Scope(
+        sees_all=False, employee_id=emp.id if emp else None, channels=channels,
+    )
+
+
+def can_write_crm(user) -> bool:
     return bool(
         user
         and user.is_authenticated
         and (
             user.is_superuser
             or user.role == "executive"
-            or user.department == "sales_team"
+            or user.department in CRM_DEPARTMENTS
+        )
+    )
+
+
+def can_read_crm(user) -> bool:
+    """The CEO reads it, the sales departments work it, an admin maintains it."""
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_superuser
+            or user.role == "executive"
+            or user.department in CRM_DEPARTMENTS
         )
     )
 
@@ -86,6 +173,20 @@ class CrmWritePermission(BasePermission):
         if request.method in SAFE_METHODS:
             return True
         return can_write_crm(u)
+
+
+class CrmManagerOnly(BasePermission):
+    """
+    For the screens that are about the file rather than about a book of
+    customers — merging duplicates, chiefly. Those span everybody's accounts
+    by definition, so there is no version of them a کارشناس could be shown
+    that would not also show them the rest of the team's customers.
+    """
+
+    message = "این بخش فقط برای مدیران فروش است."
+
+    def has_permission(self, request, view):
+        return can_read_crm(request.user) and is_crm_manager(request.user)
 
 
 class CrmAccess(BasePermission):
@@ -117,14 +218,66 @@ class GatedAPIView(APIView):
 # --------------------------------------------------------------------------
 def active_dataset(request) -> str:
     """
-    Which dataset this request reads and writes — the account's own choice.
+    The body of data every CRM request reads and writes: the real one.
 
-    Read from the user rather than the query string on purpose. A dataset that
-    can be switched by editing a URL is one that ends up switched by accident,
-    and a report of fabricated numbers is indistinguishable from a real one
-    once it has been screenshotted.
+    CRM used to carry a fabricated showroom beside the company's customer
+    file, chosen per account. It was removed — the rows deleted, the switch
+    taken out — because a second, invented customer file that looks exactly
+    like the real one is a standing way to act on numbers that are not true.
+
+    The `dataset` column is still on every table and still stamped, so this
+    stays the one place that says which value; nothing reads the account's
+    old `crm_dataset` preference any more.
     """
-    return getattr(request.user, "crm_dataset", "real") or "real"
+    return Dataset.REAL
+
+
+def employee_options(request):
+    """
+    The کارشناس roster a filter dropdown and the «به نام چه کسی» picker offer.
+
+    Scoped to the account's own channel, using the membership roster the sales
+    module already keeps. Without it a فروش بانکی manager picked from a list of
+    every salesperson in the company and could file a customer under someone
+    who has never worked their book — a row that then shows up in nobody's
+    reports, because the rest of the system agrees the two are separate.
+    """
+    qs = (
+        DimEmployee.objects.select_related("team")
+        .filter(is_active=True)
+        .exclude(full_name_fa__in=["", "0"])
+    )
+    channels = channels_for(request.user)
+    if channels is not None:
+        wanted = list(channels)
+        # The roster, *plus* anyone who already owns something in this book.
+        # Nine of the nineteen active salespeople have no membership row —
+        # the roster was added long after the customer file — and dropping
+        # them would mean opening an existing customer and finding its owner
+        # missing from the list that is supposed to contain it.
+        qs = qs.filter(
+            Q(memberships__channel__in=wanted, memberships__is_active=True)
+            | Q(customers__channel__in=wanted)
+            | Q(deals__channel__in=wanted)
+        ).distinct()
+    return qs
+
+
+def query_filters(request) -> rpt.Filters:
+    """
+    The parsed query for this request, with the two things that must never
+    come from the URL already applied: which dataset, and whose records.
+
+    Every endpoint that slices CRM data goes through here. Four of them used
+    to call `Filters.from_query(q)` with no dataset at all, which meant the
+    معامله‌ها and پیگیری‌ها lists kept showing the real customer file while the
+    screen said «داده نمایشی» — the exact failure the dataset column exists to
+    prevent, reintroduced one call site at a time. One helper is harder to
+    forget than one argument.
+    """
+    return rpt.Filters.from_query(
+        request.query_params, active_dataset(request), crm_scope(request.user)
+    )
 
 
 class _Base(viewsets.ModelViewSet):
@@ -132,13 +285,84 @@ class _Base(viewsets.ModelViewSet):
     # CrmWritePermission decides who may change what is in it.
     permission_classes = [CrmAccess, CrmWritePermission]
 
+    #: The lookup that answers "whose record is this", or None for reference
+    #: data every rep needs in full — products, stages, tags, groups. Getting
+    #: this wrong in the None direction is a leak, so it is stated per
+    #: viewset rather than guessed from the model.
+    owner_field: str | None = None
+
+    #: The writable FK behind `owner_field`, when the record carries one. Used
+    #: to stamp a rep's own id on anything they create and to stop them
+    #: handing a record to someone else.
+    owns_via: str | None = None
+
+    #: The lookup that answers "whose book is this in", or None for reference
+    #: data the departments share (products, stages, tags). Stated per viewset
+    #: for the same reason `owner_field` is: guessing it in the None direction
+    #: puts another department's customers on the page.
+    channel_field: str | None = None
+
+    #: True when `channel_field` runs through a nullable relation. A کار with
+    #: no customer belongs to nobody's book and must not vanish because of it.
+    channel_allows_null: bool = False
+
     def get_queryset(self):
         """
-        Every CRM list is scoped to the caller's dataset — one override rather
-        than a filter repeated in fourteen viewsets, because the one that got
-        forgotten would be the leak.
+        Every CRM list is scoped twice — to the caller's dataset and to the
+        records they may see — in one override rather than a filter repeated
+        in fourteen viewsets, because the one that got forgotten would be the
+        leak.
+
+        This covers detail routes as well as lists, which is the half that is
+        easy to miss: a viewset whose list is filtered but whose `retrieve`
+        is not still answers /deals/1417/ for anybody who guesses the number.
         """
-        return super().get_queryset().filter(dataset=active_dataset(self.request))
+        qs = super().get_queryset().filter(dataset=active_dataset(self.request))
+        return self.scoped(qs)
+
+    def scoped(self, qs):
+        """
+        Narrow `qs` to what the caller may see, along both axes: whose book
+        (channel) and whose row (owner). Shared by the overrides that build
+        their queryset from `Filters` instead of from super().
+        """
+        scope = crm_scope(self.request.user)
+        channels = self.effective_channels()
+
+        if self.channel_field and channels is not None:
+            if not channels:
+                return qs.none()
+            match = Q(**{f"{self.channel_field}__in": list(channels)})
+            if self.channel_allows_null:
+                head = self.channel_field.rsplit("__", 1)[0]
+                match |= Q(**{f"{head}__isnull": True})
+            qs = qs.filter(match)
+
+        if not self.owner_field or scope.sees_all:
+            return qs
+        if scope.employee_id is None:
+            return qs.none()
+        return qs.filter(**{f"{self.owner_field}_id": scope.employee_id})
+
+    def effective_channels(self) -> tuple[str, ...] | None:
+        """
+        The books this request covers: the account's, narrowed by a `channel`
+        param when one was asked for and is inside them.
+
+        A list honours the narrowing so a drill-down lands on exactly the rows
+        its chart counted. A lookup by id does not: the record either is in
+        one of the caller's books or is not theirs to see, and a stray param
+        on a detail URL should not be able to turn that into a 404.
+        """
+        if self.detail:
+            return crm_scope(self.request.user).channels
+        return query_filters(self.request).channels
+
+    def own_channel(self) -> str | None:
+        """The one channel this account writes into, or None when it covers
+        several and the record has to say which for itself."""
+        channels = crm_scope(self.request.user).channels
+        return channels[0] if channels and len(channels) == 1 else None
 
     def create_defaults(self, serializer) -> dict:
         """
@@ -152,10 +376,37 @@ class _Base(viewsets.ModelViewSet):
         that *contributes* cannot be forgotten by the next viewset the way an
         override can.
         """
-        return {"dataset": active_dataset(self.request)}
+        extra = {"dataset": active_dataset(self.request)}
+        # A rep's records are their own, whatever the payload said. The form
+        # does not offer them the choice; this is what makes that true rather
+        # than merely displayed.
+        scope = crm_scope(self.request.user)
+        if self.owns_via and not scope.sees_all and scope.employee_id is not None:
+            extra[self.owns_via] = employee_for(self.request.user)
+        # A record filed by a department account belongs to that department's
+        # book. Stamped rather than asked for: nobody in فروش بانکی has ever
+        # wanted to file a customer into فروش همکار's file, and offering the
+        # choice only creates the row that lands in the wrong one.
+        if self.channel_field == "channel":
+            mine = self.own_channel()
+            if mine:
+                extra["channel"] = mine
+        return extra
 
     def perform_create(self, serializer):
         serializer.save(**self.create_defaults(serializer))
+
+    def perform_update(self, serializer):
+        """
+        A rep cannot edit someone else's record — `get_queryset` already saw
+        to that — but could otherwise hand their own record away by setting a
+        different owner. Ownership is the scope, so it is not theirs to move.
+        """
+        extra = {}
+        scope = crm_scope(self.request.user)
+        if self.owns_via and not scope.sees_all and scope.employee_id is not None:
+            extra[self.owns_via] = employee_for(self.request.user)
+        serializer.save(**extra)
 
 
 class CustomerGroupViewSet(_Base):
@@ -198,6 +449,9 @@ class PipelineStageViewSet(_Base):
 # Customer
 # --------------------------------------------------------------------------
 class CustomerViewSet(_Base):
+    owner_field = "owner"
+    channel_field = "channel"
+    owns_via = "owner"
     queryset = Customer.objects.select_related(
         "group", "province", "owner", "lead_source"
     ).prefetch_related("tags")
@@ -220,7 +474,7 @@ class CustomerViewSet(_Base):
         # clean up.
         qs = qs.filter(merged_into__isnull=True)
         q = self.request.query_params
-        f = rpt.Filters.from_query(q)
+        f = query_filters(self.request)
 
         # `date_basis` decides which date the window applies to, so a drill
         # from "مشتریان جدید" lands on exactly the customers that were counted.
@@ -424,6 +678,10 @@ class CustomerViewSet(_Base):
         })
 
 class CustomerFeedbackViewSet(_Base):
+    # Feedback is filed against the rep it is about, not an "owner".
+    owner_field = "employee"
+    channel_field = "customer__channel"
+    owns_via = "employee"
     queryset = CustomerFeedback.objects.select_related("customer", "employee")
     serializer_class = CustomerFeedbackSerializer
 
@@ -431,7 +689,9 @@ class CustomerFeedbackViewSet(_Base):
         qs = super().get_queryset()
         if self.detail:
             return qs
-        f = rpt.Filters.from_query(self.request.query_params)
+        f = query_filters(self.request)
+        if f.blind:
+            return qs.none()
         if f.start:
             qs = qs.filter(at__gte=rpt._aware(f.start))
         if f.end:
@@ -449,6 +709,9 @@ class CustomerFeedbackViewSet(_Base):
 # Deal
 # --------------------------------------------------------------------------
 class DealViewSet(_Base):
+    owner_field = "owner"
+    channel_field = "channel"
+    owns_via = "owner"
     queryset = Deal.objects.select_related(
         "customer", "customer__province", "customer__group", "owner", "stage",
         "lead_source", "lost_reason",
@@ -475,7 +738,7 @@ class DealViewSet(_Base):
             return super().get_queryset()
 
         q = self.request.query_params
-        f = rpt.Filters.from_query(q)
+        f = query_filters(self.request)
         basis = q.get("date_basis") or (
             "opened" if (q.get("status") or "") == "open" else "closed"
         )
@@ -515,6 +778,12 @@ class DealViewSet(_Base):
             ).order_by("order").first()
             if first:
                 extra["stage"] = first
+        # The channel is the customer's, not the typist's. A deal filed
+        # against a فروش بانکی account belongs in فروش بانکی's book even when
+        # a CEO with the global view is the one entering it — otherwise the
+        # model default («همکار») quietly files it in the wrong department.
+        if data.get("customer"):
+            extra["channel"] = data["customer"].channel
         if not data.get("lead_source") and data.get("customer"):
             extra["lead_source"] = data["customer"].lead_source
         if not data.get("title") and data.get("customer"):
@@ -542,7 +811,8 @@ class DealViewSet(_Base):
         """
         before = self.get_object()
         previous_stage, previous_status = before.stage, before.status
-        obj = serializer.save()
+        super().perform_update(serializer)
+        obj = serializer.instance
         self._sync_close(obj)
         obj.save()
 
@@ -678,6 +948,11 @@ class DealViewSet(_Base):
 
 
 class DealItemViewSet(_Base):
+    channel_field = "deal__channel"
+    # A line has no owner of its own; it belongs to whoever owns the deal.
+    # Without this, a rep could read every line of every deal in the company
+    # by walking /deal-items/?deal=<n>.
+    owner_field = "deal__owner"
     queryset = DealItem.objects.select_related("product", "deal")
     serializer_class = DealItemSerializer
     filterset_fields = ["deal", "product"]
@@ -687,8 +962,8 @@ class DealItemViewSet(_Base):
         serializer.instance.deal.recalculate()
 
     def perform_update(self, serializer):
-        item = serializer.save()
-        item.deal.recalculate()
+        super().perform_update(serializer)
+        serializer.instance.deal.recalculate()
 
     def perform_destroy(self, instance):
         deal = instance.deal
@@ -700,6 +975,9 @@ class DealItemViewSet(_Base):
 # Activity / Task
 # --------------------------------------------------------------------------
 class ActivityViewSet(_Base):
+    owner_field = "owner"
+    channel_field = "customer__channel"
+    owns_via = "owner"
     queryset = Activity.objects.select_related("customer", "owner", "deal")
     serializer_class = ActivitySerializer
 
@@ -707,7 +985,7 @@ class ActivityViewSet(_Base):
         if self.detail:
             return super().get_queryset()
         q = self.request.query_params
-        f = rpt.Filters.from_query(q)
+        f = query_filters(self.request)
         # Filters already understands the pseudo-kind "call" (both directions).
         qs = f.activities()
         deal_id = q.get("deal")
@@ -733,7 +1011,8 @@ class ActivityViewSet(_Base):
         Customer.objects.filter(pk=obj.customer_id).update(last_activity_at=obj.at)
 
     def perform_update(self, serializer):
-        obj = serializer.save()
+        super().perform_update(serializer)
+        obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
 
@@ -752,6 +1031,12 @@ class ActivityViewSet(_Base):
 
 
 class TaskViewSet(_Base):
+    # A کار may stand on its own with no customer behind it, so the channel
+    # lookup has to tolerate the gap rather than filter the task away.
+    channel_field = "customer__channel"
+    channel_allows_null = True
+    owner_field = "owner"
+    owns_via = "owner"
     queryset = Task.objects.select_related("customer", "owner", "deal")
     serializer_class = TaskSerializer
     filterset_fields = ["owner", "customer", "deal", "kind"]
@@ -767,13 +1052,17 @@ class TaskViewSet(_Base):
             qs = qs.filter(done_at__isnull=False)
         return qs
 
-    def perform_create(self, serializer):
-        extra = {}
+    def create_defaults(self, serializer) -> dict:
+        # This used to be a `perform_create` override, which silently dropped
+        # the dataset stamp — a کار added while the screen said «داده نمایشی»
+        # was filed with the real ones. Contributing to the hook cannot lose
+        # what the hook already does.
+        extra = super().create_defaults(serializer)
         if not serializer.validated_data.get("owner"):
             mine = employee_for(self.request.user)
             if mine:
                 extra["owner"] = mine
-        serializer.save(**extra)
+        return extra
 
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
@@ -796,7 +1085,7 @@ class CrmDashboardView(GatedAPIView):
         ]
     )
     def get(self, request):
-        f = rpt.Filters.from_query(request.query_params, active_dataset(request))
+        f = query_filters(request)
         data = rpt.dashboard(f)
         data["window"] = {
             "start": f.start.isoformat() if f.start else None,
@@ -814,7 +1103,7 @@ class CrmReportView(GatedAPIView):
                 {"detail": f"گزارش «{key}» تعریف نشده است."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        f = rpt.Filters.from_query(request.query_params, active_dataset(request))
+        f = query_filters(request)
         axis = request.query_params.get("axis") or ""
         data = rpt.run_report(key, f, axis)
         data["axis_labels"] = rpt.AXIS_LABELS
@@ -842,9 +1131,9 @@ class PipelineBoardView(GatedAPIView):
 
     def get(self, request):
         ds = active_dataset(request)
-        f = rpt.Filters.from_query(request.query_params, ds)
-        qs = Deal.objects.filter(
-            channel=f.channel, status=Deal.Status.OPEN, dataset=ds
+        f = query_filters(request)
+        qs = Deal.objects.none() if f.blind else f.by_channel(
+            Deal.objects.filter(status=Deal.Status.OPEN, dataset=ds)
         )
         if f.owner:
             qs = qs.filter(owner_id=f.owner)
@@ -894,36 +1183,28 @@ class CrmMeView(GatedAPIView):
     def get(self, request):
         emp = employee_for(request.user)
         return Response({
-            "dataset": active_dataset(request),
             "can_edit": can_write_crm(request.user),
             "employee": emp.id if emp else None,
             "employee_name": emp.full_name_fa if emp else "",
             "team": emp.team.name_fa if emp and emp.team else "",
-            "is_manager": bool(
-                request.user.is_superuser
-                or request.user.role in {"executive", "manager"}
-            ),
+            "is_manager": is_crm_manager(request.user),
+            # True when the account reads the whole team's book. The UI uses
+            # it to decide whether to offer a «کارشناس» filter at all: showing
+            # one that can only ever return your own rows is worse than not
+            # showing it.
+            "sees_all": crm_scope(request.user).sees_all,
+            # Which book this account works. `null` for the CEO and admins,
+            # who read every department's. The UI shows it in the header:
+            # three departments now share these screens and «CRM» alone no
+            # longer says whose customers are on them.
+            "channel": (channels_for(request.user) or (None,))[0],
+            "channel_label": SalesChannel(
+                channels_for(request.user)[0]
+            ).label if channels_for(request.user) else "",
+            # A non-manager with no employee row sees nothing, and the screen
+            # has to say so rather than look like an empty CRM.
+            "unlinked": crm_scope(request.user).blind,
         })
-
-
-class CrmDatasetView(GatedAPIView):
-    """
-    Switch this account between the real customer file and the showroom.
-
-    A POST rather than a query parameter, and stored on the account, so the
-    choice survives a refresh and cannot be set by a link someone was sent.
-    """
-
-    def post(self, request):
-        choice = (request.data.get("dataset") or "").strip()
-        if choice not in {"real", "demo"}:
-            return Response(
-                {"detail": "داده باید «real» یا «demo» باشد."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        request.user.crm_dataset = choice
-        request.user.save(update_fields=["crm_dataset"])
-        return Response({"dataset": choice})
 
 
 class CrmOptionsView(GatedAPIView):
@@ -958,9 +1239,7 @@ class CrmOptionsView(GatedAPIView):
             "employees": [
                 {"id": e.id, "name": e.full_name_fa,
                  "team": e.team.name_fa if e.team else ""}
-                for e in DimEmployee.objects.select_related("team")
-                .filter(is_active=True)
-                .exclude(full_name_fa__in=["", "0"])
+                for e in employee_options(request)
             ],
             "groups": CustomerGroupSerializer(
                 CustomerGroup.objects.filter(dataset=ds), many=True
@@ -1005,9 +1284,12 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
     Not a `_Base` subclass: a candidate pairs a source row with a customer and
     has no dataset column of its own, so the usual dataset filter has nothing
     to filter on. It is applied through the customer instead.
+
+    Managers only: the queue is a view of the whole customer file, so there is
+    no per-rep slice of it that would still be useful.
     """
 
-    permission_classes = [CrmAccess, CrmWritePermission]
+    permission_classes = [CrmManagerOnly, CrmWritePermission]
     serializer_class = MatchCandidateSerializer
     queryset = CustomerMatchCandidate.objects.select_related(
         "customer", "customer__province", "customer__owner", "decided_by"

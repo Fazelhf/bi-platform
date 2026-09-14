@@ -1,3 +1,5 @@
+import type { InjectionKey, Ref } from "vue";
+
 /**
  * Matching rules for PickerField.
  *
@@ -113,3 +115,13 @@ export function ordered(options: PickerOption[], query: string): PickerOption[] 
     .sort((a, b) => a.tier - b.tier || a.index - b.index)
     .map((row) => row.option);
 }
+
+/**
+ * How deeply the field is nested inside stacked modals.
+ *
+ * FormModal provides it; PickerField reads it to put its floating panel above
+ * its own modal without floating above the next modal opened on top. Without
+ * this, a quick-add opened from inside another form drew *under* the picker
+ * panel that launched it.
+ */
+export const MODAL_LAYER: InjectionKey<Ref<number>> = Symbol("modalLayer");

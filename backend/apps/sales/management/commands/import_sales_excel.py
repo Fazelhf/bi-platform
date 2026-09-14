@@ -163,6 +163,7 @@ class Command(BaseCommand):
                 province=province,
                 channel=SalesChannel.TEAM,
                 defaults={
+                    "status": status,
                     "sales_rial": _num(ws.cell(row=row, column=PROVINCE_SALES_COL).value),
                     "target_rial": _num(ws.cell(row=row, column=PROVINCE_TARGET_COL).value),
                 },

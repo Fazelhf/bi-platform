@@ -49,6 +49,10 @@ async function load(force = false) {
 }
 
 onMounted(async () => { await crm.loadOptions(); await load(); });
+// Something was saved from the global «ثبت جدید» button over the top of this
+// page; the list under it is now stale.
+watch(() => crm.revision, () => load());
+
 watch(() => JSON.stringify(crm.query), () => load());
 
 function cardValue(c: DashCard): string {
@@ -259,7 +263,10 @@ async function onSaved(id?: number) {
         />
       </div>
 
-      <div :class="card">
+      <!-- A ranking of one is not a ranking. A کارشناس only ever appears in
+           their own rows, so these three charts would each draw a single bar
+           labelled with the reader's own name. -->
+      <div v-if="crm.seesAll" :class="card">
         <h3 class="text-sm font-semibold text-ink mb-3">بهترین فروشنده‌ها</h3>
         <CrmChart
           :categories="sellerCats" :series="sellerSeries" format="rial" :height="H_WIDE" horizontal
@@ -316,7 +323,7 @@ async function onSaved(id?: number) {
     </div>
 
     <!-- ============ People ============ -->
-    <div class="grid lg:grid-cols-3 gap-4">
+    <div v-if="crm.seesAll" class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
         <h3 class="text-sm font-semibold text-ink mb-3">فعال‌ترین کارشناسان</h3>
         <CrmChart

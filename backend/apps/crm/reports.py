@@ -28,7 +28,7 @@ from django.utils import timezone
 from apps.core.models import DimPeriod, PeriodKind
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label
 from apps.crm.models import (
-    Activity, Customer, CustomerFeedback, Deal, DealItem, DemoProvinceTarget,
+    Activity, Customer, CustomerFeedback, Deal, DealItem,
     PipelineStage,
 )
 from apps.sales.models import FactSalesProvince, SalesTarget
@@ -38,6 +38,47 @@ ZERO = Value(0, output_field=DecimalField(max_digits=20, decimal_places=0))
 
 def _money(expr):
     return Coalesce(expr, ZERO)
+
+
+# --------------------------------------------------------------------------
+# Who is asking
+# --------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Scope:
+    """
+    Row-level visibility for one signed-in account.
+
+    A CRM has two audiences with opposite needs. A manager supervises a team
+    and has to see all of it. A رکارشناس works their own book and must not see
+    anyone else's — that is not a UI preference, it is the reason each rep can
+    be given their own login at all.
+
+    `employee_id` is deliberately allowed to be None while `sees_all` is
+    False, and that case means *nothing*, not *everything*. An account in a
+    sales department that has not been linked to a DimEmployee row is a
+    misconfiguration, and the safe reading of a misconfiguration is zero rows.
+    """
+
+    sees_all: bool
+    employee_id: int | None = None
+
+    #: Which sales channels this account's CRM covers, or None for every one.
+    #:
+    #: The three sales departments keep separate books — فروش همکار's customer
+    #: file is not فروش بانکی's, and neither is B2B's. The channel is a
+    #: property of the department on the account, so it is as much a scope as
+    #: the owner is: two different questions ("whose row is this" and "whose
+    #: book is this in") that both have to be answered from the account and
+    #: never from the URL.
+    channels: tuple[str, ...] | None = None
+
+    @property
+    def blind(self) -> bool:
+        return not self.sees_all and self.employee_id is None
+
+    @classmethod
+    def unrestricted(cls) -> "Scope":
+        return cls(sees_all=True)
 
 
 # --------------------------------------------------------------------------
@@ -65,7 +106,11 @@ class Filters:
     customer: int | None = None
     tag: int | None = None
     status: str = ""
-    channel: str = "team"  # فروش همکار is the only channel in scope today
+
+    #: The channels in view; None means all of them. Set from the account (see
+    #: `Scope.channels`); a `channel` query param may only narrow within what
+    #: the account already covers, never step outside it.
+    channels: tuple[str, ...] | None = None
     result: str = ""       # activity result
     kind: str = ""         # activity kind
     granularity: str = "month"
@@ -76,11 +121,17 @@ class Filters:
     #: eventually be pasted into an email as if it were real.
     dataset: str = "real"
 
+    #: Set when the caller may only see their own records — same rule as
+    #: `dataset`: it comes from the account, never from the query string.
+    #: A query that could widen its own visibility by editing the URL is not a
+    #: scope, it is a suggestion.
+    blind: bool = False
+
     raw: dict = field(default_factory=dict)
 
     # ---- parsing ---------------------------------------------------------
     @classmethod
-    def from_query(cls, q, dataset: str = "real") -> "Filters":
+    def from_query(cls, q, dataset: str = "real", scope: "Scope | None" = None) -> "Filters":
         def num(name):
             v = q.get(name)
             try:
@@ -99,7 +150,6 @@ class Filters:
         f.customer = num("customer")
         f.tag = num("tag")
         f.status = (q.get("status") or "").strip()
-        f.channel = (q.get("channel") or "team").strip()
         f.result = (q.get("result") or "").strip()
         f.kind = (q.get("kind") or "").strip()
         f.granularity = (q.get("granularity") or "month").strip()
@@ -124,12 +174,41 @@ class Filters:
             _, f.end = month_bounds(jy, 12)
         else:
             f.start, f.end = _default_window()
+
+        # The account's own scope wins over whatever `owner` was asked for.
+        # Applying it here rather than in each report is the whole point: the
+        # one report that forgot would be the leak, and there are fourteen.
+        if scope is not None:
+            f.channels = scope.channels
+            if not scope.sees_all:
+                f.owner = scope.employee_id
+                f.blind = scope.blind
+
+        # A `channel` param narrows; it cannot widen. A drill-down carries the
+        # channel of the row it came from, so honouring it keeps a drawer
+        # agreeing with the chart — but only ever within what the account
+        # already covers.
+        asked = (q.get("channel") or "").strip()
+        if asked and (f.channels is None or asked in f.channels):
+            f.channels = (asked,)
         return f
+
+    def by_channel(self, qs, field: str = "channel"):
+        """Narrow `qs` to the channels in view. One helper rather than six
+        copies of the same `filter(channel=…)`, because the copy that got
+        forgotten would put another department's customers on the page."""
+        if self.channels is None:
+            return qs
+        if len(self.channels) == 1:
+            return qs.filter(**{field: self.channels[0]})
+        return qs.filter(**{f"{field}__in": self.channels})
 
     # ---- queryset shaping -------------------------------------------------
     def deals(self, date_field: str = "closed_at"):
         """Deals inside the window, measured on `date_field`."""
-        qs = Deal.objects.filter(channel=self.channel, dataset=self.dataset)
+        if self.blind:
+            return Deal.objects.none()
+        qs = self.by_channel(Deal.objects.filter(dataset=self.dataset))
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
@@ -154,8 +233,10 @@ class Filters:
         return qs
 
     def activities(self):
-        qs = Activity.objects.filter(
-            customer__channel=self.channel, dataset=self.dataset
+        if self.blind:
+            return Activity.objects.none()
+        qs = self.by_channel(
+            Activity.objects.filter(dataset=self.dataset), "customer__channel"
         )
         qs = self._window(qs, "at")
         if self.owner:
@@ -177,7 +258,9 @@ class Filters:
         return qs
 
     def customers(self, date_field: str = "first_deal_won_at"):
-        qs = Customer.objects.filter(channel=self.channel, dataset=self.dataset)
+        if self.blind:
+            return Customer.objects.none()
+        qs = self.by_channel(Customer.objects.filter(dataset=self.dataset))
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
@@ -200,7 +283,11 @@ class Filters:
     def drill_base(self) -> dict:
         """The filters, back in query-param form, so a drill request rebuilds
         exactly this slice. Row-specific keys are merged on top by callers."""
-        out = {"channel": self.channel}
+        # Only pin the channel in a drill when there is exactly one; "all
+        # channels" is the absence of the param, not a value it can carry.
+        out: dict = {}
+        if self.channels and len(self.channels) == 1:
+            out["channel"] = self.channels[0]
         if self.start:
             out["date_from"] = self.start.isoformat()
         if self.end:
@@ -820,12 +907,11 @@ def report_provinces(f: Filters, _axis_key: str = "province") -> dict:
     # province look like it is missing plan.
     targets: dict[int, float] = {}
     for source, field in (
-        (DemoProvinceTarget.objects, "target_rial"),
         (FactSalesProvince.objects, "target_rial"),
         (SalesTarget.objects.exclude(province=None), "target_rial"),
     ):
         for r in (
-            source.filter(period_id__in=period_ids, channel=f.channel)
+            f.by_channel(source.filter(period_id__in=period_ids))
             .values("province_id")
             .annotate(t=Sum(field))
         ):
@@ -871,7 +957,7 @@ def report_provinces(f: Filters, _axis_key: str = "province") -> dict:
 
 def report_satisfaction(f: Filters, axis_key: str = "user") -> dict:
     """تعداد مشتری ناراضی از کارشناسان."""
-    qs = CustomerFeedback.objects.filter(customer__channel=f.channel)
+    qs = f.by_channel(CustomerFeedback.objects.all(), "customer__channel")
     if f.start:
         qs = qs.filter(at__gte=_aware(f.start))
     if f.end:
@@ -1057,8 +1143,8 @@ def dashboard(f: Filters) -> dict:
     lost_agg = lost.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
     in_agg = opened.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
 
-    open_now = Deal.objects.filter(
-        channel=f.channel, status=Deal.Status.OPEN, dataset=f.dataset
+    open_now = f.by_channel(
+        Deal.objects.filter(status=Deal.Status.OPEN, dataset=f.dataset)
     )
     if f.owner:
         open_now = open_now.filter(owner_id=f.owner)

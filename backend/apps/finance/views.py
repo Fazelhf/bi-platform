@@ -18,6 +18,13 @@ from decimal import Decimal
 
 from apps.finance.models import (
     BankAccount,
+    Budget,
+    BudgetAmount,
+    BudgetAmountChange,
+    BudgetLine,
+    BudgetPeriod,
+    BudgetSalesForecast,
+    BudgetStatus,
     CashCategory,
     CashMovement,
     CreditLine,
@@ -27,13 +34,16 @@ from apps.finance.models import (
 from apps.finance.permissions import FinanceAccess, assert_finance_visible, is_finance
 from apps.finance.serializers import (
     BankAccountSerializer,
+    BudgetLineSerializer,
+    BudgetSerializer,
     CashCategorySerializer,
     CashMovementSerializer,
     CreditLineSerializer,
     FinanceSettingSerializer,
 )
 from apps.finance.services import balance_trend, cash_report
-from apps.sales.models import ApprovalStatus
+from apps.finance.services import budget as budget_service
+from apps.sales.models import ApprovalStatus, SalesChannel
 
 
 def _nonzero(value) -> bool:
@@ -192,7 +202,8 @@ class CashEntryView(APIView):
         days = sorted(
             leaves_of(period), key=lambda p: (p.start_date or p.id, p.id)
         )
-        categories = list(CashCategory.objects.filter(is_active=True))
+        # Leaves only: a parent is a roll-up, never a column someone types into.
+        categories = list(CashCategory.enterable())
         # A day/category can now span several accounts, so a cell holds a
         # list of rows rather than one figure. Days entered before accounts
         # existed come back as a single row with no account, which the form
@@ -435,3 +446,334 @@ class FinanceSettingView(APIView):
                   {"opening_balance": {
                       "before": before, "after": str(saved.opening_balance_rial)}})
         return Response(serializer.data)
+
+
+# --------------------------------------------------------------------------
+# بودجه
+# --------------------------------------------------------------------------
+
+class BudgetViewSet(viewsets.ModelViewSet):
+    """
+    The plans themselves, plus approving one of their months.
+
+    Approval is an action on a month rather than on the budget: اسفند is still
+    being argued about while شهریور is settled, which is how the finance team
+    actually works.
+    """
+
+    queryset = Budget.objects.select_related("start_period", "end_period")
+    serializer_class = BudgetSerializer
+    permission_classes = [FinanceAccess]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["jalali_year", "is_active"]
+
+    def perform_create(self, serializer):
+        budget = serializer.save(created_by=self.request.user)
+        _sync_budget_months(budget)
+        audit_log(self.request.user, budget, AuditLog.Action.CREATE)
+
+    def perform_update(self, serializer):
+        budget = serializer.save()
+        _sync_budget_months(budget)
+        audit_log(self.request.user, budget, AuditLog.Action.UPDATE)
+
+    @extend_schema(
+        parameters=[OpenApiParameter("period", int, required=True)], responses=dict
+    )
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        """
+        Adopt one month: stamp every figure's baseline, mark it approved.
+
+        Figures stay editable afterwards — that was the requirement — but the
+        baseline is written once, so «عدد مصوب چه بود؟» keeps an answer.
+        """
+        if not is_finance(request.user):
+            raise ValidationError({"detail": "فقط واحد مالی می‌تواند بودجه را تصویب کند."})
+        budget = self.get_object()
+        month = _month_param(
+            request.data.get("period") or request.query_params.get("period")
+        )
+        bp, _ = BudgetPeriod.objects.get_or_create(budget=budget, period=month)
+        stamped = bp.approve(request.user)
+        audit_log(request.user, budget, AuditLog.Action.UPDATE,
+                  {"approved": {"before": None, "after": month.label}})
+        return Response({
+            "status": bp.status,
+            "status_label": BudgetStatus(bp.status).label,
+            "approved_at": bp.approved_at.isoformat() if bp.approved_at else None,
+            "stamped": stamped,
+        })
+
+
+class BudgetLineViewSet(viewsets.ModelViewSet):
+    """The lines of a plan. Validation lives on the model — see the serializer."""
+
+    queryset = BudgetLine.objects.select_related(
+        "category", "category__parent", "credit_line"
+    )
+    serializer_class = BudgetLineSerializer
+    permission_classes = [FinanceAccess]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["budget", "direction", "is_active"]
+
+
+def _month_param(value) -> DimPeriod:
+    try:
+        period = DimPeriod.objects.get(pk=value)
+    except (DimPeriod.DoesNotExist, ValueError, TypeError):
+        raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+    if period.kind != PeriodKind.MONTH:
+        period = month_of(period)
+    return period
+
+
+def _budget_param(value) -> Budget:
+    try:
+        return Budget.objects.get(pk=value)
+    except (Budget.DoesNotExist, ValueError, TypeError):
+        raise ValidationError({"budget": "بودجه انتخاب نشده یا معتبر نیست."})
+
+
+def _sync_budget_months(budget: Budget) -> None:
+    """
+    Make sure every month in the budget's span has a row.
+
+    Without this a plan created over seven months would have figures only for
+    the months someone happened to open, and the dashboard's cumulative line
+    would have holes in it.
+    """
+    start = (budget.start_period.jalali_year, budget.start_period.jalali_month)
+    end = (budget.end_period.jalali_year, budget.end_period.jalali_month)
+    months = DimPeriod.objects.filter(
+        kind=PeriodKind.MONTH,
+        jalali_year__gte=budget.start_period.jalali_year,
+        jalali_year__lte=budget.end_period.jalali_year,
+    ).order_by("jalali_year", "jalali_month")
+    for month in months:
+        if start <= (month.jalali_year, month.jalali_month) <= end:
+            BudgetPeriod.objects.get_or_create(budget=budget, period=month)
+
+
+class BudgetGridView(APIView):
+    """
+    The planning grid: every line of a budget against every month of it.
+
+    One row per line, one column per month — the shape a cash plan is argued
+    in. POST writes the cells that changed and records who moved what.
+    """
+
+    permission_classes = [FinanceAccess]
+
+    @extend_schema(
+        parameters=[OpenApiParameter("budget", int, required=True)], responses=dict
+    )
+    def get(self, request):
+        assert_finance_visible(request.user)
+        budget = _budget_param(request.query_params.get("budget"))
+        _sync_budget_months(budget)
+
+        periods = list(
+            BudgetPeriod.objects.filter(budget=budget)
+            .select_related("period")
+            .order_by("period__jalali_year", "period__jalali_month")
+        )
+        lines = list(
+            BudgetLine.objects.filter(budget=budget, is_active=True)
+            .select_related("category", "category__parent", "credit_line")
+            .order_by("direction", "sort_order", "category__sort_order")
+        )
+        stored = {
+            (a.budget_period_id, a.line_id): a
+            for a in BudgetAmount.objects.filter(budget_period__budget=budget)
+        }
+
+        forecasts = {
+            (f.budget_period_id, f.channel): f
+            for f in BudgetSalesForecast.objects.filter(budget_period__budget=budget)
+        }
+
+        def sales_cell(bp_id: int, channel: str) -> dict:
+            row = forecasts.get((bp_id, channel))
+            return {
+                "amount_rial": str(row.amount_rial) if row else "0",
+                "baseline_rial": (
+                    str(row.baseline_rial)
+                    if row and row.baseline_rial is not None
+                    else None
+                ),
+            }
+
+        def cell(bp_id: int, line_id: int) -> dict:
+            row = stored.get((bp_id, line_id))
+            return {
+                "amount_rial": str(row.amount_rial) if row else "0",
+                "baseline_rial": (
+                    str(row.baseline_rial)
+                    if row and row.baseline_rial is not None
+                    else None
+                ),
+                "variance_note": row.variance_note if row else "",
+            }
+
+        return Response({
+            "budget": BudgetSerializer(budget).data,
+            "months": [
+                {
+                    "budget_period_id": bp.id,
+                    "period_id": bp.period_id,
+                    "label": bp.period.label,
+                    "status": bp.status,
+                    "status_label": BudgetStatus(bp.status).label,
+                    "approved_at": bp.approved_at.isoformat() if bp.approved_at else None,
+                    "days": bp.period.days,
+                }
+                for bp in periods
+            ],
+            "lines": [
+                {
+                    **BudgetLineSerializer(line).data,
+                    "cells": {str(bp.id): cell(bp.id, line.id) for bp in periods},
+                }
+                for line in lines
+            ],
+            # Accrual sales by channel — shown above the cash lines, never
+            # summed into them.
+            "sales": [
+                {
+                    "channel": channel.value,
+                    "label": channel.label,
+                    "cells": {str(bp.id): sales_cell(bp.id, channel.value) for bp in periods},
+                }
+                for channel in SalesChannel
+            ],
+            "unit": FinanceSettingSerializer(FinanceSetting.get()).data,
+            "can_edit": is_finance(request.user),
+        })
+
+    @transaction.atomic
+    def post(self, request):
+        if not is_finance(request.user):
+            raise ValidationError({"detail": "فقط واحد مالی می‌تواند بودجه را ویرایش کند."})
+
+        written = 0
+        for cell in request.data.get("cells", []):
+            try:
+                bp = BudgetPeriod.objects.get(pk=cell.get("budget_period_id"))
+                line = BudgetLine.objects.get(pk=cell.get("line_id"))
+            except (BudgetPeriod.DoesNotExist, BudgetLine.DoesNotExist, ValueError, TypeError):
+                continue
+            if bp.budget_id != line.budget_id:
+                raise ValidationError({"detail": "قلم و ماه به دو بودجهٔ متفاوت تعلق دارند."})
+
+            row, created = BudgetAmount.objects.get_or_create(
+                budget_period=bp, line=line
+            )
+            if "amount_rial" in cell:
+                amount = Decimal(str(cell.get("amount_rial") or 0))
+                if created:
+                    row.amount_rial = amount
+                    row.save(update_fields=["amount_rial", "updated_at"])
+                    written += 1
+                elif row.amount_rial != amount:
+                    # The price of «always editable»: a figure that moved after
+                    # approval has to leave a trace, or next month's meeting is
+                    # an argument about memory.
+                    BudgetAmountChange.objects.create(
+                        amount=row,
+                        old_rial=row.amount_rial,
+                        new_rial=amount,
+                        after_approval=bp.status == BudgetStatus.APPROVED,
+                        reason=str(cell.get("reason") or "")[:250],
+                        changed_by=request.user,
+                    )
+                    row.amount_rial = amount
+                    row.save(update_fields=["amount_rial", "updated_at"])
+                    written += 1
+
+            if "variance_note" in cell:
+                row.variance_note = str(cell.get("variance_note") or "")
+                row.save(update_fields=["variance_note", "updated_at"])
+
+        channels = set(SalesChannel.values)
+        for cell in request.data.get("sales_cells", []):
+            channel = cell.get("channel")
+            if channel not in channels:
+                continue
+            try:
+                bp = BudgetPeriod.objects.get(pk=cell.get("budget_period_id"))
+            except (BudgetPeriod.DoesNotExist, ValueError, TypeError):
+                continue
+            amount = Decimal(str(cell.get("amount_rial") or 0))
+            row, created = BudgetSalesForecast.objects.get_or_create(
+                budget_period=bp, channel=channel
+            )
+            if created or row.amount_rial != amount:
+                row.amount_rial = amount
+                row.save(update_fields=["amount_rial", "updated_at"])
+                written += 1
+
+        return Response({"written": written})
+
+
+class BudgetVarianceView(APIView):
+    """انحراف بودجه — plan beside ledger, rolled up the category tree."""
+
+    permission_classes = [FinanceAccess]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("budget", int, required=True),
+            OpenApiParameter("period", int, required=True, description="ماه یا هفته"),
+        ],
+        responses=dict,
+    )
+    def get(self, request):
+        assert_finance_visible(request.user)
+        budget = _budget_param(request.query_params.get("budget"))
+        try:
+            period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        except (DimPeriod.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+        return Response(budget_service.build(budget, period))
+
+
+class BudgetSeriesView(APIView):
+    """Month by month for the dashboard, including the cumulative cash line."""
+
+    permission_classes = [FinanceAccess]
+
+    @extend_schema(
+        parameters=[OpenApiParameter("budget", int, required=True)], responses=dict
+    )
+    def get(self, request):
+        assert_finance_visible(request.user)
+        budget = _budget_param(request.query_params.get("budget"))
+        return Response(budget_service.series(budget))
+
+
+class BudgetWaterfallView(APIView):
+    """
+    The bridge from planned net cash to actual net cash, one step per line.
+
+    The chart that answers «چرا پول‌مان با انتظار فرق کرد؟» — a question two
+    total rows leave entirely to the reader.
+    """
+
+    permission_classes = [FinanceAccess]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("budget", int, required=True),
+            OpenApiParameter("period", int, required=True),
+        ],
+        responses=dict,
+    )
+    def get(self, request):
+        assert_finance_visible(request.user)
+        budget = _budget_param(request.query_params.get("budget"))
+        try:
+            period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        except (DimPeriod.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+        return Response(budget_service.waterfall(budget, period))

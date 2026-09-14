@@ -2,6 +2,21 @@ import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 
 /** Where a user lands after login, by department (CEO → overview). */
+/**
+ * The departments whose people work in CRM. Mirrors
+ * `apps.crm.views.CRM_DEPARTMENTS`; the API is the enforcement and this is
+ * only so a URL does not land someone on an error page.
+ */
+const CRM_DEPARTMENTS = new Set(["sales_team", "sales_b2b", "sales_org"]);
+
+/** Supervises rather than sells — see `apps.crm.views.is_crm_manager`. */
+function isCrmManager(auth: { me: { role?: string; is_superuser?: boolean } | null }): boolean {
+  return !!(
+    auth.me?.is_superuser
+    || (auth.me?.role && ["executive", "manager"].includes(auth.me.role))
+  );
+}
+
 export function homeRouteFor(department: string): string {
   switch (department) {
     case "production":
@@ -174,6 +189,25 @@ const router = createRouter({
           path: "finance/entry",
           name: "finance-cash-entry",
           component: () => import("@/views/finance/CashEntryView.vue"),
+          meta: { finance: true },
+        },
+        // --- بودجه: expected against actual, actuals read from the cash ledger ---
+        {
+          path: "finance/budget",
+          name: "finance-budget",
+          component: () => import("@/views/finance/BudgetDashboardView.vue"),
+          meta: { finance: true },
+        },
+        {
+          path: "finance/budget/plan",
+          name: "finance-budget-plan",
+          component: () => import("@/views/finance/BudgetPlanView.vue"),
+          meta: { finance: true },
+        },
+        {
+          path: "finance/budget/variance",
+          name: "finance-budget-variance",
+          component: () => import("@/views/finance/BudgetVarianceView.vue"),
           meta: { finance: true },
         },
 
@@ -378,6 +412,7 @@ const router = createRouter({
         {
           path: "match-review",
           name: "crm-match-review",
+          meta: { crmManager: true },
           component: () => import("@/views/crm/MatchReviewView.vue"),
         },
       ],
@@ -510,15 +545,21 @@ router.beforeEach(async (to) => {
     if (!canFinance) return sentHome(to);
   }
   // CRM holds the company's real customer file — names, numbers, what each
-  // account is worth. It belongs to فروش همکار, who work it, and the CEO, who
-  // reads it. The API enforces the same rule (apps.crm.views.CrmAccess); this
-  // only keeps the URL from landing someone on an error page.
+  // account is worth. The three sales departments work it and the CEO reads
+  // it. The API enforces the same rule (apps.crm.views.CrmAccess) and scopes
+  // a کارشناس to their own records on top of it; this only keeps the URL from
+  // landing someone on an error page.
   if (to.meta.crm) {
     const canCrm =
       auth.isExecutive
       || !!auth.me?.is_superuser
-      || auth.department === "sales_team";
+      || CRM_DEPARTMENTS.has(auth.department);
     if (!canCrm) return sentHome(to);
+    // بازبینی تطبیق compares every account with every other, so there is no
+    // per-rep version of it and the API answers 403.
+    if (to.meta.crmManager && !isCrmManager(auth)) {
+      return { name: "crm-dashboard" };
+    }
   }
   // بازرگانی: what the company pays its suppliers is commercially sensitive,
   // so the same rule as finance — that department, the CEO and admins only.

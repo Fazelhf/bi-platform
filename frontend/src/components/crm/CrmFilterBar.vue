@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useCrmStore } from "@/stores/crm";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 
 /** The one filter bar every CRM page shares (state lives in the store). */
 const crm = useCrmStore();
@@ -38,14 +39,17 @@ const sel = "bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none bor
     </select>
 
     <template v-if="crm.filters.range === 'custom'">
-      <input v-model="crm.filters.date_from" type="date" :class="sel" @change="changed" />
+      <JalaliDateField v-model="crm.filters.date_from" class="w-40" placeholder="از تاریخ" @update:model-value="changed" />
       <span class="text-slate-400 text-xs">تا</span>
-      <input v-model="crm.filters.date_to" type="date" :class="sel" @change="changed" />
+      <JalaliDateField v-model="crm.filters.date_to" class="w-40" placeholder="تا تاریخ" @update:model-value="changed" />
     </template>
 
     <span class="w-px h-6 bg-slate-200 mx-1 hidden sm:block"></span>
 
-    <select v-model="crm.filters.owner" :class="sel" @change="changed">
+    <!-- Only a manager has a team to filter by. For a کارشناس the API answers
+         with their own rows whatever this said, so a dropdown of colleagues
+         would be a control that looks like it does something and does not. -->
+    <select v-if="crm.seesAll" v-model="crm.filters.owner" :class="sel" @change="changed">
       <option value="">همه کارشناسان</option>
       <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.name }}</option>
     </select>

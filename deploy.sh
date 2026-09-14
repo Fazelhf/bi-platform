@@ -29,7 +29,6 @@ python manage.py migrate --noinput
 # entered since the last one.
 echo "▸ بارگذاری داده‌ی CRM (فقط بار اول)…"
 python manage.py import_didar_crm --if-empty
-python manage.py seed_crm --if-empty
 
 # The accounting side. Unlike the دیدار load these have no --if-empty guard
 # and do not need one: both are idempotent by key, a second run creates

@@ -36,6 +36,12 @@ REPORT_ROUTES = {
     "commercial.PurchaseOrder": "commercial-dashboard",
 }
 
+# A sheet is decided as a whole, so a decision can arrive attached to any of
+# its rows — a sheet with only a provincial block has no salesperson row.
+for _label in ("sales.FactSalesProvince", "sales.FactSalesByCustomerGroup"):
+    ENTRY_ROUTES[_label] = ENTRY_ROUTES["sales.FactSalesMonthly"]
+    REPORT_ROUTES[_label] = REPORT_ROUTES["sales.FactSalesMonthly"]
+
 #: Departments that own each fact, so a manager is only sent to their own sheet.
 OWNER_DEPARTMENTS = {
     "production.FactProduction": {"production"},

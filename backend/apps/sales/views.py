@@ -5,7 +5,7 @@ from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status as http_status
 from rest_framework import viewsets
-from rest_framework.permissions import SAFE_METHODS, BasePermission
+from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -57,6 +57,7 @@ from apps.sales.serializers import (
     SalesProvinceSerializer,
     TeamSerializer,
 )
+from apps.sales.services import approval_sheets
 from apps.sales.services.kpi import compute_period_kpis
 
 
@@ -446,6 +447,11 @@ class SalesProvinceViewSet(viewsets.ModelViewSet):
     entry_department = "sales_org"
     filterset_fields = ["period", "province"]
 
+    def perform_update(self, serializer):
+        # Same rule as a salesperson row: once edited, the figure is no longer
+        # the one that was approved, so it goes back to draft.
+        serializer.save(status=ApprovalStatus.DRAFT)
+
 
 class CollectionViewSet(viewsets.ModelViewSet):
     queryset = FactCollection.objects.select_related("bank", "period").all()
@@ -528,7 +534,7 @@ class DashboardSummaryView(APIView):
         # but province sales are merged, so we scope province to the channel's
         # own facts.
         province = (
-            FactSalesProvince.objects.filter(period=period)
+            FactSalesProvince.objects.filter(period=period, status=ApprovalStatus.APPROVED)
             .select_related("province")
             .values("province__name_fa")
             .annotate(sales=Sum("sales_rial"), target=Sum("target_rial"))
@@ -642,6 +648,47 @@ def metric_fields_for(channel: str) -> list[str]:
     return [f for f, _ in metric_rows_for(channel)]
 
 
+def _breakdown(period, facts, fields, stock_fields) -> list[dict]:
+    """
+    One entry per child of a split period — the weeks of a month, or the days
+    of a week — holding that child's sheet totals alone, so the page can put
+    «هفته ۱ … ۴» beside «ماه» and show the month is exactly their sum.
+
+    Flow measures add up. Stock measures («مشتری فعال», «مانده مطالبات») take
+    each salesperson's latest value inside the child, the same rule the
+    approval sheets use; their weeks are not expected to add up to the month,
+    and the page says so rather than showing a false mismatch.
+    """
+    from apps.core.periods import leaves_of
+
+    children = list(period.children.order_by("seq"))
+    owner = {leaf.id: child.id for child in children for leaf in leaves_of(child)}
+    per_child: dict[int, dict[int, dict]] = {child.id: {} for child in children}
+
+    for fact in facts:  # oldest leaf first
+        child_id = owner.get(fact.period_id)
+        if child_id is None:
+            continue
+        person = per_child[child_id].setdefault(fact.employee_id, {})
+        for m in fields:
+            value = Decimal(getattr(fact, m) or 0)
+            person[m] = value if m in stock_fields else person.get(m, Decimal(0)) + value
+
+    out = []
+    for child in children:
+        people = list(per_child[child.id].values())
+        out.append({
+            "period_id": child.id,
+            "seq": child.seq,
+            "label": f"هفته {child.seq}" if child.kind == "week" else child.label,
+            "totals": {
+                m: str(sum((p.get(m, Decimal(0)) for p in people), Decimal(0)))
+                for m in fields
+            },
+        })
+    return out
+
+
 class SalesInputView(APIView):
     """
     Mirrors the sales workbook's single input sheet: one column per
@@ -670,9 +717,21 @@ class SalesInputView(APIView):
         # Only POST used to be checked, so another department's sheet — names,
         # figures and all — could simply be read.
         self._assert_owner(request, channel)
+        # A month cut into weeks (or a week cut into days) holds no figures
+        # of its own, so reading it used to return an empty sheet. It now
+        # returns the roll-up of its leaves, read-only — the manager sees the
+        # month as the sum of the weeks without adding four sheets by hand.
+        from apps.core.periods import leaves_of
+        from apps.sales.services.approval_sheets import STOCK_FIELDS
+
+        is_rollup = period.children.exists()
+        leaf_ids = [p.id for p in leaves_of(period)] if is_rollup else [period.id]
         facts = FactSalesMonthly.objects.filter(
-            period=period, channel=channel
-        ).select_related("employee").order_by("employee__id")
+            period_id__in=leaf_ids, channel=channel
+        ).select_related("employee", "period").order_by(
+            # Oldest leaf first, so a stock measure ends on its latest value.
+            "period__start_date", "period_id", "employee__id",
+        )
 
         from apps.sales.models import SalesTarget
 
@@ -694,14 +753,32 @@ class SalesInputView(APIView):
             )
         }
 
-        fields = metric_fields_for(channel)
+        fields = [m for m in metric_fields_for(channel) if m not in TARGET_FIELDS]
+
+        people: dict[int, dict] = {}
+        for f in facts:
+            person = people.setdefault(f.employee_id, {
+                "employee_id": f.employee_id,
+                "name": f.employee.full_name_fa,
+                "status": f.status,
+                "values": {},
+            })
+            for m in fields:
+                value = Decimal(getattr(f, m) or 0)
+                person["values"][m] = (
+                    value if m in STOCK_FIELDS
+                    else person["values"].get(m, Decimal(0)) + value
+                )
+            # Weeks in different states: the roll-up has no single status.
+            if person["status"] != f.status:
+                person["status"] = "mixed"
         columns = [{
-            "employee_id": f.employee_id,
-            "name": f.employee.full_name_fa,
-            "status": f.status,
-            **{m: str(getattr(f, m)) for m in fields},
-            "target_rial": str(plans.get(f.employee_id, 0)),
-        } for f in facts]
+            "employee_id": p["employee_id"],
+            "name": p["name"],
+            "status": p["status"],
+            **{m: str(p["values"].get(m, Decimal(0))) for m in fields},
+            "target_rial": str(plans.get(p["employee_id"], 0)),
+        } for p in people.values()]
 
         # Then everyone on the roster who has no row yet, as blank columns.
         #
@@ -729,17 +806,15 @@ class SalesInputView(APIView):
         # Every province is listed from the start — managers fill in the ones
         # they sold to instead of hunting for them in an "add" dropdown. Rows
         # that have no fact yet come back as zeros.
-        saved = {
-            p.province_id: p
-            for p in FactSalesProvince.objects.filter(period=period, channel=channel)
-        }
+        saved: dict[int, Decimal] = {}
+        for p in FactSalesProvince.objects.filter(period_id__in=leaf_ids, channel=channel):
+            saved[p.province_id] = saved.get(p.province_id, Decimal(0)) + (p.sales_rial or 0)
         provinces = []
         for prov in DimProvince.objects.all().order_by("id"):
-            row = saved.get(prov.id)
             provinces.append({
                 "province_id": prov.id,
                 "name": prov.name_fa,
-                "sales_rial": str(row.sales_rial) if row else "0",
+                "sales_rial": str(saved.get(prov.id, 0)),
                 "target_rial": str(prov_plans.get(prov.id, 0)),
             })
 
@@ -752,20 +827,24 @@ class SalesInputView(APIView):
         # channels do not report a segment split.
         customer_groups = []
         if channel == SalesChannel.B2B:
-            stored = {
-                g.customer_group_id: g
-                for g in FactSalesByCustomerGroup.objects.filter(
-                    period=period, channel=channel
-                )
-            }
+            stored: dict[int, dict] = {}
+            for g in FactSalesByCustomerGroup.objects.filter(
+                period_id__in=leaf_ids, channel=channel
+            ):
+                acc = stored.setdefault(g.customer_group_id, {
+                    "sales_rial": Decimal(0), "profit_rial": Decimal(0), "invoice_count": 0,
+                })
+                acc["sales_rial"] += g.sales_rial or 0
+                acc["profit_rial"] += g.profit_rial or 0
+                acc["invoice_count"] += g.invoice_count or 0
             for group in DimCustomerGroup.objects.filter(is_active=True):
                 row = stored.get(group.id)
                 customer_groups.append({
                     "group_id": group.id,
                     "name": group.name_fa,
-                    "sales_rial": str(row.sales_rial) if row else "0",
-                    "profit_rial": str(row.profit_rial) if row else "0",
-                    "invoice_count": row.invoice_count if row else 0,
+                    "sales_rial": str(row["sales_rial"]) if row else "0",
+                    "profit_rial": str(row["profit_rial"]) if row else "0",
+                    "invoice_count": row["invoice_count"] if row else 0,
                 })
 
         return Response({
@@ -781,6 +860,11 @@ class SalesInputView(APIView):
             "provinces": provinces,
             "all_provinces": all_provinces,
             "customer_groups": customer_groups,
+            # A split period is shown as the read-only roll-up of its leaves,
+            # with the per-week totals that prove the month is their sum.
+            "is_rollup": is_rollup,
+            "stock_fields": sorted(STOCK_FIELDS),
+            "breakdown": _breakdown(period, facts, fields, STOCK_FIELDS) if is_rollup else [],
         })
 
     def post(self, request):
@@ -802,6 +886,10 @@ class SalesInputView(APIView):
         submit = bool(request.data.get("submit"))
         status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
         user = request.user
+        # Provinces and segments are part of the same sheet and carry its
+        # status. They used to carry none, which put them on the dashboards
+        # the moment they were saved — before anyone had approved them.
+        sheet_state = {"status": status, **({"submitted_by": user} if submit else {})}
 
         # Targets live in SalesTarget at month grain and are set only in the
         # «تارگت» section — never through this sheet, whoever is posting.
@@ -870,7 +958,7 @@ class SalesInputView(APIView):
                 continue  # nothing entered for this province — don't store it
             FactSalesProvince.objects.update_or_create(
                 period=period, province_id=pid, channel=channel,
-                defaults={"sales_rial": sales},
+                defaults={"sales_rial": sales, **sheet_state},
             )
 
         # Customer segments — same rule as provinces: an all-zero row that was
@@ -892,19 +980,57 @@ class SalesInputView(APIView):
                 continue
             FactSalesByCustomerGroup.objects.update_or_create(
                 period=period, customer_group_id=gid, channel=channel,
-                defaults=values,
+                defaults={**values, **sheet_state},
             )
 
         audit_log(user, period, AuditLog.Action.UPDATE,
                   {"sales_input": {"before": None, "after": f"{channel} · {len(kept_employee_ids)} کارشناس"}})
 
         if submit:
-            first = FactSalesMonthly.objects.filter(period=period, channel=channel).first()
+            # A sheet with only a provincial block is still a submission.
+            first = (
+                FactSalesMonthly.objects.filter(period=period, channel=channel).first()
+                or FactSalesProvince.objects.filter(period=period, channel=channel).first()
+            )
             if first:
                 notify_submitted(user, first, CHANNEL_DEPARTMENT.get(channel, ""),
-                                 f"فروش {channel} · {period.label}")
+                                 f"فروش {SalesChannel(channel).label} · {period.label}")
 
         return Response({"ok": True, "submitted": submit, "salespeople": len(kept_employee_ids)})
+
+
+class SalesApprovalSheetsView(APIView):
+    """
+    کارتابل — the sales half, one item per submitted sheet (channel × period).
+
+    See `apps.sales.services.approval_sheets` for why the unit is the sheet.
+    Managers see their own channel's sheets and their status; the list is
+    scoped on the server rather than filtered in the page, so a manager's
+    browser is never sent another department's figures to hide.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        status = request.query_params.get("status") or ApprovalStatus.SUBMITTED
+        if status not in ApprovalStatus.values:
+            raise ValidationError({"status": "وضعیت نامعتبر است."})
+        return Response({"sheets": approval_sheets.list_sheets(request.user, status)})
+
+
+class SalesApprovalDecideView(APIView):
+    """Approve, reject or return one whole sheet. The CEO decides."""
+
+    permission_classes = [ApprovalPermission]
+
+    def post(self, request):
+        return Response(approval_sheets.decide_sheet(
+            request.user,
+            period_id=request.data.get("period"),
+            channel=(request.data.get("channel") or "").strip(),
+            action=(request.data.get("action") or "").strip(),
+            note=request.data.get("note") or "",
+        ))
 
 
 # --------------------------------------------------------------------------
@@ -1146,7 +1272,7 @@ class SalesDashboardDetailView(APIView):
             "sales": float(p.sales_rial),
             "target": float(p.target_rial),
         } for p in FactSalesProvince.objects.filter(
-            period=period, channel=channel
+            period=period, channel=channel, status=ApprovalStatus.APPROVED
         ).select_related("province").order_by("-sales_rial")]
 
         return Response({

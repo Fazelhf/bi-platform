@@ -1,21 +1,14 @@
 """
-Rebuild both CRM datasets from scratch, in the one order that works.
+Rebuild the CRM from scratch, in the one order that works.
 
-Why a command rather than three commands in a row: the two loaders each clear
-only their own half, and on a database whose rows were mislabelled by an
-earlier migration the halves reference each other — a demo `DealItem` pointing
-at a `Product` tagged real, which `PROTECT` then refuses to let go. Untangling
-that by hand means running the right commands in the right order and knowing
-why, which is not something anyone should have to work out on a production
-server at speed.
-
-This deletes everything CRM-side, both datasets, and rebuilds:
-
-    real → the دیدار export in backend/data/didar
-    demo → the generated showroom
+This deletes everything CRM-side and re-imports the دیدار export in
+backend/data/didar. Deletion order matters: `PROTECT` on DealItem.product and
+on the dimension keys refuses a parent while a child still points at it.
 
     python manage.py reset_crm --yes
-    python manage.py reset_crm --yes --skip-demo
+
+(There used to be a generated demo set as well. It was removed; this command
+also clears any demo rows an old database still holds.)
 
 It refuses to run without --yes, and it says what it is about to destroy
 first. It is a repair tool, not part of deploy: `deploy.sh` calls the two
@@ -53,16 +46,12 @@ ORDER = (
 
 
 class Command(BaseCommand):
-    help = "پاک‌سازی کامل CRM و ساخت دوباره‌ی داده‌ی واقعی و نمایشی."
+    help = "پاک‌سازی کامل CRM و ورود دوباره‌ی داده‌ی واقعی از دیدار."
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--yes", action="store_true",
             help="تأیید حذف همه‌ی داده‌ی CRM. بدون این، دستور اجرا نمی‌شود.",
-        )
-        parser.add_argument(
-            "--skip-demo", action="store_true",
-            help="فقط داده‌ی واقعی را وارد کن؛ داده‌ی نمایشی ساخته نشود.",
         )
         parser.add_argument(
             "--dir", default=None, help="پوشه‌ی خروجی‌های دیدار.",
@@ -95,24 +84,7 @@ class Command(BaseCommand):
             import_kwargs["dir"] = options["dir"]
         call_command("import_didar_crm", **import_kwargs)
 
-        if not options["skip_demo"]:
-            self.stdout.write("\n▸ ساخت داده‌ی نمایشی…")
-            call_command("seed_crm")
-
         self.stdout.write("")
-        real = Customer.objects.filter(dataset="real").count()
-        demo = Customer.objects.filter(dataset="demo").count()
-        stray = Customer.objects.filter(dataset="real").exclude(
-            code__startswith="didar-"
-        ).count()
         self.stdout.write(self.style.SUCCESS(
-            f"✔ واقعی: {real} مشتری · نمایشی: {demo} مشتری"
+            f"✔ {Customer.objects.count()} مشتری وارد شد."
         ))
-        if stray:
-            # Should be zero by construction; if it is not, the tagging in
-            # seed_crm has drifted again and the showroom is leaking into the
-            # real file, which is worth shouting about rather than discovering
-            # on a dashboard.
-            self.stderr.write(
-                f"⚠ {stray} مشتری با برچسب «واقعی» از دیدار نیامده — بررسی کنید."
-            )

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useClickOutside } from "@/composables/useClickOutside";
-import { matches, ordered, type PickerOption } from "@/components/picker";
+import { MODAL_LAYER, matches, ordered, type PickerOption } from "@/components/picker";
 
 /**
  * انتخاب با جستجو — a select you can type into.
@@ -68,6 +68,15 @@ const pos = ref({ top: 0, left: 0, width: 240 });
 
 const GAP = 4;
 const MAX_PANEL_H = 320;
+
+/**
+ * Stacked modals: a form can open another form on top of itself, and this
+ * panel has to clear its own modal without covering the one above it.
+ * FormModal provides the level; outside a modal there is none and the panel
+ * keeps its old fixed z-index.
+ */
+const layer = inject(MODAL_LAYER, null);
+const panelZ = computed(() => 210 + (layer?.value ?? 0) * 150);
 
 const selected = computed(
   () => props.options.find((o) => o.value === props.modelValue) ?? null,
@@ -287,11 +296,12 @@ const box =
       <div
         v-if="open"
         ref="panel"
-        class="fixed bg-surface rounded-2xl shadow-pop border border-slate-100 z-[210] overflow-hidden animate-pop"
+        class="fixed bg-surface rounded-2xl shadow-pop border border-slate-100 overflow-hidden animate-pop"
         :style="{
           top: pos.top + 'px',
           left: pos.left + 'px',
           width: Math.max(pos.width, 220) + 'px',
+          zIndex: panelZ,
         }"
         dir="rtl"
       >

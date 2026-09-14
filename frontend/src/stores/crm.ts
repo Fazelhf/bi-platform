@@ -42,6 +42,13 @@ export const useCrmStore = defineStore("crm", {
     } as Filters,
     // Drill-down drawer, driven from anywhere in the CRM.
     drill: null as { drill: Drill; title: string } | null,
+    /**
+     * Bumped whenever something is saved from outside the page showing it —
+     * the global «ثبت جدید» button, chiefly. A list cannot know that a deal
+     * was just created over the top of it, and a rep who adds a customer and
+     * does not see it appear concludes the save failed and adds it again.
+     */
+    revision: 0,
   }),
 
   getters: {
@@ -93,6 +100,30 @@ export const useCrmStore = defineStore("crm", {
       state.options?.employees.find((e) => e.id === id)?.name ?? "—",
 
     canEdit: (state) => !!state.me?.can_edit,
+
+    /**
+     * The one distinction the whole section is arranged around.
+     *
+     * A manager supervises and therefore sees the team; a کارشناس works their
+     * own book and the API answers only with their rows. Every difference in
+     * the UI — which filters appear, which columns are worth their width,
+     * whether «کارشناس» is a question or a statement — reads this rather than
+     * re-deriving it from role names.
+     */
+    isManager: (state) => !!state.me?.is_manager,
+    seesAll: (state) => !!state.me?.sees_all,
+    /** In a sales department but linked to no salesperson row. */
+    unlinked: (state) => !!state.me?.unlinked,
+
+    /**
+     * Which department's customer file is on screen.
+     *
+     * The three sales departments now share these screens and keep separate
+     * books, so «CRM» on its own no longer says whose customers these are.
+     * Empty for the CEO and admins, who read all three and for whom naming
+     * one would be a lie.
+     */
+    bookLabel: (state) => state.me?.channel_label ?? "",
   },
 
   actions: {
@@ -121,6 +152,11 @@ export const useCrmStore = defineStore("crm", {
         }
       })();
       return inFlight;
+    },
+
+    /** Tell every open list that the data under it changed. */
+    bump() {
+      this.revision += 1;
     },
 
     openDrill(drill: Drill, title: string) {

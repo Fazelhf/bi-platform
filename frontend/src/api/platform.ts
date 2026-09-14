@@ -143,7 +143,43 @@ export const crudApi = {
 };
 
 // ---------------- Approval inbox ----------------
+/** One sales sheet in the کارتابل: a channel's whole period, decided as one. */
+export interface SalesSheet {
+  key: string;
+  period: { id: number; label: string; kind: "month" | "week" | "day" };
+  channel: string;
+  channel_label: string;
+  status: string;
+  submitted_by: string;
+  submitted_at: string | null;
+  salespeople: ({ employee_id: number; name: string } & Record<string, any>)[];
+  provinces: { province_id: number; name: string; sales_rial: string }[];
+  customer_groups: {
+    group_id: number; name: string; sales_rial: string; profit_rial: string; invoice_count: number;
+  }[];
+  totals: {
+    people_revenue_rial: string;
+    province_sales_rial: string;
+    salespeople: number;
+    provinces: number;
+    customer_groups: number;
+  };
+}
+
 export const inboxApi = {
+  async salesSheets(status = "submitted"): Promise<SalesSheet[]> {
+    const { data } = await api.get("/sales/approvals/", { params: { status } });
+    return data.sheets;
+  },
+  async decideSalesSheet(
+    period: number,
+    channel: string,
+    action: "approve" | "reject" | "request-revision",
+    note = "",
+  ) {
+    const { data } = await api.post("/sales/approvals/decide/", { period, channel, action, note });
+    return data;
+  },
   async pendingSales() {
     const { data } = await api.get("/sales/sales-monthly/", {
       params: { status: "submitted", page_size: 100 },

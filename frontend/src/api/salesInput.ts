@@ -12,6 +12,12 @@ export interface SalesInput {
   all_provinces: { id: number; name: string }[];
   /** B2B only — empty for the other channels, which report no segment split. */
   customer_groups: CustomerGroupRow[];
+  /** True when the period is split: the sheet is the read-only sum of its leaves. */
+  is_rollup?: boolean;
+  /** Measures that take the latest value instead of adding up. */
+  stock_fields?: string[];
+  /** One entry per week (or day) of a split period, with that child's totals. */
+  breakdown?: { period_id: number; seq: number; label: string; totals: Record<string, string> }[];
 }
 
 export interface CustomerGroupRow {

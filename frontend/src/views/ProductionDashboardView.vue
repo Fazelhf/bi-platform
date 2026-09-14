@@ -44,19 +44,31 @@ const kpiRows = computed(() =>
   KPI_ORDER.map((c) => kpi(c)).filter((k): k is KpiResult => !!k),
 );
 
+/**
+ * Counts requests so only the newest answer is ever shown. Switching months
+ * quickly fires two loads, and if the older one returns last it would paint
+ * last month's figures under this month's label.
+ */
+let latest = 0;
+
 async function load() {
   if (!selectedPeriod.value) return;
+  const mine = ++latest;
   loading.value = true;
   try {
-    data.value = await productionApi.dashboard(selectedPeriod.value);
+    const result = await productionApi.dashboard(selectedPeriod.value);
+    if (mine === latest) data.value = result;
   } finally {
-    loading.value = false;
+    if (mine === latest) loading.value = false;
   }
 }
 onMounted(async () => {
   periods.value = await salesApi.periods();
+  // Setting the period *is* the load: the watcher below fires on it. This
+  // used to call load() here as well, so every visit fetched the dashboard
+  // twice — and the second answer arrived while the charts were still drawing
+  // the first, which is what left تولید stuck on screen after navigating away.
   selectedPeriod.value = defaultPeriodId(periods.value);
-  await load();
 });
 watch(selectedPeriod, load);
 

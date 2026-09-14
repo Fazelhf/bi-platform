@@ -39,6 +39,41 @@ const selectedDay = ref<number | null>(null);
 const weeks = computed(() => progress.value?.weeks ?? []);
 const isWeekly = computed(() => weeks.value.length > 1);
 
+/**
+ * «کل ماه» — the month as the sum of its weeks, read-only. Figures are still
+ * entered one week at a time; this is where the manager checks they add up,
+ * without opening four sheets and adding them by hand.
+ */
+const monthView = ref(false);
+const readonly = computed(() => !!data.value?.is_rollup);
+
+function openMonthView() {
+  if (monthView.value) return;
+  monthView.value = true;
+  load();
+}
+
+function pickWeek(id: number) {
+  const wasMonth = monthView.value;
+  monthView.value = false;
+  if (selectedWeek.value === id) {
+    if (wasMonth) load();
+  } else {
+    selectedWeek.value = id;
+  }
+}
+
+const isStock = (field: string) => (data.value?.stock_fields ?? []).includes(field);
+
+function breakdownSum(field: string): number {
+  return (data.value?.breakdown ?? []).reduce((s, w) => s + Number(w.totals[field] || 0), 0);
+}
+
+/** Flow measures only: the month column should equal the weeks added up. */
+function matches(field: string): boolean {
+  return Math.abs(rowTotal(field) - breakdownSum(field)) < 0.5;
+}
+
 /** The days of the week being filled in — empty unless this month is daily. */
 const days = computed(
   () => weeks.value.find((w) => w.id === selectedWeek.value)?.day_periods ?? [],
@@ -51,6 +86,7 @@ const isDaily = computed(() => days.value.length > 0);
  * month itself otherwise.
  */
 const selectedPeriod = computed(() => {
+  if (monthView.value) return selectedMonth.value;
   if (isDaily.value) return selectedDay.value;
   return isWeekly.value ? selectedWeek.value : selectedMonth.value;
 });
@@ -95,6 +131,7 @@ async function refreshProgress() {
 }
 
 async function loadMonth() {
+  monthView.value = false;
   await refreshProgress();
   // Land on the first week that still needs filling in, else the last one.
   if (isWeekly.value) {
@@ -332,6 +369,20 @@ async function removeGroup(groupId: number, name: string) {
   }
 }
 
+/**
+ * After a week is sent for approval, move on to the next one still empty.
+ *
+ * Only on ارسال — finishing a week is the one moment when moving somewhere
+ * else is what the person wants — and only when an empty week actually
+ * exists. With no such week the old code fell back to «the last one», which
+ * is how ذخیره became a button that teleported you to هفته ۴.
+ */
+function advanceToNextEmpty() {
+  if (!isWeekly.value) return;
+  const next = weeks.value.find((w) => w.state === "empty");
+  if (next && next.id !== selectedWeek.value) selectedWeek.value = next.id;
+}
+
 async function save(submit: boolean) {
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
   try {
@@ -347,9 +398,15 @@ async function save(submit: boolean) {
     removedEmployeeIds.value = [];
     saving.value = "";
     toast.success(submit ? "برای تایید مدیرعامل ارسال شد." : "پیش‌نویس ذخیره شد.");
-    // Refresh the strip so this week's dot changes colour.
-    await loadMonth();
-    if (submit) await load();
+    // Refresh the dots and the sheet, but stay on the week being filled in.
+    //
+    // This used to call loadMonth(), which does not just re-read the strip —
+    // it re-picks the week, landing on the first one still empty or, when
+    // none is, on the last. So pressing «ذخیره پیش‌نویس» in هفته ۲ of a month
+    // whose weeks were all started threw the person into هفته ۴, looking at
+    // figures they had not asked for. Saving is not navigation.
+    await Promise.all([refreshProgress(), load()]);
+    if (submit) advanceToNextEmpty();
   } catch (e: any) {
     saving.value = "";
     toast.error(e?.response?.status === 403 ? "دسترسی ندارید." : "ذخیره نشد.");
@@ -398,14 +455,22 @@ watch(selectedDay, load);
      <div class="flex items-center gap-2 flex-wrap">
       <span class="text-xs text-slate-500 px-1">هفته:</span>
       <button
+        class="px-3 py-1.5 rounded-xl text-sm transition-colors border"
+        :class="monthView
+          ? 'bg-panel text-white border-panel'
+          : 'bg-surface hover:bg-slate-50 text-accent-600 border-accent-500/40'"
+        title="جمع همه‌ی هفته‌های این ماه — فقط برای دیدن"
+        @click="openMonthView"
+      >کل ماه</button>
+      <button
         v-for="w in weeks"
         :key="w.id"
         class="px-3 py-1.5 rounded-xl text-sm transition-colors flex items-center gap-1.5"
-        :class="selectedWeek === w.id
+        :class="!monthView && selectedWeek === w.id
           ? 'bg-panel text-white'
           : 'bg-slate-50 hover:bg-slate-100 text-slate-600'"
         :title="`${w.days} روز`"
-        @click="selectedWeek = w.id"
+        @click="pickWeek(w.id)"
       >
         <span
           class="w-2 h-2 rounded-full"
@@ -429,7 +494,7 @@ watch(selectedDay, load);
 
      <!-- Day picker: one level below the week, when this month is daily.
           Figures live on the day, so this is the row actually being written. -->
-     <div v-if="isDaily" class="flex items-center gap-1.5 flex-wrap border-t border-slate-100 pt-3">
+     <div v-if="isDaily && !monthView" class="flex items-center gap-1.5 flex-wrap border-t border-slate-100 pt-3">
        <span class="text-xs text-slate-500 px-1">روز:</span>
        <button
          v-for="d in days"
@@ -466,6 +531,12 @@ watch(selectedDay, load);
        />
      </div>
 
+     <p v-else-if="monthView" class="text-xs text-slate-500 px-1">
+       نمایش
+       <span class="font-medium text-ink">کل {{ periods.find(p => p.id === selectedMonth)?.label }}</span>
+       — جمع همه‌ی هفته‌ها، فقط خواندنی. برای ویرایش یک هفته را انتخاب کنید.
+     </p>
+
      <p v-else-if="currentWeek" class="text-xs text-slate-500 px-1">
        در حال ثبت
        <span class="font-medium text-ink">هفته {{ currentWeek.seq }}</span>
@@ -481,11 +552,74 @@ watch(selectedDay, load);
     <div v-if="loading || !data" class="text-slate-400">در حال بارگذاری…</div>
 
     <template v-else>
+      <!-- «کل ماه»: the weeks side by side, the month as their sum -->
+      <section v-if="readonly" class="bg-surface rounded-card shadow-soft p-5">
+        <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <h3 class="font-bold text-ink">جمع هفته‌ها = ماه</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-5 max-w-2xl">
+              این نما فقط برای دیدن است؛ ارقام در هر هفته وارد می‌شوند.
+              جدول‌های پایین جمع کل ماه به تفکیک فروشنده، استان و گروه مشتری است.
+            </p>
+          </div>
+          <span
+            v-if="progress"
+            class="text-xs rounded-full px-2.5 py-1"
+            :class="progress.complete ? 'bg-accent-50 text-accent-600' : 'bg-amber-50 text-amber-600'"
+          >{{ progress.complete ? "✓ همه‌ی هفته‌ها ثبت شده" : `${progress.entered} از ${progress.total} هفته ثبت شده` }}</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-[11px] text-slate-400 border-b border-slate-100">
+                <th class="text-right font-medium pb-2 pe-3">شاخص</th>
+                <th
+                  v-for="w in data.breakdown" :key="w.period_id"
+                  class="text-left font-medium pb-2 px-2 whitespace-nowrap"
+                >{{ w.label }}</th>
+                <th class="text-left font-medium pb-2 px-2 text-accent-600 whitespace-nowrap">جمع ماه</th>
+                <th class="pb-2 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="m in data.metric_rows.filter((r) => !isLocked(r.field))" :key="`b-${m.field}`"
+                class="border-b border-slate-50 last:border-0"
+              >
+                <td class="py-1.5 pe-3 whitespace-nowrap text-slate-600">
+                  {{ m.label }}
+                  <span v-if="isStock(m.field)" class="text-[10px] text-slate-400">(آخرین مقدار)</span>
+                </td>
+                <td
+                  v-for="w in data.breakdown" :key="w.period_id"
+                  class="py-1.5 px-2 text-left ltr-nums text-slate-500"
+                >{{ num(Number(w.totals[m.field] || 0)) }}</td>
+                <td class="py-1.5 px-2 text-left ltr-nums font-bold text-ink">{{ num(rowTotal(m.field)) }}</td>
+                <td class="py-1.5 text-center text-xs">
+                  <span
+                    v-if="isStock(m.field)"
+                    class="text-slate-300"
+                    title="این شاخص وضعیت است نه جریان؛ ماه آخرین مقدار را نشان می‌دهد، نه جمع هفته‌ها"
+                  >—</span>
+                  <span v-else-if="matches(m.field)" class="text-accent-600" title="جمع هفته‌ها با ماه برابر است">✓</span>
+                  <span
+                    v-else
+                    class="text-red-500"
+                    :title="`اختلاف: ${num(rowTotal(m.field) - breakdownSum(m.field))}`"
+                  >✗</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- Main table: metrics as rows, salespeople as columns -->
       <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-bold text-ink">جدول عملکرد فروشندگان</h3>
-          <button class="text-sm bg-accent-500 hover:bg-accent-600 text-white rounded-xl px-3 py-1.5 transition-colors" @click="openAddPicker">
+          <span v-if="readonly" class="text-xs text-slate-400">جمع کل ماه — فقط خواندنی</span>
+          <button v-else class="text-sm bg-accent-500 hover:bg-accent-600 text-white rounded-xl px-3 py-1.5 transition-colors" @click="openAddPicker">
             + افزودن فروشنده
           </button>
         </div>
@@ -500,7 +634,8 @@ watch(selectedDay, load);
               <tr>
                 <th class="text-right font-medium text-slate-500 py-2 px-3 sticky right-0 bg-surface z-10 min-w-[150px]">شاخص</th>
                 <th v-for="(c, i) in data.columns" :key="i" class="font-medium py-2 px-2 min-w-[130px]">
-                  <div class="flex items-center justify-center gap-1">
+                  <div v-if="readonly" class="text-center text-xs text-ink px-2 py-1">{{ c.name }}</div>
+                  <div v-else class="flex items-center justify-center gap-1">
                     <input
                       v-model="c.name"
                       class="w-24 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1 text-center text-xs outline-none"
@@ -522,9 +657,9 @@ watch(selectedDay, load);
                 </td>
                 <td v-for="(c, i) in data.columns" :key="i" class="py-1 px-1">
                   <div
-                    v-if="isLocked(m.field)"
+                    v-if="isLocked(m.field) || readonly"
                     class="w-full px-2 py-1.5 text-center ltr-nums text-slate-500 bg-slate-100/60 rounded-lg cursor-not-allowed"
-                    title="تارگت توسط مدیرعامل تعیین می‌شود"
+                    :title="isLocked(m.field) ? 'تارگت توسط مدیرعامل تعیین می‌شود' : 'جمع هفته‌ها — برای ویرایش یک هفته را انتخاب کنید'"
                   >{{ num(Number(c[m.field] || 0)) }}</div>
                   <MoneyInput
                     v-else-if="isMoney(m.field)"
@@ -622,7 +757,9 @@ watch(selectedDay, load);
               >
                 <td class="py-1 text-slate-600 whitespace-nowrap">{{ p.name }}</td>
                 <td class="py-1">
+                  <div v-if="readonly" class="px-2 py-1.5 text-left ltr-nums text-ink">{{ num(Number(p.sales_rial || 0)) }}</div>
                   <MoneyInput
+                    v-else
                     v-model="p.sales_rial" placeholder="۰"
                     class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none"
                   />
@@ -662,6 +799,7 @@ watch(selectedDay, load);
               جمع فروش گروه‌ها باید با کل فروش این ماه بخواند
             </span>
             <button
+              v-if="!readonly"
               class="text-xs px-2.5 py-1 rounded-lg transition"
               :class="manageGroups
                 ? 'bg-panel text-white'
@@ -754,13 +892,17 @@ watch(selectedDay, load);
             >
               <td class="py-1.5 text-ink">{{ g.name }}</td>
               <td class="py-1.5">
-                <MoneyInput v-model="g.sales_rial" class="w-full" />
+                <span v-if="readonly" class="ltr-nums">{{ num(Number(g.sales_rial || 0)) }}</span>
+                <MoneyInput v-else v-model="g.sales_rial" class="w-full" />
               </td>
               <td class="py-1.5">
-                <MoneyInput v-model="g.profit_rial" class="w-full" />
+                <span v-if="readonly" class="ltr-nums">{{ num(Number(g.profit_rial || 0)) }}</span>
+                <MoneyInput v-else v-model="g.profit_rial" class="w-full" />
               </td>
               <td class="py-1.5">
+                <span v-if="readonly" class="ltr-nums">{{ num(Number(g.invoice_count || 0)) }}</span>
                 <input
+                  v-else
                   v-model="g.invoice_count"
                   type="number" min="0"
                   class="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-left ltr-nums bg-surface focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
@@ -777,7 +919,7 @@ watch(selectedDay, load);
       <!-- Sticky action bar -->
       <!-- z-30: the table's frozen first/last columns are z-10/z-20, so without
            this the sheet scrolled over the save buttons. -->
-      <div class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+      <div v-if="!readonly" class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
         <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm transition-colors" @click="save(false)">ذخیره پیش‌نویس</button>
