@@ -54,6 +54,10 @@ async function load() {
 }
 
 onMounted(async () => { await crm.loadOptions(); await load(); });
+// Something was saved from the global «ثبت جدید» button over the top of this
+// page; the list under it is now stale.
+watch(() => crm.revision, load);
+
 watch(() => crm.query, () => { page.value = 1; load(); }, { deep: true });
 watch([kind, result, taskState, tab], () => { page.value = 1; load(); });
 watch(page, load);
@@ -176,7 +180,7 @@ function isOverdue(t: any) {
             >{{ a.customer_name }}</button>
             <p v-if="a.note" class="text-xs text-slate-400 mt-1">{{ a.note }}</p>
             <div class="flex items-center justify-between gap-2 mt-1.5 text-xs text-slate-400">
-              <span class="truncate">{{ a.owner_name }} · {{ num(a.duration_min) }}′</span>
+              <span class="truncate"><template v-if="crm.seesAll">{{ a.owner_name }} · </template>{{ num(a.duration_min) }}′</span>
               <span class="shrink-0 ltr-nums">{{ a.at_jalali }}</span>
             </div>
           </li>
@@ -188,7 +192,7 @@ function isOverdue(t: any) {
               <tr class="text-xs text-slate-400 bg-slate-50">
                 <th class="text-right font-medium px-4 py-3">نوع</th>
                 <th class="text-right font-medium px-3">مشتری</th>
-                <th class="text-right font-medium px-3">کارشناس</th>
+                <th v-if="crm.seesAll" class="text-right font-medium px-3">کارشناس</th>
                 <th class="text-right font-medium px-3">نتیجه</th>
                 <th class="text-left font-medium px-3">مدت</th>
                 <th class="text-right font-medium px-4">تاریخ</th>
@@ -210,7 +214,7 @@ function isOverdue(t: any) {
                     {{ a.customer_name }}
                   </button>
                 </td>
-                <td class="px-3 text-slate-500">{{ a.owner_name }}</td>
+                <td v-if="crm.seesAll" class="px-3 text-slate-500">{{ a.owner_name }}</td>
                 <td class="px-3"><span class="text-[11px] rounded-full px-2 py-0.5" :class="resultClass[a.result]">{{ a.result_display }}</span></td>
                 <td class="px-3 text-left text-slate-500">{{ num(a.duration_min) }}′</td>
                 <td class="px-4 text-xs text-slate-400 whitespace-nowrap">{{ a.at_jalali }}</td>
@@ -246,7 +250,7 @@ function isOverdue(t: any) {
           <div class="min-w-0 flex-1">
             <p class="text-sm text-ink" :class="t2.is_done ? 'line-through text-slate-400' : ''">{{ t2.title }}</p>
             <p class="text-xs text-slate-400">
-              {{ t2.customer_name }} · {{ t2.owner_name }} · {{ t2.kind_display }}
+              {{ t2.customer_name }} <template v-if="crm.seesAll">· {{ t2.owner_name }} </template>· {{ t2.kind_display }}
             </p>
           </div>
           <span

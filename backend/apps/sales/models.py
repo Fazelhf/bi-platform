@@ -103,6 +103,9 @@ class SalesChannel(models.TextChoices):
     TEAM = "team", "فروش همکار"
     ORGANIZATIONAL = "organizational", "فروش بانکی"
     B2B = "b2b", "فروش B2B"
+    #: Card-terminal sales. Added with the budget's sales forecast, which
+    #: plans all four channels side by side.
+    PSP = "psp", "فروش PSP"
 
 
 class EmployeeChannel(TimeStampedModel):
@@ -245,6 +248,22 @@ class FactSalesProvince(TimeStampedModel):
     sales_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     target_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
 
+    # Approval workflow — the same one as FactSalesMonthly. This row is part of
+    # a sales *sheet* and is approved together with the salesperson rows of the
+    # same channel and period (apps.sales.services.approval_sheets). It carried
+    # no status before, so it reached the dashboards the moment it was saved.
+    status = models.CharField(
+        max_length=16, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+
     class Meta:
         unique_together = ("period", "province", "channel")
 
@@ -297,6 +316,22 @@ class FactSalesByCustomerGroup(TimeStampedModel):
     sales_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     profit_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     invoice_count = models.PositiveIntegerField(default=0)
+
+    # Approval workflow — the same one as FactSalesMonthly. This row is part of
+    # a sales *sheet* and is approved together with the salesperson rows of the
+    # same channel and period (apps.sales.services.approval_sheets). It carried
+    # no status before, so it reached the dashboards the moment it was saved.
+    status = models.CharField(
+        max_length=16, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
 
     class Meta:
         unique_together = ("period", "customer_group", "channel")

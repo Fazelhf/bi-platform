@@ -36,9 +36,11 @@ from apps.crm.management.commands.import_arpa_invoices import (
 from apps.crm.matching import CustomerIndex, Method
 from apps.crm.management.commands.import_didar_crm import Command as ImportCommand, fit
 from apps.crm.models import (
-    Customer, CustomerExternalRef, CustomerMatchCandidate, Dataset, Deal, DealItem, ExternalSource,
-    PipelineStage, Product, SalesInvoice, SalesInvoiceItem,
+    Activity, Customer, CustomerExternalRef, CustomerMatchCandidate, Dataset,
+    Deal, DealItem, ExternalSource, PipelineStage, Product, SalesInvoice,
+    SalesInvoiceItem,
 )
+from apps.sales.models import DimEmployee, EmployeeChannel, SalesChannel
 
 
 def _user(username, role, department="", dataset="real"):
@@ -76,44 +78,42 @@ class DatasetTestCase(APITestCase):
 
 
 class DatasetIsolationTests(DatasetTestCase):
-    def test_list_shows_only_the_account_s_dataset(self):
+    """
+    The demo showroom was removed. Old databases still hold `dataset` values
+    and old accounts still hold a `crm_dataset` preference; neither may bring
+    a fabricated row back onto a screen.
+    """
+
+    def test_an_old_demo_preference_still_reads_the_real_file(self):
+        self.ceo.crm_dataset = "demo"
+        self.ceo.save(update_fields=["crm_dataset"])
         self.client.force_authenticate(self.ceo)
 
         names = [r["name_fa"] for r in self.client.get("/api/crm/customers/").data["results"]]
         self.assertEqual(names, ["بانک ملی خراسان رضوی"])
 
-        self.ceo.crm_dataset = "demo"
-        self.ceo.save(update_fields=["crm_dataset"])
-        names = [r["name_fa"] for r in self.client.get("/api/crm/customers/").data["results"]]
-        self.assertEqual(names, ["مشتری نمایشی"])
-
-    def test_created_rows_join_the_dataset_on_screen(self):
-        """Adding a customer while looking at the showroom must not file it
-        with the real ones, where nobody would think to look for it."""
-        self.client.force_authenticate(self.rep)
+    def test_new_rows_are_always_real(self):
         self.rep.crm_dataset = "demo"
         self.rep.save(update_fields=["crm_dataset"])
+        self.client.force_authenticate(self.rep)
 
         res = self.client.post("/api/crm/customers/", {"name_fa": "مشتری تازه"})
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(
-            Customer.objects.get(name_fa="مشتری تازه").dataset, Dataset.DEMO
+            Customer.objects.get(name_fa="مشتری تازه").dataset, Dataset.REAL
         )
 
-    def test_switch_endpoint_stores_the_choice_and_refuses_junk(self):
+    def test_the_switch_endpoint_is_gone(self):
+        # Checked by URL resolution rather than by requesting it: an unmatched
+        # URL renders Django's debug 404 page, whose template-context copy
+        # breaks under Python 3.14 on this Django version — an unrelated error
+        # that would mask what this test is about.
+        from django.urls import Resolver404, resolve
+        with self.assertRaises(Resolver404):
+            resolve("/api/crm/dataset/")
+
         self.client.force_authenticate(self.rep)
-
-        self.assertEqual(
-            self.client.post("/api/crm/dataset/", {"dataset": "demo"}).status_code, 200
-        )
-        self.rep.refresh_from_db()
-        self.assertEqual(self.rep.crm_dataset, "demo")
-
-        self.assertEqual(
-            self.client.post("/api/crm/dataset/", {"dataset": "prod"}).status_code, 400
-        )
-        self.rep.refresh_from_db()
-        self.assertEqual(self.rep.crm_dataset, "demo")
+        self.assertNotIn("dataset", self.client.get("/api/crm/me/").data)
 
     def test_funnel_stages_do_not_mix_the_two_vocabularies(self):
         """
@@ -161,42 +161,6 @@ class ImportGuardTests(DatasetTestCase):
         cmd._clear_mislabelled()
 
         self.assertFalse(Customer.objects.filter(dataset=Dataset.REAL).exists())
-
-
-class CrossDatasetReferenceTests(DatasetTestCase):
-    """
-    The failure that stopped the repair on the server.
-
-    `seed_crm` upserts its reference lists by code, so a run that finds a
-    Product already there does not touch `created_at` — and tagging by time
-    alone left it wearing whatever label it arrived with. The showroom's
-    DealItems then pointed at a Product tagged «واقعی», and PROTECT refused to
-    let the real import delete it. Nothing is wrong on screen; it only breaks
-    the next reload, which is the worst moment to find out.
-    """
-
-    def test_a_demo_line_may_not_hold_a_real_product(self):
-        real_product = Product.objects.create(
-            code="pr-thermal", name_fa="رول حرارتی", dataset=Dataset.REAL,
-        )
-        demo_deal = Deal.objects.get(code="deal-9001")
-        DealItem.objects.create(
-            deal=demo_deal, product=real_product, quantity=1,
-            unit_price_rial=1000, dataset=Dataset.DEMO,
-        )
-
-        crossed = DealItem.objects.filter(dataset=Dataset.DEMO).exclude(
-            product__dataset=Dataset.DEMO
-        )
-        self.assertEqual(
-            crossed.count(), 1,
-            "this fixture is the broken shape — the assertion below is the point",
-        )
-        # And the real product cannot be removed while it is held, which is
-        # exactly the ProtectedError the server raised.
-        from django.db.models import ProtectedError
-        with self.assertRaises(ProtectedError):
-            Product.objects.filter(dataset=Dataset.REAL).delete()
 
 
 class ColumnWidthTests(APITestCase):
@@ -805,14 +769,14 @@ class MergeReviewApiTests(DatasetTestCase):
         # The weight behind the decision, not just the two names.
         self.assertIn("deals", row["crm"])
 
-    def test_the_queue_is_scoped_to_the_account_dataset(self):
-        """A candidate against a real customer must not surface in the
-        showroom, where accepting it would edit the company's actual file."""
+    def test_an_old_demo_preference_does_not_hide_the_queue(self):
+        """The showroom is gone; an account that last looked at it must still
+        see the real queue rather than an empty one."""
         self.client.force_authenticate(self.ceo)
         self.ceo.crm_dataset = "demo"
         self.ceo.save(update_fields=["crm_dataset"])
         res = self.client.get("/api/crm/match-candidates/")
-        self.assertEqual(res.data["count"], 0)
+        self.assertEqual(res.data["count"], 1)
 
     def test_accepting_over_http_links_the_party(self):
         self.client.force_authenticate(self.ceo)
@@ -1095,3 +1059,370 @@ class BulkDeleteTests(APITestCase):
             "/api/crm/customers/bulk-delete/", {"ids": []}, format="json"
         )
         self.assertEqual(res.status_code, 400)
+
+
+# --------------------------------------------------------------------------
+# Row-level scope
+# --------------------------------------------------------------------------
+class ScopeTests(APITestCase):
+    """
+    Each کارشناس has their own login and their own book.
+
+    This is the whole reason a rep can be given an account: the guarantee is
+    not "the screen does not show a button for other people's customers", it
+    is "the API does not answer for them". So every test here goes at the API,
+    by-id routes included — a list that filters and a `retrieve` that does not
+    is a leak you find by guessing an integer.
+    """
+
+    def setUp(self):
+        now = timezone.now()
+        self.mine = DimEmployee.objects.create(code="e-mine", full_name_fa="کارشناس من")
+        self.theirs = DimEmployee.objects.create(code="e-theirs", full_name_fa="کارشناس دیگر")
+
+        self.rep = _user("rep1", "operator", "sales_team")
+        self.mine.user = self.rep
+        self.mine.save(update_fields=["user"])
+
+        self.other_rep = _user("rep2", "operator", "sales_team")
+        self.theirs.user = self.other_rep
+        self.theirs.save(update_fields=["user"])
+
+        self.boss = _user("boss", "manager", "sales_team")
+        # In a CRM department but never linked to a salesperson row.
+        self.unlinked = _user("ghost", "operator", "sales_b2b")
+
+        self.stage = PipelineStage.objects.create(
+            code="s-open", name_fa="ارتباط مشتری", kind="open", order=1,
+            probability_pct=10, dataset=Dataset.REAL,
+        )
+        self.product = Product.objects.create(
+            code="p-1", name_fa="کالا", dataset=Dataset.REAL,
+            list_price_rial=1000, unit_cost_rial=400,
+        )
+
+        self.my_customer = Customer.objects.create(
+            code="c-mine", name_fa="مشتری من", owner=self.mine,
+            dataset=Dataset.REAL, first_contact_at=now - timedelta(days=10),
+        )
+        self.their_customer = Customer.objects.create(
+            code="c-theirs", name_fa="مشتری دیگری", owner=self.theirs,
+            dataset=Dataset.REAL, first_contact_at=now - timedelta(days=10),
+        )
+        self.my_deal = Deal.objects.create(
+            code="d-mine", title="معامله من", customer=self.my_customer,
+            owner=self.mine, stage=self.stage, dataset=Dataset.REAL,
+            opened_at=now - timedelta(days=5),
+        )
+        self.their_deal = Deal.objects.create(
+            code="d-theirs", title="معامله دیگری", customer=self.their_customer,
+            owner=self.theirs, stage=self.stage, dataset=Dataset.REAL,
+            opened_at=now - timedelta(days=5),
+        )
+        self.their_item = DealItem.objects.create(
+            deal=self.their_deal, product=self.product, quantity=1,
+            unit_price_rial=1000, unit_cost_rial=400, dataset=Dataset.REAL,
+        )
+        for owner, customer in ((self.mine, self.my_customer),
+                                (self.theirs, self.their_customer)):
+            Activity.objects.create(
+                kind="call_out", customer=customer, owner=owner,
+                at=now - timedelta(days=1), dataset=Dataset.REAL,
+            )
+
+    # ---- reading ---------------------------------------------------------
+    def test_rep_lists_only_their_own_customers(self):
+        self.client.force_authenticate(self.rep)
+        rows = self.client.get("/api/crm/customers/").data["results"]
+        self.assertEqual([r["name_fa"] for r in rows], ["مشتری من"])
+
+    def test_rep_lists_only_their_own_deals_and_activities(self):
+        self.client.force_authenticate(self.rep)
+        deals = self.client.get("/api/crm/deals/", {"status": "open"}).data["results"]
+        self.assertEqual([d["title"] for d in deals], ["معامله من"])
+
+        acts = self.client.get("/api/crm/activities/").data["results"]
+        self.assertEqual([a["customer_name"] for a in acts], ["مشتری من"])
+
+    def test_manager_lists_the_whole_team(self):
+        self.client.force_authenticate(self.boss)
+        names = {r["name_fa"] for r in self.client.get("/api/crm/customers/").data["results"]}
+        self.assertEqual(names, {"مشتری من", "مشتری دیگری"})
+
+    def test_rep_cannot_fetch_another_reps_record_by_id(self):
+        """The half a filtered list does not cover."""
+        self.client.force_authenticate(self.rep)
+        self.assertEqual(
+            self.client.get("/api/crm/deals/%d/" % self.their_deal.id).status_code, 404
+        )
+        self.assertEqual(
+            self.client.get("/api/crm/customers/%d/" % self.their_customer.id).status_code, 404
+        )
+        self.assertEqual(
+            self.client.get("/api/crm/deal-items/%d/" % self.their_item.id).status_code, 404
+        )
+
+    def test_rep_cannot_read_another_reps_deal_lines(self):
+        self.client.force_authenticate(self.rep)
+        rows = self.client.get(
+            "/api/crm/deal-items/", {"deal": self.their_deal.id}
+        ).data["results"]
+        self.assertEqual(rows, [])
+
+    def test_an_owner_param_cannot_widen_a_reps_view(self):
+        """
+        The scope comes from the account; the query string does not get a
+        vote. Asking for someone else's book returns your own rather than
+        theirs — the forced owner simply overwrites whatever was asked for,
+        which is the property worth having.
+        """
+        self.client.force_authenticate(self.rep)
+        rows = self.client.get(
+            "/api/crm/customers/", {"owner": self.theirs.id}
+        ).data["results"]
+        self.assertEqual([r["name_fa"] for r in rows], ["مشتری من"])
+
+    def test_an_account_with_no_employee_row_sees_nothing(self):
+        """A half-finished setup must fail closed, not open."""
+        self.client.force_authenticate(self.unlinked)
+        self.assertEqual(self.client.get("/api/crm/customers/").data["results"], [])
+        self.assertEqual(self.client.get("/api/crm/deals/").data["results"], [])
+        me = self.client.get("/api/crm/me/").data
+        self.assertFalse(me["sees_all"])
+        self.assertTrue(me["unlinked"])
+
+    def test_analytics_are_scoped_too(self):
+        """A report is just another way to read the rows."""
+        self.client.force_authenticate(self.rep)
+        board = self.client.get("/api/crm/pipeline/").data["columns"]
+        self.assertEqual([d["title"] for col in board for d in col["deals"]], ["معامله من"])
+
+        self.client.force_authenticate(self.unlinked)
+        board = self.client.get("/api/crm/pipeline/").data["columns"]
+        self.assertEqual([d for col in board for d in col["deals"]], [])
+
+    # ---- writing ---------------------------------------------------------
+    def test_a_rep_owns_what_they_create_whatever_the_payload_says(self):
+        self.client.force_authenticate(self.rep)
+        res = self.client.post(
+            "/api/crm/customers/",
+            {"name_fa": "سرنخ تازه", "owner": self.theirs.id},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(Customer.objects.get(name_fa="سرنخ تازه").owner_id, self.mine.id)
+
+    def test_a_rep_cannot_hand_a_record_to_someone_else(self):
+        self.client.force_authenticate(self.rep)
+        res = self.client.patch(
+            "/api/crm/customers/%d/" % self.my_customer.id,
+            {"owner": self.theirs.id}, format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.my_customer.refresh_from_db()
+        self.assertEqual(self.my_customer.owner_id, self.mine.id)
+
+    def test_a_manager_may_enter_on_someone_elses_behalf(self):
+        self.client.force_authenticate(self.boss)
+        res = self.client.post(
+            "/api/crm/customers/",
+            {"name_fa": "ثبت مدیر", "owner": self.theirs.id},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(Customer.objects.get(name_fa="ثبت مدیر").owner_id, self.theirs.id)
+
+    def test_merge_queue_is_for_managers_only(self):
+        self.client.force_authenticate(self.rep)
+        self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 403)
+        self.client.force_authenticate(self.boss)
+        self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 200)
+
+
+class DepartmentAccessTests(APITestCase):
+    """Which departments may open CRM at all."""
+
+    def test_every_sales_department_is_in(self):
+        for dept in ("sales_team", "sales_b2b", "sales_org"):
+            self.client.force_authenticate(_user("in-" + dept, "manager", dept))
+            self.assertEqual(self.client.get("/api/crm/me/").status_code, 200, dept)
+
+    def test_the_other_departments_are_not(self):
+        for dept in ("production", "finance", "commercial"):
+            self.client.force_authenticate(_user("out-" + dept, "manager", dept))
+            self.assertEqual(self.client.get("/api/crm/me/").status_code, 403, dept)
+
+
+# --------------------------------------------------------------------------
+# Separate books
+# --------------------------------------------------------------------------
+class ChannelTests(APITestCase):
+    """
+    Three sales departments, three customer files.
+
+    فروش همکار, فروش بانکی and فروش B2B sell to different books through the
+    same screens. The channel column already existed on Customer and Deal and
+    on the sales facts these reports sit beside, so the question is only
+    whether CRM honours it — everywhere, including the paths that build their
+    queryset by hand rather than through `Filters`.
+    """
+
+    def setUp(self):
+        now = timezone.now()
+        self.team_mgr = _user("m-team", "manager", "sales_team")
+        self.bank_mgr = _user("m-bank", "manager", "sales_org")
+        self.b2b_mgr = _user("m-b2b", "manager", "sales_b2b")
+        self.ceo = _user("ceo-all", "executive")
+
+        self.stage = PipelineStage.objects.create(
+            code="s-open", name_fa="ارتباط مشتری", kind="open", order=1,
+            probability_pct=10, dataset=Dataset.REAL,
+        )
+
+        self.books = {}
+        for key, channel, label in (
+            ("team", SalesChannel.TEAM, "مشتری همکار"),
+            ("bank", SalesChannel.ORGANIZATIONAL, "مشتری بانکی"),
+            ("b2b", SalesChannel.B2B, "مشتری بی‌تو‌بی"),
+        ):
+            customer = Customer.objects.create(
+                code="c-" + key, name_fa=label, channel=channel,
+                dataset=Dataset.REAL, first_contact_at=now - timedelta(days=10),
+            )
+            Deal.objects.create(
+                code="d-" + key, title="معامله " + label, customer=customer,
+                channel=channel, stage=self.stage, dataset=Dataset.REAL,
+                opened_at=now - timedelta(days=5),
+            )
+            Activity.objects.create(
+                kind="call_out", customer=customer, at=now - timedelta(days=1),
+                dataset=Dataset.REAL,
+            )
+            self.books[key] = customer
+
+    def names(self, url, key="name_fa", **params):
+        return [r[key] for r in self.client.get(url, params).data["results"]]
+
+    # ---- reading ---------------------------------------------------------
+    def test_each_department_sees_only_its_own_book(self):
+        for user, expected in (
+            (self.team_mgr, "مشتری همکار"),
+            (self.bank_mgr, "مشتری بانکی"),
+            (self.b2b_mgr, "مشتری بی‌تو‌بی"),
+        ):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.names("/api/crm/customers/"), [expected])
+            self.assertEqual(
+                self.names("/api/crm/deals/", "title", status="open"),
+                ["معامله " + expected],
+            )
+            self.assertEqual(
+                self.names("/api/crm/activities/", "customer_name"), [expected]
+            )
+
+    def test_the_ceo_reads_every_book(self):
+        self.client.force_authenticate(self.ceo)
+        self.assertEqual(
+            set(self.names("/api/crm/customers/")),
+            {"مشتری همکار", "مشتری بانکی", "مشتری بی‌تو‌بی"},
+        )
+
+    def test_a_channel_param_cannot_reach_another_book(self):
+        """Same rule as `owner`: the query string may narrow, never widen."""
+        self.client.force_authenticate(self.bank_mgr)
+        self.assertEqual(
+            self.names("/api/crm/customers/", channel="team"), ["مشتری بانکی"]
+        )
+
+    def test_the_ceo_may_narrow_to_one_book(self):
+        self.client.force_authenticate(self.ceo)
+        self.assertEqual(
+            self.names("/api/crm/customers/", channel="b2b"), ["مشتری بی‌تو‌بی"]
+        )
+
+    def test_the_pipeline_board_is_per_book(self):
+        """A hand-built queryset is exactly where a channel filter gets lost."""
+        self.client.force_authenticate(self.b2b_mgr)
+        board = self.client.get("/api/crm/pipeline/").data["columns"]
+        titles = [d["title"] for col in board for d in col["deals"]]
+        self.assertEqual(titles, ["معامله مشتری بی‌تو‌بی"])
+
+    def test_a_deal_cannot_be_fetched_across_books_by_id(self):
+        self.client.force_authenticate(self.team_mgr)
+        theirs = Deal.objects.get(code="d-bank")
+        self.assertEqual(
+            self.client.get("/api/crm/deals/%d/" % theirs.id).status_code, 404
+        )
+
+    # ---- writing ---------------------------------------------------------
+    def test_a_new_customer_joins_the_filing_departments_book(self):
+        self.client.force_authenticate(self.bank_mgr)
+        res = self.client.post(
+            "/api/crm/customers/", {"name_fa": "مشتری تازه بانکی"}, format="json"
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(
+            Customer.objects.get(name_fa="مشتری تازه بانکی").channel,
+            SalesChannel.ORGANIZATIONAL,
+        )
+
+    def test_a_deal_takes_its_channel_from_its_customer(self):
+        """
+        Even when the CEO — who is in every book and therefore pinned to none
+        — is the one entering it. The model default is «همکار», so without
+        this the deal would file itself into the wrong department.
+        """
+        self.client.force_authenticate(self.ceo)
+        res = self.client.post("/api/crm/deals/", {
+            "customer": self.books["b2b"].id,
+            "title": "معامله جدید",
+            "stage": self.stage.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(Deal.objects.get(title="معامله جدید").channel, SalesChannel.B2B)
+
+
+class RosterScopeTests(APITestCase):
+    """The کارشناس list a department is offered belongs to that department."""
+
+    def setUp(self):
+        now = timezone.now()
+        self.mine = DimEmployee.objects.create(code="r-bank", full_name_fa="کارشناس بانکی")
+        self.theirs = DimEmployee.objects.create(code="r-team", full_name_fa="کارشناس همکار")
+        EmployeeChannel.objects.create(
+            employee=self.mine, channel=SalesChannel.ORGANIZATIONAL, is_active=True
+        )
+        EmployeeChannel.objects.create(
+            employee=self.theirs, channel=SalesChannel.TEAM, is_active=True
+        )
+        # Nobody's roster, but they already own a customer in the bank book —
+        # the nine unrostered salespeople the real data actually has.
+        self.legacy = DimEmployee.objects.create(code="r-old", full_name_fa="کارشناس قدیمی")
+        Customer.objects.create(
+            code="c-legacy", name_fa="مشتری قدیمی", owner=self.legacy,
+            channel=SalesChannel.ORGANIZATIONAL, dataset=Dataset.REAL,
+            first_contact_at=now - timedelta(days=400),
+        )
+
+    def options_names(self):
+        return {e["name"] for e in self.client.get("/api/crm/options/").data["employees"]}
+
+    def test_a_department_is_offered_its_own_roster(self):
+        self.client.force_authenticate(_user("bank-mgr", "manager", "sales_org"))
+        names = self.options_names()
+        self.assertIn("کارشناس بانکی", names)
+        self.assertNotIn("کارشناس همکار", names)
+
+    def test_someone_who_already_owns_a_row_is_still_offered(self):
+        """
+        Otherwise opening an existing customer shows an owner picker that does
+        not contain that customer's owner.
+        """
+        self.client.force_authenticate(_user("bank-mgr2", "manager", "sales_org"))
+        self.assertIn("کارشناس قدیمی", self.options_names())
+
+    def test_the_ceo_is_offered_everyone(self):
+        self.client.force_authenticate(_user("ceo-roster", "executive"))
+        names = self.options_names()
+        self.assertIn("کارشناس بانکی", names)
+        self.assertIn("کارشناس همکار", names)

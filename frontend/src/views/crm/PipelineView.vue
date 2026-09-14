@@ -37,6 +37,10 @@ async function load() {
 }
 
 onMounted(async () => { await crm.loadOptions(); await load(); });
+// Something was saved from the global «ثبت جدید» button over the top of this
+// page; the list under it is now stale.
+watch(() => crm.revision, load);
+
 watch(() => crm.query, load, { deep: true });
 
 let searchTimer: number | undefined;
@@ -175,7 +179,7 @@ async function onSaved() {
             <p class="text-xs text-slate-400 mt-1 truncate">{{ d.customer_name }}</p>
             <div class="flex items-center justify-between mt-2">
               <span class="text-xs font-semibold text-ink">{{ rial(d.amount_rial) }}</span>
-              <span class="text-[10px] text-slate-400">{{ d.owner_name }}</span>
+              <span v-if="crm.seesAll" class="text-[10px] text-slate-400">{{ d.owner_name }}</span>
             </div>
             <div class="flex items-center gap-2 mt-1.5">
               <span class="text-[10px] text-slate-400">{{ d.opened_jalali }}</span>

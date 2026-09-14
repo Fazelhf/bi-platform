@@ -60,20 +60,45 @@ const lostPrompt = ref<number | null>(null);
 const lostReason = ref<number | "">("");
 const lostNote = ref("");
 
-async function moveTo(stageId: number) {
+/**
+ * The stage a click has proposed, waiting to be confirmed.
+ *
+ * The stage row used to write the transition on the first click. It sits near
+ * the top of the page everyone lands on to *read* a deal, it is nine buttons
+ * wide, and the thing it writes is a `DealStageEvent` — the record the funnel,
+ * the conversion rate and every cycle-time figure are computed from. There is
+ * no undo for it, and a mis-click is indistinguishable afterwards from a real
+ * decision made at that moment.
+ *
+ * So the click now proposes and a second one commits. Advancing a deal is a
+ * deliberate act perhaps twice in its life; the extra click costs nothing on
+ * those two occasions and buys back the ones nobody meant.
+ */
+const movePrompt = ref<number | null>(null);
+const stageName = (id: number | null) =>
+  crm.options?.stages.find((s) => s.id === id)?.name_fa ?? "—";
+
+function moveTo(stageId: number) {
   if (!deal.value) return;
   const stage = crm.options?.stages.find((s) => s.id === stageId);
   // Marking a deal lost always asks why — the reason is what the loss report
-  // is made of, so it is collected at the moment of the decision.
+  // is made of, so it is collected at the moment of the decision, and that
+  // prompt is already a confirmation.
   if (stage?.kind === "lost") {
     lostPrompt.value = stageId;
     lostReason.value = "";
     lostNote.value = "";
     return;
   }
+  movePrompt.value = stageId;
+}
+
+async function confirmMove() {
+  if (!deal.value || !movePrompt.value) return;
   moving.value = true;
   try {
-    await crmApi.moveDeal(deal.value.id, stageId);
+    await crmApi.moveDeal(deal.value.id, movePrompt.value);
+    movePrompt.value = null;
     await load();
   } finally {
     moving.value = false;
@@ -177,7 +202,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
         </div>
       </div>
 
-      <!-- Stage mover -->
+      <!-- Stage mover. Proposes; `confirmMove` commits. -->
       <div v-if="crm.canEdit" class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-1.5 no-print">
         <span class="text-xs text-slate-400 px-2">انتقال به مرحله:</span>
         <button
@@ -188,6 +213,42 @@ const card = "bg-surface rounded-card shadow-soft p-4";
           @click="moveTo(s.id)"
         >{{ s.name_fa }}</button>
       </div>
+
+      <!-- Stage-change confirmation. Says what will be written and where it
+           shows up, because "are you sure?" on its own teaches nobody which
+           click was the mistake. -->
+      <Teleport to="body">
+        <div
+          v-if="movePrompt"
+          class="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4"
+          dir="rtl"
+        >
+          <div class="bg-surface rounded-card shadow-pop w-full max-w-sm p-5">
+            <h3 class="font-bold text-ink">تغییر مرحله معامله</h3>
+            <p class="text-sm text-slate-600 mt-3 leading-relaxed">
+              «{{ deal.title }}» از مرحله
+              <span class="text-ink font-medium">{{ stageName(deal.stage) }}</span>
+              به
+              <span class="text-ink font-medium">{{ stageName(movePrompt) }}</span>
+              منتقل شود؟
+            </p>
+            <p class="text-xs text-slate-400 mt-2">
+              این جابه‌جایی در تاریخچه معامله ثبت می‌شود و در قیف فروش و زمان
+              چرخه‌ی فروش دیده خواهد شد.
+            </p>
+            <div class="flex gap-2 mt-4">
+              <button
+                class="flex-1 bg-panel text-white rounded-xl py-2 text-sm disabled:opacity-50"
+                :disabled="moving" @click="confirmMove"
+              >{{ moving ? "در حال انتقال…" : "بله، منتقل کن" }}</button>
+              <button
+                class="px-4 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm"
+                @click="movePrompt = null"
+              >انصراف</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
 
       <!-- Lost-reason prompt -->
       <Teleport to="body">

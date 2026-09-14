@@ -5,7 +5,7 @@ from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status as http_status
 from rest_framework import viewsets
-from rest_framework.permissions import SAFE_METHODS, BasePermission
+from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -57,6 +57,7 @@ from apps.sales.serializers import (
     SalesProvinceSerializer,
     TeamSerializer,
 )
+from apps.sales.services import approval_sheets
 from apps.sales.services.kpi import compute_period_kpis
 
 
@@ -446,6 +447,11 @@ class SalesProvinceViewSet(viewsets.ModelViewSet):
     entry_department = "sales_org"
     filterset_fields = ["period", "province"]
 
+    def perform_update(self, serializer):
+        # Same rule as a salesperson row: once edited, the figure is no longer
+        # the one that was approved, so it goes back to draft.
+        serializer.save(status=ApprovalStatus.DRAFT)
+
 
 class CollectionViewSet(viewsets.ModelViewSet):
     queryset = FactCollection.objects.select_related("bank", "period").all()
@@ -528,7 +534,7 @@ class DashboardSummaryView(APIView):
         # but province sales are merged, so we scope province to the channel's
         # own facts.
         province = (
-            FactSalesProvince.objects.filter(period=period)
+            FactSalesProvince.objects.filter(period=period, status=ApprovalStatus.APPROVED)
             .select_related("province")
             .values("province__name_fa")
             .annotate(sales=Sum("sales_rial"), target=Sum("target_rial"))
@@ -802,6 +808,10 @@ class SalesInputView(APIView):
         submit = bool(request.data.get("submit"))
         status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
         user = request.user
+        # Provinces and segments are part of the same sheet and carry its
+        # status. They used to carry none, which put them on the dashboards
+        # the moment they were saved — before anyone had approved them.
+        sheet_state = {"status": status, **({"submitted_by": user} if submit else {})}
 
         # Targets live in SalesTarget at month grain and are set only in the
         # «تارگت» section — never through this sheet, whoever is posting.
@@ -870,7 +880,7 @@ class SalesInputView(APIView):
                 continue  # nothing entered for this province — don't store it
             FactSalesProvince.objects.update_or_create(
                 period=period, province_id=pid, channel=channel,
-                defaults={"sales_rial": sales},
+                defaults={"sales_rial": sales, **sheet_state},
             )
 
         # Customer segments — same rule as provinces: an all-zero row that was
@@ -892,19 +902,57 @@ class SalesInputView(APIView):
                 continue
             FactSalesByCustomerGroup.objects.update_or_create(
                 period=period, customer_group_id=gid, channel=channel,
-                defaults=values,
+                defaults={**values, **sheet_state},
             )
 
         audit_log(user, period, AuditLog.Action.UPDATE,
                   {"sales_input": {"before": None, "after": f"{channel} · {len(kept_employee_ids)} کارشناس"}})
 
         if submit:
-            first = FactSalesMonthly.objects.filter(period=period, channel=channel).first()
+            # A sheet with only a provincial block is still a submission.
+            first = (
+                FactSalesMonthly.objects.filter(period=period, channel=channel).first()
+                or FactSalesProvince.objects.filter(period=period, channel=channel).first()
+            )
             if first:
                 notify_submitted(user, first, CHANNEL_DEPARTMENT.get(channel, ""),
-                                 f"فروش {channel} · {period.label}")
+                                 f"فروش {SalesChannel(channel).label} · {period.label}")
 
         return Response({"ok": True, "submitted": submit, "salespeople": len(kept_employee_ids)})
+
+
+class SalesApprovalSheetsView(APIView):
+    """
+    کارتابل — the sales half, one item per submitted sheet (channel × period).
+
+    See `apps.sales.services.approval_sheets` for why the unit is the sheet.
+    Managers see their own channel's sheets and their status; the list is
+    scoped on the server rather than filtered in the page, so a manager's
+    browser is never sent another department's figures to hide.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        status = request.query_params.get("status") or ApprovalStatus.SUBMITTED
+        if status not in ApprovalStatus.values:
+            raise ValidationError({"status": "وضعیت نامعتبر است."})
+        return Response({"sheets": approval_sheets.list_sheets(request.user, status)})
+
+
+class SalesApprovalDecideView(APIView):
+    """Approve, reject or return one whole sheet. The CEO decides."""
+
+    permission_classes = [ApprovalPermission]
+
+    def post(self, request):
+        return Response(approval_sheets.decide_sheet(
+            request.user,
+            period_id=request.data.get("period"),
+            channel=(request.data.get("channel") or "").strip(),
+            action=(request.data.get("action") or "").strip(),
+            note=request.data.get("note") or "",
+        ))
 
 
 # --------------------------------------------------------------------------
@@ -1146,7 +1194,7 @@ class SalesDashboardDetailView(APIView):
             "sales": float(p.sales_rial),
             "target": float(p.target_rial),
         } for p in FactSalesProvince.objects.filter(
-            period=period, channel=channel
+            period=period, channel=channel, status=ApprovalStatus.APPROVED
         ).select_related("province").order_by("-sales_rial")]
 
         return Response({

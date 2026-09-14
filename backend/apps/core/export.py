@@ -147,7 +147,7 @@ def _sales_workbook(period, channel):
 
     ws = _sheet(wb, "استان‌ها")
     provinces = FactSalesProvince.objects.filter(
-        period=period, channel=channel
+        period=period, channel=channel, status=ApprovalStatus.APPROVED
     ).select_related("province").order_by("-sales_rial")
     _write_table(
         ws,

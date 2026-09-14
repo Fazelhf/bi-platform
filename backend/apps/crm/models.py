@@ -38,16 +38,14 @@ class Dataset(models.TextChoices):
     """
     Which body of data a row belongs to.
 
-    The company's real customer file lives beside a fabricated one. The demo
-    set is a showroom — it can be shown to an outsider, projected in a
-    meeting, or used to learn the screens, without a single real customer's
-    name or mobile number leaving the room. It is meant to be temporary, and
-    deleting it later is `manage.py seed_crm --clear`, not a migration.
+    Only REAL is in use. CRM once kept a fabricated showroom beside the
+    company's customer file; it was removed and its rows deleted, because a
+    second customer file that looks exactly like the real one is a way to act
+    on figures that are not true.
 
-    Every row carries its own tag rather than the two sets living in separate
-    tables or databases: a customer and a deal point at DimEmployee, DimPeriod
-    and DimProvince, which belong to other apps, and a cross-database foreign
-    key is not a thing Django can follow.
+    The column and the DEMO choice are left in place on purpose: dropping them
+    is a migration across fifteen tables for no behaviour change, and
+    `active_dataset` in views is the single place that pins the value.
     """
 
     REAL = "real", "داده واقعی"

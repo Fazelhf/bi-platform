@@ -118,9 +118,17 @@ function childActive(name: string): boolean {
   return current === name || CHILD_PARENT[current] === name;
 }
 
-/** Who sees the section at all. Mirrors CrmAccess on the server. */
+/**
+ * Who sees the section at all. Mirrors `CRM_DEPARTMENTS` and `CrmAccess` on
+ * the server: the three sales departments work it, the CEO reads it. What
+ * each of them then *sees inside it* is a separate question the API answers —
+ * a کارشناس gets their own book and nobody else's.
+ */
+const CRM_DEPARTMENTS = ["sales_team", "sales_b2b", "sales_org"];
 const showCrm = computed(
-  () => auth.isExecutive || auth.department === "sales_team" || !!auth.me?.is_superuser,
+  () => auth.isExecutive
+    || CRM_DEPARTMENTS.includes(auth.department)
+    || !!auth.me?.is_superuser,
 );
 
 
@@ -176,6 +184,10 @@ const primary = computed<Item[]>(() => {
         // own row either — they are read on the نقدینگی page itself.
         children: [
           { name: "finance-cash-report", label: "نقدینگی", icon: "banknote" },
+          // Read-only for the CEO too: the dashboard and the variance grid.
+          // Setting the figures is the finance department's job.
+          { name: "finance-budget", label: "بودجه", icon: "chart" },
+          { name: "finance-budget-variance", label: "انحراف بودجه", icon: "file" },
         ],
       },
     );
@@ -206,6 +218,9 @@ const primary = computed<Item[]>(() => {
       // The treasury averages: this manager's own tool, and not on the page
       // the CEO opens to read the company's position.
       { name: "finance-treasury", label: "تحلیل خزانه", icon: "wallet" },
+      { name: "finance-budget-plan", label: "تعریف بودجه", icon: "file" },
+      { name: "finance-budget-variance", label: "انحراف بودجه", icon: "chart" },
+      { name: "finance-budget", label: "داشبورد بودجه", icon: "chart" },
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
@@ -292,6 +307,8 @@ const pageTitle = computed(() => {
     "sales-entry": "ورود اطلاعات فروش همکار", "sales-org-entry": "ورود فروش بانکی",
     "sales-b2b-entry": "ورود فروش B2B",
     "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
+    "finance-budget": "داشبورد بودجه", "finance-budget-plan": "تعریف بودجه",
+    "finance-budget-variance": "انحراف بودجه",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
     targets: "تعیین تارگت", settings: "تنظیمات سایت",
     "commercial-dashboard": "داشبورد بازرگانی داخلی",
@@ -320,7 +337,8 @@ const today = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
 async function refreshBadges() {
   try {
     if (auth.me?.can_approve || auth.me?.is_superuser) {
-      const [s, p] = await Promise.all([inboxApi.pendingSales(), inboxApi.pendingProduction()]);
+      // Sales counts sheets, matching what the کارتابل lists — not rows.
+      const [s, p] = await Promise.all([inboxApi.salesSheets(), inboxApi.pendingProduction()]);
       inboxCount.value = s.length + p.length;
     }
     chatCount.value = (await socialApi.unreadMessages()).total;

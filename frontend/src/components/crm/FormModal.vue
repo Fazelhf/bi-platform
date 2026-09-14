@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { provide, ref, toRef } from "vue";
+import { MODAL_LAYER } from "@/components/picker";
 
 /**
  * Shared shell for every CRM entry form: header, scrollable body, sticky
  * footer, and one place that renders server-side validation errors. Each form
  * only supplies its fields.
  */
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   title: string;
   subtitle?: string;
   saving?: boolean;
@@ -14,7 +15,17 @@ withDefaults(defineProps<{
   wide?: boolean;
   saveLabel?: string;
   canDelete?: boolean;
-}>(), { saving: false, error: "", wide: false, saveLabel: "ذخیره", canDelete: false });
+  /**
+   * Stacking level. A form can now open a second one on top of itself —
+   * «ثبت مشتری جدید» from inside the customer picker of an activity — and the
+   * child has to sit above both the parent modal and the picker panel that
+   * launched it (z-[210]).
+   */
+  layer?: number;
+}>(), {
+  subtitle: "", saving: false, error: "", wide: false,
+  saveLabel: "ذخیره", canDelete: false, layer: 0,
+});
 
 const emit = defineEmits<{
   (e: "close"): void;
@@ -22,12 +33,24 @@ const emit = defineEmits<{
   (e: "delete"): void;
 }>();
 
+/**
+ * Anything floating that a field inside this modal opens — PickerField's
+ * panel, chiefly — has to clear this modal but stay under the next one up.
+ * Passing the level down by injection means a field does not have to know
+ * how deeply it has been nested.
+ */
+provide(MODAL_LAYER, toRef(props, "layer"));
+
 const confirmDelete = ref(false);
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-[65] bg-black/40 flex items-start justify-center p-3 sm:p-6 overflow-y-auto" dir="rtl">
+    <div
+      class="fixed inset-0 bg-black/40 flex items-start justify-center p-3 sm:p-6 overflow-y-auto"
+      :style="{ zIndex: 65 + layer * 150 }"
+      dir="rtl"
+    >
       <div
         class="bg-surface rounded-card shadow-pop w-full my-auto flex flex-col max-h-[92vh]"
         :class="wide ? 'max-w-3xl' : 'max-w-lg'"

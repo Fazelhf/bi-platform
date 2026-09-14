@@ -187,6 +187,7 @@ DATASETS: tuple[Dataset, ...] = (
         label="فروش استانی",
         section="sales",
         model="sales.FactSalesProvince",
+        status_path="status",
         dims=(
             MONTH_DIM,
             Dim(key="province", label="استان", path="province",
@@ -203,6 +204,7 @@ DATASETS: tuple[Dataset, ...] = (
         label="فروش بر اساس گروه مشتری",
         section="sales",
         model="sales.FactSalesByCustomerGroup",
+        status_path="status",
         dims=(
             MONTH_DIM,
             Dim(key="group", label="گروه مشتری", path="customer_group",

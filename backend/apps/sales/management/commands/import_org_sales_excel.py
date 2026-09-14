@@ -137,7 +137,7 @@ class Command(BaseCommand):
             FactSalesProvince.objects.update_or_create(
                 period=period, province=province,
                 channel=SalesChannel.ORGANIZATIONAL,
-                defaults={"sales_rial": sales, "target_rial": target},
+                defaults={"sales_rial": sales, "target_rial": target, "status": status},
             )
             n_prov += 1
 

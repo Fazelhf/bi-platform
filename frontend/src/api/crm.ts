@@ -198,15 +198,25 @@ function clean(p: Params = {}): Params {
 }
 
 export interface CrmMe {
-  /** Which body of data this account is reading — real file, or showroom. */
-  dataset: "real" | "demo";
   /** False for anyone outside فروش همکار — the UI hides every create/edit
    *  affordance rather than letting them fill a form and hit a 403. */
   can_edit: boolean;
   employee: number | null;
   employee_name: string;
   team: string;
+  /** Supervises a team: sees everyone's records, may enter on their behalf. */
   is_manager: boolean;
+  /** False for a کارشناس — the API only ever answers with their own rows, so
+   *  the UI drops the controls that could only ever return those anyway. */
+  sees_all: boolean;
+  /** A non-manager account with no salesperson row behind it. It legitimately
+   *  sees nothing, and an empty CRM has to say why rather than look broken. */
+  unlinked: boolean;
+  /** Which book this account works — "team" | "organizational" | "b2b" — or
+   *  null for the CEO and admins, who read every department's. */
+  channel: string | null;
+  /** That book's name, e.g. «فروش بانکی». Empty when there is no single one. */
+  channel_label: string;
 }
 
 /** Payload for creating/updating a deal, lines included. */
@@ -289,11 +299,6 @@ export const crmApi = {
   },
 
   /** Switch this account between the real customer file and the showroom. */
-  async setDataset(dataset: "real" | "demo"): Promise<{ dataset: string }> {
-    const { data } = await api.post("/crm/dataset/", { dataset });
-    return data;
-  },
-
   async me(): Promise<CrmMe> {
     const { data } = await api.get("/crm/me/");
     return data;

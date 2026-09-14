@@ -20,6 +20,9 @@ router.register("kpi-results", views.KPIResultViewSet)
 urlpatterns = [
     path("", include(router.urls)),
     path("input/", views.SalesInputView.as_view(), name="sales-input"),
+    # کارتابل: a sales sheet (channel × period) is approved as one item.
+    path("approvals/", views.SalesApprovalSheetsView.as_view(), name="sales-approvals"),
+    path("approvals/decide/", views.SalesApprovalDecideView.as_view(), name="sales-approvals-decide"),
     path("targets/", views.SalesTargetView.as_view(), name="sales-targets"),
     path("dashboard/detail/", views.SalesDashboardDetailView.as_view(), name="sales-dashboard-detail"),
     # Range reporting: a quarter/half-year/custom span vs the span before it.

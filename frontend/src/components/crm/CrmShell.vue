@@ -15,7 +15,6 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
-import { crmApi } from "@/api/crm";
 import { useAuthStore } from "@/stores/auth";
 import { useCrmStore } from "@/stores/crm";
 import { usePresence } from "@/composables/usePresence";
@@ -26,6 +25,7 @@ import UserAvatar from "@/components/UserAvatar.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
+import QuickAdd from "@/components/crm/QuickAdd.vue";
 
 const auth = useAuthStore();
 const crm = useCrmStore();
@@ -37,6 +37,13 @@ usePresence();
 const collapsed = ref(localStorage.getItem("crmRailCollapsed") === "1");
 const mobileOpen = ref(false);
 
+/**
+ * `managerOnly` marks the sections that are about the customer *file* rather
+ * than about a book of customers. بازبینی تطبیق compares every account with
+ * every other by definition, so there is no per-rep slice of it — the API
+ * answers 403, and a menu entry that always leads to a refusal is worse than
+ * no entry.
+ */
 const NAV = [
   { name: "crm-dashboard", label: "داشبورد", icon: "grid" },
   { name: "crm-customers", label: "مشتری‌ها", icon: "team" },
@@ -44,8 +51,10 @@ const NAV = [
   { name: "crm-pipeline", label: "کاریز فروش", icon: "target" },
   { name: "crm-activities", label: "پیگیری‌ها", icon: "notes" },
   { name: "crm-reports", label: "گزارش‌ها", icon: "chart" },
-  { name: "crm-match-review", label: "بازبینی تطبیق", icon: "check" },
-];
+  { name: "crm-match-review", label: "بازبینی تطبیق", icon: "check", managerOnly: true },
+] as { name: string; label: string; icon: string; managerOnly?: boolean }[];
+
+const nav = computed(() => NAV.filter((n) => !n.managerOnly || crm.isManager));
 
 /** A detail page keeps its list row lit, so you can tell where you are. */
 const PARENT: Record<string, string> = {
@@ -62,34 +71,17 @@ const pageTitle = computed(
   () => NAV.find((n) => active(n.name))?.label ?? "CRM",
 );
 
+/**
+ * The subtitle under the CRM mark says which of the two jobs this account is
+ * here to do. It is not decoration: the same screens behave differently for
+ * the two, and someone who does not know which one they are looking at reads
+ * a missing filter as a missing feature.
+ */
+const roleLabel = computed(() => (crm.isManager ? "نمای مدیر فروش" : "میز کار کارشناس"));
+
 const userMenu = ref(false);
 const userMenuRoot = ref<HTMLElement | null>(null);
 useClickOutside(userMenuRoot, () => (userMenu.value = false));
-
-/**
- * The showroom switch.
- *
- * Demo is a body of fabricated customers that can be projected in a meeting
- * or handed to someone learning the screens, with no real name or mobile
- * number in it. It is loud on purpose while it is on — a page of invented
- * figures that looks exactly like the real one is the failure mode worth
- * spending a banner to avoid.
- */
-const dataset = computed(() => crm.me?.dataset ?? "real");
-const switching = ref(false);
-
-async function useDataset(next: "real" | "demo") {
-  if (switching.value || dataset.value === next) return;
-  switching.value = true;
-  try {
-    await crmApi.setDataset(next);
-    // Everything on screen belongs to the old dataset, including the filter
-    // dropdowns — a reload is cheaper and safer than invalidating by hand.
-    window.location.reload();
-  } finally {
-    switching.value = false;
-  }
-}
 
 function toggleRail() {
   collapsed.value = !collapsed.value;
@@ -135,7 +127,7 @@ onMounted(() => {
         </span>
         <div v-if="!collapsed" class="flex-1 min-w-0">
           <p class="font-bold text-sm text-ink leading-tight">CRM</p>
-          <p class="text-[11px] text-slate-400 truncate">مشتریان و فروش</p>
+          <p class="text-[11px] text-slate-400 truncate">{{ roleLabel }}</p>
         </div>
         <button
           v-if="!collapsed"
@@ -153,7 +145,7 @@ onMounted(() => {
 
       <nav class="flex-1 overflow-y-auto px-2.5 pb-2 space-y-0.5">
         <button
-          v-for="item in NAV"
+          v-for="item in nav"
           :key="item.name"
           class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition"
           :class="[
@@ -197,35 +189,18 @@ onMounted(() => {
 
         <h1 class="font-bold text-ink">{{ pageTitle }}</h1>
 
+        <!-- Whose book. Three departments share these screens now, and a
+             page of customers that does not say which file it is showing
+             invites acting on the wrong one. -->
         <span
-          v-if="dataset === 'demo'"
-          class="hidden sm:inline-flex items-center gap-1.5 text-xs bg-amber-100
-                 text-amber-800 rounded-full px-3 py-1"
-        >
-          داده‌ی نمایشی — واقعی نیست
-        </span>
+          v-if="crm.bookLabel"
+          class="hidden sm:inline-flex items-center text-[11px] bg-slate-100
+                 text-slate-500 rounded-full px-2.5 py-1 shrink-0"
+        >{{ crm.bookLabel }}</span>
 
         <div class="flex-1"></div>
 
-        <!-- Two labelled halves rather than a toggle: a switch shows a state,
-             and the one thing a person must never have to guess here is which
-             body of data they are looking at. -->
-        <div class="hidden sm:flex bg-slate-100 rounded-xl p-0.5 text-xs shrink-0">
-          <button
-            v-for="opt in ([
-              { key: 'real', label: 'داده واقعی' },
-              { key: 'demo', label: 'نمایشی' },
-            ] as const)"
-            :key="opt.key"
-            class="px-3 py-1.5 rounded-lg transition-colors"
-            :class="dataset === opt.key
-              ? 'bg-surface text-ink shadow-soft font-medium'
-              : 'text-slate-500 hover:text-ink'"
-            :disabled="switching"
-            @click="useDataset(opt.key)"
-          >{{ opt.label }}</button>
-        </div>
-
+        <QuickAdd />
         <ThemePicker />
         <NotificationBell />
 
@@ -257,15 +232,15 @@ onMounted(() => {
         </div>
       </header>
 
+      <!-- An account in a sales department with no salesperson row behind it
+           sees nothing, correctly. Without this it reads as a broken CRM and
+           gets reported as one; with it, it names the fix. -->
       <p
-        v-if="dataset === 'demo'"
-        class="sm:hidden bg-amber-100 text-amber-800 text-xs rounded-xl px-3 py-2 mb-3
-               flex items-center justify-between gap-2"
+        v-if="crm.unlinked"
+        class="bg-amber-50 text-amber-800 text-sm rounded-xl px-4 py-3 mb-4"
       >
-        <span>داده‌ی نمایشی — واقعی نیست</span>
-        <button class="underline shrink-0" @click="useDataset('real')">
-          برو به داده واقعی
-        </button>
+        این حساب هنوز به هیچ کارشناس فروشی وصل نشده است، بنابراین رکوردی برای
+        نمایش ندارد. از مدیر فروش بخواهید حساب شما را به کارشناس مربوطه متصل کند.
       </p>
 
       <RouterView />

@@ -39,6 +39,10 @@ async function load() {
 }
 
 onMounted(async () => { await crm.loadOptions(); await load(); });
+// Something was saved from the global «ثبت جدید» button over the top of this
+// page; the list under it is now stale.
+watch(() => crm.revision, load);
+
 watch(() => [crm.filters.owner, crm.filters.group, crm.filters.province, crm.filters.source], () => { page.value = 1; load(); });
 watch([status, page], load);
 
@@ -56,6 +60,11 @@ function onSaved() {
 /**
  * Selection, and the two things you can do with one.
  *
+ * Managers only. Both actions are maintenance of the customer *file* rather
+ * than work on a book of customers: one queues rows for a merge review that a
+ * کارشناس cannot open, and the other deletes. Neither belongs to the person
+ * whose job is to sell to the rows.
+ *
  * The list holds 3,760 accounts now, most of them arrived from accounting and
  * a good share of them duplicates or dormant. Cleaning that up one row at a
  * time is not work anybody finishes, so the list needs to act on a handful at
@@ -64,6 +73,8 @@ function onSaved() {
  * for those: a duplicate account should be *merged*, which keeps its orders,
  * not deleted, which loses them.
  */
+const canCurate = computed(() => crm.canEdit && crm.isManager);
+
 const selected = ref<Set<number>>(new Set());
 const acting = ref(false);
 const result = ref<{ ok: string; warn: { name_fa: string; reason: string }[] } | null>(null);
@@ -166,7 +177,7 @@ const statusClass: Record<string, string> = {
     <!-- Appears only once something is selected: an action bar that is always
          there invites a click, and one of these two deletes. -->
     <div
-      v-if="crm.canEdit && selected.size"
+      v-if="canCurate && selected.size"
       class="bg-panel text-white rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2"
     >
       <span class="text-sm px-1">{{ num(selected.size) }} انتخاب شده</span>
@@ -217,7 +228,7 @@ const statusClass: Record<string, string> = {
         >
           <div class="flex items-start justify-between gap-3">
             <input
-              v-if="crm.canEdit" type="checkbox" class="mt-1 shrink-0"
+              v-if="canCurate" type="checkbox" class="mt-1 shrink-0"
               :checked="selected.has(c.id)"
               @click.stop @change="toggle(c.id)"
             />
@@ -233,7 +244,7 @@ const statusClass: Record<string, string> = {
             {{ [c.group_name, c.province_name].filter(Boolean).join(" · ") }}
           </div>
           <div class="flex items-center justify-between gap-2 mt-1 text-xs text-slate-400">
-            <span class="truncate">{{ c.owner_name }}<template v-if="c.source_name"> · {{ c.source_name }}</template></span>
+            <span class="truncate"><template v-if="crm.seesAll">{{ c.owner_name }}</template><template v-if="c.source_name"><template v-if="crm.seesAll"> · </template>{{ c.source_name }}</template></span>
             <span class="shrink-0 ltr-nums">{{ c.first_won_jalali || "—" }}</span>
           </div>
         </li>
@@ -243,13 +254,13 @@ const statusClass: Record<string, string> = {
         <table class="w-full text-sm min-w-[760px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">
-              <th v-if="crm.canEdit" class="w-10 px-3">
+              <th v-if="canCurate" class="w-10 px-3">
                 <input type="checkbox" :checked="allOnPage" @change="toggleAll" />
               </th>
               <th class="text-right font-medium px-4 py-3">مشتری</th>
               <th class="text-right font-medium px-3">گروه</th>
               <th class="text-right font-medium px-3">استان</th>
-              <th class="text-right font-medium px-3">کارشناس</th>
+              <th v-if="crm.seesAll" class="text-right font-medium px-3">کارشناس</th>
               <th class="text-right font-medium px-3">منبع سرنخ</th>
               <th class="text-right font-medium px-3">وضعیت</th>
               <th class="text-right font-medium px-4">اولین خرید</th>
@@ -261,7 +272,7 @@ const statusClass: Record<string, string> = {
               class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
               @click="router.push({ name: 'crm-customer', params: { id: c.id } })"
             >
-              <td v-if="crm.canEdit" class="px-3" @click.stop>
+              <td v-if="canCurate" class="px-3" @click.stop>
                 <input
                   type="checkbox" :checked="selected.has(c.id)"
                   @change="toggle(c.id)"
@@ -273,7 +284,8 @@ const statusClass: Record<string, string> = {
               </td>
               <td class="px-3 text-slate-500">{{ c.group_name }}</td>
               <td class="px-3 text-slate-500">{{ c.province_name }}</td>
-              <td class="px-3 text-slate-500">{{ c.owner_name }}</td>
+              <!-- Every row would carry the reader's own name. -->
+              <td v-if="crm.seesAll" class="px-3 text-slate-500">{{ c.owner_name }}</td>
               <td class="px-3 text-slate-500">{{ c.source_name }}</td>
               <td class="px-3">
                 <span class="text-[11px] rounded-full px-2 py-0.5" :class="statusClass[c.status]">

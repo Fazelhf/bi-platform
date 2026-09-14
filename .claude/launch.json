@@ -49,6 +49,19 @@
         "--strictPort"
       ],
       "port": 5175
+    },
+    {
+      "//": "Graft's interactive context-graph viewer. Read-only over graft/; not part of the app.",
+      "name": "graft-viz",
+      "runtimeExecutable": "graft",
+      "runtimeArgs": [
+        "viz",
+        "C:/Users/Asus/bi-platform-v2",
+        "--port",
+        "4400",
+        "--no-open"
+      ],
+      "port": 4400
     }
   ]
 }

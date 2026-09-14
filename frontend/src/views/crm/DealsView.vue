@@ -47,6 +47,10 @@ async function load() {
 }
 
 onMounted(async () => { await crm.loadOptions(); await load(); });
+// Something was saved from the global «ثبت جدید» button over the top of this
+// page; the list under it is now stale.
+watch(() => crm.revision, load);
+
 watch(() => crm.query, () => { page.value = 1; load(); }, { deep: true });
 watch(status, () => { page.value = 1; load(); });
 watch(page, load);
@@ -149,7 +153,7 @@ const statusClass: Record<string, string> = {
           </div>
 
           <div class="flex items-center justify-between gap-2 mt-1.5 text-xs text-slate-400">
-            <span class="truncate">{{ d.owner_name }} · {{ d.stage_name }}</span>
+            <span class="truncate"><template v-if="crm.seesAll">{{ d.owner_name }} · </template>{{ d.stage_name }}</span>
             <span class="shrink-0 ltr-nums">{{ d.closed_jalali || d.opened_jalali }}</span>
           </div>
           <p v-if="d.reason_name" class="text-[10px] text-red-400 mt-1">{{ d.reason_name }}</p>
@@ -161,7 +165,7 @@ const statusClass: Record<string, string> = {
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">
               <th class="text-right font-medium px-4 py-3">معامله</th>
-              <th class="text-right font-medium px-3">کارشناس</th>
+              <th v-if="crm.seesAll" class="text-right font-medium px-3">کارشناس</th>
               <th class="text-right font-medium px-3">مرحله</th>
               <th class="text-right font-medium px-3">وضعیت</th>
               <th class="text-left font-medium px-3">مبلغ</th>
@@ -180,7 +184,7 @@ const statusClass: Record<string, string> = {
                 <p class="text-ink font-medium truncate max-w-[280px]">{{ d.title }}</p>
                 <p class="text-xs text-slate-400">{{ d.customer_name }} · {{ d.province_name }}</p>
               </td>
-              <td class="px-3 text-slate-500">{{ d.owner_name }}</td>
+              <td v-if="crm.seesAll" class="px-3 text-slate-500">{{ d.owner_name }}</td>
               <td class="px-3 text-slate-500 text-xs">{{ d.stage_name }}</td>
               <td class="px-3">
                 <span class="text-[11px] rounded-full px-2 py-0.5" :class="statusClass[d.status]">{{ d.status_display }}</span>
