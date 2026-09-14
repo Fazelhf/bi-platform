@@ -120,6 +120,20 @@ class FinanceSetting(TimeStampedModel):
         help_text="واحد نمایش؛ ذخیره‌سازی همیشه ریال است",
     )
 
+    # ---- budget variance --------------------------------------------------
+    # A variance counts as worth looking at only when it clears BOTH bars.
+    # Percent alone floods the screen with tiny lines that moved 40%; rial
+    # alone flags every big line that moved 1%. Neither is a signal on its
+    # own, so «مهم» is the intersection.
+    variance_threshold_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("10"),
+        help_text="انحراف از چند درصد به بالا مهم شمرده شود",
+    )
+    variance_threshold_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0,
+        help_text="انحراف از چه مبلغی به بالا مهم شمرده شود — صفر یعنی بدون کف مبلغی",
+    )
+
     @classmethod
     def get(cls) -> "FinanceSetting":
         obj, _ = cls.objects.get_or_create(singleton=True)
@@ -135,6 +149,18 @@ class CashCategory(TimeStampedModel):
 
     `direction` is what the category is *allowed* to be used for. جاری شرکا
     legitimately appears on both sides of his sheet, hence BOTH.
+
+    **A tree, for the same reason `DimPeriod` is one.** Budgeting asks
+    questions the flat list cannot answer — «از خرید جمبو چقدر انتظار داشتیم
+    و چقدر شد؟» needs جمبو to be its own line, not a rial inside تامین
+    کننده. So a category may have a parent, and the same invariant applies:
+
+        Movements are stored **only on leaves**. A parent's figure is always
+        the roll-up of its children, never written.
+
+    Without that rule a month recorded against both تامین کننده and its child
+    خرید جمبو would double count, silently. `clean()` and the entry grid both
+    enforce it; `leaf_ids()` is how every report rolls a parent up.
     """
 
     class Allowed(models.TextChoices):
@@ -144,11 +170,18 @@ class CashCategory(TimeStampedModel):
 
     code = models.SlugField(unique=True)
     name_fa = models.CharField(max_length=100)
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="children",
+        help_text="دستهٔ والد — اگر خالی باشد، این دسته در سطح اول است",
+    )
     direction = models.CharField(
         max_length=5, choices=Allowed.choices, default=Allowed.BOTH
     )
     #: Categories that describe a credit relationship (تسهیلات / قرض / شرکا)
-    #: expect their movements to name one, so a balance can be kept.
+    #: expect their movements to name one, so a balance can be kept. Children
+    #: inherit it — every child of تسهیلات needs a credit line too — so read
+    #: `needs_credit_line` rather than this field.
     expects_credit_line = models.BooleanField(default=False)
     sort_order = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -161,6 +194,73 @@ class CashCategory(TimeStampedModel):
 
     def allows(self, direction: str) -> bool:
         return self.direction == self.Allowed.BOTH or self.direction == direction
+
+    # ---- tree -------------------------------------------------------------
+
+    @property
+    def is_leaf(self) -> bool:
+        return not self.children.exists()
+
+    @property
+    def needs_credit_line(self) -> bool:
+        """
+        True when this category or any ancestor expects one. Set on تسهیلات
+        once; every child of it inherits rather than repeating the flag and
+        risking one of them being missed.
+        """
+        node = self
+        while node is not None:
+            if node.expects_credit_line:
+                return True
+            node = node.parent
+        return False
+
+    def leaves(self) -> list["CashCategory"]:
+        """This category's leaves — or itself when it has none."""
+        children = list(self.children.all())
+        if not children:
+            return [self]
+        out: list["CashCategory"] = []
+        for child in children:
+            out.extend(child.leaves())
+        return out
+
+    def leaf_ids(self) -> list[int]:
+        """The ids a report sums over to get this category's figure."""
+        return [c.id for c in self.leaves()]
+
+    @classmethod
+    def enterable(cls):
+        """
+        The categories a figure may be recorded against — leaves only.
+
+        Every grid that offers a column, and every query that lists what can
+        be picked, goes through here. A parent shown as an enterable column is
+        how the double counting the tree exists to prevent gets back in.
+        """
+        return cls.objects.filter(is_active=True, children__isnull=True)
+
+    def clean(self) -> None:
+        from django.core.exceptions import ValidationError
+
+        # A cycle would make leaves() recurse forever.
+        node = self.parent
+        while node is not None:
+            if node.pk == self.pk:
+                raise ValidationError({"parent": "دستهٔ والد نمی‌تواند زیرمجموعهٔ خودش باشد."})
+            node = node.parent
+
+        # A parent's direction has to contain its children's, or a child
+        # could take a movement its own branch is not allowed to report. A
+        # BOTH parent contains everything; otherwise the child must match.
+        if (
+            self.parent
+            and self.parent.direction != self.Allowed.BOTH
+            and self.direction != self.parent.direction
+        ):
+            raise ValidationError(
+                {"direction": "جهت این دسته با جهت مجاز دستهٔ والد نمی‌خواند."}
+            )
 
     def __str__(self) -> str:
         return self.name_fa
@@ -324,3 +424,18 @@ class CashMovement(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.period} · {self.get_direction_display()} · {self.category}"
+
+
+# The budget models live in their own module — treasury and budgeting are
+# different jobs — but Django only registers models that are imported when the
+# app loads, so they are pulled in here rather than left for a caller to find.
+from .budget_models import (  # noqa: E402,F401  (import position is required)
+    Budget,
+    BudgetAmount,
+    BudgetAmountChange,
+    BudgetLine,
+    BudgetPeriod,
+    BudgetSalesForecast,
+    BudgetStatus,
+    is_material,
+)

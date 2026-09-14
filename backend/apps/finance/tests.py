@@ -37,8 +37,11 @@ class TreasuryTestCase(APITestCase):
             )
             for i in (1, 2, 3)
         ]
-        self.sales = CashCategory.objects.get(code="sales")
-        self.supplier = CashCategory.objects.get(code="supplier")
+        # فروش and تامین کننده became parents when categories gained a tree;
+        # figures live on their leaves now, which is where migration 0006 put
+        # the real rows too.
+        self.sales = CashCategory.objects.get(code="sales-other")
+        self.supplier = CashCategory.objects.get(code="supplier-other")
         self.partner = CashCategory.objects.get(code="partner-account")
 
         User = get_user_model()
@@ -216,9 +219,13 @@ class CashEntryTests(TreasuryTestCase):
         # Categories are split by the direction they are allowed in.
         in_codes = {c["code"] for c in response.data["categories"]["in"]}
         out_codes = {c["code"] for c in response.data["categories"]["out"]}
-        self.assertIn("sales", in_codes)
-        self.assertNotIn("sales", out_codes)
-        self.assertIn("supplier", out_codes)
+        self.assertIn("sales-other", in_codes)
+        self.assertNotIn("sales-other", out_codes)
+        self.assertIn("supplier-other", out_codes)
+        # A parent is a roll-up of its children, never a column someone can
+        # type into — offering one is how double counting gets back in.
+        self.assertNotIn("sales", in_codes | out_codes)
+        self.assertNotIn("supplier", in_codes | out_codes)
         # جاری شرکا legitimately appears on both sides.
         self.assertIn("partner-account", in_codes)
         self.assertIn("partner-account", out_codes)

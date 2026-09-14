@@ -35,8 +35,11 @@ class AccountTestCase(APITestCase):
             )
             for i in (1, 2, 3)
         ]
-        self.sales = CashCategory.objects.get(code="sales")
-        self.supplier = CashCategory.objects.get(code="supplier")
+        # فروش and تامین کننده became parents when categories gained a tree;
+        # figures live on their leaves now, which is where migration 0006 put
+        # the real rows too.
+        self.sales = CashCategory.objects.get(code="sales-other")
+        self.supplier = CashCategory.objects.get(code="supplier-other")
 
         User = get_user_model()
         self.finance = User.objects.create_user(

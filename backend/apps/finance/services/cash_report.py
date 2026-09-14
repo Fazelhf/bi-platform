@@ -79,7 +79,9 @@ def build_range(start: DimPeriod, end: DimPeriod) -> dict:
 
 
 def _grid(days: list[DimPeriod], title: str, period_id: int | None) -> dict:
-    categories = list(CashCategory.objects.filter(is_active=True))
+    # Leaves only — a parent's figure is the sum of these, not a row of
+    # its own, or every total would count its children twice.
+    categories = list(CashCategory.enterable())
     in_cats = [c for c in categories if c.allows(Direction.IN)]
     out_cats = [c for c in categories if c.allows(Direction.OUT)]
 
