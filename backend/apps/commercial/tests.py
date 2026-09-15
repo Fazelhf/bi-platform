@@ -440,3 +440,71 @@ class DashboardTests(CommercialTestCase):
         response = self.client.get("/api/commercial/dashboard/")
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.data["top_material"])
+
+
+class OfficialInvoiceVatTests(CommercialTestCase):
+    """فاکتور رسمی: ۱۰٪ ارزش افزوده on top of the price, and nothing otherwise."""
+
+    def test_official_quote_adds_vat_and_unofficial_does_not(self):
+        request = self._request(qty=10)
+        official = Quote.objects.create(
+            request=request, supplier=self.a,
+            unit_price_rial=Decimal(1_000_000), is_official=True,
+        )
+        plain = Quote.objects.create(
+            request=request, supplier=self.b, unit_price_rial=Decimal(1_050_000),
+        )
+        self.assertEqual(official.total_rial, Decimal(10_000_000))
+        self.assertEqual(official.vat_rial, Decimal(1_000_000))
+        self.assertEqual(official.grand_total_rial, Decimal(11_000_000))
+        self.assertEqual(plain.vat_rial, Decimal(0))
+        # The cheaper-looking official price costs more once VAT is in.
+        self.assertGreater(official.unit_price_with_vat_rial, plain.unit_price_with_vat_rial)
+
+    def test_order_api_carries_vat(self):
+        self.client.force_authenticate(self.manager)
+        response = self.client.post("/api/commercial/orders/", {
+            "material": self.shrink.id, "supplier": self.a.id,
+            "quantity": "3", "unit_price_rial": "333333",
+            "ordered_on": "2026-07-25", "is_official": True,
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["total_rial"], "999999")
+        self.assertEqual(response.data["vat_rial"], "100000")
+        self.assertEqual(response.data["grand_total_rial"], "1099999")
+
+
+class QuickQuoteTests(CommercialTestCase):
+    """استعلام از پرونده تامین‌کننده یا کالا، بدون ساختن درخواست از قبل."""
+
+    def test_opens_a_request_when_none_is_given(self):
+        self.client.force_authenticate(self.manager)
+        response = self.client.post("/api/commercial/quotes/quick/", {
+            "supplier": self.a.id, "material": self.shrink.id, "quantity": "12",
+            "unit_price_rial": "500000", "quoted_on": "2026-07-25", "is_official": True,
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        request = PurchaseRequest.objects.get(pk=response.data["request"])
+        self.assertEqual(request.material, self.shrink)
+        self.assertEqual(request.quantity, Decimal(12))
+        self.assertEqual(request.status, PurchaseRequest.Status.QUOTING)
+        self.assertEqual(response.data["grand_total_rial"], "6600000")
+
+    def test_joins_an_existing_request(self):
+        self.client.force_authenticate(self.manager)
+        existing = self._request(qty=20)
+        response = self.client.post("/api/commercial/quotes/quick/", {
+            "supplier": self.b.id, "material": self.shrink.id,
+            "request": existing.id, "unit_price_rial": "1000",
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["request"], existing.id)
+        self.assertEqual(PurchaseRequest.objects.count(), 1)
+
+    def test_failed_quote_leaves_no_orphan_request(self):
+        self.client.force_authenticate(self.manager)
+        response = self.client.post("/api/commercial/quotes/quick/", {
+            "material": self.shrink.id, "quantity": "5", "unit_price_rial": "1000",
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(PurchaseRequest.objects.count(), 0)

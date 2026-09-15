@@ -14,8 +14,11 @@ import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
 import StatTile from "@/components/commercial/StatTile.vue";
+import QuickQuoteForm from "@/components/commercial/QuickQuoteForm.vue";
+import OrderForm from "@/components/commercial/OrderForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import { useAuthStore } from "@/stores/auth";
 
 /**
  * پرونده یک کالا: قیمتی که دادیم، قیمتی که بقیه خواستند، مصرف ماهانه و
@@ -23,7 +26,25 @@ import EmptyState from "@/components/EmptyState.vue";
  */
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 const { exact, toUnit, unitLabel } = useMoney();
+
+const materialId = computed(() => Number(route.params.id));
+const canEdit = computed(
+  () => auth.department === "commercial" || !!auth.me?.is_superuser,
+);
+const showQuote = ref(false);
+const showOrder = ref(false);
+
+async function afterSave() {
+  showQuote.value = false;
+  showOrder.value = false;
+  const id = materialId.value;
+  [history.value, usage.value] = await Promise.all([
+    commercialApi.materialHistory(id),
+    commercialApi.materialConsumption(id),
+  ]);
+}
 
 const material = ref<Material | null>(null);
 const history = ref<PriceHistory | null>(null);
@@ -136,11 +157,32 @@ const usageChart = computed(() => {
             <span v-if="material.category_name"> · {{ material.category_name }}</span>
           </p>
         </div>
-        <button
-          class="text-sm text-slate-500 hover:text-ink px-2 py-2"
-          @click="router.push({ name: 'commercial-materials' })"
-        >← بازگشت</button>
+        <div class="flex flex-wrap gap-2 shrink-0">
+          <button
+            class="text-sm text-slate-500 hover:text-ink px-2 py-2"
+            @click="router.push({ name: 'commercial-materials' })"
+          >← بازگشت</button>
+          <button
+            v-if="canEdit"
+            class="bg-slate-100 text-ink rounded-xl px-4 py-2 text-sm"
+            @click="showQuote = true"
+          >+ استعلام</button>
+          <button
+            v-if="canEdit"
+            class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
+            @click="showOrder = true"
+          >+ خرید</button>
+        </div>
       </div>
+
+      <QuickQuoteForm
+        v-if="showQuote" :material-id="materialId"
+        @close="showQuote = false" @saved="afterSave"
+      />
+      <OrderForm
+        v-if="showOrder" :default-material="materialId"
+        @close="showOrder = false" @saved="afterSave"
+      />
 
       <!-- Headline figures -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">

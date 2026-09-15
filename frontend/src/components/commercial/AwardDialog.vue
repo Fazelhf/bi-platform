@@ -142,7 +142,9 @@ async function save() {
               </span>
             </div>
             <p class="text-xs text-slate-400 mt-0.5">
-              مبلغ کل: <span class="ltr-nums">{{ exact(q.total_rial, true) }}</span>
+              مبلغ کل: <span class="ltr-nums">{{ exact(q.grand_total_rial, true) }}</span>
+              <span v-if="q.is_official"> (رسمی، با {{ q.vat_pct }}٪ ارزش افزوده)</span>
+              <span v-else> (غیررسمی)</span>
               <span v-if="q.note"> · {{ q.note }}</span>
             </p>
 

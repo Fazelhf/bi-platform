@@ -895,6 +895,11 @@ class SalesInputView(APIView):
         # «تارگت» section — never through this sheet, whoever is posting.
         editable = [f for f in metric_fields_for(channel) if f not in TARGET_FIELDS]
 
+        # Once منابع انسانی owns this channel, the sheet only takes people who
+        # already exist. A typed name used to create a new person on the spot,
+        # which is exactly how «شیما نظام آبادی» and «شیما نظام ابادی» became
+        # two people — and names are renamed in HR, not in a column header.
+        chart_owned = _chart_owns(channel)
         kept_employee_ids = set()
         for row in request.data.get("columns", []):
             name = (row.get("name") or "").strip()
@@ -903,12 +908,16 @@ class SalesInputView(APIView):
             emp_id = row.get("employee_id")
             if emp_id:
                 employee = DimEmployee.objects.filter(pk=emp_id).first()
-                if employee and employee.full_name_fa != name:
+                if employee and employee.full_name_fa != name and not chart_owned:
                     employee.full_name_fa = name
                     employee.save(update_fields=["full_name_fa"])
             else:
                 employee = DimEmployee.objects.filter(full_name_fa=name).first()
             if employee is None:
+                if chart_owned:
+                    raise ValidationError(
+                        f"«{name}» در منابع انسانی ثبت نشده است؛ اول او را در چارت سازمانی اضافه کنید."
+                    )
                 employee = DimEmployee.objects.create(
                     full_name_fa=name, code=f"emp-{uuid.uuid4().hex[:8]}"
                 )
@@ -936,9 +945,12 @@ class SalesInputView(APIView):
         # empty the roster.
         removed = request.data.get("remove_employee_ids") or []
         if removed:
-            EmployeeChannel.objects.filter(
-                channel=channel, employee_id__in=removed
-            ).delete()
+            # With the chart in charge the column is only this period's
+            # figures; the person stays on the team until HR moves them.
+            if not chart_owned:
+                EmployeeChannel.objects.filter(
+                    channel=channel, employee_id__in=removed
+                ).delete()
             FactSalesMonthly.objects.filter(
                 period=period, channel=channel, employee_id__in=removed
             ).delete()
@@ -1284,6 +1296,21 @@ class SalesDashboardDetailView(APIView):
         })
 
 
+def _chart_owns(channel: str) -> bool:
+    """Whether منابع انسانی decides who is on this channel's roster."""
+    from apps.hr.models import OrgUnit
+
+    return OrgUnit.objects.filter(sales_channel=channel).exists()
+
+
+def _refuse_if_chart_owns(channel: str) -> None:
+    if _chart_owns(channel):
+        raise PermissionDenied(
+            "کارشناسان این بخش از «منابع انسانی» خوانده می‌شوند؛ "
+            "افزودن، حذف یا تغییر نام را از چارت سازمانی انجام دهید."
+        )
+
+
 class RosterViewSet(viewsets.ModelViewSet):
     """
     «کارشناسان بخش» — each department manager's own roster.
@@ -1382,14 +1409,15 @@ class RosterViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """
-        Add someone to this roster — an existing کارشناس by id, or a new one by
-        name. Re-adding a person who was deactivated revives that membership
-        instead of failing on the unique constraint.
+        Who is on a roster is decided in منابع انسانی once the chart claims the
+        channel. Until then this still works, so a channel nobody has placed
+        on the chart is not left with no way to add anyone.
         """
         import uuid
 
         channel = self._channel()
         self._assert_owner(channel)
+        _refuse_if_chart_owns(channel)
 
         employee_id = request.data.get("employee")
         name = (request.data.get("name") or "").strip()
@@ -1426,6 +1454,10 @@ class RosterViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._assert_owner(serializer.instance.channel)
+        # The regional team and the note stay the manager's; membership and
+        # the person's name belong to منابع انسانی once it owns the channel.
+        if {"is_active", "employee_name"} & set(self.request.data):
+            _refuse_if_chart_owns(serializer.instance.channel)
         member = serializer.save()
         # The name and team live on the employee, not the membership, but the
         # manager edits them from this one screen.
@@ -1450,6 +1482,7 @@ class RosterViewSet(viewsets.ModelViewSet):
         """
         member = self.get_object()
         self._assert_owner(member.channel)
+        _refuse_if_chart_owns(member.channel)
         if FactSalesMonthly.objects.filter(
             employee_id=member.employee_id, channel=member.channel
         ).exists():

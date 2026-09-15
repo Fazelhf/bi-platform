@@ -431,6 +431,7 @@ class CashMovement(TimeStampedModel):
 # app loads, so they are pulled in here rather than left for a caller to find.
 from .budget_models import (  # noqa: E402,F401  (import position is required)
     Budget,
+    BudgetActual,
     BudgetAmount,
     BudgetAmountChange,
     BudgetLine,

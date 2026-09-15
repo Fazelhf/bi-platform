@@ -6,11 +6,12 @@ lines, keys the expected figure for each month, and approves month by month.
 
 Four ideas the design rests on:
 
-* **There is no «actual» table.** A budget line names a `CashCategory` leaf,
-  and its actual is the sum of the `CashMovement` rows already recorded
-  against that leaf. The finance team keys a number once, in the place they
-  key it today, and variance falls out. A second actuals table would mean
-  double entry and, within a quarter, two figures that disagree.
+* **The CEO plans, finance reports.** The CEO defines every سرفصل and its
+  expected figure. The finance team keys what actually happened against each
+  سرفصل, week by week, on its own page (BudgetActual), and cannot move the
+  plan it is measured against. The cash ledger does not feed the budget:
+  reading both would count the same rial twice the moment it was keyed in
+  both places.
 
 * **Budget is monthly, comparison is weekly.** Approval happens on a month —
   that is the grain the plan is argued at. Actuals arrive weekly, on the
@@ -143,7 +144,7 @@ class BudgetLine(TimeStampedModel):
     class Meta:
         unique_together = ("budget", "category", "credit_line", "direction")
         ordering = ("sort_order", "category__sort_order")
-        verbose_name = "budget line (قلم بودجه)"
+        verbose_name = "budget line (سرفصل بودجه)"
         verbose_name_plural = "budget lines"
         indexes = [models.Index(fields=["budget", "direction"])]
 
@@ -284,7 +285,7 @@ class BudgetAmount(TimeStampedModel):
             and self.line_id
             and self.budget_period.budget_id != self.line.budget_id
         ):
-            raise ValidationError({"line": "این قلم به بودجهٔ دیگری تعلق دارد."})
+            raise ValidationError({"line": "این سرفصل به بودجهٔ دیگری تعلق دارد."})
 
     def for_week(self, week: DimPeriod) -> Decimal:
         """
@@ -388,3 +389,40 @@ class BudgetSalesForecast(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.get_channel_display()} · {self.budget_period}"
+
+
+class BudgetActual(TimeStampedModel):
+    """
+    What actually happened on one سرفصل in one week, as the finance team keys it.
+
+    Weekly: a month cut into weeks takes one figure per week and the month is
+    their sum; a month never cut takes its figure on the month itself. Days are
+    never an entry grain here — a week the sales team enters day by day is
+    still one week for the budget.
+
+    Manual on purpose. Reading the cash ledger as the actual tied every سرفصل
+    to a cash category keyed exactly the same way; the finance team now
+    reports against the plan directly.
+    """
+
+    line = models.ForeignKey(BudgetLine, on_delete=models.CASCADE, related_name="actuals")
+    period = models.ForeignKey(
+        DimPeriod, on_delete=models.PROTECT, related_name="budget_actuals",
+        help_text="هفته، یا ماهی که به هفته تقسیم نشده",
+    )
+    amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    note = models.CharField(max_length=250, blank=True)
+    entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+
+    class Meta:
+        unique_together = ("line", "period")
+        ordering = ("period__start_date", "line__sort_order")
+        verbose_name = "budget actual (رقم واقعی سرفصل)"
+        verbose_name_plural = "budget actuals"
+        indexes = [models.Index(fields=["period", "line"])]
+
+    def __str__(self) -> str:
+        return f"{self.line} · {self.period.label}"

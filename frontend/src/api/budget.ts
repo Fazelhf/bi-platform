@@ -195,6 +195,36 @@ export interface Waterfall {
   steps: WaterfallStep[];
 }
 
+/** One سرفصل on the finance team's weekly actuals sheet. */
+export interface ActualEntryLine extends VarianceCell {
+  line_id: number;
+  label: string;
+  category_name: string;
+  parent_name: string;
+  counterparty: string;
+  direction: Direction;
+  /** Whether anything was keyed for it in this period. */
+  entered: boolean;
+  note: string;
+  month_budget_rial: string;
+  month_actual_rial: string;
+}
+
+export interface ActualEntrySheet {
+  budget: { id: number; title: string };
+  period: { id: number; label: string; kind: string };
+  month: { id: number; label: string; days: number };
+  /** A month cut into weeks, read as the sum of its weeks — not writable. */
+  is_rollup: boolean;
+  /** The entry periods: the month's weeks, or the month itself. */
+  weeks: { period_id: number; label: string; seq: number; days: number; entered: number }[];
+  line_count: number;
+  lines: ActualEntryLine[];
+  totals: { in: VarianceCell; out: VarianceCell };
+  can_edit: boolean;
+  unit: FinanceSettings;
+}
+
 const many = <T>(data: any): T[] => data.results ?? data;
 
 export const budgetApi = {
@@ -248,6 +278,33 @@ export const budgetApi = {
       sales_cells: salesCells,
     });
     return data as { written: number };
+  },
+
+  async actuals(budgetId: number, periodId: number): Promise<ActualEntrySheet> {
+    const { data } = await api.get("/finance/budget-actuals/", {
+      params: { budget: budgetId, period: periodId },
+    });
+    return data;
+  },
+  async saveActuals(
+    budgetId: number,
+    periodId: number,
+    cells: { line_id: number; amount_rial: string; note: string }[],
+  ) {
+    const { data } = await api.post("/finance/budget-actuals/", {
+      budget: budgetId,
+      period: periodId,
+      cells,
+    });
+    return data as { written: number };
+  },
+  async saveNote(budgetPeriodId: number, lineId: number, note: string) {
+    const { data } = await api.post("/finance/budget-notes/", {
+      budget_period_id: budgetPeriodId,
+      line_id: lineId,
+      variance_note: note,
+    });
+    return data as { variance_note: string };
   },
 
   async variance(budgetId: number, periodId: number): Promise<VarianceReport> {

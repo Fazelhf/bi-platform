@@ -31,6 +31,7 @@ const { budgets, budgetId, periodId, months, budget, linkQuery, init } = useBudg
 const { money, unitLabel } = useMoney();
 const auth = useAuthStore();
 const isFinance = computed(() => auth.department === "finance" || !!auth.me?.is_superuser);
+const isCeo = computed(() => auth.isExecutive || !!auth.me?.is_superuser);
 
 const series = ref<BudgetSeries | null>(null);
 const report = ref<VarianceReport | null>(null);
@@ -227,10 +228,15 @@ const worst = computed(() =>
           class="px-3 py-1.5 text-sm rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200"
         >جزئیات انحراف</router-link>
         <router-link
-          v-if="isFinance"
+          v-if="isCeo"
           :to="{ name: 'finance-budget-plan', query: linkQuery }"
           class="px-3 py-1.5 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700"
         >تعریف بودجه</router-link>
+        <router-link
+          v-if="isFinance"
+          :to="{ name: 'finance-budget-actuals', query: linkQuery }"
+          class="px-3 py-1.5 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700"
+        >ورود ارقام واقعی</router-link>
       </div>
     </section>
 
@@ -241,16 +247,16 @@ const worst = computed(() =>
     <section v-else-if="!budgets.length" class="bg-surface rounded-card shadow-soft p-10 text-center">
       <p class="font-semibold text-ink">هنوز بودجه‌ای تعریف نشده</p>
       <p class="text-sm text-slate-400 mt-1">
-        {{ isFinance ? 'از «تعریف بودجه» اولین بودجه را بسازید.' : 'واحد مالی هنوز بودجه‌ای ثبت نکرده است.' }}
+        {{ isCeo ? 'از «تعریف بودجه» اولین بودجه را بسازید.' : 'مدیرعامل هنوز بودجه‌ای تعریف نکرده است.' }}
       </p>
-      <router-link v-if="isFinance" :to="{ name: 'finance-budget-plan' }" class="inline-block mt-3 text-sm text-brand-700">رفتن به تعریف بودجه ←</router-link>
+      <router-link v-if="isCeo" :to="{ name: 'finance-budget-plan' }" class="inline-block mt-3 text-sm text-brand-700">رفتن به تعریف بودجه ←</router-link>
     </section>
 
     <template v-else>
       <!-- Nothing recorded yet: say so before the KPIs look like a crisis. -->
       <div v-if="report && !report.has_actuals" class="rounded-card p-3 text-sm bg-sky-50 text-sky-800 leading-6">
-        <span class="font-semibold">برای {{ report.month.label }} هنوز هیچ حرکت نقدینگی ثبت نشده است.</span>
-        ارقام «واقعی» صفرند و انحراف‌ها یعنی «هنوز ثبت نشده» — برای دیدن عملکرد، ماهی را انتخاب کنید که ورود نقدینگی‌اش انجام شده.
+        <span class="font-semibold">برای {{ report.month.label }} هنوز هیچ رقم واقعی ثبت نشده است.</span>
+        ارقام «واقعی» صفرند و انحراف‌ها یعنی «هنوز ثبت نشده» — برای دیدن عملکرد، ماهی را انتخاب کنید که ارقام واقعی‌اش وارد شده.
       </div>
 
       <!-- 1. On plan? -->
@@ -302,7 +308,7 @@ const worst = computed(() =>
         <table v-else class="min-w-full text-sm">
           <thead>
             <tr class="text-[11px] text-slate-500">
-              <th class="text-right font-medium p-3">قلم</th>
+              <th class="text-right font-medium p-3">سرفصل</th>
               <th class="text-left font-medium p-3">مورد انتظار</th>
               <th class="text-left font-medium p-3">واقعی</th>
               <th class="text-left font-medium p-3">انحراف</th>

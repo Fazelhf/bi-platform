@@ -14,11 +14,12 @@ from apps.core.audit import log as audit_log
 from apps.core.models import AuditLog, DimPeriod, PeriodKind
 from apps.core.notify import notify_submitted
 from apps.core.periods import leaves_of, month_of
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from apps.finance.models import (
     BankAccount,
     Budget,
+    BudgetActual,
     BudgetAmount,
     BudgetAmountChange,
     BudgetLine,
@@ -31,7 +32,15 @@ from apps.finance.models import (
     Direction,
     FinanceSetting,
 )
-from apps.finance.permissions import FinanceAccess, assert_finance_visible, is_finance
+from apps.finance.permissions import (
+    BudgetActualAccess,
+    BudgetPlanAccess,
+    CategoryAccess,
+    FinanceAccess,
+    assert_finance_visible,
+    is_ceo,
+    is_finance,
+)
 from apps.finance.serializers import (
     BankAccountSerializer,
     BudgetLineSerializer,
@@ -119,7 +128,9 @@ class CashCategoryViewSet(viewsets.ModelViewSet):
 
     queryset = CashCategory.objects.all()
     serializer_class = CashCategorySerializer
-    permission_classes = [FinanceAccess]
+    # Finance keeps them for the cash report; the CEO adds سرفصل‌ها while
+    # defining a budget.
+    permission_classes = [CategoryAccess]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ["direction", "is_active"]
     search_fields = ["code", "name_fa", "note"]
@@ -463,7 +474,8 @@ class BudgetViewSet(viewsets.ModelViewSet):
 
     queryset = Budget.objects.select_related("start_period", "end_period")
     serializer_class = BudgetSerializer
-    permission_classes = [FinanceAccess]
+    # The plan is the CEO's: finance reads it and reports against it.
+    permission_classes = [BudgetPlanAccess]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["jalali_year", "is_active"]
 
@@ -488,8 +500,6 @@ class BudgetViewSet(viewsets.ModelViewSet):
         Figures stay editable afterwards — that was the requirement — but the
         baseline is written once, so «عدد مصوب چه بود؟» keeps an answer.
         """
-        if not is_finance(request.user):
-            raise ValidationError({"detail": "فقط واحد مالی می‌تواند بودجه را تصویب کند."})
         budget = self.get_object()
         month = _month_param(
             request.data.get("period") or request.query_params.get("period")
@@ -513,7 +523,7 @@ class BudgetLineViewSet(viewsets.ModelViewSet):
         "category", "category__parent", "credit_line"
     )
     serializer_class = BudgetLineSerializer
-    permission_classes = [FinanceAccess]
+    permission_classes = [BudgetPlanAccess]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["budget", "direction", "is_active"]
 
@@ -561,9 +571,10 @@ class BudgetGridView(APIView):
 
     One row per line, one column per month — the shape a cash plan is argued
     in. POST writes the cells that changed and records who moved what.
+    Only the CEO writes it; finance reads it.
     """
 
-    permission_classes = [FinanceAccess]
+    permission_classes = [BudgetPlanAccess]
 
     @extend_schema(
         parameters=[OpenApiParameter("budget", int, required=True)], responses=dict
@@ -648,14 +659,11 @@ class BudgetGridView(APIView):
                 for channel in SalesChannel
             ],
             "unit": FinanceSettingSerializer(FinanceSetting.get()).data,
-            "can_edit": is_finance(request.user),
+            "can_edit": is_ceo(request.user),
         })
 
     @transaction.atomic
     def post(self, request):
-        if not is_finance(request.user):
-            raise ValidationError({"detail": "فقط واحد مالی می‌تواند بودجه را ویرایش کند."})
-
         written = 0
         for cell in request.data.get("cells", []):
             try:
@@ -664,7 +672,7 @@ class BudgetGridView(APIView):
             except (BudgetPeriod.DoesNotExist, BudgetLine.DoesNotExist, ValueError, TypeError):
                 continue
             if bp.budget_id != line.budget_id:
-                raise ValidationError({"detail": "قلم و ماه به دو بودجهٔ متفاوت تعلق دارند."})
+                raise ValidationError({"detail": "سرفصل و ماه به دو بودجهٔ متفاوت تعلق دارند."})
 
             row, created = BudgetAmount.objects.get_or_create(
                 budget_period=bp, line=line
@@ -777,3 +785,127 @@ class BudgetWaterfallView(APIView):
         except (DimPeriod.DoesNotExist, ValueError, TypeError):
             raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
         return Response(budget_service.waterfall(budget, period))
+
+
+# --------------------------------------------------------------------------
+# ورود ارقام واقعی بودجه
+# --------------------------------------------------------------------------
+
+def _int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _entry_period_param(value) -> DimPeriod:
+    try:
+        period = DimPeriod.objects.get(pk=value)
+    except (DimPeriod.DoesNotExist, ValueError, TypeError):
+        raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+    if period.kind == PeriodKind.DAY:
+        raise ValidationError({"period": "ارقام واقعی بودجه هفتگی وارد می‌شوند، نه روزانه."})
+    return period
+
+
+def _require_month_in_budget(budget: Budget, period: DimPeriod) -> None:
+    month = period if period.kind == PeriodKind.MONTH else month_of(period)
+    if not BudgetPeriod.objects.filter(budget=budget, period=month).exists():
+        raise ValidationError({"period": "این دوره در بازهٔ این بودجه نیست."})
+
+
+class BudgetActualEntryView(APIView):
+    """
+    ورود ارقام واقعی بودجه — the finance team's weekly sheet.
+
+    Every سرفصل of the budget, its plan for the week and the actual keyed
+    against it. The CEO defines the plan; finance reports against it here and
+    cannot move it.
+    """
+
+    permission_classes = [BudgetActualAccess]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("budget", int, required=True),
+            OpenApiParameter("period", int, required=True, description="هفته یا ماه"),
+        ],
+        responses=dict,
+    )
+    def get(self, request):
+        budget = _budget_param(request.query_params.get("budget"))
+        period = _entry_period_param(request.query_params.get("period"))
+        _require_month_in_budget(budget, period)
+        sheet = budget_service.entry_sheet(budget, period)
+        # A split month is the sum of its weeks: read it, key the weeks.
+        sheet["can_edit"] = is_finance(request.user) and not sheet["is_rollup"]
+        sheet["unit"] = FinanceSettingSerializer(FinanceSetting.get()).data
+        return Response(sheet)
+
+    @transaction.atomic
+    def post(self, request):
+        budget = _budget_param(request.data.get("budget"))
+        period = _entry_period_param(request.data.get("period"))
+        _require_month_in_budget(budget, period)
+        if (
+            period.kind == PeriodKind.MONTH
+            and period.children.filter(kind=PeriodKind.WEEK).exists()
+        ):
+            raise ValidationError({
+                "period": "این ماه به هفته تقسیم شده؛ ارقام واقعی را در هر هفته وارد کنید."
+            })
+
+        lines = {ln.id: ln for ln in BudgetLine.objects.filter(budget=budget, is_active=True)}
+        written = 0
+        for cell in request.data.get("cells", []):
+            line = lines.get(_int(cell.get("line_id")))
+            if line is None:
+                continue
+            try:
+                amount = Decimal(str(cell.get("amount_rial") or 0))
+            except (InvalidOperation, ValueError):
+                raise ValidationError({"detail": f"مبلغ «{line}» عدد معتبری نیست."})
+            note = str(cell.get("note") or "")[:250]
+
+            existing = BudgetActual.objects.filter(line=line, period=period).first()
+            # Never keyed and still blank: leave it out rather than filling
+            # the table with zeros nobody entered.
+            if existing is None and not amount and not note:
+                continue
+            if existing and existing.amount_rial == amount and existing.note == note:
+                continue
+            BudgetActual.objects.update_or_create(
+                line=line, period=period,
+                defaults={"amount_rial": amount, "note": note, "entered_by": request.user},
+            )
+            written += 1
+
+        if written:
+            audit_log(request.user, budget, AuditLog.Action.UPDATE, {
+                "budget_actuals": {"before": None, "after": f"{period.label}: {written} سرفصل"},
+            })
+        return Response({"written": written})
+
+
+class BudgetNoteView(APIView):
+    """
+    علت انحراف — written by the finance team, who know why an actual moved.
+
+    Kept apart from the plan grid, which is the CEO's: explaining a variance
+    must not require the right to change the budget.
+    """
+
+    permission_classes = [BudgetActualAccess]
+
+    def post(self, request):
+        try:
+            bp = BudgetPeriod.objects.get(pk=request.data.get("budget_period_id"))
+            line = BudgetLine.objects.get(pk=request.data.get("line_id"))
+        except (BudgetPeriod.DoesNotExist, BudgetLine.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({"detail": "سرفصل یا ماه معتبر نیست."})
+        if bp.budget_id != line.budget_id:
+            raise ValidationError({"detail": "سرفصل و ماه به دو بودجهٔ متفاوت تعلق دارند."})
+        row, _ = BudgetAmount.objects.get_or_create(budget_period=bp, line=line)
+        row.variance_note = str(request.data.get("variance_note") or "")
+        row.save(update_fields=["variance_note", "updated_at"])
+        return Response({"variance_note": row.variance_note})

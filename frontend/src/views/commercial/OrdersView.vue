@@ -47,7 +47,7 @@ const filtered = computed(() => {
 const total = computed(() =>
   filtered.value
     .filter((o) => o.status !== "cancelled")
-    .reduce((sum, o) => sum + Number(o.total_rial), 0),
+    .reduce((sum, o) => sum + Number(o.grand_total_rial), 0),
 );
 
 async function load() {
@@ -159,7 +159,8 @@ async function remove(order: PurchaseOrder) {
 
           <p class="text-xs text-slate-500 mt-2 truncate">{{ o.supplier_name }}</p>
           <div class="flex items-baseline gap-3 mt-1 flex-wrap ltr-nums">
-            <span class="text-ink font-semibold">{{ exact(o.total_rial) }}</span>
+            <span class="text-ink font-semibold">{{ exact(o.grand_total_rial) }}</span>
+            <span v-if="o.is_official" class="text-xs text-sky-600">رسمی</span>
             <span class="text-xs text-slate-400">
               {{ num(o.quantity) }} {{ o.material_unit }} × {{ exact(o.unit_price_rial) }}
             </span>
@@ -203,7 +204,12 @@ async function remove(order: PurchaseOrder) {
                 {{ num(o.quantity) }} {{ o.material_unit }}
               </td>
               <td class="px-3 ltr-nums text-slate-500">{{ exact(o.unit_price_rial) }}</td>
-              <td class="px-3 ltr-nums text-ink font-medium">{{ exact(o.total_rial) }}</td>
+              <td class="px-3 ltr-nums text-ink font-medium">
+                {{ exact(o.grand_total_rial) }}
+                <p v-if="o.is_official" class="text-xs text-sky-600 font-normal">
+                  رسمی · شامل {{ exact(o.vat_rial) }} ارزش افزوده
+                </p>
+              </td>
               <td class="px-3 text-xs text-slate-500 ltr-nums">
                 {{ faDate(o.ordered_on) }}
                 <p v-if="o.delivery_days !== null" class="text-slate-400">

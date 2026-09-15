@@ -7,12 +7,16 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import StatTile from "@/components/commercial/StatTile.vue";
+import QuickQuoteForm from "@/components/commercial/QuickQuoteForm.vue";
+import OrderForm from "@/components/commercial/OrderForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import { useAuthStore } from "@/stores/auth";
 
 /** پرونده یک تامین‌کننده: چه خواست، چه برد، و چه تحویل داد. */
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 const { exact, unitLabel } = useMoney();
 
 const data = ref<SupplierHistory | null>(null);
@@ -22,16 +26,33 @@ const error = ref("");
 const FA = new Intl.NumberFormat("fa-IR");
 
 const stats = computed(() => data.value?.stats ?? null);
+const supplierId = computed(() => Number(route.params.id));
+const canEdit = computed(
+  () => auth.department === "commercial" || !!auth.me?.is_superuser,
+);
 
-onMounted(async () => {
-  await loadMoneySettings();
+const showQuote = ref(false);
+const showOrder = ref(false);
+
+async function load() {
   try {
-    data.value = await commercialApi.supplierHistory(Number(route.params.id));
+    data.value = await commercialApi.supplierHistory(supplierId.value);
   } catch (e) {
     error.value = apiError(e);
   } finally {
     loading.value = false;
   }
+}
+
+function afterSave() {
+  showQuote.value = false;
+  showOrder.value = false;
+  load();
+}
+
+onMounted(async () => {
+  await loadMoneySettings();
+  await load();
 });
 </script>
 
@@ -63,11 +84,32 @@ onMounted(async () => {
             کالاها: {{ stats.materials.join("، ") }}
           </p>
         </div>
-        <button
-          class="text-sm text-slate-500 hover:text-ink px-2 py-2"
-          @click="router.push({ name: 'commercial-suppliers' })"
-        >← بازگشت</button>
+        <div class="flex flex-wrap gap-2 shrink-0">
+          <button
+            class="text-sm text-slate-500 hover:text-ink px-2 py-2"
+            @click="router.push({ name: 'commercial-suppliers' })"
+          >← بازگشت</button>
+          <button
+            v-if="canEdit"
+            class="bg-slate-100 text-ink rounded-xl px-4 py-2 text-sm"
+            @click="showQuote = true"
+          >+ استعلام</button>
+          <button
+            v-if="canEdit"
+            class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
+            @click="showOrder = true"
+          >+ خرید</button>
+        </div>
       </div>
+
+      <QuickQuoteForm
+        v-if="showQuote" :supplier-id="supplierId"
+        @close="showQuote = false" @saved="afterSave"
+      />
+      <OrderForm
+        v-if="showOrder" :default-supplier="supplierId"
+        @close="showOrder = false" @saved="afterSave"
+      />
 
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatTile

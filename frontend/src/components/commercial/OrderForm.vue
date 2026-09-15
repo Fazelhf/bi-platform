@@ -28,6 +28,9 @@ const props = defineProps<{
   order?: PurchaseOrder | null;
   request?: PurchaseRequest | null;
   quote?: Quote | null;
+  /** Opened from a supplier's or material's page: that one comes pre-chosen. */
+  defaultSupplier?: number | null;
+  defaultMaterial?: number | null;
 }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
@@ -53,8 +56,10 @@ const STATUSES = [
 const today = new Date().toISOString().slice(0, 10);
 
 const form = ref({
-  material: props.order?.material ?? props.request?.material ?? null as number | null,
-  supplier: props.order?.supplier ?? props.quote?.supplier ?? null as number | null,
+  material: props.order?.material ?? props.request?.material
+    ?? props.defaultMaterial ?? null as number | null,
+  supplier: props.order?.supplier ?? props.quote?.supplier
+    ?? props.defaultSupplier ?? null as number | null,
   quantity: props.order?.quantity ?? props.request?.quantity ?? "",
   unit_price_rial: props.order?.unit_price_rial ?? props.quote?.unit_price_rial ?? "",
   ordered_on: props.order?.ordered_on ?? today,
@@ -65,8 +70,11 @@ const form = ref({
   payment_term: props.order?.payment_term ?? props.quote?.payment_term ?? (null as number | null),
   payment_method: props.order?.payment_method ?? props.quote?.payment_method ?? "",
   payment_note: props.order?.payment_note ?? props.quote?.payment_note ?? "",
+  is_official: props.order?.is_official ?? props.quote?.is_official ?? false,
   note: props.order?.note ?? "",
 });
+
+const vatPct = Number(props.order?.vat_pct ?? props.quote?.vat_pct ?? 10);
 
 const termOptions = computed(() => terms.value.map((t) => ({
   value: t.id,
@@ -76,9 +84,13 @@ const termOptions = computed(() => terms.value.map((t) => ({
     : (t.days ? `${t.days} روز پس از تحویل` : "بدون مهلت"),
 })));
 
-const total = computed(() =>
-  exact(Number(form.value.quantity || 0) * Number(form.value.unit_price_rial || 0), true),
-);
+const amounts = computed(() => {
+  const total = Math.round(
+    Number(form.value.quantity || 0) * Number(form.value.unit_price_rial || 0),
+  );
+  const vat = form.value.is_official ? Math.round(total * vatPct / 100) : 0;
+  return { total, vat, grand: total + vat };
+});
 
 const materialUnit = computed(
   () => materials.value.find((m) => m.id === form.value.material)?.unit_label ?? "",
@@ -183,9 +195,29 @@ async function save() {
       </div>
     </div>
 
-    <div class="bg-slate-50 rounded-xl px-3 py-2 text-sm flex justify-between">
-      <span class="text-slate-500">مبلغ کل</span>
-      <span class="ltr-nums font-medium text-ink">{{ total }}</span>
+    <label class="flex items-center gap-2 text-sm text-ink">
+      <input v-model="form.is_official" type="checkbox" class="rounded" />
+      فاکتور رسمی
+      <span class="text-xs text-slate-400">— {{ vatPct }}٪ ارزش افزوده به مبلغ اضافه می‌شود</span>
+    </label>
+
+    <div class="bg-slate-50 rounded-xl px-3 py-2 text-sm space-y-1">
+      <div class="flex justify-between">
+        <span class="text-slate-500">مبلغ کل{{ form.is_official ? " (بدون ارزش افزوده)" : "" }}</span>
+        <span class="ltr-nums text-ink" :class="form.is_official ? '' : 'font-medium'">
+          {{ exact(amounts.total, true) }}
+        </span>
+      </div>
+      <template v-if="form.is_official">
+        <div class="flex justify-between">
+          <span class="text-slate-500">ارزش افزوده ({{ vatPct }}٪)</span>
+          <span class="ltr-nums text-ink">{{ exact(amounts.vat, true) }}</span>
+        </div>
+        <div class="flex justify-between font-medium">
+          <span class="text-slate-500">مبلغ قابل پرداخت</span>
+          <span class="ltr-nums text-ink">{{ exact(amounts.grand, true) }}</span>
+        </div>
+      </template>
     </div>
 
     <div class="grid sm:grid-cols-3 gap-3">

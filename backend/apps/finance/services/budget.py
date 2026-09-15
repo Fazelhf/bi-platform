@@ -8,16 +8,9 @@ so a figure here cannot disagree with the ledger it describes.
 Three rules the grid depends on, all of them decided here rather than in the
 UI, because a client that got one of them wrong would be quietly lying:
 
-* **A line's actual is whatever the ledger says**, matched by category leaf +
-  direction, and narrowed by counterparty when the line names one. A line that
-  names no counterparty takes what is left over after the named ones have
-  claimed theirs — otherwise «بازپرداخت اصل تسهیلات» and «... پارسیان» would
-  both count the same instalment.
-
-* **Money spent outside the budget is a row, not a silence.** A leaf with
-  movements and no budget line appears as «خارج از بودجه». A variance report
-  that only lists what someone thought to plan for is the one report guaranteed
-  to miss the surprise.
+* **A سرفصل's actual is what the finance team keyed for it** — weekly, on
+  «ورود ارقام واقعی بودجه». A month is the sum of its weeks. The cash ledger
+  is not read: the same rial keyed in both places would count twice.
 
 * **Over budget is not the same as bad.** Direction decides: spending more than
   planned is unfavourable, collecting more is favourable. Every row says so
@@ -27,19 +20,20 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Count, Sum
 
 from apps.core.models import DimPeriod, PeriodKind
 from apps.core.periods import leaf_ids_for
 from apps.finance.budget_models import (
     Budget,
+    BudgetActual,
     BudgetAmount,
     BudgetLine,
     BudgetPeriod,
     BudgetSalesForecast,
     BudgetStatus,
 )
-from apps.finance.models import CashCategory, CashMovement, Direction, FinanceSetting
+from apps.finance.models import CashCategory, Direction, FinanceSetting
 from apps.sales.models import FactSalesMonthly, SalesChannel
 
 ZERO = Decimal(0)
@@ -49,78 +43,41 @@ ZERO = Decimal(0)
 # actuals
 # --------------------------------------------------------------------------
 
-def _ledger_totals(period: DimPeriod) -> dict[tuple[int, int | None, str], Decimal]:
+def entry_periods(month: DimPeriod) -> list[DimPeriod]:
     """
-    Everything recorded under a period, keyed by (category, credit line,
-    direction). One query whatever the grain — `leaf_ids_for` turns a month
-    into its weeks or days, so the same code answers both views.
+    The periods budget actuals are keyed on for a month: its weeks, or the
+    month itself when it was never cut into weeks. Never days — a week the
+    sales team enters day by day is still one week for the budget.
     """
-    rows = (
-        CashMovement.objects.filter(period_id__in=leaf_ids_for(period))
-        .values("category_id", "credit_line_id", "direction")
-        .annotate(total=Sum("amount_rial"))
-    )
-    return {
-        (r["category_id"], r["credit_line_id"], r["direction"]): r["total"] or ZERO
-        for r in rows
-    }
+    weeks = list(month.children.filter(kind=PeriodKind.WEEK).order_by("seq"))
+    return weeks or [month]
+
+
+def actual_period_ids(period: DimPeriod) -> list[int]:
+    """The entry periods a report period covers."""
+    if period.kind == PeriodKind.MONTH:
+        return [p.id for p in entry_periods(period)]
+    if period.kind == PeriodKind.DAY and period.parent_id:
+        return [period.parent_id]
+    return [period.id]
 
 
 def actuals_by_line(
     lines: list[BudgetLine], period: DimPeriod
 ) -> tuple[dict[int, Decimal], list[dict]]:
     """
-    Split the period's ledger between the budget lines, and report the rest.
+    What the finance team keyed for each سرفصل under a period.
 
-    Returns `(actual per line id, unbudgeted rows)`. The second half is the
-    part a spreadsheet cannot produce: categories that took money nobody
-    planned for.
+    Returns `(actual per line id, extras)`. Extras are always empty now that
+    actuals are entered per سرفصل — there is no money without a line to land
+    on — and the slot stays so the report's shape does not change.
     """
-    totals = _ledger_totals(period)
-    claimed: set[tuple[int, int | None, str]] = set()
-    actual: dict[int, Decimal] = {}
-
-    # Lines that name a counterparty claim their exact slice first, so the
-    # catch-all line below is left with the genuine remainder.
-    named = [ln for ln in lines if ln.credit_line_id]
-    catch_all = [ln for ln in lines if not ln.credit_line_id]
-
-    for line in named:
-        key = (line.category_id, line.credit_line_id, line.direction)
-        actual[line.id] = totals.get(key, ZERO)
-        claimed.add(key)
-
-    for line in catch_all:
-        total = ZERO
-        for key, value in totals.items():
-            cat_id, _credit, direction = key
-            if cat_id == line.category_id and direction == line.direction and key not in claimed:
-                total += value
-                claimed.add(key)
-        actual[line.id] = total
-
-    unbudgeted: dict[tuple[int, str], Decimal] = {}
-    for key, value in totals.items():
-        if key in claimed or not value:
-            continue
-        cat_id, _credit, direction = key
-        unbudgeted[(cat_id, direction)] = unbudgeted.get((cat_id, direction), ZERO) + value
-
-    names = {
-        c.id: c for c in CashCategory.objects.filter(id__in={c for c, _ in unbudgeted})
-    }
-    extras = [
-        {
-            "category_id": cat_id,
-            "category": names[cat_id].name_fa if cat_id in names else "—",
-            "code": names[cat_id].code if cat_id in names else "",
-            "direction": direction,
-            "actual_rial": value,
-        }
-        for (cat_id, direction), value in unbudgeted.items()
-    ]
-    extras.sort(key=lambda e: -abs(e["actual_rial"]))
-    return actual, extras
+    rows = (
+        BudgetActual.objects.filter(line__in=lines, period_id__in=actual_period_ids(period))
+        .values("line_id")
+        .annotate(total=Sum("amount_rial"))
+    )
+    return {r["line_id"]: r["total"] or ZERO for r in rows}, []
 
 
 # --------------------------------------------------------------------------
@@ -349,8 +306,8 @@ def build(budget: Budget, period: DimPeriod) -> dict:
         # A period nobody has entered yet compares the whole plan against
         # zero: every inflow «short», every outflow «saved». The UI must say
         # that plainly instead of dressing it up as a variance.
-        "has_actuals": CashMovement.objects.filter(
-            period_id__in=leaf_ids_for(period)
+        "has_actuals": BudgetActual.objects.filter(
+            line__budget=budget, period_id__in=actual_period_ids(period)
         ).exists(),
         # Beside the cash grid, never inside its totals — see sales_block.
         "sales": sales_block(budget, period, setting),
@@ -528,4 +485,109 @@ def sales_block(budget: Budget, period: DimPeriod, setting: FinanceSetting | Non
     return {
         "rows": rows,
         "total": _cell(total_budget, total_actual, None, Direction.IN, setting),
+    }
+
+
+# --------------------------------------------------------------------------
+# actual entry
+# --------------------------------------------------------------------------
+
+def entry_sheet(budget: Budget, period: DimPeriod) -> dict:
+    """
+    The finance team's weekly sheet: every سرفصل of the budget, its plan for
+    the period and the actual keyed against it.
+
+    `period` is a week or a month. A month cut into weeks comes back as the
+    read-only sum of its weeks («کل ماه»); a month that was never cut is itself
+    the entry period.
+    """
+    setting = FinanceSetting.get()
+    month = _month_of(budget, period)
+    weeks = entry_periods(month)
+    week_ids = [w.id for w in weeks]
+    is_rollup = period.kind == PeriodKind.MONTH and weeks[0].id != month.id
+    ids = actual_period_ids(period)
+
+    bp = BudgetPeriod.objects.filter(budget=budget, period=month).first()
+    lines = list(
+        BudgetLine.objects.filter(budget=budget, is_active=True)
+        .select_related("category", "category__parent", "credit_line")
+        .order_by("direction", "sort_order", "category__sort_order")
+    )
+    planned = (
+        {a.line_id: a.amount_rial for a in BudgetAmount.objects.filter(budget_period=bp)}
+        if bp else {}
+    )
+
+    # A week's plan is the month's, pro-rated by day count — the same rule the
+    # variance report uses, so the two pages never disagree about a week.
+    share = Decimal(1)
+    if period.kind != PeriodKind.MONTH and month.days and period.days:
+        share = Decimal(period.days) / Decimal(month.days)
+
+    stored: dict[int, dict] = {}
+    for row in BudgetActual.objects.filter(line__in=lines, period_id__in=ids):
+        acc = stored.setdefault(row.line_id, {"amount": ZERO, "note": ""})
+        acc["amount"] += row.amount_rial
+        acc["note"] = row.note or acc["note"]
+
+    month_to_date = {
+        r["line_id"]: r["total"] or ZERO
+        for r in BudgetActual.objects.filter(line__in=lines, period_id__in=week_ids)
+        .values("line_id").annotate(total=Sum("amount_rial"))
+    }
+    entered_per_week = {
+        r["period_id"]: r["n"]
+        for r in BudgetActual.objects.filter(line__in=lines, period_id__in=week_ids)
+        .values("period_id").annotate(n=Count("id"))
+    }
+
+    totals = {
+        Direction.IN: {"budget": ZERO, "actual": ZERO},
+        Direction.OUT: {"budget": ZERO, "actual": ZERO},
+    }
+    out_lines = []
+    for line in lines:
+        plan = (planned.get(line.id, ZERO) * share).quantize(Decimal("1"))
+        got = stored.get(line.id)
+        actual = got["amount"] if got else ZERO
+        totals[line.direction]["budget"] += plan
+        totals[line.direction]["actual"] += actual
+        out_lines.append({
+            "line_id": line.id,
+            "label": str(line),
+            "category_name": line.category.name_fa,
+            "parent_name": line.category.parent.name_fa if line.category.parent_id else "",
+            "counterparty": line.credit_line.counterparty if line.credit_line_id else "",
+            "direction": line.direction,
+            "entered": got is not None,
+            "note": got["note"] if got else "",
+            "month_budget_rial": str(planned.get(line.id, ZERO)),
+            "month_actual_rial": str(month_to_date.get(line.id, ZERO)),
+            **_cell(plan, actual, None, line.direction, setting),
+        })
+
+    return {
+        "budget": {"id": budget.id, "title": budget.title},
+        "period": {"id": period.id, "label": period.label, "kind": period.kind},
+        "month": {"id": month.id, "label": month.label, "days": month.days},
+        "is_rollup": is_rollup,
+        "weeks": [
+            {
+                "period_id": w.id,
+                "label": month.label if w.id == month.id else f"هفته {w.seq}",
+                "seq": w.seq,
+                "days": w.days,
+                "entered": entered_per_week.get(w.id, 0),
+            }
+            for w in weeks
+        ],
+        "line_count": len(lines),
+        "lines": out_lines,
+        "totals": {
+            "in": _cell(totals[Direction.IN]["budget"], totals[Direction.IN]["actual"],
+                        None, Direction.IN, setting),
+            "out": _cell(totals[Direction.OUT]["budget"], totals[Direction.OUT]["actual"],
+                         None, Direction.OUT, setting),
+        },
     }

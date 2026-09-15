@@ -215,9 +215,7 @@ async function editNote(row: VarianceRow) {
   });
   if (answer === null) return;
   try {
-    await budgetApi.saveGrid([
-      { budget_period_id: r.budget_period_id, line_id: row.line_id, variance_note: answer },
-    ]);
+    await budgetApi.saveNote(r.budget_period_id, row.line_id, answer);
     row.note = answer;
     toast.success("علت انحراف ثبت شد.");
   } catch (e) {
@@ -302,13 +300,13 @@ const totalCards = computed(() => {
       <!-- The weekly view is a different instrument; say so before the numbers. -->
       <!-- Nothing recorded yet: the plan is being compared against zero. -->
       <div v-if="!report.has_actuals" class="rounded-card p-3 text-sm bg-sky-50 text-sky-800 leading-6">
-        <span class="font-semibold">برای {{ report.period.label }} هنوز هیچ حرکت نقدینگی ثبت نشده است.</span>
+        <span class="font-semibold">برای {{ report.period.label }} هنوز هیچ رقم واقعی ثبت نشده است.</span>
         ستون «واقعی» صفر است، پس انحراف‌های زیر یعنی «هنوز ثبت نشده»، نه کسری یا صرفه‌جویی.
       </div>
 
       <div v-if="report.prorated" class="rounded-card p-3 text-sm bg-amber-50 text-amber-800 leading-6">
         <span class="font-semibold">این نمای «رصد جریان نقد» است، نه انحراف رسمی بودجه.</span>
-        بودجهٔ {{ report.month.label }} به نسبت روزهای این هفته سرشکن شده. اقلامی که یک‌جا پرداخت می‌شوند
+        بودجهٔ {{ report.month.label }} به نسبت روزهای این هفته سرشکن شده. سرفصل‌های که یک‌جا پرداخت می‌شوند
         (اقساط، خرید مواد) در هفتهٔ پرداخت انحراف بزرگ نشان می‌دهند که لزوماً انحراف بودجه نیست.
       </div>
 
@@ -447,7 +445,7 @@ const totalCards = computed(() => {
           <table class="min-w-full text-sm">
             <thead>
               <tr class="text-[11px] text-slate-500 border-b border-slate-100">
-                <th class="text-right font-medium p-3 min-w-[16rem]">قلم</th>
+                <th class="text-right font-medium p-3 min-w-[16rem]">سرفصل</th>
                 <th class="text-left font-medium p-3">مورد انتظار</th>
                 <th v-if="showBaseline && !report.prorated" class="text-left font-medium p-3">مصوب</th>
                 <th class="text-left font-medium p-3 min-w-[8rem]">واقعی</th>

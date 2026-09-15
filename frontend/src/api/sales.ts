@@ -8,7 +8,8 @@ export const salesApi = {
   },
 
   async employees(): Promise<{ id: number; full_name_fa: string; team_name?: string }[]> {
-    const { data } = await api.get("/sales/employees/", { params: { page_size: 200 } });
+    // Archived people keep their old figures but are not offered for new ones.
+    const { data } = await api.get("/sales/employees/", { params: { page_size: 200, is_active: true } });
     return data.results ?? data;
   },
 

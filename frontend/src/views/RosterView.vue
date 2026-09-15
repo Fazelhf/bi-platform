@@ -8,23 +8,26 @@ import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
 /**
- * «کارشناسان بخش» — the roster each department manager owns.
+ * «تیم فروش / تیم من» — who is on a channel's entry sheet.
  *
- * Nothing used to record which salespeople belong to a channel. The entry
- * sheet listed whoever already had figures, so a new month opened empty, the
- * manager retyped the same names, and anyone who sold nothing that month
- * quietly vanished instead of showing a zero. This is the list; the sheet is
- * built from it.
+ * The list itself is no longer edited here. It is read from منابع انسانی:
+ * whoever holds a seat in this channel's unit on the chart is on it, and
+ * whoever is moved out or archived drops off. Managers kept the list by hand
+ * before, which is how people went missing and duplicates crept in.
+ *
+ * What stays the manager's is the regional grouping (ایران غرب، تهران، …),
+ * which is a sales matter rather than who works in the company.
  */
 const auth = useAuthStore();
 
 const CHANNELS = [
   { key: "team", label: "فروش همکار", dept: "sales_team" },
   { key: "organizational", label: "فروش بانکی", dept: "sales_org" },
+  { key: "psp", label: "فروش PSP", dept: "sales_org" },
   { key: "b2b", label: "فروش B2B", dept: "sales_b2b" },
 ];
 
-/** A manager only ever has one; the CEO picks. */
+/** A manager sees their own channels; the CEO picks. */
 const visibleChannels = computed(() =>
   auth.isExecutive ? CHANNELS : CHANNELS.filter((c) => c.dept === auth.department),
 );
@@ -34,13 +37,6 @@ const members = ref<RosterMember[]>([]);
 const teams = ref<Team[]>([]);
 const loading = ref(true);
 const showInactive = ref(false);
-
-// Add panel
-const adding = ref(false);
-const available = ref<{ id: number; name: string; team_name: string; channels: string[] }[]>([]);
-const newName = ref("");
-const newTeam = ref<number | "">("");
-const busy = ref(false);
 
 async function load() {
   loading.value = true;
@@ -55,10 +51,7 @@ onMounted(async () => {
   teams.value = await rosterApi.teams();
   await load();
 });
-watch(channel, async () => {
-  adding.value = false;
-  await load();
-});
+watch(channel, load);
 
 const shown = computed(() =>
   showInactive.value ? members.value : members.value.filter((m) => m.is_active),
@@ -72,92 +65,12 @@ const totals = computed(() => ({
   neverEntered: members.value.filter((m) => m.is_active && !m.periods_filled).length,
 }));
 
-async function openAdd() {
-  adding.value = true;
-  newName.value = "";
-  newTeam.value = "";
-  available.value = await rosterApi.available(channel.value);
-}
-
-async function addExisting(id: number) {
-  busy.value = true;
-  try {
-    await rosterApi.add(channel.value, { employee: id });
-    toast.success("کارشناس به بخش اضافه شد.");
-    adding.value = false;
-    await load();
-  } catch {
-    toast.error("اضافه نشد.");
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function addNew() {
-  if (!newName.value.trim()) return;
-  busy.value = true;
-  try {
-    await rosterApi.add(channel.value, {
-      name: newName.value.trim(),
-      team: newTeam.value || null,
-    });
-    toast.success("کارشناس جدید ثبت شد.");
-    adding.value = false;
-    await load();
-  } catch {
-    toast.error("ثبت نشد.");
-  } finally {
-    busy.value = false;
-  }
-}
-
 async function setTeam(m: RosterMember, teamId: string) {
   await rosterApi.update(m.id, { team: teamId ? Number(teamId) : null });
   await load();
 }
 
-async function toggleActive(m: RosterMember) {
-  await rosterApi.update(m.id, { is_active: !m.is_active });
-  await load();
-}
-
-async function remove(m: RosterMember) {
-  const ok = await confirm({
-    title: "حذف از بخش",
-    message: m.periods_filled
-      ? `«${m.employee_name}» سابقه فروش دارد، پس حذف نمی‌شود و فقط غیرفعال خواهد شد تا گزارش‌های گذشته دست‌نخورده بماند.`
-      : `«${m.employee_name}» از فهرست این بخش حذف شود؟`,
-    danger: true,
-  });
-  if (!ok) return;
-  const res = await rosterApi.remove(m.id);
-  toast.success(res?.deactivated ? "غیرفعال شد." : "حذف شد.");
-  await load();
-}
-
-/* ---- editing a کارشناس's name ------------------------------------------ */
-const editingId = ref<number | null>(null);
-const editName = ref("");
-
-function startEdit(m: RosterMember) {
-  editingId.value = m.id;
-  editName.value = m.employee_name;
-}
-
-async function saveEdit(m: RosterMember) {
-  const name = editName.value.trim();
-  editingId.value = null;
-  if (!name || name === m.employee_name) return;
-  try {
-    await rosterApi.update(m.id, { employee_name: name });
-    toast.success("نام کارشناس ویرایش شد.");
-    await load();
-  } catch {
-    toast.error("ویرایش نشد.");
-  }
-}
-
-/* ---- managing the teams themselves ------------------------------------- */
+/* ---- the regional teams ------------------------------------------------- */
 const showTeams = ref(false);
 const newTeamName = ref("");
 const teamEditId = ref<number | null>(null);
@@ -218,10 +131,10 @@ const card = "bg-surface rounded-card shadow-soft";
       <div>
         <h2 class="text-lg font-bold text-ink">{{ auth.isExecutive ? "تیم فروش" : "تیم من" }}</h2>
         <p class="text-xs text-slate-400 mt-0.5">
-          فهرست کارشناسان این بخش و تیم‌بندی آن‌ها. برگه‌های ورود اطلاعات از همین فهرست ساخته می‌شوند.
+          کارشناسان هر بخش از چارت سازمانی خوانده می‌شوند و برگه‌های ورود اطلاعات از همین فهرست ساخته می‌شوند.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
         <select
           v-if="visibleChannels.length > 1"
           v-model="channel"
@@ -232,14 +145,21 @@ const card = "bg-surface rounded-card shadow-soft";
         <button
           class="border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
           @click="showTeams = !showTeams"
-        >مدیریت تیم‌ها</button>
-        <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="openAdd">
-          + افزودن کارشناس
-        </button>
+        >مدیریت تیم‌های منطقه‌ای</button>
+        <router-link
+          v-if="auth.isExecutive"
+          :to="{ name: 'hr-chart' }"
+          class="bg-panel text-white rounded-xl px-4 py-2 text-sm"
+        >ویرایش در منابع انسانی</router-link>
       </div>
     </div>
 
-    <!-- Summary -->
+    <p class="bg-sky-50 text-sky-700 text-sm rounded-xl px-3 py-2">
+      افزودن، جابه‌جایی یا خروج کارشناس در «منابع انسانی» انجام می‌شود
+      <template v-if="!auth.isExecutive">— اگر کسی کم یا زیاد است، به مدیریت اطلاع دهید</template>.
+      کسی که از شرکت رفته بایگانی می‌شود و آمار دوره‌های گذشته‌اش دست‌نخورده می‌ماند.
+    </p>
+
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div :class="card" class="p-4">
         <p class="text-xs text-slate-400">کارشناس فعال</p>
@@ -263,14 +183,11 @@ const card = "bg-surface rounded-card shadow-soft";
       </div>
     </div>
 
-    <!-- Team management: the groups (ایران غرب، تهران، …) live here now
-         rather than only in the Django admin. -->
     <div v-if="showTeams" :class="card" class="p-5 space-y-3">
       <div class="flex items-center justify-between">
-        <h3 class="font-bold text-ink text-sm">تیم‌ها</h3>
+        <h3 class="font-bold text-ink text-sm">تیم‌های منطقه‌ای</h3>
         <button class="text-slate-400 hover:text-ink text-xl leading-none" @click="showTeams = false">×</button>
       </div>
-
       <div class="flex flex-wrap gap-2">
         <div
           v-for="t in teams" :key="t.id"
@@ -295,7 +212,6 @@ const card = "bg-surface rounded-card shadow-soft";
           >×</button>
         </div>
       </div>
-
       <div class="flex items-center gap-2 border-t border-slate-100 pt-3">
         <input
           v-model="newTeamName" placeholder="نام تیم جدید — مثلاً ایران غرب"
@@ -307,61 +223,8 @@ const card = "bg-surface rounded-card shadow-soft";
           :disabled="!newTeamName.trim()" @click="addTeam"
         >افزودن تیم</button>
       </div>
-      <p class="text-xs text-slate-400">
-        روی نام تیم بزنید تا ویرایش شود. تیمی که عضو دارد حذف نمی‌شود — اول اعضایش را جابه‌جا کنید.
-      </p>
     </div>
 
-    <!-- Add panel -->
-    <div v-if="adding" :class="card" class="p-5 space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="font-bold text-ink text-sm">افزودن کارشناس</h3>
-        <button class="text-slate-400 hover:text-ink text-xl leading-none" @click="adding = false">×</button>
-      </div>
-
-      <div v-if="available.length">
-        <p class="text-xs text-slate-400 mb-2">از میان کارشناسان موجود:</p>
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="a in available" :key="a.id"
-            class="text-sm border border-slate-200 rounded-xl px-3 py-1.5 hover:bg-slate-50 disabled:opacity-50"
-            :disabled="busy"
-            @click="addExisting(a.id)"
-          >
-            {{ a.name }}
-            <span v-if="a.team_name" class="text-xs text-slate-400">· {{ a.team_name }}</span>
-            <!-- Someone already in another channel is not a duplicate; the
-                 same person genuinely sells in more than one. -->
-            <span v-if="a.channels.length" class="text-[10px] text-amber-600">
-              (در {{ a.channels.length }} بخش دیگر)
-            </span>
-          </button>
-        </div>
-      </div>
-      <p v-else class="text-xs text-slate-400">همه کارشناسان موجود، در این بخش هستند.</p>
-
-      <div class="border-t border-slate-100 pt-4">
-        <p class="text-xs text-slate-400 mb-2">یا کارشناس جدید:</p>
-        <div class="flex flex-wrap items-center gap-2">
-          <input
-            v-model="newName" placeholder="نام و نام خانوادگی"
-            class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm flex-1 min-w-[200px] outline-none focus:ring-2 focus:ring-accent-500/30"
-            @keyup.enter="addNew"
-          />
-          <select v-model="newTeam" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
-            <option value="">— تیم —</option>
-            <option v-for="t in teams" :key="t.id" :value="t.id">{{ t.name_fa }}</option>
-          </select>
-          <button
-            class="bg-accent-500 hover:bg-accent-600 text-white rounded-xl px-4 py-2 text-sm disabled:opacity-50"
-            :disabled="busy || !newName.trim()"
-            @click="addNew"
-          >افزودن</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- List -->
     <div v-if="loading" class="space-y-2">
       <Skeleton v-for="i in 6" :key="i" class="h-12 rounded-xl" />
     </div>
@@ -370,37 +233,19 @@ const card = "bg-surface rounded-card shadow-soft";
       v-else-if="!shown.length"
       icon="👥"
       title="هنوز کارشناسی در این بخش نیست"
-      hint="با دکمه «افزودن کارشناس» شروع کنید. برگه ورود اطلاعات از همین فهرست ساخته می‌شود."
+      hint="در منابع انسانی، کارشناسان را در واحد این بخش روی چارت قرار دهید."
     />
 
     <div v-else :class="card" class="overflow-hidden">
-      <!-- A card per person on phones. This list is editable, so the controls
-           come with it: the name is still tap-to-rename, the team is still a
-           select, and فعال/حذف are full-size buttons rather than the 12px
-           text links a table row squeezes them into. -->
       <ul class="md:hidden divide-y divide-slate-100">
         <li
           v-for="m in shown" :key="`m-${m.id}`"
           class="p-4" :class="m.is_active ? '' : 'bg-slate-50/60 text-slate-400'"
         >
           <div class="flex items-start justify-between gap-3">
-            <input
-              v-if="editingId === m.id"
-              v-model="editName"
-              class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm flex-1 min-w-0 outline-none focus:ring-2 focus:ring-accent-500/30"
-              @keyup.enter="saveEdit(m)"
-              @blur="saveEdit(m)"
-            />
-            <button
-              v-else
-              class="font-medium text-right min-w-0 truncate"
-              :class="m.is_active ? 'text-ink' : ''"
-              title="برای ویرایش نام کلیک کنید"
-              @click="startEdit(m)"
-            >{{ m.employee_name }}</button>
-            <span v-if="!m.is_active" class="text-[11px] bg-slate-200 text-slate-500 rounded-full px-2 py-0.5 shrink-0">غیرفعال</span>
+            <span class="font-medium min-w-0 truncate" :class="m.is_active ? 'text-ink' : ''">{{ m.employee_name }}</span>
+            <span v-if="!m.is_active" class="text-[11px] bg-slate-200 text-slate-500 rounded-full px-2 py-0.5 shrink-0">خارج از بخش</span>
           </div>
-
           <div class="flex items-center gap-2 mt-2 flex-wrap">
             <select
               :value="m.team ?? ''"
@@ -413,34 +258,25 @@ const card = "bg-surface rounded-card shadow-soft";
             <span v-if="m.has_login" class="text-xs text-green-600 ltr-nums">✓ {{ m.username }}</span>
             <span v-else class="text-xs text-amber-600">✗ بدون حساب</span>
           </div>
-
           <div class="flex items-center justify-between gap-2 mt-2 text-xs ltr-nums">
             <span :class="m.periods_filled ? 'text-slate-400' : 'text-red-500'">
               {{ num(m.periods_filled) }} دوره · {{ m.last_period || "—" }}
             </span>
             <span class="text-ink font-medium">{{ rial(Number(m.total_revenue)) }}</span>
           </div>
-
-          <div class="flex gap-2 mt-3 no-print">
-            <button class="text-xs px-3 py-2 rounded-lg bg-slate-100 text-slate-600" @click="toggleActive(m)">
-              {{ m.is_active ? "غیرفعال کردن" : "فعال کردن" }}
-            </button>
-            <button class="text-xs px-3 py-2 rounded-lg bg-red-50 text-red-500" @click="remove(m)">حذف</button>
-          </div>
         </li>
       </ul>
 
       <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm min-w-[760px]">
+        <table class="w-full text-sm min-w-[700px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">
               <th class="text-right font-medium px-4 py-3">کارشناس</th>
-              <th class="text-right font-medium px-3">تیم</th>
+              <th class="text-right font-medium px-3">تیم منطقه‌ای</th>
               <th class="text-right font-medium px-3">حساب کاربری</th>
               <th class="text-left font-medium px-3">دوره‌های ثبت‌شده</th>
               <th class="text-left font-medium px-3">آخرین ثبت</th>
-              <th class="text-left font-medium px-3">فروش کل</th>
-              <th class="text-left font-medium px-4 no-print">عملیات</th>
+              <th class="text-left font-medium px-4">فروش کل</th>
             </tr>
           </thead>
           <tbody>
@@ -450,21 +286,8 @@ const card = "bg-surface rounded-card shadow-soft";
               :class="m.is_active ? 'hover:bg-slate-50' : 'bg-slate-50/60 text-slate-400'"
             >
               <td class="px-4 py-2.5">
-                <input
-                  v-if="editingId === m.id"
-                  v-model="editName"
-                  class="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-sm w-40 outline-none focus:ring-2 focus:ring-accent-500/30"
-                  @keyup.enter="saveEdit(m)"
-                  @blur="saveEdit(m)"
-                />
-                <button
-                  v-else
-                  class="font-medium hover:underline text-right"
-                  :class="m.is_active ? 'text-ink' : ''"
-                  title="برای ویرایش نام کلیک کنید"
-                  @click="startEdit(m)"
-                >{{ m.employee_name }}</button>
-                <span v-if="!m.is_active" class="text-[11px] bg-slate-200 text-slate-500 rounded-full px-2 py-0.5 mr-2">غیرفعال</span>
+                <span class="font-medium" :class="m.is_active ? 'text-ink' : ''">{{ m.employee_name }}</span>
+                <span v-if="!m.is_active" class="text-[11px] bg-slate-200 text-slate-500 rounded-full px-2 py-0.5 mr-2">خارج از بخش</span>
               </td>
               <td class="px-3">
                 <select
@@ -478,23 +301,13 @@ const card = "bg-surface rounded-card shadow-soft";
               </td>
               <td class="px-3">
                 <span v-if="m.has_login" class="text-xs text-green-600">✓ {{ m.username }}</span>
-                <span v-else class="text-xs text-amber-600" title="بدون حساب کاربری نمی‌تواند وارد سامانه شود">
-                  ✗ ندارد
-                </span>
+                <span v-else class="text-xs text-amber-600">✗ ندارد</span>
               </td>
               <td class="px-3 text-left ltr-nums">
                 <span :class="m.periods_filled ? '' : 'text-red-500'">{{ num(m.periods_filled) }}</span>
               </td>
               <td class="px-3 text-left text-xs whitespace-nowrap">{{ m.last_period || "—" }}</td>
-              <td class="px-3 text-left ltr-nums whitespace-nowrap">{{ rial(Number(m.total_revenue)) }}</td>
-              <td class="px-4 text-left whitespace-nowrap no-print">
-                <button class="text-xs text-slate-400 hover:text-ink px-2" @click="toggleActive(m)">
-                  {{ m.is_active ? "غیرفعال" : "فعال" }}
-                </button>
-                <button class="text-xs text-red-500 hover:bg-red-50 rounded px-2 py-1" @click="remove(m)">
-                  حذف
-                </button>
-              </td>
+              <td class="px-4 text-left ltr-nums whitespace-nowrap">{{ rial(Number(m.total_revenue)) }}</td>
             </tr>
           </tbody>
         </table>
@@ -502,13 +315,9 @@ const card = "bg-surface rounded-card shadow-soft";
 
       <div v-if="inactiveCount" class="px-4 py-2.5 border-t border-slate-100">
         <button class="text-xs text-slate-400 hover:text-ink" @click="showInactive = !showInactive">
-          {{ showInactive ? "پنهان کردن" : "نمایش" }} {{ num(inactiveCount) }} کارشناس غیرفعال
+          {{ showInactive ? "پنهان کردن" : "نمایش" }} {{ num(inactiveCount) }} نفر که دیگر در این بخش نیستند
         </button>
       </div>
     </div>
-
-    <p class="text-xs text-slate-400">
-      کارشناسی که سابقه فروش دارد حذف نمی‌شود، فقط غیرفعال می‌شود — تا آمار دوره‌های گذشته دست‌نخورده بماند.
-    </p>
   </div>
 </template>

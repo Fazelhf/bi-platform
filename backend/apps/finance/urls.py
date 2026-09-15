@@ -21,5 +21,8 @@ urlpatterns = [
     path("budget-variance/", views.BudgetVarianceView.as_view(), name="budget-variance"),
     path("budget-series/", views.BudgetSeriesView.as_view(), name="budget-series"),
     path("budget-waterfall/", views.BudgetWaterfallView.as_view(), name="budget-waterfall"),
+    # What actually happened, keyed weekly by finance, and why it differed.
+    path("budget-actuals/", views.BudgetActualEntryView.as_view(), name="budget-actuals"),
+    path("budget-notes/", views.BudgetNoteView.as_view(), name="budget-notes"),
     path("", include(router.urls)),
 ]
