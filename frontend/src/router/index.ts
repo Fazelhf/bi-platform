@@ -202,12 +202,19 @@ const router = createRouter({
           path: "finance/budget/plan",
           name: "finance-budget-plan",
           component: () => import("@/views/finance/BudgetPlanView.vue"),
-          meta: { finance: true },
+          // The CEO's: finance reports against the plan, it does not set it.
+          meta: { finance: true, executive: true },
         },
         {
           path: "finance/budget/variance",
           name: "finance-budget-variance",
           component: () => import("@/views/finance/BudgetVarianceView.vue"),
+          meta: { finance: true },
+        },
+        {
+          path: "finance/budget/actuals",
+          name: "finance-budget-actuals",
+          component: () => import("@/views/finance/BudgetActualsView.vue"),
           meta: { finance: true },
         },
 
@@ -319,12 +326,26 @@ const router = createRouter({
           meta: { foreign: true, foreignOnly: true },
         },
 
-        // --- منابع انسانی: each department's own roster ---
+        // --- a department's team, read from منابع انسانی ---
         {
           path: "roster",
           name: "roster",
           component: () => import("@/views/RosterView.vue"),
           meta: { roster: true },
+        },
+
+        // --- منابع انسانی: the chart everything else reads; management only ---
+        {
+          path: "hr",
+          name: "hr-chart",
+          component: () => import("@/views/hr/HrChartView.vue"),
+          meta: { hr: true },
+        },
+        {
+          path: "hr/people",
+          name: "hr-people",
+          component: () => import("@/views/hr/HrPeopleView.vue"),
+          meta: { hr: true },
         },
 
         // --- Approval inbox (کارتابل) — anyone who can approve ---
@@ -584,6 +605,11 @@ router.beforeEach(async (to) => {
     if (to.meta.foreignOnly && !worksCommercial) {
       return { name: "foreign-dashboard" };
     }
+  }
+  // منابع انسانی decides who works where, so only management opens it. The
+  // API enforces the same (apps.hr.permissions.HrAccess).
+  if (to.meta.hr && !(auth.isExecutive || auth.me?.is_superuser)) {
+    return sentHome(to);
   }
   // Roster: department managers (their own section) and the CEO.
   if (to.meta.roster) {

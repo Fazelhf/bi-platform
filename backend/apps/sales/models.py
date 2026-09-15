@@ -27,14 +27,31 @@ class DimTeam(TimeStampedModel):
 
 
 class DimEmployee(TimeStampedModel):
-    """A salesperson (فروشنده). Named columns in the source sheets."""
+    """
+    One person who works (or worked) for the company.
+
+    It began as «a salesperson — a named column in the source sheets», and
+    every fact, target and CRM record already points here, so this row became
+    the company's person record rather than a new table beside it: a second
+    one would give each person two ids and history two owners.
+
+    `apps.hr` owns it. Where someone sits (واحد، سمت) lives on hr.Position;
+    whether they still work here is `is_active`. A person who leaves is
+    archived, never deleted, so the reports they appear in stay whole.
+    """
 
     code = models.SlugField(unique=True)
     full_name_fa = models.CharField(max_length=150)
     team = models.ForeignKey(
         DimTeam, null=True, blank=True, on_delete=models.SET_NULL, related_name="members"
     )
+    #: False = بایگانی: kept only so old figures still have a name.
     is_active = models.BooleanField(default=True)
+    mobile = models.CharField(max_length=30, blank=True)
+    hired_on = models.DateField(null=True, blank=True)
+    archived_at = models.DateField(null=True, blank=True)
+    archive_note = models.CharField(max_length=200, blank=True)
+    note = models.TextField(blank=True)
     # Login account for this salesperson. The dimension existed only to label
     # imported spreadsheet columns, so nobody could *be* an employee — which
     # is fine for reading a dashboard and useless the moment a rep has to

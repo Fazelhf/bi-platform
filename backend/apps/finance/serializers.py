@@ -76,7 +76,7 @@ class CashCategorySerializer(serializers.ModelSerializer):
                 )})
             if parent.budget_lines.exists():
                 raise serializers.ValidationError({"parent": (
-                    f"«{parent.name_fa}» خودش قلم بودجه است و نمی‌تواند زیرمجموعه بگیرد."
+                    f"«{parent.name_fa}» خودش سرفصل بودجه است و نمی‌تواند زیرمجموعه بگیرد."
                 )})
             # A child left without a direction takes its group's.
             if "direction" not in attrs and instance is None:
@@ -84,7 +84,7 @@ class CashCategorySerializer(serializers.ModelSerializer):
             direction = attrs.get("direction", instance.direction if instance else None)
             if parent.direction != CashCategory.Allowed.BOTH and direction != parent.direction:
                 raise serializers.ValidationError(
-                    {"direction": "جهت این قلم با جهت گروهش نمی‌خواند."}
+                    {"direction": "جهت این سرفصل با جهت گروهش نمی‌خواند."}
                 )
 
         if instance is None:
@@ -291,7 +291,7 @@ class BudgetLineSerializer(serializers.ModelSerializer):
             duplicate = duplicate.exclude(pk=self.instance.pk)
         if duplicate.exists():
             raise serializers.ValidationError(
-                {"category": "این قلم با همین طرف‌حساب و جهت در این بودجه وجود دارد."}
+                {"category": "این سرفصل با همین طرف‌حساب و جهت در این بودجه وجود دارد."}
             )
         return attrs
 

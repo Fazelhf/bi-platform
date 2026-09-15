@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.db.models import Count
@@ -355,6 +356,43 @@ class QuoteViewSet(viewsets.ModelViewSet):
         if quote.request.status == PurchaseRequest.Status.OPEN:
             quote.request.status = PurchaseRequest.Status.QUOTING
             quote.request.save(update_fields=["status", "updated_at"])
+
+    @extend_schema(request=QuoteSerializer, responses=QuoteSerializer)
+    @action(detail=False, methods=["post"])
+    @transaction.atomic
+    def quick(self, request):
+        """
+        ثبت استعلام از پرونده تامین‌کننده یا کالا.
+
+        A quote hangs off a request, but the person on a supplier's page who
+        has just been given a price over the phone should not have to leave
+        it to raise one first. Without `request`, one is opened here for the
+        given material and quantity. The whole thing is one transaction, so a
+        quote that fails validation leaves no orphan request behind.
+        """
+        data = dict(request.data.items())
+        if not data.get("request"):
+            material = Material.objects.filter(pk=data.get("material") or 0).first()
+            if not material:
+                raise ValidationError({"material": "کالا را انتخاب کنید."})
+            try:
+                quantity = Decimal(str(data.get("quantity") or 0))
+            except InvalidOperation:
+                quantity = Decimal(0)
+            if quantity <= 0:
+                raise ValidationError({"quantity": "مقدار را وارد کنید."})
+            on = _as_date(data.get("quoted_on")) or date.today()
+            purchase_request = PurchaseRequest.objects.create(
+                material=material, quantity=quantity, requested_on=on,
+                period=_month_period(on), created_by=request.user,
+            )
+            audit_log(request.user, purchase_request, AuditLog.Action.CREATE)
+            data["request"] = purchase_request.id
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=201)
 
 
 class PaymentTermViewSet(viewsets.ModelViewSet):

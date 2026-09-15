@@ -84,9 +84,22 @@ async function load() {
       financeApi.entry(selected.value),
       financeApi.creditLines(),
     ]);
+    accounts.value = entry.accounts;
+    // An empty cell used to render nothing to type into — only a «+ حساب
+    // دیگر» link, and only when more than one account existed. With a single
+    // account, the usual start, nothing could be entered at all, weekly or
+    // daily. Every cell now opens with one blank row; the server skips blank
+    // rows on save, so this adds nothing to the table.
+    for (const day of entry.days) {
+      for (const side of ["in", "out"] as const) {
+        for (const c of entry.categories[side]) {
+          const key = String(c.id);
+          if (!day[side][key]?.length) day[side][key] = [blankRow()];
+        }
+      }
+    }
     data.value = entry;
     lines.value = creditLines;
-    accounts.value = entry.accounts;
   } catch (e: any) {
     data.value = null;
     error.value = e?.response?.status === 403
@@ -173,7 +186,7 @@ async function save(submit: boolean) {
       <div>
         <h1 class="font-bold text-ink">ورود اطلاعات نقدینگی</h1>
         <p class="text-xs text-slate-400 mt-0.5">
-          هر روز یک ردیف است. ستون‌ها همان دسته‌های گزارش خودتان‌اند.
+          هر روز (یا در ماه‌های هفتگی، هر هفته) یک ردیف است. ستون‌ها همان دسته‌های گزارش خودتان‌اند.
           مبالغ به <span class="font-medium">{{ unitLabel }}</span>.
         </p>
       </div>
@@ -198,6 +211,19 @@ async function save(submit: boolean) {
     <p v-else-if="loading" class="text-center text-slate-400 py-16 text-sm">در حال بارگذاری…</p>
 
     <template v-else-if="data">
+      <!-- Every amount has to name an account, so with none defined nothing
+           can be saved. Say so instead of leaving a dead save button. -->
+      <div
+        v-if="data.can_edit && !accounts.length"
+        class="rounded-card p-3 text-sm bg-amber-50 text-amber-800 leading-6"
+      >
+        هنوز هیچ حساب بانکی یا صندوقی تعریف نشده و هر مبلغ باید به یک حساب نسبت داده شود.
+        <router-link :to="{ name: 'finance-cash-report' }" class="font-semibold underline">
+          از صفحهٔ نقدینگی یک حساب بسازید
+        </router-link>
+        و سپس برگردید.
+      </div>
+
       <div class="grid grid-cols-3 gap-3">
         <div class="bg-surface rounded-card shadow-soft p-4">
           <p class="text-[11px] text-slate-400">جمع واریز</p>

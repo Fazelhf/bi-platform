@@ -42,8 +42,12 @@ const form = ref({
   payment_term: props.quote?.payment_term ?? (null as number | null),
   payment_method: props.quote?.payment_method ?? "",
   payment_note: props.quote?.payment_note ?? "",
+  is_official: props.quote?.is_official ?? false,
   note: props.quote?.note ?? "",
 });
+
+/** The rate this quote carries — an existing one keeps its own. */
+const vatPct = Number(props.quote?.vat_pct ?? 10);
 
 /** The schedule is the hint, so «۶۰ روزه» and «۵۰٪ پیش‌پرداخت» are comparable
  *  in the dropdown itself rather than only after both are chosen. */
@@ -76,9 +80,13 @@ const choices = computed(() => suppliers.value.map((s) => {
 
 const available = computed(() => choices.value.filter((c) => !c.disabled).length);
 
-const lineTotal = computed(() =>
-  exact(Number(form.value.unit_price_rial || 0) * Number(props.request.quantity || 0), true),
-);
+const amounts = computed(() => {
+  const total = Math.round(
+    Number(form.value.unit_price_rial || 0) * Number(props.request.quantity || 0),
+  );
+  const vat = form.value.is_official ? Math.round(total * vatPct / 100) : 0;
+  return { total, vat, grand: total + vat };
+});
 
 onMounted(async () => {
   [suppliers.value, terms.value] = await Promise.all([
@@ -140,8 +148,29 @@ async function save() {
       </label>
       <MoneyInput v-model="form.unit_price_rial" :class="inp" />
       <p class="text-xs text-slate-400 mt-1">
-        مبلغ کل برای این مقدار: <span class="ltr-nums">{{ lineTotal }}</span>
+        قیمت بدون ارزش افزوده وارد شود.
       </p>
+    </div>
+
+    <label class="flex items-center gap-2 text-sm text-ink">
+      <input v-model="form.is_official" type="checkbox" class="rounded" />
+      فاکتور رسمی
+      <span class="text-xs text-slate-400">— {{ vatPct }}٪ ارزش افزوده به قیمت اضافه می‌شود</span>
+    </label>
+
+    <div class="bg-slate-50 rounded-xl px-3 py-2 text-sm space-y-1">
+      <div class="flex justify-between">
+        <span class="text-slate-500">مبلغ کل برای این مقدار</span>
+        <span class="ltr-nums text-ink">{{ exact(amounts.total, true) }}</span>
+      </div>
+      <div v-if="form.is_official" class="flex justify-between">
+        <span class="text-slate-500">ارزش افزوده ({{ vatPct }}٪)</span>
+        <span class="ltr-nums text-ink">{{ exact(amounts.vat, true) }}</span>
+      </div>
+      <div v-if="form.is_official" class="flex justify-between font-medium">
+        <span class="text-slate-500">جمع با ارزش افزوده</span>
+        <span class="ltr-nums text-ink">{{ exact(amounts.grand, true) }}</span>
+      </div>
     </div>
 
     <div class="grid grid-cols-3 gap-3">

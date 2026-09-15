@@ -177,6 +177,13 @@ export interface Quote {
   payment_method: PaymentMethodCode;
   payment_method_label: string;
   payment_note: string;
+  /** فاکتور رسمی — adds ارزش افزوده on top of the quoted price. */
+  is_official: boolean;
+  vat_pct: string;
+  vat_rial: string;
+  grand_total_rial: string;
+  /** What one unit really costs, VAT included — the figure to compare. */
+  unit_price_with_vat_rial: string;
   /** null when this supplier has never sent a sample of this material. */
   sample_status: QuoteSample | null;
   is_selected: boolean;
@@ -241,6 +248,12 @@ export interface PurchaseOrder {
   payment_method: PaymentMethodCode;
   payment_method_label: string;
   payment_note: string;
+  /** فاکتور رسمی — adds ارزش افزوده on top of `total_rial`. */
+  is_official: boolean;
+  vat_pct: string;
+  vat_rial: string;
+  /** مبلغ قابل پرداخت: goods plus VAT. */
+  grand_total_rial: string;
   note: string;
 }
 
@@ -564,6 +577,11 @@ export const commercialApi = {
     const { data } = id
       ? await api.patch(`/commercial/quotes/${id}/`, payload)
       : await api.post("/commercial/quotes/", payload);
+    return data as Quote;
+  },
+  /** A quote from a supplier's or material's page — opens a request if none is given. */
+  async quickQuote(payload: Record<string, unknown>) {
+    const { data } = await api.post("/commercial/quotes/quick/", payload);
     return data as Quote;
   },
   async removeQuote(id: number) {

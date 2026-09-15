@@ -143,6 +143,8 @@ class QuoteSerializer(serializers.ModelSerializer):
             "delivery_days", "validity_days", "payment_term",
             "payment_term_name", "advance_pct", "payment_days",
             "payment_method", "payment_method_label", "payment_note",
+            "is_official", "vat_pct", "vat_rial", "grand_total_rial",
+            "unit_price_with_vat_rial",
             "sample_status", "is_selected", "reason",
             "reason_name", "reason_kind", "decision_note", "note", "created_at",
         ]
@@ -151,8 +153,21 @@ class QuoteSerializer(serializers.ModelSerializer):
         # allow two winners in the same request.
         read_only_fields = ["is_selected"]
 
+    vat_rial = serializers.SerializerMethodField()
+    grand_total_rial = serializers.SerializerMethodField()
+    unit_price_with_vat_rial = serializers.SerializerMethodField()
+
     def get_total_rial(self, obj) -> str:
         return str(obj.total_rial)
+
+    def get_vat_rial(self, obj) -> str:
+        return str(obj.vat_rial)
+
+    def get_grand_total_rial(self, obj) -> str:
+        return str(obj.grand_total_rial)
+
+    def get_unit_price_with_vat_rial(self, obj) -> str:
+        return str(obj.unit_price_with_vat_rial)
 
     def get_sample_status(self, obj) -> dict | None:
         """
@@ -347,12 +362,22 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "delivered_on", "delivery_days", "period", "period_label",
             "status", "status_label", "payment_term", "payment_term_name",
             "payment_method", "payment_method_label", "payment_note",
+            "is_official", "vat_pct", "vat_rial", "grand_total_rial",
             "note", "created_at",
         ]
         read_only_fields = ["order_no"]
 
+    vat_rial = serializers.SerializerMethodField()
+    grand_total_rial = serializers.SerializerMethodField()
+
     def get_total_rial(self, obj) -> str:
         return str(obj.total_rial)
+
+    def get_vat_rial(self, obj) -> str:
+        return str(obj.vat_rial)
+
+    def get_grand_total_rial(self, obj) -> str:
+        return str(obj.grand_total_rial)
 
     def validate(self, attrs):
         status = attrs.get("status", getattr(self.instance, "status", None))

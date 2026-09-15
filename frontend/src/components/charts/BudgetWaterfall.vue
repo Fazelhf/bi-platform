@@ -23,7 +23,7 @@ const props = withDefaults(defineProps<{
   start: number;
   end: number;
   steps: { label: string; effect: number; verdict: Verdict }[];
-  /** Beyond this many steps the rest are folded into «سایر اقلام». */
+  /** Beyond this many steps the rest are folded into «سایر سرفصل‌ها». */
   maxSteps?: number;
   height?: number;
 }>(), { maxSteps: 10, height: 320 });
@@ -47,7 +47,7 @@ const option = computed<EChartsOption>(() => {
   const rest = props.end - props.start - shown;
   const steps = [...top];
   if (Math.abs(rest) >= 1) {
-    steps.push({ label: "سایر اقلام", effect: rest, verdict: rest >= 0 ? "good" : "bad" });
+    steps.push({ label: "سایر سرفصل‌ها", effect: rest, verdict: rest >= 0 ? "good" : "bad" });
   }
 
   const labels: string[] = ["بودجهٔ خالص"];
@@ -86,7 +86,7 @@ const option = computed<EChartsOption>(() => {
     span(Math.min(run, next), Math.max(run, next), s.verdict === "good" ? good : bad);
     labels.push(short(s.label));
     const sign = s.effect > 0 ? "+" : "";
-    tips.push(`${s.label}: ${sign}${compact(s.effect)}<br/>پس از این قلم: ${compact(next)}`);
+    tips.push(`${s.label}: ${sign}${compact(s.effect)}<br/>پس از این سرفصل: ${compact(next)}`);
     run = next;
   }
   labels.push("واقعی خالص");
@@ -135,7 +135,7 @@ useChart(el, option);
   <div class="bg-surface rounded-card shadow-soft p-4">
     <h3 class="text-sm font-semibold text-ink mb-1 text-center">{{ title }}</h3>
     <p v-if="!steps.length" class="text-xs text-slate-400 text-center py-10">
-      در این دوره هیچ قلمی از بودجه فاصله نگرفته است.
+      در این دوره هیچ سرفصلی از بودجه فاصله نگرفته است.
     </p>
     <div v-show="steps.length" ref="el" :style="{ height: height + 'px' }"></div>
   </div>

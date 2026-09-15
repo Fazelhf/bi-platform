@@ -36,6 +36,10 @@ from django.db import models, transaction
 from apps.core.models import DimPeriod, TimeStampedModel
 
 ZERO = Decimal(0)
+#: مالیات بر ارزش افزوده on a فاکتور رسمی. Each quote and order keeps its own
+#: copy of the rate, so the day the rate changes last year's invoices do not
+#: silently change with it.
+VAT_PCT = Decimal(10)
 #: Rial has no sub-unit. Quantity carries two decimal places (half a kilo is
 #: real), so every product of the two has to be brought back to whole Rial or
 #: the API starts emitting «۱۰٬۰۰۰٬۰۰۰٫۰۰ ریال».
@@ -343,6 +347,16 @@ class Quote(TimeStampedModel):
     )
     payment_note = models.CharField(max_length=250, blank=True)
 
+    # -- فاکتور رسمی ------------------------------------------------------
+    # A price is compared as what leaves the account. An official invoice
+    # adds ارزش افزوده on top of the quoted price, so «۱٬۰۰۰٬۰۰۰ رسمی» and
+    # «۱٬۰۵۰٬۰۰۰ غیررسمی» are not the ordering they look like.
+    is_official = models.BooleanField("فاکتور رسمی", default=False)
+    vat_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=VAT_PCT,
+        help_text="درصد ارزش افزوده",
+    )
+
     is_selected = models.BooleanField(default=False)
     reason = models.ForeignKey(
         QuoteReason, null=True, blank=True,
@@ -361,9 +375,24 @@ class Quote(TimeStampedModel):
 
     @property
     def total_rial(self) -> Decimal:
-        """What this quote would cost for the whole requested quantity."""
+        """What this quote would cost for the whole requested quantity, before VAT."""
         raw = (self.unit_price_rial or ZERO) * (self.request.quantity or ZERO)
         return raw.quantize(RIAL)
+
+    @property
+    def vat_rial(self) -> Decimal:
+        return vat_on(self.total_rial, self.is_official, self.vat_pct)
+
+    @property
+    def grand_total_rial(self) -> Decimal:
+        return self.total_rial + self.vat_rial
+
+    @property
+    def unit_price_with_vat_rial(self) -> Decimal:
+        """The comparable price: what one unit really costs, VAT included."""
+        return (self.unit_price_rial or ZERO) + vat_on(
+            self.unit_price_rial or ZERO, self.is_official, self.vat_pct
+        )
 
     def __str__(self) -> str:
         return f"{self.supplier} · {self.unit_price_rial}"
@@ -422,6 +451,12 @@ class PurchaseOrder(TimeStampedModel):
         max_length=10, choices=PaymentMethod.choices, blank=True
     )
     payment_note = models.CharField(max_length=250, blank=True)
+    #: Carried over from the winning quote; see Quote.is_official.
+    is_official = models.BooleanField("فاکتور رسمی", default=False)
+    vat_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=VAT_PCT,
+        help_text="درصد ارزش افزوده",
+    )
     note = models.TextField(blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
@@ -445,6 +480,15 @@ class PurchaseOrder(TimeStampedModel):
         """
         raw = (self.quantity or ZERO) * (self.unit_price_rial or ZERO)
         return raw.quantize(RIAL)
+
+    @property
+    def vat_rial(self) -> Decimal:
+        return vat_on(self.total_rial, self.is_official, self.vat_pct)
+
+    @property
+    def grand_total_rial(self) -> Decimal:
+        """مبلغ قابل پرداخت — the goods plus ارزش افزوده on an official invoice."""
+        return self.total_rial + self.vat_rial
 
     @property
     def counts_as_purchase(self) -> bool:
@@ -1253,6 +1297,13 @@ class ShipmentCost(TimeStampedModel):
 
 
 # -- helpers -------------------------------------------------------------
+def vat_on(amount: Decimal, is_official: bool, pct: Decimal | None) -> Decimal:
+    """ارزش افزوده on an amount — zero unless the invoice is رسمی."""
+    if not is_official:
+        return ZERO
+    return ((amount or ZERO) * (pct or ZERO) / Decimal(100)).quantize(RIAL)
+
+
 def _next_number(prefix: str, on_date) -> str:
     """Human-readable document number: «PO-1405-0007»."""
     from apps.core import jalali

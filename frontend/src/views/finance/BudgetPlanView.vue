@@ -28,11 +28,15 @@ import { faYear, loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { confirm, prompt, toast } from "@/composables/useUi";
 import MoneyInput from "@/components/MoneyInput.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
+import { useAuthStore } from "@/stores/auth";
 
 const {
   budgets, monthPeriods, budgetId, budget, linkQuery, init, refreshBudgets,
 } = useBudgetContext();
 const { money } = useMoney();
+const auth = useAuthStore();
+/** Defining the budget is the CEO's; everyone else reads it. */
+const isCeo = computed(() => auth.isExecutive || !!auth.me?.is_superuser);
 
 const grid = ref<BudgetGrid | null>(null);
 const loading = ref(true);
@@ -278,7 +282,7 @@ async function createBudget() {
     showNew.value = false;
     newBudget.title = "";
     await refreshBudgets(created.id);
-    toast.success("بودجه ساخته شد. حالا اقلامش را اضافه کنید.");
+    toast.success("بودجه ساخته شد. حالا سرفصل‌هاش را اضافه کنید.");
   } catch (e) {
     toast.error(apiError(e, "بودجه ساخته نشد."));
   }
@@ -352,7 +356,7 @@ const parentOptions = computed(() =>
 async function createCategory() {
   const name = newCategory.name.trim();
   if (!name) {
-    toast.error("نام قلم را بنویسید.");
+    toast.error("نام سرفصل را بنویسید.");
     return;
   }
   try {
@@ -368,7 +372,7 @@ async function createCategory() {
     newCategory.parent = null;
     toast.success(`«${created.name_fa}» ساخته شد — حالا «افزودن» را بزنید.`);
   } catch (e) {
-    toast.error(apiError(e, "قلم ساخته نشد."));
+    toast.error(apiError(e, "سرفصل ساخته نشد."));
   }
 }
 
@@ -391,15 +395,15 @@ async function addLine() {
     newLine.category = null;
     newLine.credit_line = null;
     await loadGrid();
-    toast.success("قلم اضافه شد.");
+    toast.success("سرفصل اضافه شد.");
   } catch (e) {
-    toast.error(apiError(e, "قلم اضافه نشد — شاید قبلاً در این بودجه هست."));
+    toast.error(apiError(e, "سرفصل اضافه نشد — شاید قبلاً در این بودجه هست."));
   }
 }
 
 async function removeLine(line: GridLine) {
   const ok = await confirm({
-    title: "حذف قلم",
+    title: "حذف سرفصل",
     message: `«${line.label}» و همهٔ ارقام بودجه‌ای‌اش از این بودجه حذف می‌شود. حرکت‌های نقدینگی ثبت‌شده دست نمی‌خورند.`,
     danger: true,
   });
@@ -409,7 +413,7 @@ async function removeLine(line: GridLine) {
     for (const k of Object.keys(draft)) if (k.endsWith(`:${line.id}`)) delete draft[k];
     await loadGrid();
   } catch (e) {
-    toast.error(apiError(e, "قلم حذف نشد."));
+    toast.error(apiError(e, "سرفصل حذف نشد."));
   }
 }
 
@@ -465,7 +469,7 @@ const statusChip = (s: string) =>
       <div>
         <h1 class="font-bold text-ink">تعریف بودجه</h1>
         <p class="text-xs text-slate-400 mt-0.5">
-          ارقام مورد انتظار هر قلم در هر ماه · عملکرد واقعی از ورود نقدینگی خوانده می‌شود
+          ارقام مورد انتظار هر سرفصل در هر ماه · ارقام واقعی را واحد مالی هفتگی وارد می‌کند
         </p>
       </div>
       <div class="flex flex-wrap items-end gap-2">
@@ -484,7 +488,7 @@ const statusChip = (s: string) =>
           class="px-3 py-1.5 text-sm rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200"
         >انحراف بودجه</router-link>
         <button
-          v-if="grid?.can_edit !== false"
+          v-if="isCeo"
           class="px-3 py-1.5 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700"
           @click="showNew = !showNew"
         >+ بودجهٔ جدید</button>
@@ -532,14 +536,20 @@ const statusChip = (s: string) =>
     >
       <p class="font-semibold text-ink">هنوز بودجه‌ای تعریف نشده</p>
       <p class="text-sm text-slate-400 mt-1">
-        یک بودجه برای بازه‌ای از ماه‌ها بسازید، اقلامش را اضافه کنید و ارقام مورد انتظار را وارد کنید.
+        {{ isCeo
+          ? "یک بودجه برای بازه‌ای از ماه‌ها بسازید، سرفصل‌هایش را اضافه کنید و ارقام مورد انتظار را وارد کنید."
+          : "تعریف بودجه با مدیرعامل است؛ پس از تعریف، ارقام واقعی را در «ورود ارقام واقعی بودجه» وارد کنید." }}
       </p>
-      <button class="mt-4 px-4 py-2 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700" @click="showNew = true">
+      <button class="mt-4 px-4 py-2 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700" v-if="isCeo" @click="showNew = true">
         + ساخت اولین بودجه
       </button>
     </section>
 
     <template v-else-if="grid">
+      <p v-if="!grid.can_edit" class="rounded-card p-3 text-sm bg-slate-100 text-slate-600">
+        تعریف و ویرایش بودجه با مدیرعامل است؛ این صفحه برای شما فقط خواندنی است.
+      </p>
+
       <!-- Summary -->
       <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div class="bg-surface rounded-card shadow-soft p-4">
@@ -569,7 +579,7 @@ const statusChip = (s: string) =>
 
       <!-- Add line -->
       <section v-if="grid.can_edit" class="bg-surface rounded-card shadow-soft p-4">
-        <h2 class="text-sm font-semibold text-ink mb-3">افزودن قلم</h2>
+        <h2 class="text-sm font-semibold text-ink mb-3">افزودن سرفصل</h2>
         <div class="flex flex-wrap items-end gap-3">
           <div>
             <span class="text-[11px] text-slate-400 block mb-1">جهت</span>
@@ -603,12 +613,12 @@ const statusChip = (s: string) =>
           <button
             class="px-3 py-1.5 text-sm rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200"
             @click="showNewCategory = !showNewCategory"
-          >+ قلم جدید</button>
+          >+ سرفصل جدید</button>
         </div>
         <!-- A line not in the list yet -->
         <div v-if="showNewCategory" class="mt-3 p-3 rounded-xl bg-slate-50 flex flex-wrap items-end gap-3">
           <label class="block min-w-[14rem]">
-            <span class="text-[11px] text-slate-400">نام قلم {{ newLine.direction === 'in' ? 'ورودی' : 'خروجی' }}</span>
+            <span class="text-[11px] text-slate-400">نام سرفصل {{ newLine.direction === 'in' ? 'ورودی' : 'خروجی' }}</span>
             <input
               v-model="newCategory.name"
               placeholder="مثلاً: هزینهٔ تبلیغات"
@@ -623,9 +633,9 @@ const statusChip = (s: string) =>
               <option v-for="c in parentOptions" :key="c.id" :value="c.id">{{ c.name_fa }}</option>
             </select>
           </label>
-          <button class="px-4 py-1.5 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700" @click="createCategory">ساخت قلم</button>
+          <button class="px-4 py-1.5 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700" @click="createCategory">ساخت سرفصل</button>
           <p class="basis-full text-[11px] text-slate-400">
-            قلم تازه در صفحهٔ «ورود نقدینگی» هم ستون می‌شود تا عملکرد واقعی‌اش همان‌جا ثبت شود.
+            سرفصل تازه همان لحظه در «ورود ارقام واقعی بودجه» برای واحد مالی ظاهر می‌شود.
           </p>
         </div>
 
@@ -659,14 +669,14 @@ const statusChip = (s: string) =>
         </div>
 
         <p v-if="!grid.lines.length" class="text-sm text-slate-400 text-center py-10">
-          این بودجه هنوز قلمی ندارد — از بخش «افزودن قلم» شروع کنید.
+          این بودجه هنوز سرفصلی ندارد — از بخش «افزودن سرفصل» شروع کنید.
         </p>
 
         <div class="overflow-x-auto">
           <table class="min-w-full text-sm border-separate border-spacing-0">
             <thead>
               <tr class="text-[11px] text-slate-500">
-                <th class="sticky right-0 z-10 bg-surface text-right font-medium p-3 min-w-[15rem] border-b border-slate-100">قلم</th>
+                <th class="sticky right-0 z-10 bg-surface text-right font-medium p-3 min-w-[15rem] border-b border-slate-100">سرفصل</th>
                 <th
                   v-for="m in grid.months" :key="m.budget_period_id"
                   class="p-2 font-medium text-center border-b border-slate-100 min-w-[9.5rem]"
@@ -740,7 +750,7 @@ const statusChip = (s: string) =>
                 >{{ section.title }}</td>
               </tr>
               <tr v-if="!section.lines.length">
-                <td :colspan="grid.months.length + 2" class="px-3 pb-3 text-xs text-slate-400">قلمی ندارد.</td>
+                <td :colspan="grid.months.length + 2" class="px-3 pb-3 text-xs text-slate-400">سرفصلی ندارد.</td>
               </tr>
               <tr v-for="line in section.lines" :key="line.id" class="group hover:bg-slate-50/60">
                 <td class="sticky right-0 z-10 bg-surface group-hover:bg-slate-50 p-2 pe-3 border-b border-slate-50">

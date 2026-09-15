@@ -946,27 +946,21 @@ watch(selectedDay, load);
           <option v-for="e in pickableEmployees" :key="e.id" :value="e.id">
             {{ e.full_name_fa }}{{ e.team_name ? ` — ${e.team_name}` : "" }}
           </option>
-          <option value="new">➕ فروشنده جدید…</option>
         </select>
 
-        <div v-if="pickId === 'new'" class="mb-1">
-          <label class="block text-xs text-slate-500 mb-1">نام فروشنده جدید</label>
-          <input
-            v-model="newName"
-            placeholder="نام و نام خانوادگی"
-            class="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
-            @keyup.enter="confirmAdd"
-          />
-        </div>
-        <p v-else-if="!pickableEmployees.length" class="text-xs text-slate-400">
-          همه‌ی فروشندگان موجود قبلاً در جدول هستند. برای افزودن، «فروشنده جدید» را انتخاب کنید.
+        <!-- No «فروشنده جدید» here any more: a name typed into this box used
+             to create a new person, which is how the same کارشناس ended up in
+             the database twice. People are added in منابع انسانی. -->
+        <p class="text-xs text-slate-400">
+          <template v-if="!pickableEmployees.length">همه‌ی افراد موجود قبلاً در جدول هستند.</template>
+          کارشناس تازه را مدیریت در «منابع انسانی» به چارت اضافه می‌کند؛ از آن پس خودکار در این برگه می‌آید.
         </p>
 
         <div class="flex justify-end gap-2 pt-5">
           <button class="px-4 py-2 text-sm rounded-lg hover:bg-slate-100 transition-colors" @click="showAdd = false">انصراف</button>
           <button
             class="px-4 py-2 text-sm rounded-lg bg-accent-500 text-white hover:bg-accent-600 disabled:opacity-50 transition-colors"
-            :disabled="pickId === '' || (pickId === 'new' && !newName.trim())"
+            :disabled="typeof pickId !== 'number'"
             @click="confirmAdd"
           >افزودن</button>
         </div>

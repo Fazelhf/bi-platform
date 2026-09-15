@@ -69,6 +69,7 @@ const commercialItems: Item[] = [
   { name: "commercial-materials", label: "کالاها", icon: "box" },
   { name: "commercial-suppliers", label: "تامین‌کنندگان", icon: "team" },
   { name: "commercial-requests", label: "درخواست و استعلام", icon: "target" },
+  { name: "commercial-samples", label: "نمونه‌ها", icon: "box" },
   { name: "commercial-orders", label: "سفارش‌های خرید", icon: "notes" },
 ];
 
@@ -109,7 +110,6 @@ const CHILD_PARENT: Record<string, string> = {
   "commercial-request": "commercial-requests",
   // نمونه‌ها has no row of its own — it is reached from درخواست و استعلام,
   // which stays highlighted while you are in it.
-  "commercial-samples": "commercial-requests",
   "foreign-order": "foreign-orders",
 };
 
@@ -163,6 +163,16 @@ const primary = computed<Item[]>(() => {
         ],
       },
       { name: "production-dashboard", label: "تولید", icon: "factory" },
+      // Management only: the chart every other list of people is read from.
+      {
+        name: "group-hr",
+        label: "منابع انسانی",
+        icon: "team",
+        children: [
+          { name: "hr-chart", label: "چارت سازمانی", icon: "building" },
+          { name: "hr-people", label: "افراد و بایگانی", icon: "team" },
+        ],
+      },
       // Three destinations, no working screens: the CEO reads this section
       // but files no ثبت سفارش and chases no container.
       {
@@ -188,6 +198,8 @@ const primary = computed<Item[]>(() => {
           // Setting the figures is the finance department's job.
           { name: "finance-budget", label: "بودجه", icon: "chart" },
           { name: "finance-budget-variance", label: "انحراف بودجه", icon: "file" },
+          // Defining the budget is the CEO's; finance reports against it.
+          { name: "finance-budget-plan", label: "تعریف بودجه", icon: "file" },
         ],
       },
     );
@@ -218,7 +230,7 @@ const primary = computed<Item[]>(() => {
       // The treasury averages: this manager's own tool, and not on the page
       // the CEO opens to read the company's position.
       { name: "finance-treasury", label: "تحلیل خزانه", icon: "wallet" },
-      { name: "finance-budget-plan", label: "تعریف بودجه", icon: "file" },
+      { name: "finance-budget-actuals", label: "ورود ارقام واقعی بودجه", icon: "banknote" },
       { name: "finance-budget-variance", label: "انحراف بودجه", icon: "chart" },
       { name: "finance-budget", label: "داشبورد بودجه", icon: "chart" },
     );
@@ -309,8 +321,10 @@ const pageTitle = computed(() => {
     "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
     "finance-budget": "داشبورد بودجه", "finance-budget-plan": "تعریف بودجه",
     "finance-budget-variance": "انحراف بودجه",
+    "finance-budget-actuals": "ورود ارقام واقعی بودجه",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
     targets: "تعیین تارگت", settings: "تنظیمات سایت",
+    "hr-chart": "چارت سازمانی", "hr-people": "افراد و بایگانی",
     "commercial-dashboard": "داشبورد بازرگانی داخلی",
     "commercial-materials": "کالاهای مصرفی", "commercial-material": "پرونده کالا",
     "commercial-suppliers": "تامین‌کنندگان", "commercial-supplier": "پرونده تامین‌کننده",

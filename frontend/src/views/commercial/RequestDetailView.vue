@@ -46,8 +46,10 @@ const quotes = computed(() => request.value?.quotes ?? []);
 const takenSupplierIds = computed(() => quotes.value.map((q) => q.supplier));
 const cheapest = computed(() => {
   if (!quotes.value.length) return null;
+  // Compared with VAT in: a رسمی price carries ارزش افزوده on top, so the
+  // lowest number typed is not always the lowest cost.
   return quotes.value.reduce((a, b) =>
-    Number(a.unit_price_rial) <= Number(b.unit_price_rial) ? a : b,
+    Number(a.unit_price_with_vat_rial) <= Number(b.unit_price_with_vat_rial) ? a : b,
   );
 });
 const fastest = computed(() => {
@@ -148,9 +150,9 @@ async function removeQuote(quote: Quote) {
 
 /** Difference from the cheapest quote — the number that justifies a choice. */
 function overCheapest(quote: Quote): number | null {
-  const low = Number(cheapest.value?.unit_price_rial ?? 0);
+  const low = Number(cheapest.value?.unit_price_with_vat_rial ?? 0);
   if (!low) return null;
-  const diff = (Number(quote.unit_price_rial) - low) / low * 100;
+  const diff = (Number(quote.unit_price_with_vat_rial) - low) / low * 100;
   return diff === 0 ? null : diff;
 }
 
@@ -262,6 +264,12 @@ const FA = new Intl.NumberFormat("fa-IR");
                     v-if="cheapest && q.id === cheapest.id"
                     class="text-xs text-emerald-600"
                   >کمترین</span>
+                  <p class="text-xs" :class="q.is_official ? 'text-sky-600' : 'text-slate-400'">
+                    <template v-if="q.is_official">
+                      رسمی · با ارزش افزوده {{ exact(q.unit_price_with_vat_rial) }}
+                    </template>
+                    <template v-else>غیررسمی</template>
+                  </p>
                 </td>
                 <td class="px-3 ltr-nums text-xs">
                   <span v-if="overCheapest(q) === null" class="text-slate-300">—</span>
@@ -269,7 +277,12 @@ const FA = new Intl.NumberFormat("fa-IR");
                     +{{ FA.format(Number(overCheapest(q)!.toFixed(1))) }}٪
                   </span>
                 </td>
-                <td class="px-3 ltr-nums text-slate-500">{{ exact(q.total_rial) }}</td>
+                <td class="px-3 ltr-nums text-slate-500">
+                  {{ exact(q.grand_total_rial) }}
+                  <p v-if="q.is_official" class="text-xs text-slate-400">
+                    شامل {{ exact(q.vat_rial) }} ارزش افزوده
+                  </p>
+                </td>
                 <td class="px-3 ltr-nums text-slate-500">
                   {{ num(q.delivery_days) }} روز
                   <span
@@ -426,7 +439,10 @@ const FA = new Intl.NumberFormat("fa-IR");
               <td class="px-3 ltr-nums text-slate-500">
                 {{ num(o.quantity) }} {{ o.material_unit }}
               </td>
-              <td class="px-3 ltr-nums text-ink">{{ exact(o.total_rial, true) }}</td>
+              <td class="px-3 ltr-nums text-ink">
+                {{ exact(o.grand_total_rial, true) }}
+                <span v-if="o.is_official" class="text-xs text-slate-400">با ارزش افزوده</span>
+              </td>
               <td class="px-4 text-xs text-slate-500">{{ o.status_label }}</td>
             </tr>
           </tbody>
