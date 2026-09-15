@@ -149,8 +149,18 @@ cPanel → **SSL/TLS Status** → برای هر دو `YOUR-DOMAIN.com` و `api.Y
 روی سرور فقط این کافی است:
 
 ```bash
-bash ~/bi-platform/deploy.sh
+cd ~/bi-platform && git fetch origin && git show origin/main:deploy.sh > /tmp/bi-deploy.sh && bash /tmp/bi-deploy.sh
 ```
+
+این دستور اسکریپت دیپلوی را از همان نسخه‌ای می‌خواند که دیپلوی می‌شود و:
+
+1. نسخه‌ی جدید را **در پوشه‌ی جداگانه** با همان پایتون، `.env` و دیتابیس راه‌اندازی و آزمایش می‌کند — سایت دست نمی‌خورد؛
+2. مایگریشن‌ها را اجرا می‌کند (افزودنی‌اند؛ نسخه‌ی فعلی سایت با آن‌ها کار می‌کند)؛
+3. فقط اگر همه‌چیز سالم بود سایت را به نسخه‌ی جدید منتقل و ری‌استارت می‌کند؛
+4. سایت زنده را چک می‌کند و **اگر جواب نداد، خودکار به نسخه‌ی قبلی برمی‌گردد** و لاگ خطا را نشان می‌دهد.
+
+> چرا: دیپلوی ۲۳ شهریور ۱۴۰۵ کل سایت را با «Internal Error» از کار انداخت و اسکریپت قبلی
+> متوجه نشد؛ سایت تا برگرداندن دستی کد پایین ماند.
 
 > ⚠️ **اگر فرانت را تغییر داده‌اید، قبلش حتماً روی ویندوز `build-spa.bat` را اجرا کنید.**
 > `deploy.sh` روی سرور فرانت را build **نمی‌کند** — نسخه‌ی بیلدشده در `backend/spa/`
@@ -163,7 +173,7 @@ bash ~/bi-platform/deploy.sh
 build-spa.bat        # روی ویندوز: build + کپی در backend/spa
 git add -A && git commit -m "..." && git push
 # سپس روی سرور:
-bash ~/bi-platform/deploy.sh
+cd ~/bi-platform && git fetch origin && git show origin/main:deploy.sh > /tmp/bi-deploy.sh && bash /tmp/bi-deploy.sh
 ```
 
 ## عیب‌یابی سریع
