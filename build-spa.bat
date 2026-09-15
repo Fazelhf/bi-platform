@@ -35,6 +35,6 @@ echo     git add -A
 echo     git commit -m "rebuild frontend"
 echo     git push
 echo.
-echo و سپس روی سرور:  bash ~/bi-platform/deploy.sh
+echo و سپس روی سرور دستور دیپلوی را اجرا کنید — docs\DEPLOY-cpanel.md بخش «به‌روزرسانی بعدی».
 echo.
 pause

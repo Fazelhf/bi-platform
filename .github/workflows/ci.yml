@@ -12,7 +12,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          # The server's version, not the newest one. CI on 3.13 passed a
+          # deploy that then failed to start on the host's 3.12 — a check on a
+          # different interpreter than the one serving the site proves less
+          # than it looks like it does.
+          python-version: "3.12"
       - name: Install deps
         working-directory: backend
         run: |
