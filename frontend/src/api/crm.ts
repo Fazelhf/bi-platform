@@ -10,7 +10,7 @@ import api from "./client";
  * chart that opened it.
  */
 export interface Drill {
-  kind: "deals" | "customers" | "activities" | "feedback" | null;
+  kind: "deals" | "customers" | "activities" | "feedback" | "invoices" | null;
   params: Record<string, string | number>;
 }
 
@@ -292,6 +292,31 @@ export interface MatchSummary {
   pending: number;
 }
 
+/**
+ * One آرپا invoice. Read-only in the CRM: it is accounting's record, and an
+ * edit made here would be overwritten by — or disagree with — the ledger.
+ * `amount_rial` is net of discount and before VAT; returns are negative.
+ */
+export interface CrmInvoice {
+  id: number;
+  number: string;
+  kind: "sale" | "return";
+  kind_display: string;
+  issued_at: string;
+  issued_jalali: string;
+  customer: number;
+  customer_name: string;
+  owner: number | null;
+  owner_name: string;
+  deal: number | null;
+  deal_title: string;
+  amount_rial: string;
+  vat_rial: string;
+  total_rial: string;
+  unsettled_rial: string;
+  payment_terms: string;
+}
+
 export const crmApi = {
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
@@ -363,6 +388,11 @@ export const crmApi = {
   async customerTimeline(id: number) {
     const { data } = await api.get(`/crm/customers/${id}/timeline/`);
     return data as { activities: CrmActivity[]; deals: Deal[] };
+  },
+
+  async invoices(params: Params = {}) {
+    const { data } = await api.get("/crm/invoices/", { params: clean(params) });
+    return data as { count: number; results: CrmInvoice[] };
   },
 
   async activities(params: Params = {}) {
@@ -445,6 +475,8 @@ export const crmApi = {
         return { kind: d.kind, ...(await this.activities(params)) };
       case "feedback":
         return { kind: d.kind, ...(await this.feedback(params)) };
+      case "invoices":
+        return { kind: d.kind, ...(await this.invoices(params)) };
       default:
         return { kind: "deals", ...(await this.deals(params)) };
     }

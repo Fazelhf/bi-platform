@@ -761,6 +761,40 @@ class CustomerExternalRef(DatasetModel):
         return f"{self.get_source_display()}:{self.external_id} → {self.customer}"
 
 
+class DismissedParty(TimeStampedModel):
+    """
+    A source party someone removed from the CRM on purpose.
+
+    Deleting a customer takes its CustomerExternalRef with it by cascade, and
+    the ref was the only record that the party had ever been seen. The next
+    import then met the party as new and created it again — measured at 18 of
+    20 deleted customers returning after one run. This row is what outlives
+    the delete: the importer skips any party listed here.
+
+    Kept outside `Customer` and without a foreign key to it, because its whole
+    job is to exist after the customer does not.
+    """
+
+    source = models.CharField(max_length=8, choices=ExternalSource.choices)
+    external_id = models.CharField(max_length=64)
+    external_name = models.CharField(max_length=200, blank=True)
+    dismissed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="crm_dismissed_parties",
+    )
+
+    class Meta:
+        verbose_name = "طرف‌حساب حذف‌شده"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "external_id"], name="crm_dismissed_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_source_display()}:{self.external_id} {self.external_name}"
+
+
 class CustomerMatchCandidate(TimeStampedModel):
     """
     A suspected — not confirmed — pairing between a source party and a customer.

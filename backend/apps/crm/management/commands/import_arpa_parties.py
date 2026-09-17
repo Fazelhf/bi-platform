@@ -1,8 +1,12 @@
 """
 Bring the accounting system's party list into the CRM customer file.
 
-    python manage.py import_arpa_parties --dir "C:/Users/Asus/Downloads" --check
-    python manage.py import_arpa_parties --dir "C:/Users/Asus/Downloads"
+    python manage.py import_arpa_parties --dir data/arpa --check
+    python manage.py import_arpa_parties --dir data/arpa
+
+Run by hand after uploading a fresh export — never from deploy.sh. It is
+idempotent against the workbook, not against what the team did in the app
+since the last run; see DismissedParty and `PartyWriter.apply`.
 
 The customer file already exists — it came out of دیدار — so this is a merge,
 not a load. What matters is that it *cannot silently fuse two customers*: a
@@ -15,8 +19,8 @@ Two facts about the source shape the run:
 
 * **The party list belongs to a group of companies, not to this one.** 3,498
   parties across 16 گروه, of which «آرال رول آریا تهران» is a sister firm's
-  customer file — 1,495 parties and, checked against 1404's invoices, not one
-  Rial of sales here. Excluded.
+  customer file — 1,495 parties. Excluded, except the handful that carry
+  invoices from our branch: 1405 showed 60.6bn Rial from six of them.
 * **The sister company also appears as a customer of ours.** «شرکت آرال رول
   آریا - فی ما بین» sits in گروه «نمابر مهر سایر مشتریان», not in the آرال
   group, and billed 417bn Rial in 1404. Excluding by group would miss it, so
@@ -29,7 +33,6 @@ of data loss — آرپا's legal name is kept on the external ref instead.
 """
 from __future__ import annotations
 
-
 from pathlib import Path
 
 from django.conf import settings
@@ -40,21 +43,15 @@ from django.utils import timezone
 from apps.crm.matching import CustomerIndex, Method, fold
 from apps.crm.models import (
     Customer, CustomerExternalRef, CustomerMatchCandidate, Dataset,
-    ExternalSource,
+    DismissedParty, ExternalSource,
 )
 from apps.crm.party_sync import PartyWriter
 
 FILE = "اشخاص کلی.xlsx"
 
-#: A sister company's own customer file. Verified against 1404's invoices:
-#: zero sales from this group, so nothing is lost by leaving it out.
+#: A sister company's own customer file. Excluded — except for the parties in
+#: it that have invoices from our branch (see `_filter`).
 EXCLUDED_GROUPS = frozenset({"آرال رول آریا تهران"})
-
-#: Sister-company accounts, wherever they are filed. They do buy from us and
-#: the invoices are real, so they are imported — flagged, so that no target,
-#: conversion rate or per-rep figure counts them as sales work.
-
-
 
 
 class Command(BaseCommand):
@@ -89,10 +86,20 @@ class Command(BaseCommand):
         # have never traded is the number the caller needs to see before
         # agreeing to import them.
         self.with_sales = self._codes_with_sales(options["dir"])
+        # Parties someone deleted from the CRM. Without this the import is
+        # an undo button for every delete: the party looks new again and is
+        # recreated.
+        self.dismissed = set(
+            DismissedParty.objects.filter(source=ExternalSource.ARPA)
+            .values_list("external_id", flat=True)
+        )
         keep, dropped = self._filter(rows, options)
         self.stdout.write(
             f"طرف‌حساب: {len(rows)} خوانده شد، {len(keep)} می‌ماند "
-            f"({dropped} کنار گذاشته شد)"
+            f"({dropped} کنار گذاشته شد"
+            + (f"، از جمله {self.skipped_dismissed} که کاربر حذف کرده بود"
+               if self.skipped_dismissed else "")
+            + ")"
         )
 
         # A party waiting on a reviewer is not available for the ladder to
@@ -136,9 +143,13 @@ class Command(BaseCommand):
         """Drop the sister firm's own book, and rows with nothing to key on."""
         wanted = self.with_sales if options["only_with_sales"] else None
         keep = []
+        self.skipped_dismissed = 0
         for row in rows:
             code, name = fold(row.get("کد")), fold(row.get("نام"))
             if not code or not name:
+                continue
+            if code in self.dismissed:
+                self.skipped_dismissed += 1
                 continue
             # The group says whose book a party is filed in; an invoice from
             # our branch says whose customer it is. When they disagree the

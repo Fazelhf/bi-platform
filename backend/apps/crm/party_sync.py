@@ -44,6 +44,11 @@ TEXT_FIELDS = (
     ("payment_terms", "شرایط تسویه پیش فرض"),
 )
 
+#: Of the above, the ones a person can also edit on the CRM screen
+#: (`CustomerWriteSerializer`). On an existing account these are filled only
+#: when blank — see `PartyWriter.apply`.
+CRM_EDITABLE = frozenset({"national_id"})
+
 #: Fields filled only when the CRM has nothing. آرپا leaves آدرس empty on a
 #: third of its parties and a phone on nearly half; a sync that blanks the
 #: number a rep dialled last week is a loss, not an update.
@@ -91,7 +96,10 @@ class PartyWriter:
     stays the customers who actually buy.
     """
 
-    def __init__(self, with_sales=frozenset()):
+    def __init__(self, with_sales=None):
+        # None means «not known» — the review screen creates accounts without
+        # the invoice workbooks at hand — and is not the same as «no sales».
+        # Reading it as the empty set closed every account a reviewer created.
         self.with_sales = with_sales
         self.provinces = {
             _province_key(p.name_fa): p for p in DimProvince.objects.all()
@@ -100,15 +108,38 @@ class PartyWriter:
 
     # -- fields ----------------------------------------------------------
     def apply(self, customer: Customer, row: dict, save: bool = True) -> Customer:
+        """
+        Write one آرپا row onto a customer.
+
+        Two policies, split by who else can change the field:
+
+        * **Fields the CRM screen edits** — phone, address, national id,
+          province, group — are only *filled*, never overwritten, on an
+          account that already exists. This used to overwrite, and because
+          every deploy re-ran the import, a rep who corrected a phone number
+          watched it revert on the next release.
+        * **Fields only accounting holds** — economic code, payment terms,
+          credit standing — stay in sync, since nobody in the CRM can be
+          contradicted by them.
+
+        An existing account is never *closed* by an import. Closing is a
+        judgement the team makes; the import may only open an account that
+        has started buying.
+        """
+        fresh = customer._state.adding
+
         for field, *columns in TEXT_FIELDS:
             value = next(
                 (fold(row.get(c)) for c in columns if fold(row.get(c))), ""
             )
             if field in {"national_id", "economic_code"}:
                 value = id_key(value)
-            if value:
-                limit = customer._meta.get_field(field).max_length
-                setattr(customer, field, value[:limit])
+            if not value:
+                continue
+            if field in CRM_EDITABLE and not fresh and getattr(customer, field):
+                continue
+            limit = customer._meta.get_field(field).max_length
+            setattr(customer, field, value[:limit])
 
         for field, column in FILL_IF_EMPTY:
             value = fold(row.get(column))
@@ -129,23 +160,31 @@ class PartyWriter:
             jdate(row.get("تاریخ اعتبار گواهی ارزش افزوده"))
             or customer.vat_cert_expires_at
         )
-        customer.is_intercompany = any(
-            m in fold(row.get("نام")) for m in INTERCOMPANY_MARKERS
-        )
+        # Only ever raised. A name that says «فی ما بین» makes the account
+        # intercompany; a name that stops saying it is not evidence enough to
+        # put a sister company's billing back into the sales team's figures.
+        if any(m in fold(row.get("نام")) for m in INTERCOMPANY_MARKERS):
+            customer.is_intercompany = True
 
-        # Both reasons an account is closed, re-derived on every call. Reading
-        # only the آرپا column made a second import re-open all 1,597 accounts
-        # the first had closed for never having traded.
-        #
-        # The no-trade rule applies only to accounts this sync created. A
-        # دیدار customer has deals and calls behind it, and the invoice
-        # exports begin at 1404 — judging it by them would close customers
-        # whose last order was simply earlier.
-        never_traded = (
-            customer.code.startswith("arpa-")
-            and fold(row.get("کد")) not in self.with_sales
+        has_sales = (
+            None if self.with_sales is None
+            else fold(row.get("کد")) in self.with_sales
         )
-        customer.is_active = not (truthy(row.get("غیر فعال")) or never_traded)
+        if fresh:
+            # The party list is a whole group's ledger and most of it has
+            # never traded here, so a new account arrives closed unless it has
+            # invoices — keeping a rep's working list to customers who buy.
+            customer.is_active = (
+                not truthy(row.get("غیر فعال")) and has_sales is not False
+            )
+        elif (
+            not customer.is_active and has_sales is True
+            and customer.code.startswith("arpa-")
+        ):
+            # The one change an import may make to an existing account's
+            # state: one that was closed for never having traded has now
+            # traded.
+            customer.is_active = True
 
         if save:
             customer.save()

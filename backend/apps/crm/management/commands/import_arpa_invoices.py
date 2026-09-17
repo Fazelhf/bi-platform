@@ -1,8 +1,11 @@
 """
 Load the sales invoices out of آرپا and check them against آرپا's own totals.
 
-    python manage.py import_arpa_invoices --dir "C:/Users/Asus/Downloads" --check
-    python manage.py import_arpa_invoices --dir "C:/Users/Asus/Downloads"
+    python manage.py import_arpa_invoices --dir data/arpa --check
+    python manage.py import_arpa_invoices --dir data/arpa
+
+Run by hand after uploading a fresh export, after import_arpa_parties —
+never from deploy.sh. Ends by linking the new invoices to deals.
 
 Two workbooks per period, joined here: «فروش کل» is one row per invoice and
 «جزئیات فروش» one row per line. Both are read for every year found in the
@@ -143,6 +146,14 @@ class Command(BaseCommand):
         with transaction.atomic():
             self._write(plan, grouped)
         self._compare(real, written=True)
+
+        # Freshly written invoices have no deal yet; attaching them here means
+        # the dashboard's «from pipeline to invoice» figure is current after a
+        # single command rather than after two that are easy to run one of.
+        from apps.crm.invoice_link import link_invoices
+        from apps.crm.management.commands.link_invoices import report
+        self.stdout.write("")
+        report(self, link_invoices())
 
     # -- reading ---------------------------------------------------------
     def _read_all(self, directory: Path, pattern: str) -> list[dict]:

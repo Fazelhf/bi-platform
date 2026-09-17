@@ -5,7 +5,7 @@ from rest_framework import serializers
 from apps.crm.jalali import jalali_str
 from apps.crm.models import (
     Activity, Customer, CustomerMatchCandidate, CustomerFeedback, CustomerGroup, Deal, DealItem,
-    DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
+    DealStageEvent, LeadSource, LostReason, PipelineStage, Product, SalesInvoice,
     ProductCategory, Tag, Task,
 )
 
@@ -454,3 +454,26 @@ class MatchCandidateSerializer(serializers.ModelSerializer):
             "rep": p.get("نام بازاریاب", ""),
             "terms": p.get("شرایط تسویه پیش فرض", ""),
         }
+
+
+
+class SalesInvoiceSerializer(serializers.ModelSerializer):
+    """One آرپا invoice, flattened for the drill-down drawer."""
+
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
+    owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True, default="")
+    deal_title = serializers.CharField(source="deal.title", read_only=True, default="")
+    issued_jalali = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SalesInvoice
+        fields = (
+            "id", "number", "kind", "kind_display", "issued_at", "issued_jalali",
+            "customer", "customer_name", "owner", "owner_name", "deal",
+            "deal_title", "amount_rial", "vat_rial", "total_rial",
+            "unsettled_rial", "payment_terms",
+        )
+
+    def get_issued_jalali(self, obj) -> str:
+        return jalali_str(obj.issued_at)
