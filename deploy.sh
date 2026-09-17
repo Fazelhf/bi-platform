@@ -174,9 +174,17 @@ site_is_up || rollback "سایت بعد از ری‌استارت جواب ندا
 say "بارگذاری داده‌ی CRM (فقط بار اول)…"
 python manage.py import_didar_crm --if-empty || echo "⚠️ بارگذاری CRM خطا داد — سایت سالم است."
 
-say "بارگذاری داده‌ی حسابداری آرپا…"
-python manage.py import_arpa_parties --dir data/arpa || echo "⚠️ import_arpa_parties خطا داد — سایت سالم است."
-python manage.py import_arpa_invoices --dir data/arpa || echo "⚠️ import_arpa_invoices خطا داد — سایت سالم است."
+# آرپا is deliberately NOT loaded here any more.
+#
+# It used to be, on the theory that both importers are idempotent. They are
+# idempotent against the *workbook* — not against what people do in the app
+# between two deploys. Every deploy re-read the same export and so:
+#   * brought back customers the team had deleted (18 of 20 in a test: the
+#     delete takes the آرپا id with it, so the party looks new again);
+#   * rewrote ~1,800 customers from the file, undoing hand edits;
+# and did it on a schedule set by code changes, which has nothing to do with
+# when accounting data changes. Loading accounting data is its own act, run
+# when a fresh export has been uploaded — see backend/data/arpa/README.md.
 
 echo
 echo "✅ به‌روزرسانی انجام شد و سایت جواب می‌دهد: $SITE_URL"

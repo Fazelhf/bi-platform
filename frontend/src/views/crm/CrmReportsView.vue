@@ -37,7 +37,9 @@ type Col = { k: string; label: string; f: "rial" | "count" | "pct" | "days" | "t
 const COLUMNS: Record<string, Col[]> = {
   sales: [
     { k: "count", label: "تعداد معامله", f: "count", total: true },
-    { k: "amount", label: "مبلغ فروش", f: "rial", total: true },
+    { k: "amount", label: "معامله موفق", f: "rial", total: true },
+    { k: "invoiced_count", label: "تعداد فاکتور", f: "count", total: true },
+    { k: "invoiced", label: "فاکتورشده", f: "rial", total: true },
     { k: "cost", label: "بهای تمام‌شده", f: "rial", total: true },
     { k: "profit", label: "سود", f: "rial", total: true },
     { k: "margin_pct", label: "حاشیه سود", f: "pct" },
@@ -194,7 +196,14 @@ const series = computed(() => {
       { name: "ناموفق", stack: "s", color: "#ef4444", values: rows.map((r) => r.lost_count) },
     ];
   }
-  if (reportKey.value === "sales" || reportKey.value === "profit") {
+  if (reportKey.value === "sales") {
+    return [
+      { name: "معامله موفق", values: rows.map((r) => r.amount), color: "#22c55e" },
+      { name: "فاکتورشده", values: rows.map((r) => r.invoiced ?? 0), color: "#3b82f6" },
+      { name: "سود", values: rows.map((r) => r.profit), type: "line" as const, color: "#0ea5e9" },
+    ];
+  }
+  if (reportKey.value === "profit") {
     return [
       { name: "فروش", values: rows.map((r) => r.amount), color: "#22c55e" },
       { name: "سود", values: rows.map((r) => r.profit), type: "line" as const, color: "#0ea5e9" },

@@ -29,7 +29,7 @@ from apps.core.models import DimPeriod, PeriodKind
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, Deal, DealItem,
-    PipelineStage,
+    PipelineStage, SalesInvoice,
 )
 from apps.sales.models import FactSalesProvince, SalesTarget
 
@@ -272,6 +272,48 @@ class Filters:
             qs = qs.filter(province_id=self.province)
         return qs
 
+    def invoices(self):
+        """
+        Invoices billed inside the window — what accounting says was sold.
+
+        Scoped by the same rules as every other queryset here, so a کارشناس
+        sees the invoices on their own accounts and a department sees its own
+        book. The channel is read off the *customer*, not the invoice: آرپا
+        fills «مسوول فروش» on one invoice in seven, and filtering on that would
+        hide six sevenths of a department's billing from it.
+
+        Sister-company billing is left out. It is real revenue in the ledger
+        but not the sales team's work — «آرال رول آریا - فی ما بین» alone would
+        otherwise add 250bn Rial to 1405 and to whoever it is assigned to.
+        """
+        if self.blind:
+            return SalesInvoice.objects.none()
+        qs = self.by_channel(
+            SalesInvoice.objects.filter(dataset=self.dataset)
+            .exclude(customer__is_intercompany=True),
+            "customer__channel",
+        )
+        # `issued_at` is a date, not a timestamp: compared against the aware
+        # datetimes `_window` builds, the window edges shift by the timezone
+        # offset and invoices on the first day can fall outside.
+        if self.start:
+            qs = qs.filter(issued_at__gte=self.start)
+        if self.end:
+            qs = qs.filter(issued_at__lt=self.end)
+        if self.owner:
+            qs = qs.filter(owner_id=self.owner)
+        if self.group:
+            qs = qs.filter(customer__group_id=self.group)
+        if self.source:
+            qs = qs.filter(customer__lead_source_id=self.source)
+        if self.province:
+            qs = qs.filter(customer__province_id=self.province)
+        if self.customer:
+            qs = qs.filter(customer_id=self.customer)
+        if self.product:
+            qs = qs.filter(items__product_id=self.product).distinct()
+        return qs
+
     def _window(self, qs, field_name: str):
         if self.start:
             qs = qs.filter(**{f"{field_name}__gte": _aware(self.start)})
@@ -406,6 +448,79 @@ DEAL_MEASURES = {
 }
 
 
+INVOICE_MEASURES = {
+    "invoiced": _money(Sum("amount_rial")),
+    "invoiced_count": Count("id", distinct=True),
+}
+
+#: The same «بر محور …» dimensions, as paths from an invoice rather than a
+#: deal. Most are identical because both hang off a customer and an owner.
+#: Stage and lost reason have no invoice equivalent — a bill has no pipeline
+#: stage — so those axes simply carry no invoiced figure.
+INVOICE_PATHS = {
+    "owner_id": ("owner_id", "owner__full_name_fa"),
+    "customer__province_id": ("customer__province_id", "customer__province__name_fa"),
+    "customer__group_id": ("customer__group_id", "customer__group__name_fa"),
+    "lead_source_id": ("customer__lead_source_id", "customer__lead_source__name_fa"),
+    "customer_id": ("customer_id", "customer__name_fa"),
+    "owner__team_id": ("owner__team_id", "owner__team__name_fa"),
+}
+
+
+UNATTRIBUTED = {
+    "user": "بدون بازاریاب",
+    "team": "بدون تیم",
+    "province": "استان نامشخص",
+    "group": "گروه نامشخص",
+    "source": "منبع نامشخص",
+}
+
+
+def _with_invoices(rows: list[dict], f: "Filters", axis: "Axis") -> list[dict]:
+    """
+    Put the invoiced figure beside the won-deal figure on every row.
+
+    Rows that exist only on the invoice side are added, not dropped: a
+    customer billed heavily with no deal in دیدار is exactly the gap this
+    comparison exists to show, and leaving it off because there was no deal
+    row to hang it on would hide the largest discrepancies first.
+    """
+    paths = INVOICE_PATHS.get(axis.id_path)
+    for r in rows:
+        r.setdefault("invoiced", 0.0)
+        r.setdefault("invoiced_count", 0.0)
+    if not paths:
+        return rows
+
+    by_id = {r["id"]: r for r in rows}
+    id_path, label_path = paths
+    for inv in (
+        f.invoices().values(id_path, label_path)
+        .annotate(**INVOICE_MEASURES).order_by()
+    ):
+        gid = inv[id_path]
+        row = by_id.get(gid)
+        if row is None:
+            row = {
+                "id": gid, "label": inv[label_path] or "—",
+                **{k: 0.0 for k in DEAL_MEASURES},
+                "margin_pct": 0.0,
+            }
+            rows.append(row)
+            by_id[gid] = row
+        row["invoiced"] = _num(inv["invoiced"])
+        row["invoiced_count"] = _num(inv["invoiced_count"])
+
+    # The null bucket is not a data gap to hide behind «—». On the owner axis
+    # it is «بازاریاب بدون پورسانت», which in 1404–1405 carried two thirds of
+    # everything billed; it tops a ranking by billing, and has to read as
+    # what it is rather than as a rendering glitch.
+    for r in rows:
+        if r["id"] is None and r["label"] in ("—", "", None):
+            r["label"] = UNATTRIBUTED.get(axis.key, "نامشخص")
+    return rows
+
+
 def _grouped(qs, axis: Axis, measures: dict) -> list[dict]:
     rows = (
         qs.values(axis.id_path, axis.label_path)
@@ -451,19 +566,31 @@ def _num(v) -> float:
 # Reports
 # --------------------------------------------------------------------------
 def report_sales(f: Filters, axis_key: str) -> dict:
-    """گزارش کلی فروش — won deals, measured on the date they were won."""
+    """
+    گزارش کلی فروش — two figures side by side on every row.
+
+    `amount` is won deals from دیدار, on the date they were won. `invoiced` is
+    آرپا's invoices, net of returns and before VAT, on the date they were
+    issued. They are kept apart rather than blended because they answer
+    different questions — what the team closed, and what was billed — and in
+    1404 they differed by 2x to 70x month to month. Collapsing them into one
+    «sales» number would hide the very gap the manager needs to see.
+    """
     qs = f.deals("closed_at").filter(status=Deal.Status.WON)
+    invoices = f.invoices()
     drill = {"status": "won"}
 
     if axis_key == "time":
         rows = []
         for jy, jm, s, e in _time_buckets(f):
             agg = qs.filter(closed_at__gte=_aware(s), closed_at__lt=_aware(e)).aggregate(**DEAL_MEASURES)
+            billed = invoices.filter(issued_at__gte=s, issued_at__lt=e).aggregate(**INVOICE_MEASURES)
             d = dict(f.drill_base()); d.update(drill)
             d["date_from"], d["date_to"] = s.isoformat(), (e - dt.timedelta(days=1)).isoformat()
             rows.append({
                 "id": f"{jy}-{jm}", "label": month_label(jy, jm),
                 **{k: _num(v) for k, v in agg.items()},
+                **{k: _num(v) for k, v in billed.items()},
                 "drill": {"kind": "deals", "params": d},
             })
         return _shape("sales", "time", rows, chronological=True)
@@ -472,7 +599,16 @@ def report_sales(f: Filters, axis_key: str) -> dict:
     rows = _grouped(qs, axis, DEAL_MEASURES)
     for r in rows:
         r["margin_pct"] = _pct(r["profit"], r["amount"])
-    return _shape("sales", axis_key, _finish(rows, f, axis, "amount", "deals", drill))
+    rows = _with_invoices(rows, f, axis)
+    # Ranked by the larger of the two, so a rep or customer that is big on
+    # either side is near the top: ranking by deals alone buries an account
+    # billed heavily without a deal logged, which is the case worth finding.
+    for r in rows:
+        r["_rank"] = max(r["invoiced"], r["amount"])
+    rows = _finish(rows, f, axis, "_rank", "deals", drill)
+    for r in rows:
+        r.pop("_rank", None)
+    return _shape("sales", axis_key, rows)
 
 
 def report_profit(f: Filters, axis_key: str) -> dict:
@@ -1141,6 +1277,20 @@ def dashboard(f: Filters) -> dict:
         cost=_money(Sum("cost_rial")),
     )
     lost_agg = lost.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
+
+    # What accounting billed in the same window, beside what the team won.
+    billed = f.invoices()
+    billed_agg = billed.aggregate(
+        n=Count("id", distinct=True),
+        amount=_money(Sum("amount_rial")),
+        unsettled=_money(Sum("unsettled_rial")),
+    )
+    # Of the value won, how much has an invoice attached. Summed over the
+    # deals themselves, not over a join to their invoices: a deal billed in
+    # three instalments would otherwise count three times.
+    won_billed = Deal.objects.filter(
+        pk__in=won.filter(invoices__isnull=False).values("pk")
+    ).aggregate(amount=_money(Sum("amount_rial")))
     in_agg = opened.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
 
     open_now = f.by_channel(
@@ -1189,6 +1339,14 @@ def dashboard(f: Filters) -> dict:
              {"date_basis": "opened"}, {"amount": _num(in_agg["amount"])}),
         card("won", "فروش موفق", _num(won_agg["n"]), "count", "deals",
              {"status": "won"}, {"amount": _num(won_agg["amount"])}),
+        # Beside «فروش موفق», not instead of it: the two measure different
+        # things and the distance between them is itself the finding.
+        card("invoiced", "فروش فاکتورشده", _num(billed_agg["amount"]), "rial",
+             "invoices", {},
+             {"count": _num(billed_agg["n"]),
+              "won_amount": _num(won_agg["amount"]),
+              "unsettled": _num(billed_agg["unsettled"]),
+              "won_billed_pct": _pct(won_billed["amount"], won_agg["amount"])}),
         card("lost", "معاملات شکست خورده", _num(lost_agg["n"]), "count", "deals",
              {"status": "lost"}, {"amount": _num(lost_agg["amount"])}),
         card("profit", "سود فروش", _num(won_agg["profit"]), "rial", "deals",

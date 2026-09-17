@@ -11,8 +11,9 @@ its invoices are skipped; 260 invoices worth 543bn Rial are waiting on this
 queue. «Reject» is not «discard»: it means *this is a different customer*, and
 a different customer still needs an account.
 
-Nothing here deletes. Accepting writes accounting's fields onto the customer
-the reviewer chose; rejecting creates a new customer. If a decision turns out
+Decisions never delete. Accepting writes accounting's fields onto the customer
+the reviewer chose; rejecting creates a new customer. The one delete path,
+`delete_customers`, lives here too so it can leave a tombstone behind. If a decision turns out
 to be wrong, the ref moves — no history has been destroyed in the meantime.
 """
 from __future__ import annotations
@@ -180,9 +181,10 @@ def reject(candidate: CustomerMatchCandidate, user=None) -> Customer:
     the account disappear.
 
     The new account arrives open. Whether it has ever traded is not knowable
-    from this screen — the invoice files are not loaded here — and the next
-    `import_arpa_parties` run re-derives `is_active` for every linked party,
-    so an account that never buys is closed then.
+    from this screen — the invoice files are not loaded here — and a reviewer
+    who has just said «this is a customer of its own» should not find it
+    hidden from the list. A later import opens accounts that start buying but
+    never closes one, so closing it stays a decision for the team.
     """
     if candidate.state != CustomerMatchCandidate.State.PENDING:
         raise MergeError("این مورد قبلاً تعیین تکلیف شده است.")
@@ -313,3 +315,35 @@ def alternatives(candidate: CustomerMatchCandidate, limit: int = 6):
         if name_key(c.name_fa) == key
     ][:limit]
     return Customer.objects.filter(pk__in=ids)
+
+
+@transaction.atomic
+def delete_customers(queryset, user=None) -> int:
+    """
+    Delete customers, leaving a tombstone for every source id they carried.
+
+    The only sanctioned way to remove a customer. A bare `.delete()` cascades
+    the external refs away, and with them the fact that the party was ever
+    imported — so the next accounting load recreates it. Both the list's bulk
+    action and the single-row DELETE come through here for that reason.
+    """
+    from apps.crm.models import DismissedParty
+
+    ids = list(queryset.values_list("pk", flat=True))
+    if not ids:
+        return 0
+    refs = CustomerExternalRef.objects.filter(customer_id__in=ids).values_list(
+        "source", "external_id", "external_name"
+    )
+    DismissedParty.objects.bulk_create(
+        [
+            DismissedParty(
+                source=source, external_id=external_id,
+                external_name=name,
+                dismissed_by=user if user and user.is_authenticated else None,
+            )
+            for source, external_id, name in refs
+        ],
+        ignore_conflicts=True,
+    )
+    return Customer.objects.filter(pk__in=ids).delete()[0]

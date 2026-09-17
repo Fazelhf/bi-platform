@@ -33,12 +33,14 @@ from apps.crm import matching, merge as crm_merge, reports as rpt
 from apps.crm.management.commands.import_arpa_invoices import (
     Command as InvoiceCommand, dec as inv_dec,
 )
+from apps.crm.invoice_link import WINDOW_DAYS, link_invoices
 from apps.crm.matching import CustomerIndex, Method
 from apps.crm.management.commands.import_didar_crm import Command as ImportCommand, fit
 from apps.crm.models import (
     Activity, Customer, CustomerExternalRef, CustomerMatchCandidate, Dataset,
     Deal, DealItem, ExternalSource, PipelineStage, Product, SalesInvoice,
     SalesInvoiceItem,
+    DismissedParty,
 )
 from apps.sales.models import DimEmployee, EmployeeChannel, SalesChannel
 
@@ -1426,3 +1428,395 @@ class RosterScopeTests(APITestCase):
         names = self.options_names()
         self.assertIn("کارشناس بانکی", names)
         self.assertIn("کارشناس همکار", names)
+
+
+class ReimportRespectsTheAppTests(APITestCase):
+    """
+    What a second accounting import may and may not undo.
+
+    The failure these pin down was measured, not imagined: deploy re-ran the
+    import on every release, 18 of 20 customers deleted in the app came back
+    after one run, and ~1,800 accounts were rewritten from the workbook over
+    whatever the team had corrected by hand.
+    """
+
+    HEADER = [
+        "کد", "نام", "نام گروه", "شماره تلفن", "موبایل", "کد ملی",
+        "کد اقتصادی", "نوع", "غیر فعال", "خوش حساب", "شرایط تسویه پیش فرض",
+    ]
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.user = _user("reimporter", "manager", "sales_team")
+        self.client.force_authenticate(self.user)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _workbook(self, parties, buyers=()):
+        import openpyxl
+        from pathlib import Path
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(self.HEADER)
+        for p in parties:
+            ws.append([p.get(h, "") for h in self.HEADER])
+        wb.save(Path(self.dir, "اشخاص کلی.xlsx"))
+
+        sales = openpyxl.Workbook()
+        ws = sales.active
+        ws.append(["کد طرف حساب", "نوع برگه"])
+        for code in buyers:
+            ws.append([code, "فاکتور فروش"])
+        sales.save(Path(self.dir, "فروش کل.xlsx"))
+
+    def _import(self):
+        from io import StringIO
+        from django.core.management import call_command
+        call_command("import_arpa_parties", dir=self.dir, stdout=StringIO())
+
+    PARTY = {
+        "کد": "555001", "نام": "کاغذ پردازان البرز", "نام گروه": "سایر طرف حسابها",
+        "شماره تلفن": "02633334444", "کد ملی": "10101010101",
+        "کد اقتصادی": "411111111111", "نوع": "حقوقی", "غیر فعال": "False",
+        "خوش حساب": "False", "شرایط تسویه پیش فرض": "نقدی",
+    }
+
+    def _customer(self):
+        return Customer.objects.get(code="arpa-555001")
+
+    def test_a_deleted_customer_stays_deleted(self):
+        self._workbook([self.PARTY])
+        self._import()
+        customer = self._customer()
+
+        res = self.client.delete(f"/api/crm/customers/{customer.pk}/")
+        self.assertIn(res.status_code, (200, 204), getattr(res, "data", None))
+        self._import()
+
+        self.assertFalse(Customer.objects.filter(code="arpa-555001").exists())
+        self.assertTrue(DismissedParty.objects.filter(
+            source=ExternalSource.ARPA, external_id="555001"
+        ).exists())
+
+    def test_a_bulk_deleted_customer_stays_deleted(self):
+        self._workbook([self.PARTY])
+        self._import()
+        customer = self._customer()
+
+        self.client.post(
+            "/api/crm/customers/bulk-delete/", {"ids": [customer.pk]}, format="json"
+        )
+        self._import()
+
+        self.assertFalse(Customer.objects.filter(code="arpa-555001").exists())
+
+    def test_a_hand_corrected_field_survives_the_next_import(self):
+        self._workbook([self.PARTY], buyers=["555001"])
+        self._import()
+        customer = self._customer()
+
+        res = self.client.patch(
+            f"/api/crm/customers/{customer.pk}/",
+            {"phone": "02699998888", "national_id": "20202020202"}, format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self._import()
+
+        customer.refresh_from_db()
+        self.assertEqual(customer.phone, "02699998888")
+        self.assertEqual(customer.national_id, "20202020202")
+
+    def test_an_accounting_only_field_still_follows_accounting(self):
+        """Payment terms cannot be edited in the CRM, so nobody's work is
+        overwritten by keeping them current — and a stale term is wrong."""
+        self._workbook([self.PARTY], buyers=["555001"])
+        self._import()
+        self._workbook([{**self.PARTY, "شرایط تسویه پیش فرض": "30روزه"}], buyers=["555001"])
+        self._import()
+
+        self.assertEqual(self._customer().payment_terms, "30روزه")
+
+    def test_an_account_the_team_reopened_is_not_closed_again(self):
+        """
+        A party with no invoices arrives closed. If a rep reopens it — they
+        are about to sell to it — the next import used to close it again,
+        because «no invoices in the file» was re-derived on every run.
+        """
+        self._workbook([self.PARTY])
+        self._import()
+        customer = self._customer()
+        self.assertFalse(customer.is_active)
+
+        customer.is_active = True
+        customer.save(update_fields=["is_active"])
+        self._import()
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.is_active)
+
+    def test_an_account_that_starts_buying_is_opened(self):
+        self._workbook([self.PARTY])
+        self._import()
+        self.assertFalse(self._customer().is_active)
+
+        self._workbook([self.PARTY], buyers=["555001"])
+        self._import()
+        self.assertTrue(self._customer().is_active)
+
+    def test_a_reviewer_created_account_arrives_open(self):
+        """
+        «Reject» on the review screen creates the account without the invoice
+        workbooks at hand. Unknown sales used to read as «no sales» and the
+        account was created closed — hidden from the list the reviewer had
+        just added it to.
+        """
+        someone = Customer.objects.create(
+            code="didar-co-555", name_fa="کاغذ پردازان", dataset=Dataset.REAL,
+            first_contact_at=timezone.now(),
+        )
+        candidate = CustomerMatchCandidate.objects.create(
+            source=ExternalSource.ARPA, external_id="555001",
+            external_name=self.PARTY["نام"], customer=someone,
+            method="fuzzy", score=Decimal("0.9"), payload=self.PARTY,
+        )
+        created = crm_merge.reject(candidate, self.user)
+        self.assertTrue(created.is_active)
+
+
+class DeployDoesNotLoadDataTests(APITestCase):
+    """The deploy script must not run the accounting import on its own."""
+
+    def test_deploy_script_does_not_call_the_arpa_importers(self):
+        from pathlib import Path
+        from django.conf import settings
+
+        script = Path(settings.BASE_DIR).parent / "deploy.sh"
+        commands = [
+            line for line in script.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")
+        ]
+        self.assertFalse(
+            any("import_arpa_" in line for line in commands),
+            "deploy.sh runs an آرپا import again — every release would undo "
+            "deletes and hand edits made in the app since the last one.",
+        )
+
+
+class InvoiceLinkTests(APITestCase):
+    """
+    Attaching an invoice to the deal it billed — and refusing to guess.
+
+    The 30-day window is measured, not chosen: gaps to the nearest won deal
+    cluster within a month and then spread evenly to 90 days and beyond.
+    Linking past that would attach invoices to whichever deal was least far
+    away, and every per-deal figure built on it would be precise and wrong.
+    """
+
+    def setUp(self):
+        from datetime import date
+        self.day = date(2025, 10, 1)
+        self.customer = Customer.objects.create(
+            code="didar-co-l1", name_fa="مشتری لینک", dataset=Dataset.REAL,
+            first_contact_at=timezone.now() - timedelta(days=500),
+        )
+
+    def _deal(self, code, days_from_invoice, amount=1_000_000, status="won"):
+        closed = timezone.make_aware(
+            timezone.datetime.combine(self.day + timedelta(days=days_from_invoice),
+                                      timezone.datetime.min.time())
+        )
+        return Deal.objects.create(
+            code=code, title=code, customer=self.customer, dataset=Dataset.REAL,
+            status=status, opened_at=closed - timedelta(days=30), closed_at=closed,
+            amount_rial=amount,
+        )
+
+    def _invoice(self, number, amount=1_000_000, customer=None):
+        return SalesInvoice.objects.create(
+            code=f"arpa-inv-l-{number}", number=number,
+            customer=customer or self.customer, issued_at=self.day,
+            amount_rial=amount, dataset=Dataset.REAL,
+        )
+
+    def test_the_nearest_won_deal_inside_the_window_is_linked(self):
+        near = self._deal("d-near", 10)
+        self._deal("d-far", 25)
+        inv = self._invoice("1")
+
+        stats = link_invoices()
+
+        inv.refresh_from_db()
+        self.assertEqual(inv.deal_id, near.pk)
+        self.assertEqual(stats.linked, 1)
+
+    def test_a_deal_outside_the_window_is_not_guessed(self):
+        self._deal("d-old", -(WINDOW_DAYS + 5))
+        inv = self._invoice("2")
+
+        stats = link_invoices()
+
+        inv.refresh_from_db()
+        self.assertIsNone(inv.deal_id)
+        self.assertEqual(stats.out_of_window, 1)
+
+    def test_an_open_or_lost_deal_is_not_what_an_invoice_bills(self):
+        self._deal("d-open", 2, status="open")
+        self._deal("d-lost", 2, status="lost")
+        inv = self._invoice("3")
+
+        stats = link_invoices()
+
+        inv.refresh_from_db()
+        self.assertIsNone(inv.deal_id)
+        self.assertEqual(stats.no_won_deal, 1)
+
+    def test_on_a_tie_the_closer_amount_wins(self):
+        """Two deals won the same day for one customer are two orders; the
+        amount is what tells them apart."""
+        self._deal("d-small", 5, amount=1_000_000)
+        big = self._deal("d-big", 5, amount=90_000_000)
+        inv = self._invoice("4", amount=88_000_000)
+
+        link_invoices()
+
+        inv.refresh_from_db()
+        self.assertEqual(inv.deal_id, big.pk)
+
+    def test_an_existing_link_is_never_replaced(self):
+        first = self._deal("d-first", 20)
+        inv = self._invoice("5")
+        SalesInvoice.objects.filter(pk=inv.pk).update(deal=first)
+        self._deal("d-closer", 1)
+
+        stats = link_invoices()
+
+        inv.refresh_from_db()
+        self.assertEqual(inv.deal_id, first.pk)
+        self.assertEqual(stats.already, 1)
+
+
+class SalesSideBySideTests(APITestCase):
+    """
+    Won deals and billed invoices on the same screens, never blended.
+
+    In 1404 the two differed by 2x to 70x from month to month. One «sales»
+    number built from either would be wrong for half the questions asked of
+    it; built from both, it would be wrong for all of them.
+    """
+
+    def setUp(self):
+        from datetime import date
+        self.ceo = _user("ceo-sbs", "executive")
+        self.rep_emp = DimEmployee.objects.create(code="e-sbs", full_name_fa="کارشناس الف")
+        self.other_emp = DimEmployee.objects.create(code="e-sbs2", full_name_fa="کارشناس ب")
+        now = timezone.now()
+        self.customer = Customer.objects.create(
+            code="didar-co-s1", name_fa="مشتری فروش", dataset=Dataset.REAL,
+            owner=self.rep_emp, first_contact_at=now - timedelta(days=400),
+            channel=SalesChannel.TEAM,
+        )
+        self.sister = Customer.objects.create(
+            code="arpa-s2", name_fa="آرال رول آریا - فی ما بین", dataset=Dataset.REAL,
+            first_contact_at=now - timedelta(days=400), is_intercompany=True,
+            channel=SalesChannel.TEAM,
+        )
+        self.bank_customer = Customer.objects.create(
+            code="arpa-s3", name_fa="بانک", dataset=Dataset.REAL,
+            first_contact_at=now - timedelta(days=400),
+            channel=SalesChannel.ORGANIZATIONAL,
+        )
+        self.start, self.end = date(2025, 9, 23), date(2025, 10, 22)  # مهر 1404
+        self.day = date(2025, 10, 1)
+
+        Deal.objects.create(
+            code="d-sbs", title="م", customer=self.customer, owner=self.rep_emp,
+            dataset=Dataset.REAL, status="won", amount_rial=10_000_000,
+            opened_at=now - timedelta(days=60),
+            closed_at=timezone.make_aware(timezone.datetime(2025, 10, 5)),
+        )
+        for code, customer, owner, amount, day in (
+            ("i1", self.customer, self.rep_emp, 30_000_000, self.day),
+            ("i2", self.customer, None, 5_000_000, self.day),
+            ("i3", self.sister, None, 900_000_000, self.day),
+            ("i4", self.bank_customer, self.other_emp, 7_000_000, self.day),
+            # The window's first day, which a datetime comparison drops.
+            ("i5", self.customer, self.rep_emp, 1_000_000, self.start),
+        ):
+            SalesInvoice.objects.create(
+                code=f"arpa-inv-{code}", number=code, customer=customer,
+                owner=owner, issued_at=day, amount_rial=amount,
+                unsettled_rial=amount, dataset=Dataset.REAL,
+            )
+
+    def _window(self):
+        return {"date_from": self.start.isoformat(), "date_to": self.end.isoformat()}
+
+    def test_intercompany_billing_is_not_counted_as_sales(self):
+        f = rpt.Filters.from_query(self._window())
+        total = f.invoices().aggregate(s=Sum("amount_rial"))["s"]
+        self.assertEqual(total, 30_000_000 + 5_000_000 + 7_000_000 + 1_000_000)
+
+    def test_an_invoice_on_the_first_day_of_the_window_is_inside_it(self):
+        f = rpt.Filters.from_query(self._window())
+        self.assertTrue(f.invoices().filter(number="i5").exists())
+
+    def test_the_monthly_trend_carries_both_figures(self):
+        f = rpt.Filters.from_query(self._window())
+        rows = rpt.report_sales(f, "time")["rows"]
+        mehr = [r for r in rows if r["invoiced"] or r["amount"]]
+        self.assertEqual(len(mehr), 1)
+        self.assertEqual(mehr[0]["amount"], 10_000_000)
+        self.assertEqual(mehr[0]["invoiced"], 43_000_000)
+
+    def test_by_salesperson_keeps_billing_that_has_no_deal_behind_it(self):
+        """
+        «کارشناس ب» won nothing in دیدار but billed 7m. Dropping the row for
+        want of a deal would hide exactly the gap the comparison is for.
+        """
+        f = rpt.Filters.from_query(self._window())
+        rows = {r["label"]: r for r in rpt.report_sales(f, "user")["rows"]}
+        self.assertEqual(rows["کارشناس ب"]["invoiced"], 7_000_000)
+        self.assertEqual(rows["کارشناس ب"]["amount"], 0)
+        self.assertEqual(rows["کارشناس الف"]["invoiced"], 31_000_000)
+
+    def test_billing_with_no_salesperson_is_named_not_dashed(self):
+        f = rpt.Filters.from_query(self._window())
+        labels = {r["label"] for r in rpt.report_sales(f, "user")["rows"]}
+        self.assertIn("بدون بازاریاب", labels)
+        self.assertNotIn("—", labels)
+
+    def test_the_dashboard_shows_billing_beside_won_deals(self):
+        self.client.force_authenticate(self.ceo)
+        res = self.client.get("/api/crm/dashboard/", self._window())
+        self.assertEqual(res.status_code, 200)
+        cards = {c["key"]: c for c in res.data["cards"]}
+        self.assertIn("won", cards)
+        self.assertEqual(cards["invoiced"]["value"], 43_000_000)
+        self.assertEqual(cards["invoiced"]["sub"]["won_amount"], 10_000_000)
+        keys = [c["key"] for c in res.data["cards"]]
+        self.assertEqual(keys.index("invoiced"), keys.index("won") + 1)
+
+    def test_a_department_sees_only_its_own_book_of_invoices(self):
+        """The channel comes from the customer: آرپا fills «مسوول فروش» on
+        one invoice in seven, so filtering on the invoice hides the rest."""
+        self.client.force_authenticate(_user("team-mgr-sbs", "manager", "sales_team"))
+        res = self.client.get("/api/crm/invoices/", self._window())
+        self.assertEqual(res.status_code, 200)
+        numbers = {r["number"] for r in res.data["results"]}
+        self.assertIn("i1", numbers)
+        self.assertNotIn("i4", numbers)   # فروش بانکی's customer
+        self.assertNotIn("i3", numbers)   # intercompany
+
+    def test_a_salesperson_sees_only_their_own_invoices(self):
+        user = _user("rep-sbs", "operator", "sales_team")
+        self.rep_emp.user = user
+        self.rep_emp.save(update_fields=["user"])
+        self.client.force_authenticate(user)
+
+        res = self.client.get("/api/crm/invoices/", self._window())
+        numbers = {r["number"] for r in res.data["results"]}
+        self.assertEqual(numbers, {"i1", "i5"})

@@ -64,6 +64,11 @@ function cardValue(c: DashCard): string {
 
 function cardSub(c: DashCard): string {
   const s = c.sub ?? {};
+  // Checked first: the invoiced card also carries `count`, which the pipeline
+  // branch below would otherwise claim and caption as «معامله · وزنی».
+  if (s.won_amount !== undefined) {
+    return `${num(s.count)} فاکتور · معامله موفق ${rial(s.won_amount)}`;
+  }
   if (s.amount !== undefined) return rial(s.amount);
   if (s.margin_pct !== undefined) return `حاشیه ${pct(s.margin_pct)}`;
   if (s.won !== undefined) return `${num(s.won)} از ${num(s.closed)} معامله بسته‌شده`;
@@ -75,6 +80,7 @@ function cardSub(c: DashCard): string {
 const CARD_STYLE: Record<string, { accent: string; icon: string }> = {
   incoming: { accent: "text-sky-600", icon: "M12 5v14M5 12h14" },
   won: { accent: "text-emerald-600", icon: "M20 6L9 17l-5-5" },
+  invoiced: { accent: "text-blue-600", icon: "M6 2h9l5 5v15H6zM14 2v6h6M9 13h6M9 17h6" },
   lost: { accent: "text-red-500", icon: "M18 6L6 18M6 6l12 12" },
   profit: { accent: "text-emerald-600", icon: "M3 17l6-6 4 4 7-7" },
   pipeline: { accent: "text-violet-600", icon: "M4 6h16M7 12h10M10 18h4" },
@@ -97,8 +103,11 @@ function openRow(rows: ReportRow[], i: number, title: string) {
 
 // ---- chart data -----------------------------------------------------------
 const trendCats = computed(() => data.value?.trend.map((r) => r.label) ?? []);
+// Won deals and billed invoices as two bars per month, never one. They
+// differed by 2x to 70x month to month in 1404 — the gap is the reading.
 const trendSeries = computed(() => [
-  { name: "فروش موفق", values: data.value?.trend.map((r) => r.amount) ?? [], color: "#22c55e" },
+  { name: "معامله موفق (دیدار)", values: data.value?.trend.map((r) => r.amount) ?? [], color: "#22c55e" },
+  { name: "فاکتورشده (آرپا)", values: data.value?.trend.map((r) => r.invoiced ?? 0) ?? [], color: "#3b82f6" },
   { name: "سود", values: data.value?.trend.map((r) => r.profit) ?? [], type: "line" as const, color: "#0ea5e9" },
 ]);
 
@@ -111,7 +120,8 @@ const incomingSeries = computed(() => [
 
 const sellerCats = computed(() => data.value?.top_sellers.map((r) => r.label) ?? []);
 const sellerSeries = computed(() => [
-  { name: "فروش", values: data.value?.top_sellers.map((r) => r.amount) ?? [] },
+  { name: "معامله موفق", values: data.value?.top_sellers.map((r) => r.amount) ?? [], color: "#22c55e" },
+  { name: "فاکتورشده", values: data.value?.top_sellers.map((r) => r.invoiced ?? 0) ?? [], color: "#3b82f6" },
 ]);
 
 const funnelRows = computed(() => data.value?.funnel.filter((r) => r.kind === "open") ?? []);

@@ -29,13 +29,13 @@ from rest_framework.views import APIView
 from apps.crm import merge as crm_merge, reports as rpt
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label, period_for
 from apps.crm.models import (
-    CustomerMatchCandidate, Dataset,
+    CustomerMatchCandidate, Dataset, SalesInvoice,
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
     ProductCategory, Tag, Task,
 )
 from apps.crm.serializers import (
-    MatchCandidateSerializer,
+    MatchCandidateSerializer, SalesInvoiceSerializer,
     ActivitySerializer, CustomerDetailSerializer, CustomerFeedbackSerializer,
     CustomerGroupSerializer, CustomerListSerializer, CustomerWriteSerializer,
     DealDetailSerializer, DealItemSerializer, DealListSerializer,
@@ -457,6 +457,14 @@ class CustomerViewSet(_Base):
     ).prefetch_related("tags")
     serializer_class = CustomerListSerializer
 
+    def perform_destroy(self, instance):
+        # Through the tombstone helper, not `instance.delete()`: a bare delete
+        # forgets the customer's آرپا id and the next accounting load brings
+        # the customer straight back.
+        crm_merge.delete_customers(
+            Customer.objects.filter(pk=instance.pk), self.request.user
+        )
+
     def get_serializer_class(self):
         if self.action in {"create", "update", "partial_update"}:
             return CustomerWriteSerializer
@@ -669,7 +677,9 @@ class CustomerViewSet(_Base):
 
         deleted = 0
         if deletable:
-            deleted = Customer.objects.filter(pk__in=deletable).delete()[0]
+            deleted = crm_merge.delete_customers(
+                Customer.objects.filter(pk__in=deletable), request.user
+            )
 
         return Response({
             "deleted": len(deletable),
@@ -1405,3 +1415,36 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             "state": candidate.state,
             "created": {"id": customer.id, "name_fa": customer.name_fa},
         })
+
+
+
+# --------------------------------------------------------------------------
+# Invoices (read-only — they are owned by accounting)
+# --------------------------------------------------------------------------
+class SalesInvoiceViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    The invoices behind a «فروش فاکتورشده» figure.
+
+    Read-only on purpose: an invoice is accounting's record, loaded from آرپا,
+    and a correction typed here would be silently overwritten by the next
+    export — or worse, not overwritten, and disagree with the ledger for good.
+
+    The queryset comes from `Filters.invoices()`, the same one the dashboard
+    sums, so the drawer can never list a different set of invoices than the
+    number that opened it.
+    """
+
+    permission_classes = [CrmAccess]
+    serializer_class = SalesInvoiceSerializer
+    queryset = SalesInvoice.objects.all()
+
+    def get_queryset(self):
+        qs = query_filters(self.request).invoices().select_related(
+            "customer", "owner", "deal"
+        )
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(number__icontains=search) | Q(customer__name_fa__icontains=search)
+            )
+        return qs.order_by("-issued_at", "-number")

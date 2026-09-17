@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { crmApi, type CrmActivity, type CrmCustomer, type Deal } from "@/api/crm";
+import { crmApi, type CrmActivity, type CrmCustomer, type CrmInvoice, type Deal } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import Skeleton from "@/components/Skeleton.vue";
@@ -77,6 +77,8 @@ function exportCsv() {
       ? ["نوع", "مشتری", "کارشناس", "نتیجه", "مدت (دقیقه)", "تاریخ", "توضیح"]
       : kind.value === "feedback"
       ? ["مشتری", "کارشناس", "امتیاز", "توضیح", "تاریخ"]
+      : kind.value === "invoices"
+      ? ["شماره", "نوع", "تاریخ", "مشتری", "بازاریاب", "مبلغ خالص", "مالیات", "تسویه‌نشده", "معامله"]
       : ["کد", "نام", "گروه", "استان", "کارشناس", "وضعیت", "اولین خرید"];
   const body = rows.value.map((r: any) =>
     kind.value === "deals"
@@ -85,6 +87,8 @@ function exportCsv() {
       ? [r.kind_display, r.customer_name, r.owner_name, r.result_display, r.duration_min, r.at_jalali, r.note]
       : kind.value === "feedback"
       ? [r.customer_name, r.employee_name, r.score, r.note, r.at_jalali]
+      : kind.value === "invoices"
+      ? [r.number, r.kind_display, r.issued_jalali, r.customer_name, r.owner_name, r.amount_rial, r.vat_rial, r.unsettled_rial, r.deal_title]
       : [r.code, r.name_fa, r.group_name, r.province_name, r.owner_name, r.status_display, r.first_won_jalali],
   );
   const csv = [head, ...body].map((line) => line.map((c: any) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -162,6 +166,14 @@ function exportCsv() {
                     <th class="text-right font-medium px-3">نتیجه</th>
                     <th class="text-right font-medium px-4">تاریخ</th>
                   </template>
+                  <template v-else-if="kind === 'invoices'">
+                    <th class="text-right font-medium px-4 py-2.5">فاکتور</th>
+                    <th class="text-right font-medium px-3">بازاریاب</th>
+                    <th class="text-left font-medium px-3">مبلغ خالص</th>
+                    <th class="text-left font-medium px-3">تسویه‌نشده</th>
+                    <th class="text-right font-medium px-3">معامله</th>
+                    <th class="text-right font-medium px-4">تاریخ</th>
+                  </template>
                   <template v-else-if="kind === 'feedback'">
                     <th class="text-right font-medium px-4 py-2.5">مشتری</th>
                     <th class="text-right font-medium px-3">کارشناس</th>
@@ -221,6 +233,34 @@ function exportCsv() {
                       <span class="text-[11px] rounded-full px-2 py-0.5" :class="resultClass[a.result]">{{ a.result_display }}</span>
                     </td>
                     <td class="px-4 text-xs text-slate-400 whitespace-nowrap">{{ a.at_jalali }}</td>
+                  </tr>
+                </template>
+
+                <!-- Invoices. The deal cell is where the two systems meet: empty
+                     means no won deal in دیدار within a month of this bill. -->
+                <template v-else-if="kind === 'invoices'">
+                  <tr v-for="inv in (rows as CrmInvoice[])" :key="inv.id" class="border-t border-slate-100 hover:bg-slate-50">
+                    <td class="px-4 py-2.5">
+                      <p class="text-ink">
+                        {{ inv.number }}
+                        <span v-if="inv.kind === 'return'" class="text-[11px] rounded-full px-2 py-0.5 bg-red-100 text-red-600 mr-1">{{ inv.kind_display }}</span>
+                      </p>
+                      <button class="text-xs text-slate-400 hover:text-ink hover:underline truncate max-w-[220px]" @click="goCustomer(inv.customer)">
+                        {{ inv.customer_name }}
+                      </button>
+                    </td>
+                    <td class="px-3 text-slate-500">{{ inv.owner_name || "بدون بازاریاب" }}</td>
+                    <td class="px-3 text-left whitespace-nowrap" :class="Number(inv.amount_rial) < 0 ? 'text-red-500' : 'text-ink'">{{ rial(inv.amount_rial) }}</td>
+                    <td class="px-3 text-left whitespace-nowrap text-slate-500">{{ rial(inv.unsettled_rial) }}</td>
+                    <td class="px-3 text-xs">
+                      <button
+                        v-if="inv.deal"
+                        class="text-emerald-700 hover:underline truncate max-w-[160px]"
+                        @click="goDeal({ id: inv.deal } as Deal)"
+                      >{{ inv.deal_title }}</button>
+                      <span v-else class="text-slate-300">—</span>
+                    </td>
+                    <td class="px-4 text-xs text-slate-400 whitespace-nowrap">{{ inv.issued_jalali }}</td>
                   </tr>
                 </template>
 
