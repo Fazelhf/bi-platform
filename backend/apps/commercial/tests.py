@@ -508,3 +508,28 @@ class QuickQuoteTests(CommercialTestCase):
         }, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertEqual(PurchaseRequest.objects.count(), 0)
+
+
+class EditTests(CommercialTestCase):
+    """A row created with a code derived from its Persian name must stay editable."""
+
+    def test_supplier_with_persian_code_can_be_edited(self):
+        self.client.force_authenticate(self.manager)
+        created = self.client.post("/api/commercial/suppliers/", {"name_fa": "پارس گستر"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        edited = self.client.patch(
+            f"/api/commercial/suppliers/{created.data['id']}/",
+            {**created.data, "name_fa": "پارس گستر نوین"}, format="json",
+        )
+        self.assertEqual(edited.status_code, 200, edited.data)
+        self.assertEqual(edited.data["name_fa"], "پارس گستر نوین")
+
+    def test_material_with_persian_code_can_be_edited(self):
+        self.client.force_authenticate(self.manager)
+        created = self.client.post("/api/commercial/materials/", {"name_fa": "چسب حرارتی"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        edited = self.client.patch(
+            f"/api/commercial/materials/{created.data['id']}/",
+            {"name_fa": "چسب حرارتی ۲", "code": created.data["code"]}, format="json",
+        )
+        self.assertEqual(edited.status_code, 200, edited.data)

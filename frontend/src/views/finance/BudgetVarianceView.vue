@@ -2,14 +2,8 @@
 /**
  * انحراف بودجه — what was expected beside what happened, down the tree.
  *
- * Two views, deliberately named differently:
- *
- * * **ماهانه — «انحراف بودجه».** The official comparison: the approved month
- *   against everything recorded in it.
- * * **هفتگی — «رصد جریان نقد».** The month's plan pro-rated onto a week by
- *   day count. Honest for rent and wages, misleading for instalments and
- *   material purchases that land in one week. Calling both «انحراف» would
- *   teach people to distrust the number in the first week.
+ * Monthly, like the rest of the budget: the month's plan against everything
+ * recorded for that month.
  *
  * Colour comes from the server's verdict, never from the sign: spending more
  * than planned is bad, collecting more is good.
@@ -23,13 +17,12 @@ import {
   type VarianceReport,
   type VarianceRow,
 } from "@/api/budget";
-import { salesApi } from "@/api/sales";
-import type { WeekSlot } from "@/types";
 import { useBudgetContext } from "@/composables/useBudgetContext";
 import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { prompt, toast } from "@/composables/useUi";
 import { useAuthStore } from "@/stores/auth";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
+import BulletBars from "@/components/charts/BulletBars.vue";
 
 const { budgets, budgetId, periodId, months, linkQuery, init } = useBudgetContext();
 const { money, unitLabel } = useMoney();
@@ -41,10 +34,6 @@ const report = ref<VarianceReport | null>(null);
 const loading = ref(true);
 const error = ref("");
 
-const grain = ref<"month" | "week">("month");
-const weeks = ref<WeekSlot[]>([]);
-const weekId = ref<number | null>(null);
-
 const dir = ref<"all" | Direction>("all");
 const onlyMaterial = ref(false);
 const showBaseline = ref(false);
@@ -55,21 +44,8 @@ const n = (v: string | number | null | undefined) => Number(v ?? 0);
 
 // ---- load -------------------------------------------------------------
 
-async function loadWeeks() {
-  weeks.value = [];
-  weekId.value = null;
-  if (!periodId.value) return;
-  try {
-    weeks.value = (await salesApi.monthProgress(periodId.value)).weeks ?? [];
-  } catch {
-    weeks.value = [];
-  }
-  if (!weeks.value.length) grain.value = "month";
-  else if (grain.value === "week") weekId.value = weeks.value[0].id;
-}
-
 async function load() {
-  const target = grain.value === "week" ? weekId.value : periodId.value;
+  const target = periodId.value;
   if (!budgetId.value || !target) {
     report.value = null;
     loading.value = false;
@@ -89,21 +65,12 @@ async function load() {
   }
 }
 
-watch([budgetId, periodId], async () => {
-  await loadWeeks();
-  await load();
-});
-watch(grain, (g) => {
-  if (g === "week" && !weekId.value && weeks.value.length) weekId.value = weeks.value[0].id;
-  load();
-});
-watch(weekId, () => grain.value === "week" && load());
+watch([budgetId, periodId], load);
 
 onMounted(async () => {
   try {
     await loadMoneySettings();
     await init();
-    await loadWeeks();
     await load();
   } catch (e) {
     error.value = apiError(e, "بارگذاری ناموفق بود.");
@@ -188,13 +155,6 @@ function pct(p: number | null) {
   const r = Math.round(p * 10) / 10;
   return `${r > 0 ? "+" : ""}${FA.format(r)}٪`;
 }
-/** Actual as a share of plan, for the sales header — «—» when nothing was planned. */
-function achieved(cell: VarianceCell) {
-  const b = n(cell.budget_rial);
-  if (!b) return "—";
-  return `${FA.format(Math.round((n(cell.actual_rial) / b) * 1000) / 10)}٪`;
-}
-
 /** Share of plan used — the little bar under «واقعی». Capped so 400% still fits. */
 function usage(cell: VarianceCell) {
   const b = n(cell.budget_rial);
@@ -206,7 +166,7 @@ function usage(cell: VarianceCell) {
 
 async function editNote(row: VarianceRow) {
   const r = report.value;
-  if (!r || r.grain !== "month" || !row.line_id || !r.budget_period_id) return;
+  if (!r || !row.line_id || !r.budget_period_id) return;
   const answer = await prompt({
     title: `علت انحراف — ${row.label}`,
     message: `بودجه ${money(n(row.budget_rial))}، واقعی ${money(n(row.actual_rial))}. چرا؟`,
@@ -222,6 +182,15 @@ async function editNote(row: VarianceRow) {
     toast.error(apiError(e, "ثبت نشد."));
   }
 }
+
+/** Top-level groups, plan against actual — the tree's first level, drawn. */
+function groupsOf(side: Direction) {
+  return (report.value?.rows ?? [])
+    .filter((r) => r.depth === 0 && r.direction === side && (n(r.budget_rial) || n(r.actual_rial)))
+    .map((r) => ({ label: r.label, budget: n(r.budget_rial), actual: n(r.actual_rial), verdict: r.verdict }));
+}
+const inGroups = computed(() => groupsOf("in"));
+const outGroups = computed(() => groupsOf("out"));
 
 const totalCards = computed(() => {
   const t = report.value?.totals;
@@ -239,7 +208,7 @@ const totalCards = computed(() => {
     <!-- Header -->
     <section class="bg-surface rounded-card shadow-soft p-4 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 class="font-bold text-ink">{{ grain === 'week' ? 'رصد جریان نقد' : 'انحراف بودجه' }}</h1>
+        <h1 class="font-bold text-ink">انحراف بودجه</h1>
         <p class="text-xs text-slate-400 mt-0.5">
           مورد انتظار در برابر واقعی · همه ارقام به <span class="font-medium">{{ unitLabel }}</span>
         </p>
@@ -255,29 +224,6 @@ const totalCards = computed(() => {
           <span class="text-[11px] text-slate-400">ماه</span>
           <select v-model.number="periodId" class="mt-1 border border-slate-200 rounded-xl px-3 py-1.5 text-sm bg-surface">
             <option v-for="p in months" :key="p.id" :value="p.id">{{ p.label }}</option>
-          </select>
-        </label>
-        <div>
-          <span class="text-[11px] text-slate-400 block mb-1">نما</span>
-          <div class="flex bg-slate-100 rounded-xl p-0.5">
-            <button
-              class="px-3 py-1 text-xs rounded-lg transition"
-              :class="grain === 'month' ? 'bg-surface shadow-sm text-ink font-medium' : 'text-slate-500'"
-              @click="grain = 'month'"
-            >ماهانه</button>
-            <button
-              class="px-3 py-1 text-xs rounded-lg transition disabled:opacity-40"
-              :class="grain === 'week' ? 'bg-surface shadow-sm text-ink font-medium' : 'text-slate-500'"
-              :disabled="!weeks.length"
-              :title="weeks.length ? '' : 'این ماه هنوز به هفته تقسیم نشده'"
-              @click="grain = 'week'"
-            >هفتگی</button>
-          </div>
-        </div>
-        <label v-if="grain === 'week' && weeks.length" class="block">
-          <span class="text-[11px] text-slate-400">هفته</span>
-          <select v-model.number="weekId" class="mt-1 border border-slate-200 rounded-xl px-3 py-1.5 text-sm bg-surface">
-            <option v-for="w in weeks" :key="w.id" :value="w.id">{{ w.label }}</option>
           </select>
         </label>
         <router-link
@@ -297,21 +243,14 @@ const totalCards = computed(() => {
     <DashboardSkeleton v-else-if="loading && !report" />
 
     <template v-else-if="report">
-      <!-- The weekly view is a different instrument; say so before the numbers. -->
       <!-- Nothing recorded yet: the plan is being compared against zero. -->
       <div v-if="!report.has_actuals" class="rounded-card p-3 text-sm bg-sky-50 text-sky-800 leading-6">
         <span class="font-semibold">برای {{ report.period.label }} هنوز هیچ رقم واقعی ثبت نشده است.</span>
         ستون «واقعی» صفر است، پس انحراف‌های زیر یعنی «هنوز ثبت نشده»، نه کسری یا صرفه‌جویی.
       </div>
 
-      <div v-if="report.prorated" class="rounded-card p-3 text-sm bg-amber-50 text-amber-800 leading-6">
-        <span class="font-semibold">این نمای «رصد جریان نقد» است، نه انحراف رسمی بودجه.</span>
-        بودجهٔ {{ report.month.label }} به نسبت روزهای این هفته سرشکن شده. سرفصل‌های که یک‌جا پرداخت می‌شوند
-        (اقساط، خرید مواد) در هفتهٔ پرداخت انحراف بزرگ نشان می‌دهند که لزوماً انحراف بودجه نیست.
-      </div>
-
       <div
-        v-if="report.status !== 'approved' && !report.prorated"
+        v-if="report.status !== 'approved'"
         class="rounded-card p-3 text-sm bg-slate-100 text-slate-600"
       >
         بودجهٔ {{ report.month.label }} هنوز تصویب نشده — مقایسه با ارقام پیش‌نویس است.
@@ -341,62 +280,10 @@ const totalCards = computed(() => {
         </div>
       </div>
 
-      <!-- Sales forecast — accrual, read beside the cash grid, not inside it -->
-      <section v-if="report.sales?.rows.length" class="bg-surface rounded-card shadow-soft">
-        <div class="flex flex-wrap items-center justify-between gap-2 p-4 border-b border-slate-100">
-          <div>
-            <h2 class="text-sm font-semibold text-ink">پیش‌بینی فروش در برابر فروش ثبت‌شده</h2>
-            <p class="text-[11px] text-slate-400 mt-0.5">تعهدی — در جمع ورودی و خروجی نقدی شمرده نمی‌شود</p>
-          </div>
-          <span class="px-2 py-1 rounded-lg text-xs" :class="verdictChip[report.sales.total.verdict]">
-            تحقق {{ achieved(report.sales.total) }}
-          </span>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="min-w-full text-sm">
-            <thead>
-              <tr class="text-[11px] text-slate-500 border-b border-slate-100">
-                <th class="text-right font-medium p-3">کانال</th>
-                <th class="text-left font-medium p-3">پیش‌بینی</th>
-                <th class="text-left font-medium p-3 min-w-[8rem]">فروش ثبت‌شده</th>
-                <th class="text-left font-medium p-3">انحراف</th>
-                <th class="text-left font-medium p-3">٪</th>
-                <th class="text-right font-medium p-3">وضعیت</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in report.sales.rows" :key="row.channel" class="border-b border-slate-50">
-                <td class="p-3 text-ink">{{ row.label }}</td>
-                <td class="p-3 text-left ltr-nums text-slate-600 whitespace-nowrap">{{ money(n(row.budget_rial), false) }}</td>
-                <td class="p-3 text-left whitespace-nowrap">
-                  <p class="ltr-nums text-ink">{{ money(n(row.actual_rial), false) }}</p>
-                  <div v-if="usage(row) !== null" class="h-1 bg-slate-100 rounded-full mt-1 overflow-hidden relative">
-                    <span class="absolute inset-y-0 w-px bg-slate-400" style="left: 66.6%"></span>
-                    <span
-                      class="block h-full rounded-full"
-                      :class="row.verdict === 'bad' ? 'bg-red-400' : row.verdict === 'good' ? 'bg-green-500' : 'bg-slate-400'"
-                      :style="{ width: `${(usage(row) ?? 0) * 100}%` }"
-                    ></span>
-                  </div>
-                </td>
-                <td class="p-3 text-left ltr-nums whitespace-nowrap" :class="verdictText[row.verdict]">{{ signed(row.variance_rial) }}</td>
-                <td class="p-3 text-left ltr-nums whitespace-nowrap text-xs" :class="verdictText[row.verdict]">{{ pct(row.variance_pct) }}</td>
-                <td class="p-3">
-                  <span class="px-1.5 py-0.5 rounded-md text-[10px]" :class="verdictChip[row.verdict]">{{ verdictLabel[row.verdict] }}</span>
-                </td>
-              </tr>
-              <tr class="bg-slate-50/80 font-semibold">
-                <td class="p-3">جمع</td>
-                <td class="p-3 text-left ltr-nums whitespace-nowrap">{{ money(n(report.sales.total.budget_rial), false) }}</td>
-                <td class="p-3 text-left ltr-nums whitespace-nowrap">{{ money(n(report.sales.total.actual_rial), false) }}</td>
-                <td class="p-3 text-left ltr-nums whitespace-nowrap" :class="verdictText[report.sales.total.verdict]">{{ signed(report.sales.total.variance_rial) }}</td>
-                <td class="p-3 text-left ltr-nums whitespace-nowrap text-xs" :class="verdictText[report.sales.total.verdict]">{{ pct(report.sales.total.variance_pct) }}</td>
-                <td class="p-3"></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <div v-if="inGroups.length || outGroups.length" class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        <BulletBars v-if="outGroups.length" title="خروجی به تفکیک گروه" :items="outGroups" />
+        <BulletBars v-if="inGroups.length" title="ورودی به تفکیک گروه" :items="inGroups" />
+      </div>
 
       <!-- Filters -->
       <section class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center justify-between gap-3">
@@ -413,7 +300,7 @@ const totalCards = computed(() => {
           <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
             <input v-model="onlyMaterial" type="checkbox" class="rounded" /> فقط انحراف‌های مهم
           </label>
-          <label v-if="!report.prorated" class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+          <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
             <input v-model="showBaseline" type="checkbox" class="rounded" /> ستون مصوب
           </label>
           <button class="text-xs text-slate-500 hover:text-ink" @click="collapseAll(true)">بستن همه</button>
@@ -423,7 +310,7 @@ const totalCards = computed(() => {
           <span class="px-2 py-1 rounded-lg bg-slate-100 text-slate-600">
             مهم: {{ FA.format(materialCount) }}
           </span>
-          <span v-if="unexplained && !report.prorated" class="px-2 py-1 rounded-lg bg-amber-50 text-amber-700">
+          <span v-if="unexplained" class="px-2 py-1 rounded-lg bg-amber-50 text-amber-700">
             نامطلوبِ بدون علت: {{ FA.format(unexplained) }}
           </span>
           <span v-if="report.unbudgeted_count" class="px-2 py-1 rounded-lg bg-red-50 text-red-600">
@@ -447,7 +334,7 @@ const totalCards = computed(() => {
               <tr class="text-[11px] text-slate-500 border-b border-slate-100">
                 <th class="text-right font-medium p-3 min-w-[16rem]">سرفصل</th>
                 <th class="text-left font-medium p-3">مورد انتظار</th>
-                <th v-if="showBaseline && !report.prorated" class="text-left font-medium p-3">مصوب</th>
+                <th v-if="showBaseline" class="text-left font-medium p-3">مصوب</th>
                 <th class="text-left font-medium p-3 min-w-[8rem]">واقعی</th>
                 <th class="text-left font-medium p-3">انحراف</th>
                 <th class="text-left font-medium p-3">٪</th>
@@ -477,7 +364,7 @@ const totalCards = computed(() => {
                   </div>
                 </td>
                 <td class="p-2 text-left ltr-nums text-slate-600 whitespace-nowrap">{{ money(n(row.budget_rial), false) }}</td>
-                <td v-if="showBaseline && !report.prorated" class="p-2 text-left ltr-nums text-slate-400 whitespace-nowrap">
+                <td v-if="showBaseline" class="p-2 text-left ltr-nums text-slate-400 whitespace-nowrap">
                   {{ row.baseline_rial === null ? '—' : money(n(row.baseline_rial), false) }}
                 </td>
                 <td class="p-2 text-left whitespace-nowrap">
@@ -499,7 +386,7 @@ const totalCards = computed(() => {
                     <span v-if="row.kind !== 'category'" class="px-1.5 py-0.5 rounded-md text-[10px] shrink-0" :class="verdictChip[row.verdict]">
                       {{ row.kind === 'unbudgeted' ? 'بدون بودجه' : verdictLabel[row.verdict] }}
                     </span>
-                    <template v-if="row.kind === 'line' && report.grain === 'month'">
+                    <template v-if="row.kind === 'line'">
                       <button
                         v-if="row.note"
                         class="text-xs text-slate-600 truncate max-w-[14rem] text-right hover:text-ink"

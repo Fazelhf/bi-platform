@@ -9,6 +9,11 @@ import { kpiValue, num, pct, rial } from "@/utils/format";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
 import SectionBoard from "@/components/boards/SectionBoard.vue";
+import { financeApi, type FinanceSummary } from "@/api/finance";
+import { useAuthStore } from "@/stores/auth";
+import ComboTrendChart from "@/components/charts/ComboTrendChart.vue";
+import GaugeChart from "@/components/charts/GaugeChart.vue";
+import SeriesChart from "@/components/charts/SeriesChart.vue";
 
 /**
  * The CEO's one screen.
@@ -27,6 +32,13 @@ const data = ref<ExecutiveOverview | null>(null);
 const trend = ref<TrendMonth[]>([]);
 const loading = ref(false);
 
+/** The financial picture. Optional: if it cannot be read, the rest still shows. */
+const finance = ref<FinanceSummary | null>(null);
+const auth = useAuthStore();
+const canSeeFinance = computed(
+  () => auth.isExecutive || !!auth.me?.is_superuser || auth.department === "finance",
+);
+
 function pick(kpis: KpiResult[] | undefined, codes: string[]) {
   return codes.map((c) => kpis?.find((k) => k.kpi_code === c)).filter((k): k is KpiResult => !!k);
 }
@@ -35,12 +47,16 @@ async function load() {
   if (!selectedPeriod.value) return;
   loading.value = true;
   try {
-    const [ov, tr] = await Promise.all([
+    const [ov, tr, fin] = await Promise.all([
       executiveApi.overview(selectedPeriod.value),
       executiveApi.trend(),
+      canSeeFinance.value
+        ? financeApi.executiveSummary(selectedPeriod.value).catch(() => null)
+        : Promise.resolve(null),
     ]);
     data.value = ov;
     trend.value = tr.months;
+    finance.value = fin;
   } finally {
     loading.value = false;
   }
@@ -155,6 +171,16 @@ const alerts = computed(() => {
       tone: "warn",
     });
   }
+  const f = finance.value;
+  for (const w of f?.cash.warnings ?? []) {
+    out.push({ text: w.text, tone: w.level === "danger" ? "bad" : "warn" });
+  }
+  if (f?.budget?.has_actuals && f.budget.material_bad) {
+    out.push({
+      text: `${num(f.budget.material_bad)} انحراف نامطلوب مهم در بودجهٔ ${f.month.label}`,
+      tone: f.budget.totals.net.verdict === "bad" ? "bad" : "warn",
+    });
+  }
   if (d.combined.production_margin < 0) {
     out.push({ text: `حاشیه تولید منفی است (${rial(d.combined.production_margin)})`, tone: "bad" });
   }
@@ -162,6 +188,102 @@ const alerts = computed(() => {
 });
 
 const card = "bg-surface rounded-card shadow-soft";
+
+// ---- وضعیت حال حاضر شرکت ---------------------------------------------------
+type Tone = "good" | "warn" | "bad" | "none";
+
+/**
+ * The company in six lights. Each says what it measures and why it is the
+ * colour it is, so the strip answers «کجا باید نگاه کنم؟» before the details.
+ */
+const status = computed(() => {
+  const d = data.value;
+  if (!d) return [];
+  const f = finance.value;
+  const items: { title: string; value: string; note: string; tone: Tone }[] = [];
+
+  const hasTarget = !!here.value?.target;
+  items.push({
+    title: "فروش",
+    value: hasTarget ? pct(achievement.value) : rial(d.combined.total_sales_revenue),
+    note: hasTarget ? "تحقق تارگت ماه" : "تارگت ماه تعیین نشده",
+    tone: !hasTarget ? "none" : achievement.value >= 100 ? "good" : achievement.value >= 70 ? "warn" : "bad",
+  });
+
+  const profit = here.value?.profit ?? 0;
+  items.push({
+    title: "سودآوری",
+    value: pct(margin.value),
+    note: `حاشیهٔ سود فروش · ${rial(profit)}`,
+    tone: profit > 0 ? "good" : profit < 0 ? "bad" : "none",
+  });
+
+  if (f) {
+    const closing = Number(f.cash.closing_rial);
+    const low = Number(f.cash.low_threshold_rial);
+    items.push({
+      title: "نقدینگی",
+      value: rial(closing),
+      note: `موجودی پایان ${f.month.label}`,
+      tone: closing < 0 ? "bad" : low && closing < low ? "warn" : f.cash.has_movements || closing ? "good" : "none",
+    });
+    const b = f.budget;
+    items.push({
+      title: "بودجه",
+      value: !b ? "تعریف نشده" : !b.has_actuals ? "ثبت نشده" : b.material_bad ? `${num(b.material_bad)} انحراف مهم` : "طبق برنامه",
+      note: b ? b.title : "بودجه‌ای برای این ماه نیست",
+      tone: !b || !b.has_actuals ? "none" : !b.material_bad ? "good" : b.totals.net.verdict === "bad" ? "bad" : "warn",
+    });
+  }
+
+  items.push({
+    title: "تولید",
+    value: rial(d.combined.production_margin),
+    note: "حاشیهٔ تولید",
+    tone: d.combined.production_margin > 0 ? "good" : d.combined.production_margin < 0 ? "bad" : "none",
+  });
+
+  const complete = d.sales_completeness.complete && d.production.completeness.complete;
+  items.push({
+    title: "کامل بودن داده",
+    value: complete ? "کامل" : "ناقص",
+    note: `فروش ${num(d.sales_completeness.approved)}/${num(d.sales_completeness.total)} · تولید ${num(d.production.completeness.approved)}/${num(d.production.completeness.total)}`,
+    tone: complete ? "good" : "warn",
+  });
+  return items;
+});
+
+const overallTone = computed<Tone>(() =>
+  status.value.some((s) => s.tone === "bad") ? "bad"
+    : status.value.some((s) => s.tone === "warn") ? "warn" : "good",
+);
+const toneBox: Record<Tone, string> = {
+  good: "border-green-200 bg-green-50/40",
+  warn: "border-amber-200 bg-amber-50/40",
+  bad: "border-red-200 bg-red-50/40",
+  none: "border-slate-100 bg-slate-50/40",
+};
+const toneDot: Record<Tone, string> = {
+  good: "bg-green-500", warn: "bg-amber-500", bad: "bg-red-500", none: "bg-slate-300",
+};
+const toneChip: Record<Tone, string> = {
+  good: "bg-green-50 text-green-700", warn: "bg-amber-50 text-amber-700",
+  bad: "bg-red-50 text-red-600", none: "bg-slate-100 text-slate-500",
+};
+
+// ---- نمای مالی -----------------------------------------------------------------
+const financeTrend = computed(() => finance.value?.trend ?? []);
+
+const budgetGauges = computed(() => {
+  const b = finance.value?.budget;
+  if (!b || !b.has_actuals) return [];
+  const p = (c: { budget_rial: string; actual_rial: string }) =>
+    Number(c.budget_rial) ? (Number(c.actual_rial) / Number(c.budget_rial)) * 100 : null;
+  return [
+    { title: "تحقق ورودی نقد", value: p(b.totals.in), good: true },
+    { title: "مصرف بودجهٔ خروجی", value: p(b.totals.out), good: false },
+  ];
+});
 </script>
 
 <template>
@@ -179,6 +301,26 @@ const card = "bg-surface rounded-card shadow-soft";
     <DashboardSkeleton v-if="loading" :cards="4" :charts="0" :rows="4" />
 
     <template v-else-if="data">
+      <!-- ===== وضعیت حال حاضر شرکت ===== -->
+      <section :class="card" class="p-4">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <h3 class="font-bold text-ink text-sm">وضعیت حال حاضر شرکت — {{ data.period.label }}</h3>
+          <span class="text-xs rounded-full px-2.5 py-1" :class="toneChip[overallTone]">
+            {{ overallTone === "good" ? "✓ همه‌چیز رو به راه است" : overallTone === "warn" ? "نیازمند توجه" : "وضعیت هشدار" }}
+          </span>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div v-for="s in status" :key="s.title" class="rounded-xl p-3 border" :class="toneBox[s.tone]">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full" :class="toneDot[s.tone]"></span>
+              <p class="text-[11px] text-slate-500">{{ s.title }}</p>
+            </div>
+            <p class="text-base font-bold text-ink ltr-nums mt-1 truncate" :title="s.value">{{ s.value }}</p>
+            <p class="text-[11px] text-slate-400 mt-0.5 truncate" :title="s.note">{{ s.note }}</p>
+          </div>
+        </div>
+      </section>
+
       <!-- ===== Hero: the month, judged ===== -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Headline + mix -->
@@ -339,6 +481,107 @@ const card = "bg-surface rounded-card shadow-soft";
           </RouterLink>
         </div>
       </div>
+
+      <!-- ===== نمای مالی ===== -->
+      <section v-if="finance" class="space-y-3">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <h3 class="font-bold text-ink">نمای مالی — {{ finance.month.label }}</h3>
+          <div class="flex gap-4 text-xs">
+            <RouterLink :to="{ name: 'finance-cash-report' }" class="text-brand-700 hover:underline">نقدینگی ←</RouterLink>
+            <RouterLink
+              v-if="finance.budget"
+              :to="{ name: 'finance-budget', query: { budget: String(finance.budget.id), period: String(finance.month.id) } }"
+              class="text-brand-700 hover:underline"
+            >داشبورد بودجه ←</RouterLink>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div :class="card" class="p-4">
+            <p class="text-[11px] text-slate-400">موجودی پایان ماه</p>
+            <p class="text-lg font-bold ltr-nums mt-1" :class="Number(finance.cash.closing_rial) < 0 ? 'text-red-600' : 'text-ink'">
+              {{ rial(Number(finance.cash.closing_rial)) }}
+            </p>
+            <p class="text-[11px] text-slate-400 mt-0.5 ltr-nums">ابتدای ماه {{ rial(Number(finance.cash.opening_rial)) }}</p>
+          </div>
+          <div :class="card" class="p-4">
+            <p class="text-[11px] text-slate-400">واریز ماه</p>
+            <p class="text-lg font-bold text-green-600 ltr-nums mt-1">{{ rial(Number(finance.cash.in_rial)) }}</p>
+          </div>
+          <div :class="card" class="p-4">
+            <p class="text-[11px] text-slate-400">برداشت ماه</p>
+            <p class="text-lg font-bold text-red-500 ltr-nums mt-1">{{ rial(Number(finance.cash.out_rial)) }}</p>
+          </div>
+          <div :class="card" class="p-4">
+            <p class="text-[11px] text-slate-400">خالص ماه</p>
+            <p class="text-lg font-bold ltr-nums mt-1" :class="Number(finance.cash.net_rial) < 0 ? 'text-red-600' : 'text-green-600'">
+              {{ rial(Number(finance.cash.net_rial)) }}
+            </p>
+          </div>
+          <div :class="card" class="p-4">
+            <p class="text-[11px] text-slate-400">مانده تسهیلات (بدهی)</p>
+            <p class="text-lg font-bold text-red-500 ltr-nums mt-1">{{ rial(Number(finance.credit.owed_by_company_rial)) }}</p>
+            <p class="text-[11px] text-slate-400 mt-0.5 ltr-nums">طلب از قرض‌ها {{ rial(Number(finance.credit.owed_to_company_rial)) }}</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+          <div class="xl:col-span-2">
+            <ComboTrendChart
+              v-if="financeTrend.length"
+              title="جریان نقد شش ماه اخیر"
+              :categories="financeTrend.map((m) => m.label)"
+              :bars="[
+                { name: 'واریز', values: financeTrend.map((m) => Number(m.in)), tone: 'in' },
+                { name: 'برداشت', values: financeTrend.map((m) => Number(m.out)), tone: 'out' },
+              ]"
+              :lines="[{ name: 'خالص', values: financeTrend.map((m) => Number(m.net)), tone: 'net' }]"
+              :height="280"
+            />
+          </div>
+          <SeriesChart
+            v-if="finance.composition.out.length"
+            title="برداشت‌های ماه به تفکیک"
+            kind="pie"
+            :categories="finance.composition.out.map((c) => c.label)"
+            :series="[{ name: 'برداشت', values: finance.composition.out.map((c) => Number(c.rial)) }]"
+            :height="280"
+          />
+          <div v-else :class="card" class="p-4 flex items-center justify-center text-xs text-slate-400">
+            در این ماه برداشتی ثبت نشده است.
+          </div>
+        </div>
+
+        <div v-if="finance.budget" :class="card" class="p-4">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <p class="text-sm font-semibold text-ink">
+              بودجه: {{ finance.budget.title }}
+              <span class="text-[11px] font-normal text-slate-400">· {{ finance.budget.status_label }}</span>
+            </p>
+            <span v-if="!finance.budget.has_actuals" class="text-xs text-sky-700 bg-sky-50 rounded-full px-2.5 py-1">
+              هنوز رقم واقعی برای این ماه ثبت نشده
+            </span>
+          </div>
+          <div v-if="budgetGauges.length" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+            <GaugeChart
+              v-for="g in budgetGauges" :key="g.title" flat
+              :title="g.title" :value="g.value" :good-when-high="g.good" :height="170"
+            />
+          </div>
+          <ul v-if="finance.budget.top_bad.length" class="mt-3 space-y-1.5 border-t border-slate-100 pt-3">
+            <li v-for="b in finance.budget.top_bad" :key="b.label" class="flex items-center justify-between text-xs">
+              <span class="text-ink">
+                {{ b.label }}
+                <span class="text-slate-400">· {{ b.direction === "in" ? "ورودی" : "خروجی" }}</span>
+              </span>
+              <span class="text-red-600 ltr-nums">
+                {{ Number(b.variance_rial) > 0 ? "+" : "" }}{{ rial(Number(b.variance_rial)) }}
+                <template v-if="b.variance_pct !== null">({{ pct(Math.abs(b.variance_pct)) }})</template>
+              </span>
+            </li>
+          </ul>
+        </div>
+      </section>
 
       <!-- ===== Combined financials ===== -->
       <div :class="card" class="p-5">

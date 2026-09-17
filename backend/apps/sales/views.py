@@ -534,7 +534,9 @@ class DashboardSummaryView(APIView):
         # but province sales are merged, so we scope province to the channel's
         # own facts.
         province = (
-            FactSalesProvince.objects.filter(period=period, status=ApprovalStatus.APPROVED)
+            FactSalesProvince.objects.filter(
+                period_id__in=leaf_ids_for(period), status=ApprovalStatus.APPROVED
+            )
             .select_related("province")
             .values("province__name_fa")
             .annotate(sales=Sum("sales_rial"), target=Sum("target_rial"))
@@ -542,7 +544,7 @@ class DashboardSummaryView(APIView):
         )
 
         collections = (
-            FactCollection.objects.filter(period=period)
+            FactCollection.objects.filter(period_id__in=leaf_ids_for(period))
             .select_related("bank")
             .values("bank__name_fa")
             .annotate(amount=Sum("amount_rial"))
@@ -1188,6 +1190,48 @@ def _ratio(num, den):
     return float(num) / float(den) if den else None
 
 
+def _rolled_up_facts(period, channel):
+    """
+    One approved row per salesperson for a period, whatever grain it was entered at.
+
+    Figures live only on leaf periods. A month entered week by week holds
+    nothing of its own, so filtering on `period=month` returned an empty
+    dashboard for exactly the months kept most carefully. The weeks are summed
+    here instead — stock measures (a balance, not a flow) take the latest
+    week's value, the same rule the entry sheet's roll-up uses.
+    """
+    from types import SimpleNamespace
+
+    from apps.sales.services.approval_sheets import STOCK_FIELDS
+
+    numeric = [
+        f.name for f in FactSalesMonthly._meta.concrete_fields
+        if f.get_internal_type() in {
+            "DecimalField", "IntegerField", "PositiveIntegerField",
+            "PositiveSmallIntegerField", "BigIntegerField", "SmallIntegerField",
+        }
+    ]
+    rows: dict[int, SimpleNamespace] = {}
+    facts = (
+        FactSalesMonthly.objects.filter(
+            period_id__in=leaf_ids_for(period), channel=channel,
+            status=ApprovalStatus.APPROVED,
+        )
+        .select_related("employee", "employee__team")
+        .order_by("period__start_date", "period_id", "employee__id")
+    )
+    for f in facts:
+        row = rows.get(f.employee_id)
+        if row is None:
+            row = rows[f.employee_id] = SimpleNamespace(
+                employee=f.employee, **{n: 0 for n in numeric}
+            )
+        for n in numeric:
+            value = getattr(f, n) or 0
+            setattr(row, n, value if n in STOCK_FIELDS else getattr(row, n) + value)
+    return sorted(rows.values(), key=lambda r: r.employee.id)
+
+
 class SalesDashboardDetailView(APIView):
     """Per-salesperson and per-team series for the sales chart dashboards."""
 
@@ -1199,11 +1243,7 @@ class SalesDashboardDetailView(APIView):
         assert_channel_visible(request.user, channel)
 
         # ---- Salesperson block (channel-scoped) — Sheet3 rows 18-30 ----
-        facts = list(
-            FactSalesMonthly.objects.filter(
-                period=period, channel=channel, status=ApprovalStatus.APPROVED
-            ).select_related("employee").order_by("employee__id")
-        )
+        facts = _rolled_up_facts(period, channel)
         channel_revenue = sum(float(f.revenue_rial) for f in facts)
 
         salespeople = []
@@ -1237,9 +1277,7 @@ class SalesDashboardDetailView(APIView):
         # viewing (previously this aggregated across all channels, so the B2B and
         # banking dashboards showed company-wide team totals that did not match
         # their own recorded figures).
-        all_facts = FactSalesMonthly.objects.filter(
-            period=period, channel=channel, status=ApprovalStatus.APPROVED
-        ).select_related("employee", "employee__team")
+        all_facts = facts
 
         agg: dict[int, dict] = {}
         for f in all_facts:
@@ -1280,12 +1318,15 @@ class SalesDashboardDetailView(APIView):
 
         # ---- Provinces (channel-scoped) ----
         provinces = [{
-            "name": p.province.name_fa,
-            "sales": float(p.sales_rial),
-            "target": float(p.target_rial),
+            "name": p["province__name_fa"],
+            "sales": float(p["sales"] or 0),
+            "target": float(p["target"] or 0),
         } for p in FactSalesProvince.objects.filter(
-            period=period, channel=channel, status=ApprovalStatus.APPROVED
-        ).select_related("province").order_by("-sales_rial")]
+            period_id__in=leaf_ids_for(period), channel=channel,
+            status=ApprovalStatus.APPROVED,
+        ).values("province__name_fa").annotate(
+            sales=Sum("sales_rial"), target=Sum("target_rial"),
+        ).order_by("-sales")]
 
         return Response({
             "period": PeriodSerializer(period).data,

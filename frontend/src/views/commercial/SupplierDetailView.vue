@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { commercialApi, type SupplierHistory } from "@/api/commercial";
+import { commercialApi, type Supplier, type SupplierHistory } from "@/api/commercial";
+import SupplierForm from "@/components/commercial/SupplierForm.vue";
 import { useMoney, loadMoneySettings } from "@/composables/useMoney";
 import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
@@ -33,6 +34,15 @@ const canEdit = computed(
 
 const showQuote = ref(false);
 const showOrder = ref(false);
+const editingSupplier = ref<Supplier | null>(null);
+
+async function openEdit() {
+  try {
+    editingSupplier.value = await commercialApi.supplier(supplierId.value);
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
 
 async function load() {
   try {
@@ -91,6 +101,11 @@ onMounted(async () => {
           >← بازگشت</button>
           <button
             v-if="canEdit"
+            class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
+            @click="openEdit"
+          >ویرایش</button>
+          <button
+            v-if="canEdit"
             class="bg-slate-100 text-ink rounded-xl px-4 py-2 text-sm"
             @click="showQuote = true"
           >+ استعلام</button>
@@ -102,6 +117,10 @@ onMounted(async () => {
         </div>
       </div>
 
+      <SupplierForm
+        v-if="editingSupplier" :supplier="editingSupplier"
+        @close="editingSupplier = null" @saved="editingSupplier = null; load()"
+      />
       <QuickQuoteForm
         v-if="showQuote" :supplier-id="supplierId"
         @close="showQuote = false" @saved="afterSave"

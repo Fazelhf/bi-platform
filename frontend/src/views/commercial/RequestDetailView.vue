@@ -15,6 +15,7 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import QuoteForm from "@/components/commercial/QuoteForm.vue";
+import RequestForm from "@/components/commercial/RequestForm.vue";
 import AwardDialog from "@/components/commercial/AwardDialog.vue";
 import OrderForm from "@/components/commercial/OrderForm.vue";
 import SampleForm from "@/components/commercial/SampleForm.vue";
@@ -79,6 +80,7 @@ onMounted(async () => { await loadMoneySettings(); await load(); });
 
 const editingQuote = ref<Quote | null>(null);
 const showQuote = ref(false);
+const showEditRequest = ref(false);
 const showAward = ref(false);
 const showOrder = ref(false);
 /** Which quote the award dialog should open on, when it was opened from a row. */
@@ -190,6 +192,11 @@ const FA = new Intl.NumberFormat("fa-IR");
               class="text-sm text-slate-500 hover:text-ink px-2 py-2"
               @click="router.push({ name: 'commercial-requests' })"
             >← بازگشت</button>
+            <button
+              v-if="canEdit"
+              class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
+              @click="showEditRequest = true"
+            >ویرایش درخواست</button>
             <button
               v-if="canEdit && request.status !== 'cancelled'"
               class="bg-slate-100 text-ink rounded-xl px-4 py-2 text-sm"
@@ -449,6 +456,10 @@ const FA = new Intl.NumberFormat("fa-IR");
         </table>
       </div>
 
+      <RequestForm
+        v-if="showEditRequest" :request="request"
+        @close="showEditRequest = false" @saved="showEditRequest = false; load()"
+      />
       <QuoteForm
         v-if="showQuote"
         :request="request" :quote="editingQuote"

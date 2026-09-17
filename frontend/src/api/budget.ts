@@ -76,19 +76,10 @@ export interface GridLine extends BudgetLine {
   cells: Record<string, GridCell>;
 }
 
-/** Accrual sales for one channel — beside the cash lines, never in their totals. */
-export interface SalesForecastRow {
-  channel: string;
-  label: string;
-  /** Keyed by budget_period_id. */
-  cells: Record<string, { amount_rial: string; baseline_rial: string | null }>;
-}
-
 export interface BudgetGrid {
   budget: Budget;
   months: GridMonth[];
   lines: GridLine[];
-  sales: SalesForecastRow[];
   unit: FinanceSettings;
   can_edit: boolean;
 }
@@ -99,13 +90,6 @@ export interface SaveCell {
   amount_rial?: string;
   variance_note?: string;
   /** Why an approved figure moved — kept in the change history. */
-  reason?: string;
-}
-
-export interface SaveSalesCell {
-  budget_period_id: number;
-  channel: string;
-  amount_rial: string;
   reason?: string;
 }
 
@@ -130,19 +114,11 @@ export interface VarianceRow extends VarianceCell {
   depth: number;
 }
 
-export interface SalesVarianceRow extends VarianceCell {
-  channel: string;
-  label: string;
-}
-
 export interface VarianceReport {
   budget: { id: number; title: string };
   period: { id: number; label: string; kind: string };
   month: { id: number; label: string };
   budget_period_id: number | null;
-  grain: "month" | "week";
-  /** True for a week: its plan is the month's, pro-rated by day count. */
-  prorated: boolean;
   status: BudgetStatus;
   status_label: string;
   approved_at: string | null;
@@ -152,8 +128,6 @@ export interface VarianceReport {
   unbudgeted_count: number;
   /** False when no cash movement has been recorded in the period yet. */
   has_actuals: boolean;
-  /** Forecast sales against recorded sales, per channel. */
-  sales: { rows: SalesVarianceRow[]; total: VarianceCell };
 }
 
 export interface SeriesPoint {
@@ -168,8 +142,6 @@ export interface SeriesPoint {
   actual_net: string;
   cumulative_budget: string;
   cumulative_actual: string;
-  budget_sales: string;
-  actual_sales: string;
 }
 
 export interface BudgetSeries {
@@ -195,7 +167,7 @@ export interface Waterfall {
   steps: WaterfallStep[];
 }
 
-/** One سرفصل on the finance team's weekly actuals sheet. */
+/** One سرفصل on the finance team's monthly actuals sheet. */
 export interface ActualEntryLine extends VarianceCell {
   line_id: number;
   label: string;
@@ -206,23 +178,25 @@ export interface ActualEntryLine extends VarianceCell {
   /** Whether anything was keyed for it in this period. */
   entered: boolean;
   note: string;
-  month_budget_rial: string;
-  month_actual_rial: string;
 }
 
 export interface ActualEntrySheet {
   budget: { id: number; title: string };
   period: { id: number; label: string; kind: string };
   month: { id: number; label: string; days: number };
-  /** A month cut into weeks, read as the sum of its weeks — not writable. */
-  is_rollup: boolean;
-  /** The entry periods: the month's weeks, or the month itself. */
-  weeks: { period_id: number; label: string; seq: number; days: number; entered: number }[];
   line_count: number;
   lines: ActualEntryLine[];
   totals: { in: VarianceCell; out: VarianceCell };
   can_edit: boolean;
   unit: FinanceSettings;
+}
+
+/** Top-level groups × months, for the variance heatmap. */
+export interface BudgetHeatmapData {
+  budget: { id: number; title: string };
+  months: { period_id: number; label: string; has_actuals: boolean }[];
+  groups: { key: string; code: string; label: string; direction: Direction }[];
+  cells: (VarianceCell & { group: string; period_id: number })[];
 }
 
 const many = <T>(data: any): T[] => data.results ?? data;
@@ -272,11 +246,8 @@ export const budgetApi = {
     const { data } = await api.get("/finance/budget-grid/", { params: { budget: budgetId } });
     return data;
   },
-  async saveGrid(cells: SaveCell[], salesCells: SaveSalesCell[] = []) {
-    const { data } = await api.post("/finance/budget-grid/", {
-      cells,
-      sales_cells: salesCells,
-    });
+  async saveGrid(cells: SaveCell[]) {
+    const { data } = await api.post("/finance/budget-grid/", { cells });
     return data as { written: number };
   },
 
@@ -311,6 +282,10 @@ export const budgetApi = {
     const { data } = await api.get("/finance/budget-variance/", {
       params: { budget: budgetId, period: periodId },
     });
+    return data;
+  },
+  async heatmap(budgetId: number): Promise<BudgetHeatmapData> {
+    const { data } = await api.get("/finance/budget-heatmap/", { params: { budget: budgetId } });
     return data;
   },
   async series(budgetId: number): Promise<BudgetSeries> {

@@ -62,7 +62,7 @@ class MaterialUnit(models.TextChoices):
 class MaterialCategory(TimeStampedModel):
     """A grouping of consumables — بسته‌بندی, مواد اولیه, قطعات یدکی and so on."""
 
-    code = models.SlugField(unique=True)
+    code = models.SlugField(unique=True, allow_unicode=True)
     name_fa = models.CharField(max_length=100)
     sort_order = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -86,7 +86,7 @@ class Material(TimeStampedModel):
     ambiguous on every screen that showed it.
     """
 
-    code = models.SlugField(unique=True)
+    code = models.SlugField(unique=True, allow_unicode=True)
     name_fa = models.CharField(max_length=150)
     category = models.ForeignKey(
         MaterialCategory, null=True, blank=True,
@@ -129,7 +129,7 @@ class Supplier(TimeStampedModel):
         DOMESTIC = "domestic", "داخلی"
         FOREIGN = "foreign", "خارجی"
 
-    code = models.SlugField(unique=True)
+    code = models.SlugField(unique=True, allow_unicode=True)
     name_fa = models.CharField(max_length=200)
     #: Foreign mills are known by their Latin name on every document.
     name_en = models.CharField(max_length=200, blank=True)
@@ -175,7 +175,7 @@ class QuoteReason(TimeStampedModel):
         SAMPLE = "sample", "دلیل رد نمونه"
 
     kind = models.CharField(max_length=8, choices=Kind.choices)
-    code = models.SlugField(unique=True)
+    code = models.SlugField(unique=True, allow_unicode=True)
     name_fa = models.CharField(max_length=120)
     sort_order = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -213,7 +213,7 @@ class PaymentTerm(TimeStampedModel):
     be able to add «۴۰٪ پیش‌پرداخت، مابقی چک ۴ ماهه» without a deploy.
     """
 
-    code = models.SlugField(unique=True)
+    code = models.SlugField(unique=True, allow_unicode=True)
     name_fa = models.CharField(max_length=120)
     #: درصد پیش‌پرداخت — what has to be paid before anything arrives.
     advance_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
@@ -744,7 +744,7 @@ class Bank(TimeStampedModel):
     policy, and the allocation-queue report is broken down by this.
     """
 
-    code = models.SlugField(unique=True)
+    code = models.SlugField(unique=True, allow_unicode=True)
     name_fa = models.CharField(max_length=120)
     #: Drawn in the queue-share chart, so each bank keeps one colour.
     color = models.CharField(max_length=7, blank=True)

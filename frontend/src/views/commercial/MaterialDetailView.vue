@@ -15,6 +15,7 @@ import { faDate } from "@/utils/adminFormat";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
 import StatTile from "@/components/commercial/StatTile.vue";
 import QuickQuoteForm from "@/components/commercial/QuickQuoteForm.vue";
+import MaterialForm from "@/components/commercial/MaterialForm.vue";
 import OrderForm from "@/components/commercial/OrderForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -35,6 +36,12 @@ const canEdit = computed(
 );
 const showQuote = ref(false);
 const showOrder = ref(false);
+const showEdit = ref(false);
+
+async function afterEdit() {
+  showEdit.value = false;
+  material.value = await commercialApi.material(materialId.value);
+}
 
 async function afterSave() {
   showQuote.value = false;
@@ -164,6 +171,11 @@ const usageChart = computed(() => {
           >← بازگشت</button>
           <button
             v-if="canEdit"
+            class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
+            @click="showEdit = true"
+          >ویرایش</button>
+          <button
+            v-if="canEdit"
             class="bg-slate-100 text-ink rounded-xl px-4 py-2 text-sm"
             @click="showQuote = true"
           >+ استعلام</button>
@@ -175,6 +187,10 @@ const usageChart = computed(() => {
         </div>
       </div>
 
+      <MaterialForm
+        v-if="showEdit" :material="material"
+        @close="showEdit = false" @saved="afterEdit"
+      />
       <QuickQuoteForm
         v-if="showQuote" :material-id="materialId"
         @close="showQuote = false" @saved="afterSave"

@@ -19,7 +19,6 @@ import {
   type Direction,
   type GridLine,
   type GridMonth,
-  type SalesForecastRow,
   type TreeCategory,
 } from "@/api/budget";
 import { financeApi, type CreditLine } from "@/api/finance";
@@ -69,38 +68,6 @@ function setValue(line: GridLine, bpId: number, raw: string) {
 }
 const isDirty = (line: GridLine, bpId: number) => key(bpId, line.id) in draft;
 
-// ---- sales forecast ---------------------------------------------------------
-// Same draft, a different key shape (`bp:s:channel`), so one save and one
-// «unsaved changes» count cover both.
-
-const sKey = (bpId: number, channel: string) => `${bpId}:s:${channel}`;
-function sStored(row: SalesForecastRow, bpId: number): string {
-  return row.cells[String(bpId)]?.amount_rial ?? "0";
-}
-function sValue(row: SalesForecastRow, bpId: number): string {
-  const k = sKey(bpId, row.channel);
-  return k in draft ? draft[k] : sStored(row, bpId);
-}
-function setSValue(row: SalesForecastRow, bpId: number, raw: string) {
-  const k = sKey(bpId, row.channel);
-  const clean = raw === "" || raw === "-" ? "0" : raw;
-  if (n(clean) === n(sStored(row, bpId))) delete draft[k];
-  else draft[k] = clean;
-}
-const sDirty = (row: SalesForecastRow, bpId: number) => sKey(bpId, row.channel) in draft;
-function sDrift(row: SalesForecastRow, m: GridMonth): string | null {
-  const baseline = row.cells[String(m.budget_period_id)]?.baseline_rial;
-  if (baseline === null || baseline === undefined) return null;
-  return n(sValue(row, m.budget_period_id)) !== n(baseline) ? baseline : null;
-}
-const sRowTotal = (row: SalesForecastRow) =>
-  (grid.value?.months ?? []).reduce((s, m) => s + n(sValue(row, m.budget_period_id)), 0);
-const salesMonthTotal = (bpId: number) =>
-  (grid.value?.sales ?? []).reduce((s, r) => s + n(sValue(r, bpId)), 0);
-const salesTotal = computed(() =>
-  (grid.value?.months ?? []).reduce((s, m) => s + salesMonthTotal(m.budget_period_id), 0),
-);
-
 /** The live figure has moved away from the approved one. */
 function drift(line: GridLine, m: GridMonth): string | null {
   const baseline = line.cells[String(m.budget_period_id)]?.baseline_rial;
@@ -121,8 +88,7 @@ const sections = computed(() =>
 /** Row position across both sections, for Enter-moves-down. */
 const rowIndex = computed(() => {
   const map = new Map<number, number>();
-  // The sales rows sit above the cash lines and take the first indices.
-  let i = grid.value?.sales?.length ?? 0;
+  let i = 0;
   for (const s of sections.value) for (const l of s.lines) map.set(l.id, i++);
   return map;
 });
@@ -211,7 +177,7 @@ async function save() {
 
   saving.value = true;
   try {
-    const cells = keys.filter((k) => !k.includes(":s:")).map((k) => {
+    const cells = keys.map((k) => {
       const [bp, line] = k.split(":").map(Number);
       return {
         budget_period_id: bp,
@@ -220,16 +186,7 @@ async function save() {
         ...(approved.has(bp) ? { reason } : {}),
       };
     });
-    const salesCells = keys.filter((k) => k.includes(":s:")).map((k) => {
-      const [bp, , channel] = k.split(":");
-      return {
-        budget_period_id: Number(bp),
-        channel,
-        amount_rial: draft[k],
-        ...(approved.has(Number(bp)) ? { reason } : {}),
-      };
-    });
-    const res = await budgetApi.saveGrid(cells, salesCells);
+    const res = await budgetApi.saveGrid(cells);
     for (const k of keys) delete draft[k];
     await loadGrid();
     toast.success(`${FA.format(res.written)} رقم ذخیره شد.`);
@@ -469,7 +426,7 @@ const statusChip = (s: string) =>
       <div>
         <h1 class="font-bold text-ink">تعریف بودجه</h1>
         <p class="text-xs text-slate-400 mt-0.5">
-          ارقام مورد انتظار هر سرفصل در هر ماه · ارقام واقعی را واحد مالی هفتگی وارد می‌کند
+          ارقام مورد انتظار هر سرفصل در هر ماه · ارقام واقعی را واحد مالی ماهانه وارد می‌کند
         </p>
       </div>
       <div class="flex flex-wrap items-end gap-2">
@@ -551,11 +508,7 @@ const statusChip = (s: string) =>
       </p>
 
       <!-- Summary -->
-      <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div class="bg-surface rounded-card shadow-soft p-4">
-          <p class="text-[11px] text-slate-400">پیش‌بینی فروش</p>
-          <p class="text-lg font-bold text-brand-700 ltr-nums">{{ money(salesTotal) }}</p>
-        </div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div class="bg-surface rounded-card shadow-soft p-4">
           <p class="text-[11px] text-slate-400">بازه</p>
           <p class="text-sm font-bold text-ink mt-1">{{ grid.budget.start_label }} تا {{ grid.budget.end_label }}</p>
@@ -695,52 +648,6 @@ const statusChip = (s: string) =>
               </tr>
             </thead>
 
-            <!-- Sales forecast: accrual, so it sits above the cash plan and
-                 never enters the net row. -->
-            <tbody v-if="grid.sales?.length">
-              <tr>
-                <td :colspan="grid.months.length + 2" class="sticky right-0 px-3 pt-4 pb-2 text-xs font-bold text-brand-700">
-                  پیش‌بینی فروش
-                  <span class="font-normal text-slate-400">— تعهدی؛ در خالص نقدی شمرده نمی‌شود</span>
-                </td>
-              </tr>
-              <tr v-for="(row, si) in grid.sales" :key="row.channel" class="group hover:bg-slate-50/60">
-                <td class="sticky right-0 z-10 bg-surface group-hover:bg-slate-50 p-2 pe-3 border-b border-slate-50">
-                  <p class="text-ink">{{ row.label }}</p>
-                </td>
-                <td
-                  v-for="(m, ci) in grid.months" :key="m.budget_period_id"
-                  :data-row="si" :data-col="ci"
-                  class="p-1.5 border-b border-slate-50"
-                  @keydown.enter.prevent="moveDown(si, ci, $event)"
-                >
-                  <div class="relative">
-                    <MoneyInput
-                      v-if="grid.can_edit"
-                      :model-value="sValue(row, m.budget_period_id)"
-                      class="w-full border rounded-lg px-2 py-1 text-sm text-left ltr-nums bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-                      :class="sDirty(row, m.budget_period_id) ? 'border-amber-300 bg-amber-50/60' : 'border-slate-200'"
-                      @update:model-value="(v: string) => setSValue(row, m.budget_period_id, v)"
-                    />
-                    <p v-else class="text-left ltr-nums px-2 py-1">{{ FA.format(n(sValue(row, m.budget_period_id))) }}</p>
-                    <span
-                      v-if="sDrift(row, m)"
-                      class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-500"
-                      :title="`عدد مصوب: ${FA.format(n(sDrift(row, m)))} ریال`"
-                    ></span>
-                  </div>
-                </td>
-                <td class="p-2 text-left ltr-nums text-slate-600 border-b border-slate-50 whitespace-nowrap">{{ money(sRowTotal(row), false) }}</td>
-              </tr>
-              <tr class="bg-slate-50/80 font-semibold">
-                <td class="sticky right-0 z-10 bg-slate-50 p-2 pe-3 text-xs">جمع پیش‌بینی فروش</td>
-                <td v-for="m in grid.months" :key="m.budget_period_id" class="p-2 text-left ltr-nums text-xs whitespace-nowrap">
-                  {{ money(salesMonthTotal(m.budget_period_id), false) }}
-                </td>
-                <td class="p-2 text-left ltr-nums text-xs whitespace-nowrap">{{ money(salesTotal, false) }}</td>
-              </tr>
-            </tbody>
-
             <tbody v-for="section in sections" :key="section.dir">
               <tr>
                 <td
@@ -819,7 +726,7 @@ const statusChip = (s: string) =>
 
       <p class="text-[11px] text-slate-400 px-1">
         سال بودجه: {{ faYear(grid.budget.jalali_year) }} ·
-        پیش‌بینی فروش تعهدی است و با فروش ثبت‌شدهٔ هر کانال مقایسه می‌شود؛ پولِ آن در «وصول نقدی» و «وصول مطالبات» بودجه‌بندی می‌شود.
+        بودجه مستقل است و از هیچ ماژول دیگری داده نمی‌خواند؛ ارقام واقعی را واحد مالی در «ورود ارقام واقعی بودجه» وارد می‌کند.
       </p>
     </template>
   </div>
