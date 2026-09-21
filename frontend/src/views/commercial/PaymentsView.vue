@@ -67,7 +67,7 @@ const totals = computed(() => data.value?.totals);
           <p class="text-xs text-slate-400">باقی‌مانده به فروشنده</p>
           <p class="text-2xl font-bold text-ink ltr-nums mt-1">
             {{ FA.format(Number(totals.outstanding)) }}
-            <span class="text-sm text-slate-400">USD</span>
+            <span class="text-sm text-slate-400">{{ totals.currency }}</span>
           </p>
           <p class="text-xs text-slate-400 ltr-nums mt-1">
             از {{ FA.format(Number(totals.value)) }} کل ·
@@ -79,7 +79,7 @@ const totals = computed(() => data.value?.totals);
           <p class="text-xs text-red-700">سود دیرکرد</p>
           <p class="text-2xl font-bold text-red-700 ltr-nums mt-1">
             {{ FA.format(Number(totals.interest)) }}
-            <span class="text-sm">USD</span>
+            <span class="text-sm">{{ totals.currency }}</span>
           </p>
           <p class="text-xs text-red-600 ltr-nums mt-1">
             {{ num(totals.overdue_count) }} فاکتور از سررسید گذشته
@@ -90,9 +90,32 @@ const totals = computed(() => data.value?.totals);
           <p class="text-xs text-slate-400">جمع قابل پرداخت</p>
           <p class="text-2xl font-bold text-ink ltr-nums mt-1">
             {{ FA.format(Number(totals.payable)) }}
-            <span class="text-sm text-slate-400">USD</span>
+            <span class="text-sm text-slate-400">{{ totals.currency }}</span>
           </p>
           <p class="text-xs text-slate-400 mt-1">باقی‌مانده به‌علاوه سود دیرکرد</p>
+        </div>
+      </div>
+
+      <!-- More than one currency: each on its own line, never added up. -->
+      <div
+        v-if="data.by_currency && data.by_currency.length > 1"
+        class="bg-surface rounded-card shadow-soft p-3"
+      >
+        <p class="text-xs text-slate-400 mb-2">
+          ارقام بالا فقط {{ totals.currency }} است؛ تفکیک ارزها:
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <div
+            v-for="c in data.by_currency" :key="c.currency"
+            class="rounded-xl bg-slate-50 px-3 py-2 text-xs"
+          >
+            <span class="font-semibold text-ink">{{ c.currency }}</span>
+            <span class="text-slate-500 ltr-nums">
+              · باقی‌مانده {{ FA.format(Number(c.outstanding)) }}
+              · سود دیرکرد {{ FA.format(Number(c.interest)) }}
+              · قابل پرداخت {{ FA.format(Number(c.payable)) }}
+            </span>
+          </div>
         </div>
       </div>
 

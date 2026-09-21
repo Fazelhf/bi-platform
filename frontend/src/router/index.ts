@@ -387,10 +387,18 @@ const router = createRouter({
       meta: { requiresAuth: true, crm: true },
       children: [
         {
+          path: "today",
+          name: "crm-today",
+          component: () => import("@/views/crm/TodayView.vue"),
+        },
+        {
           // The dashboard is the landing page. A separate «میز کار» was tried
           // and removed: this dataset is a sixteen-month history, so every
           // outstanding follow-up in it is a year old, and a to-do list where
           // all four hundred rows are equally late is not a to-do list.
+          // «کارتابل امروز» (crm-today) came back on request with that fixed:
+          // tasks older than `CrmTodayView.BACKLOG_DAYS` are one counted line,
+          // not rows. It is still not the landing page.
           path: "",
           name: "crm-dashboard",
           component: () => import("@/views/crm/CrmDashboardView.vue"),

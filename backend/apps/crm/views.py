@@ -17,17 +17,19 @@ sales_team department owns the data, the CEO reads everything.
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, DecimalField, F, Max, Q, Sum, Value
+from django.http import HttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.crm import merge as crm_merge, reports as rpt
-from apps.crm.jalali import jalali_month_of, month_bounds, month_label, period_for
+from apps.crm.jalali import jalali_month_of, jalali_str, month_bounds, month_label, period_for
 from apps.crm.models import (
     CustomerMatchCandidate, Dataset, SalesInvoice,
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
@@ -263,6 +265,34 @@ def employee_options(request):
     return qs
 
 
+def apply_ordering(qs, request, allowed: dict[str, str]):
+    """
+    Sort a list by `?ordering=<key>` or `?ordering=-<key>`.
+
+    The keys are the UI's column names, mapped here to real lookups — never
+    passed through — so a URL cannot order by a field it has no business
+    reading (or one that forces a full-table join). Sorting on the server is
+    the point: a table that sorts only the thirty rows it has loaded shows
+    «the biggest deal» as the biggest one on page one.
+    """
+    raw = (request.query_params.get("ordering") or "").strip()
+    key = raw.lstrip("-")
+    if key not in allowed:
+        return qs
+    field = allowed[key]
+    desc = raw.startswith("-")
+    # Blanks last either way: a missing date or owner is not «the smallest».
+    expr = F(field).desc(nulls_last=True) if desc else F(field).asc(nulls_last=True)
+    return qs.order_by(expr, "-id" if desc else "id")
+
+
+def id_list(request) -> list[int] | None:
+    """`?ids=1,2,3` — the rows a user ticked, for exporting just those."""
+    raw = request.query_params.get("ids") or ""
+    ids = [int(x) for x in raw.split(",") if x.strip().isdigit()]
+    return ids or None
+
+
 def query_filters(request) -> rpt.Filters:
     """
     The parsed query for this request, with the two things that must never
@@ -280,7 +310,27 @@ def query_filters(request) -> rpt.Filters:
     )
 
 
+class CrmPagination(PageNumberPagination):
+    """
+    Honour the page size the screen asks for.
+
+    Every CRM list sends `page_size` (30 for the tables, 25 for the drill
+    drawer) and computes «صفحه ۱ از N» from it — but the project default
+    ignored the parameter and always returned 100. The pager then promised
+    eight pages of a three-page result, and «بعدی» past the third answered
+    404. The ceiling stops a hand-typed URL from asking for everything.
+    """
+
+    # The project default, unchanged: lookups fetched without a size (tags,
+    # groups, products for a dropdown) must not start arriving truncated.
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
+
 class _Base(viewsets.ModelViewSet):
+    pagination_class = CrmPagination
+
     # Two checks, deliberately: CrmAccess decides who sees the section at all,
     # CrmWritePermission decides who may change what is in it.
     permission_classes = [CrmAccess, CrmWritePermission]
@@ -519,7 +569,19 @@ class CustomerViewSet(_Base):
                 | Q(mobile__icontains=search)
                 | Q(code__icontains=search)
             )
-        return qs.distinct()
+        ids = id_list(self.request)
+        if ids:
+            qs = qs.filter(pk__in=ids)
+        return apply_ordering(qs.distinct(), self.request, {
+            "name": "name_fa",
+            "group": "group__name_fa",
+            "province": "province__name_fa",
+            "owner": "owner__full_name_fa",
+            "status": "status",
+            "last_activity": "last_activity_at",
+            "first_won": "first_deal_won_at",
+            "first_contact": "first_contact_at",
+        })
 
     def create_defaults(self, serializer) -> dict:
         # A rep adding a customer should not have to fill in "who owns this"
@@ -556,6 +618,7 @@ class CustomerViewSet(_Base):
             "calls": obj.activities.filter(kind__in=["call_out", "call_in"]).count(),
             "open_tasks": obj.tasks.filter(done_at__isnull=True).count(),
         }
+        data["insights"] = customer_insights(obj)
         return Response(data)
 
     @action(detail=True, methods=["get"])
@@ -572,6 +635,12 @@ class CustomerViewSet(_Base):
 
 
     # -- bulk actions on the list -------------------------------------------
+    @action(detail=False, methods=["post"], url_path="bulk-assign")
+    def bulk_assign(self, request):
+        return bulk_assign(request, self.scoped(
+            Customer.objects.filter(dataset=active_dataset(request))
+        ))
+
     @action(detail=False, methods=["post"], url_path="bulk-review")
     def bulk_review(self, request):
         """
@@ -718,6 +787,193 @@ class CustomerFeedbackViewSet(_Base):
 # --------------------------------------------------------------------------
 # Deal
 # --------------------------------------------------------------------------
+def customer_insights(customer) -> dict:
+    """
+    What the customer page adds on top of the raw record — the part that
+    makes it a 360° view rather than a contact card.
+
+    * **Money from accounting**: what آرپا has billed them and what is still
+      owed. دیدار's deals say what was agreed; the invoices say what was
+      charged, and the unsettled figure is what a کارشناس should know before
+      picking up the phone to sell more.
+    * **Twelve months of purchases**, by Jalali month, so a customer who used
+      to buy monthly and stopped in the spring is visible as such.
+    * **A relationship-health score** from recency, frequency and balance,
+      with the reasons listed — a score nobody can explain is a score nobody
+      trusts.
+    * **The open tasks**, so what is owed to them is on the page.
+    """
+    now = timezone.now()
+    today = now.date()
+
+    invoices = SalesInvoice.objects.filter(customer=customer, is_intercompany=False)
+    inv = invoices.aggregate(
+        count=Count("id"),
+        amount=Sum("amount_rial"),
+        unsettled=Sum("unsettled_rial"),
+        last=Max("issued_at"),
+    )
+    overdue_debt = invoices.filter(
+        unsettled_rial__gt=0, due_date__isnull=False, due_date__lt=today,
+    ).aggregate(s=Sum("unsettled_rial"))["s"] or 0
+
+    # ---- twelve Jalali months, oldest first -----------------------------------
+    jy, jm = jalali_month_of(today)
+    months = []
+    for _ in range(12):
+        months.append((jy, jm))
+        jm -= 1
+        if jm == 0:
+            jy, jm = jy - 1, 12
+    months.reverse()
+    first_start = month_bounds(*months[0])[0]
+
+    won = customer.deals.filter(status=Deal.Status.WON, closed_at__date__gte=first_start)
+    by_month: dict[tuple[int, int], float] = {m: 0.0 for m in months}
+    for closed_at, amount in won.values_list("closed_at", "amount_rial"):
+        key = jalali_month_of(closed_at)
+        if key in by_month:
+            by_month[key] += float(amount or 0)
+    invoiced_by_month: dict[tuple[int, int], float] = {m: 0.0 for m in months}
+    for issued_at, amount in invoices.filter(issued_at__gte=first_start).values_list("issued_at", "amount_rial"):
+        key = jalali_month_of(issued_at)
+        if key in invoiced_by_month:
+            invoiced_by_month[key] += float(amount or 0)
+
+    series = [
+        {"label": month_label(*m), "won": by_month[m], "invoiced": invoiced_by_month[m]}
+        for m in months
+    ]
+    active_months = sum(1 for r in series if r["won"] or r["invoiced"])
+
+    # ---- health ------------------------------------------------------------------
+    last_touch = customer.last_activity_at
+    days_quiet = (now - last_touch).days if last_touch else None
+    # The later of the last invoice (a date) and the last won deal (a
+    # timestamp) — whichever system saw the purchase first.
+    last_won = customer.deals.filter(status=Deal.Status.WON).aggregate(m=Max("closed_at"))["m"]
+    candidates = [d for d in (inv["last"], last_won.date() if last_won else None) if d]
+    last_buy = max(candidates) if candidates else None
+    days_since_buy = (today - last_buy).days if last_buy else None
+
+    score = 100
+    reasons: list[dict] = []
+    if days_quiet is None:
+        score -= 30
+        reasons.append({"tone": "bad", "text": "هیچ تماسی با این مشتری ثبت نشده"})
+    elif days_quiet > 90:
+        score -= 30
+        reasons.append({"tone": "bad", "text": f"{days_quiet} روز بدون تماس"})
+    elif days_quiet > 30:
+        score -= 15
+        reasons.append({"tone": "warn", "text": f"{days_quiet} روز از آخرین تماس گذشته"})
+    else:
+        reasons.append({"tone": "good", "text": "در تماس منظم"})
+
+    if days_since_buy is None:
+        score -= 25
+        reasons.append({"tone": "warn", "text": "هنوز خریدی ثبت نشده"})
+    elif days_since_buy > 180:
+        score -= 25
+        reasons.append({"tone": "bad", "text": f"{days_since_buy} روز از آخرین خرید گذشته"})
+    elif days_since_buy > 90:
+        score -= 10
+        reasons.append({"tone": "warn", "text": f"{days_since_buy} روز از آخرین خرید گذشته"})
+    else:
+        reasons.append({"tone": "good", "text": "خرید اخیر دارد"})
+
+    if active_months >= 6:
+        reasons.append({"tone": "good", "text": f"در {active_months} ماه از ۱۲ ماه اخیر خرید داشته"})
+    elif active_months == 0 and days_since_buy is not None:
+        score -= 10
+
+    if overdue_debt:
+        score -= 20
+        reasons.append({"tone": "bad", "text": "بدهی سررسیدگذشته دارد"})
+    elif inv["unsettled"]:
+        reasons.append({"tone": "warn", "text": "فاکتور تسویه‌نشده دارد"})
+
+    overdue_tasks = customer.tasks.filter(done_at__isnull=True, due_at__lt=now).count()
+    if overdue_tasks:
+        score -= 10
+        reasons.append({"tone": "warn", "text": f"{overdue_tasks} کار عقب‌افتاده برای این مشتری"})
+
+    score = max(0, min(100, score))
+    label = "خوب" if score >= 70 else "نیازمند توجه" if score >= 40 else "در خطر"
+
+    tasks = customer.tasks.filter(done_at__isnull=True).select_related("owner").order_by("due_at")[:10]
+    recent_invoices = invoices.select_related("deal").order_by("-issued_at")[:50]
+
+    return {
+        "invoiced": float(inv["amount"] or 0),
+        "invoice_count": inv["count"] or 0,
+        "unsettled": float(inv["unsettled"] or 0),
+        "overdue_debt": float(overdue_debt),
+        "last_invoice": jalali_str(inv["last"]) if inv["last"] else "",
+        "days_quiet": days_quiet,
+        "days_since_buy": days_since_buy,
+        "active_months": active_months,
+        "series": series,
+        "health": {"score": score, "label": label, "reasons": reasons},
+        "tasks": TaskSerializer(tasks, many=True).data,
+        "invoices": SalesInvoiceSerializer(recent_invoices, many=True).data,
+    }
+
+
+def bulk_assign(request, scoped_qs):
+    """
+    Set the owner on the selected rows of `scoped_qs`.
+
+    The new owner has to be on this book's roster (`employee_options`), for
+    the same reason the single-record picker is limited to it: a customer
+    filed under someone who has never worked the book shows up in nobody's
+    reports.
+    """
+    if not is_crm_manager(request.user):
+        return Response({"detail": "تغییر کارشناس فقط برای مدیران فروش است."}, status=403)
+    ids = [i for i in (request.data.get("ids") or []) if isinstance(i, int)]
+    owner_id = request.data.get("owner")
+    owner = employee_options(request).filter(pk=owner_id).first() if owner_id else None
+    if not ids or not owner:
+        return Response({"detail": "ردیف‌ها و کارشناس جدید را انتخاب کنید."}, status=400)
+    updated = scoped_qs.filter(pk__in=ids).update(owner=owner)
+    return Response({"updated": updated, "owner_name": owner.full_name_fa})
+
+
+def deal_summary(qs) -> dict:
+    """Totals for a set of deals. Shared by the /summary/ endpoint the
+    drill-down header reads and by the Excel export, so the strip above the
+    rows and the جمع line inside the file are the same arithmetic."""
+    agg = qs.aggregate(
+        count=Count("id", distinct=True),
+        amount=Sum("amount_rial"),
+        profit=Sum("profit_rial"),
+        cost=Sum("cost_rial"),
+    )
+    amount = float(agg["amount"] or 0)
+    profit = float(agg["profit"] or 0)
+    return {
+        "count": agg["count"] or 0,
+        "amount": amount,
+        "profit": profit,
+        "cost": float(agg["cost"] or 0),
+        "margin_pct": round(profit / amount * 100, 1) if amount else 0.0,
+    }
+
+
+def activity_summary(qs) -> dict:
+    """The call-quality equivalent of `deal_summary`."""
+    total = qs.count()
+    success = qs.filter(result=Activity.Result.SUCCESS).count()
+    return {
+        "count": total,
+        "success": success,
+        "success_rate": round(success / total * 100, 1) if total else 0.0,
+        "customers": qs.values("customer_id").distinct().count(),
+        "minutes": qs.aggregate(s=Sum("duration_min"))["s"] or 0,
+    }
+
+
 class DealViewSet(_Base):
     owner_field = "owner"
     channel_field = "channel"
@@ -765,10 +1021,28 @@ class DealViewSet(_Base):
                 | Q(customer__name_fa__icontains=search)
                 | Q(code__icontains=search)
             )
-        return qs.select_related(
+        ids = id_list(self.request)
+        if ids:
+            qs = qs.filter(pk__in=ids)
+        qs = qs.select_related(
             "customer", "customer__province", "customer__group", "owner",
             "stage", "lead_source", "lost_reason",
         ).distinct()
+        return apply_ordering(qs, self.request, self.ORDERING)
+
+    #: Sortable columns of the معامله‌ها table → the lookup behind each.
+    ORDERING = {
+        "title": "title",
+        "customer": "customer__name_fa",
+        "owner": "owner__full_name_fa",
+        "stage": "stage__order",
+        "status": "status",
+        "amount": "amount_rial",
+        "profit": "profit_rial",
+        "opened": "opened_at",
+        "closed": "closed_at",
+        "expected": "expected_close_date",
+    }
 
     def create_defaults(self, serializer) -> dict:
         data = serializer.validated_data
@@ -878,20 +1152,32 @@ class DealViewSet(_Base):
         did not go through the API cannot silently skip the log.
         """
         deal = self.get_object()
+        stage, error = self._target_stage(request)
+        if error:
+            return error
+        self._apply_move(deal, stage, request)
+        return Response(DealDetailSerializer(deal).data)
+
+    def _target_stage(self, request):
+        """The stage a move asks for, or the 400 explaining why not."""
         stage = PipelineStage.objects.filter(
             pk=request.data.get("stage"), dataset=active_dataset(request)
         ).first()
         if not stage:
-            return Response({"detail": "مرحله نامعتبر است."}, status=400)
+            return None, Response({"detail": "مرحله نامعتبر است."}, status=400)
         # Same rule as the edit form: a loss with no reason would leave a hole
         # in the "دلایل از دست رفتن" report, and every path into that state
         # has to enforce it — not just the one with a nice prompt attached.
         if stage.kind == PipelineStage.Kind.LOST and not request.data.get("lost_reason"):
-            return Response(
+            return None, Response(
                 {"lost_reason": "برای ثبت فرصت از دست رفته، انتخاب دلیل الزامی است."},
                 status=400,
             )
+        return stage, None
 
+    def _apply_move(self, deal, stage, request):
+        """One deal to one stage, with its stage event — shared by the single
+        move and the bulk one so neither can skip the log the funnel reads."""
         previous = deal.stage
         now = timezone.now()
         last = deal.stage_events.order_by("-at").first()
@@ -924,7 +1210,45 @@ class DealViewSet(_Base):
             deal=deal, from_stage=previous, to_stage=stage, at=now,
             by=request.user, days_in_previous=days,
         )
-        return Response(DealDetailSerializer(deal).data)
+
+    @action(detail=False, methods=["post"], url_path="bulk-move")
+    def bulk_move(self, request):
+        """
+        Move several deals to one stage at once.
+
+        Each still goes through `_apply_move`, so each gets its own stage event
+        and its own close date — a bulk path that updated the column in one
+        query would be quicker and would leave the funnel report blind to
+        every deal moved that way.
+        """
+        if not can_write_crm(request.user):
+            return Response({"detail": CrmWritePermission.message}, status=403)
+        stage, error = self._target_stage(request)
+        if error:
+            return error
+        ids = request.data.get("ids") or []
+        # Through the scoped queryset: a rep can only move what they can see.
+        deals = self.scoped(
+            Deal.objects.filter(
+                pk__in=[i for i in ids if isinstance(i, int)],
+                dataset=active_dataset(request),
+            )
+        ).select_related("stage", "customer")
+        moved = 0
+        for deal in deals:
+            if deal.stage_id == stage.id:
+                continue
+            self._apply_move(deal, stage, request)
+            moved += 1
+        return Response({"moved": moved})
+
+    @action(detail=False, methods=["post"], url_path="bulk-assign")
+    def bulk_assign(self, request):
+        """Hand several deals to another کارشناس. Managers only — a rep's
+        ownership is their scope, so it is not theirs to give away."""
+        return bulk_assign(request, self.scoped(
+            Deal.objects.filter(dataset=active_dataset(request))
+        ))
 
     @action(detail=True, methods=["get"])
     def history(self, request, pk=None):
@@ -939,22 +1263,7 @@ class DealViewSet(_Base):
     def summary(self, request):
         """Totals for the current filter — shown above a drill-down list so
         the drawer's numbers visibly reconcile with the chart."""
-        qs = self.get_queryset()
-        agg = qs.aggregate(
-            count=Count("id", distinct=True),
-            amount=Sum("amount_rial"),
-            profit=Sum("profit_rial"),
-            cost=Sum("cost_rial"),
-        )
-        amount = float(agg["amount"] or 0)
-        profit = float(agg["profit"] or 0)
-        return Response({
-            "count": agg["count"] or 0,
-            "amount": amount,
-            "profit": profit,
-            "cost": float(agg["cost"] or 0),
-            "margin_pct": round(profit / amount * 100, 1) if amount else 0.0,
-        })
+        return Response(deal_summary(self.get_queryset()))
 
 
 class DealItemViewSet(_Base):
@@ -1028,16 +1337,7 @@ class ActivityViewSet(_Base):
 
     @action(detail=False, methods=["get"])
     def summary(self, request):
-        qs = self.get_queryset()
-        total = qs.count()
-        success = qs.filter(result=Activity.Result.SUCCESS).count()
-        return Response({
-            "count": total,
-            "success": success,
-            "success_rate": round(success / total * 100, 1) if total else 0.0,
-            "customers": qs.values("customer_id").distinct().count(),
-            "minutes": qs.aggregate(s=Sum("duration_min"))["s"] or 0,
-        })
+        return Response(activity_summary(self.get_queryset()))
 
 
 class TaskViewSet(_Base):
@@ -1124,6 +1424,418 @@ class CrmReportView(GatedAPIView):
         return Response(data)
 
 
+def export_context(request, extra: list[tuple[str, str]] | None = None) -> list[tuple[str, str]]:
+    """
+    The filters behind an export, in words.
+
+    A workbook leaves the app and is read days later by someone who was not
+    looking at the screen it came from, so it has to carry its own question:
+    which window, whose book, which کارشناس, which narrowing. Names, not ids —
+    «استان: اصفهان», not «province=7».
+    """
+    q = request.query_params
+    f = query_filters(request)
+    rows: list[tuple[str, str]] = []
+
+    if f.start and f.end:
+        last = f.end - timedelta(days=1)
+        rows.append(("بازه زمانی", f"{jalali_str(f.start)} تا {jalali_str(last)}"))
+
+    def name_of(model, key, label, field="name_fa"):
+        value = q.get(key)
+        if not value:
+            return
+        obj = model.objects.filter(pk=value).first()
+        if obj:
+            rows.append((label, getattr(obj, field)))
+
+    name_of(DimEmployee, "owner", "کارشناس", "full_name_fa")
+    name_of(DimProvince, "province", "استان")
+    name_of(CustomerGroup, "group", "گروه مشتری")
+    name_of(LeadSource, "source", "منبع سرنخ")
+    name_of(Product, "product", "محصول")
+    name_of(PipelineStage, "stage", "مرحله فروش")
+    name_of(LostReason, "lost_reason", "دلیل عدم موفقیت")
+    name_of(Customer, "customer", "مشتری")
+
+    STATUS = {"won": "موفق", "open": "جاری", "lost": "ناموفق"}
+    if q.get("status"):
+        rows.append(("وضعیت معامله", STATUS.get(q["status"], q["status"])))
+    if q.get("search"):
+        rows.append(("جستجو", q["search"]))
+    if q.get("invoiced") == "0":
+        rows.append(("فاکتور", "بدون فاکتور"))
+    elif q.get("invoiced") == "1":
+        rows.append(("فاکتور", "فاکتورشده"))
+
+    CHANNEL = {
+        SalesChannel.TEAM: "فروش همکار",
+        SalesChannel.ORGANIZATIONAL: "فروش بانکی",
+        SalesChannel.B2B: "فروش B2B",
+    }
+    if f.channels:
+        rows.append(("دفتر", "، ".join(CHANNEL.get(c, c) for c in f.channels)))
+    scope = crm_scope(request.user)
+    if not scope.sees_all:
+        emp = employee_for(request.user)
+        rows.append(("محدوده", f"فقط رکوردهای {emp.full_name_fa if emp else 'کاربر'}"))
+
+    rows += extra or []
+    rows.append(("تهیه‌شده توسط", request.user.get_full_name() or request.user.username))
+    rows.append(("تاریخ خروجی", jalali_str(timezone.now())))
+    return rows
+
+
+def xlsx_response(workbook, filename: str) -> HttpResponse:
+    """A workbook as a download, with the Persian filename kept intact."""
+    from urllib.parse import quote
+
+    from apps.crm.export import to_stream
+
+    response = HttpResponse(
+        to_stream(workbook).read(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    safe = quote(f"{filename}.xlsx")
+    response["Content-Disposition"] = (
+        f"attachment; filename=export.xlsx; filename*=UTF-8''{safe}"
+    )
+    # The browser reads the name off this header, which CORS hides by default.
+    response["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return response
+
+
+class CrmSearchView(GatedAPIView):
+    """
+    One box, the whole CRM: customers by name, contact, phone or code; deals
+    by title or code. Scoped exactly as the lists are — the viewsets do the
+    narrowing, so a search can never reveal a row the list would hide.
+
+    Kept small on purpose (a handful of each): this answers «where is X»,
+    and the lists answer «show me all of them».
+    """
+
+    LIMIT = 6
+
+    def get(self, request):
+        q = (request.query_params.get("q") or "").strip()
+        if len(q) < 2:
+            return Response({"customers": [], "deals": []})
+
+        # Through the list viewset, so the scoping (dataset, book, owner) is
+        # the one the customer list applies — not a second copy of it.
+        cvs = CustomerViewSet()
+        cvs.request = request
+        cvs.action, cvs.detail, cvs.kwargs, cvs.format_kwarg = "list", False, {}, None
+        customers = cvs.scoped(
+            Customer.objects.filter(dataset=active_dataset(request), merged_into__isnull=True)
+        ).select_related("group", "province", "owner", "lead_source").filter(
+            Q(name_fa__icontains=q) | Q(contact_name__icontains=q)
+            | Q(phone__icontains=q) | Q(mobile__icontains=q) | Q(code__icontains=q)
+        ).order_by(F("last_activity_at").desc(nulls_last=True))[: self.LIMIT]
+
+        # Deals across every status and all time: «where is the Tolou deal»
+        # should not depend on which month the filter bar was left on.
+        deals = self_scope_deals(request).filter(
+            Q(title__icontains=q) | Q(code__icontains=q) | Q(customer__name_fa__icontains=q)
+        ).select_related("customer", "owner", "stage").order_by("-opened_at")[: self.LIMIT]
+
+        return Response({
+            "customers": CustomerListSerializer(customers, many=True).data,
+            "deals": DealListSerializer(deals, many=True).data,
+        })
+
+
+def self_scope_deals(request):
+    """Every deal this account may see, with no time window applied."""
+    vs = DealViewSet()
+    vs.request = request
+    vs.action, vs.detail, vs.kwargs, vs.format_kwarg = "list", False, {}, None
+    return vs.scoped(Deal.objects.filter(dataset=active_dataset(request)))
+
+
+class CrmTodayView(GatedAPIView):
+    """
+    کارتابل امروز — the working screen, as opposed to the reporting ones.
+
+    Every other CRM screen answers «چه خبر بوده؟» over a window the user
+    picks. This one answers «الان باید چه کار کنم؟», which is a different
+    question and has no date filter: it is always now. What it surfaces is
+    work that is *owed* — a task past its due date, a call that ended in
+    «نیاز به پیگیری» and was never followed up, an open deal that has gone
+    quiet, a customer who has not been contacted in months — the expensive
+    ones first.
+
+    A کارشناس sees their own book; a manager sees the team's and can narrow
+    to one person with `?owner=`. That is the ordinary CRM scope applied
+    through the same `crm_scope`, not a rule of its own.
+    """
+
+    #: An open deal with no activity for this long is not being worked.
+    STALE_DEAL_DAYS = 14
+    #: A customer who bought before but has heard nothing for this long.
+    DORMANT_DAYS = 60
+    #: How far ahead «کارهای پیش‌رو» and «نزدیک به بسته‌شدن» look.
+    HORIZON_DAYS = 7
+    #: Overdue tasks older than this are a backlog, not today's work. CRM was
+    #: loaded with sixteen months of دیدار history, so hundreds of tasks are
+    #: equally late; listed together they bury the handful that still matter
+    #: (a «میز کار» was once removed for exactly that). They are counted and
+    #: linked, not listed.
+    BACKLOG_DAYS = 60
+    #: Rows per list. This is a worklist, not a report: twenty items somebody
+    #: can act on today beats four hundred they will scroll past.
+    LIMIT = 20
+
+    def get(self, request):
+        ds = active_dataset(request)
+        scope = crm_scope(request.user)
+        now = timezone.now()
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        horizon = now + timedelta(days=self.HORIZON_DAYS)
+
+        asked = request.query_params.get("owner")
+        owner_id = int(asked) if (asked or "").isdigit() else None
+        if not scope.sees_all:
+            # A rep's own book, whatever the URL says.
+            owner_id = scope.employee_id
+            if owner_id is None:
+                return Response(self._empty())
+
+        def mine(qs, field="owner_id"):
+            return qs.filter(**{field: owner_id}) if owner_id else qs
+
+        def in_book(qs, field="channel"):
+            """Narrow to the books this account covers — the same rule the
+            list endpoints apply, and the one it would be dangerous to
+            reimplement loosely here."""
+            if scope.channels is None:
+                return qs
+            if not scope.channels:
+                return qs.none()
+            return qs.filter(**{f"{field}__in": list(scope.channels)})
+
+        # ---- کارها ---------------------------------------------------------
+        tasks = mine(Task.objects.filter(dataset=ds, done_at__isnull=True))
+        if scope.channels is not None:
+            # A کار may stand on its own with no customer behind it; it
+            # belongs to nobody's book and must not vanish because of that.
+            tasks = (
+                tasks.none() if not scope.channels
+                else tasks.filter(
+                    Q(customer__isnull=True)
+                    | Q(customer__channel__in=list(scope.channels))
+                )
+            )
+        tasks = tasks.select_related("customer", "deal", "owner")
+
+        backlog_cut = now - timedelta(days=self.BACKLOG_DAYS)
+        # Newest first: yesterday's missed call is more recoverable than one
+        # from last season, so it leads.
+        overdue_qs = tasks.filter(due_at__lt=now, due_at__gte=backlog_cut).order_by("-due_at")
+        backlog = tasks.filter(due_at__lt=backlog_cut).count()
+        today_qs = tasks.filter(due_at__gte=now, due_at__lte=today_end).order_by("due_at")
+        upcoming_qs = tasks.filter(due_at__gt=today_end, due_at__lte=horizon).order_by("due_at")
+
+        # ---- قول پیگیری ----------------------------------------------------
+        # A call that ended in «نیاز به پیگیری» and is still the customer's
+        # latest contact: the promise was made and nothing happened since.
+        follow = in_book(
+            mine(Activity.objects.filter(
+                dataset=ds,
+                result=Activity.Result.FOLLOW_UP,
+                at__gte=now - timedelta(days=90),
+            )),
+            "customer__channel",
+        ).select_related("customer", "owner", "deal")
+        pending = [
+            a for a in follow.order_by("-at")[:200]
+            if not Activity.objects.filter(customer_id=a.customer_id, at__gt=a.at)
+            .exclude(pk=a.pk).exists()
+        ][: self.LIMIT]
+
+        # ---- معاملات راکد --------------------------------------------------
+        stale_cut = now - timedelta(days=self.STALE_DEAL_DAYS)
+        stale_qs = in_book(
+            mine(Deal.objects.filter(dataset=ds, status=Deal.Status.OPEN))
+        ).annotate(last_touch=Max("activities__at")).filter(
+            Q(last_touch__lt=stale_cut)
+            | Q(last_touch__isnull=True, opened_at__lt=stale_cut)
+        ).select_related("customer", "owner", "stage")
+
+        # ---- نزدیک به بسته‌شدن ----------------------------------------------
+        closing = in_book(mine(Deal.objects.filter(
+            dataset=ds, status=Deal.Status.OPEN,
+            expected_close_date__isnull=False,
+            expected_close_date__lte=horizon.date(),
+        ))).select_related("customer", "owner", "stage").order_by("expected_close_date")
+
+        # ---- مشتریان بی‌تماس ------------------------------------------------
+        quiet_cut = now - timedelta(days=self.DORMANT_DAYS)
+        quiet = in_book(mine(Customer.objects.filter(
+            dataset=ds,
+            status__in=[Customer.Status.ACTIVE, Customer.Status.DORMANT],
+        ))).filter(
+            Q(last_activity_at__lt=quiet_cut) | Q(last_activity_at__isnull=True)
+        ).select_related("owner", "province", "group").order_by("-first_deal_won_at")
+
+        # ---- امروز تا اینجا --------------------------------------------------
+        open_deals = in_book(mine(Deal.objects.filter(dataset=ds, status=Deal.Status.OPEN)))
+        # `weighted_rial` is a property, so the forecast is summed in the
+        # query rather than by walking every open deal in Python.
+        open_agg = open_deals.aggregate(
+            count=Count("id"),
+            amount=Sum("amount_rial"),
+            weighted=Sum(
+                F("amount_rial") * F("stage__probability_pct") / Value(100),
+                output_field=DecimalField(max_digits=20, decimal_places=2),
+            ),
+        )
+
+        return Response({
+            "as_of": jalali_str(now),
+            "owner": owner_id,
+            "counters": {
+                "overdue": overdue_qs.count(),
+                "backlog": backlog,
+                "due_today": today_qs.count(),
+                "pending_follow_up": len(pending),
+                "stale_deals": stale_qs.count(),
+                "quiet_customers": quiet.count(),
+                "activities_today": mine(
+                    Activity.objects.filter(dataset=ds, at__gte=day_start)
+                ).count(),
+                "open_count": open_agg["count"] or 0,
+                "open_amount": float(open_agg["amount"] or 0),
+                "open_weighted": float(open_agg["weighted"] or 0),
+            },
+            "overdue": TaskSerializer(overdue_qs[: self.LIMIT], many=True).data,
+            "due_today": TaskSerializer(today_qs[: self.LIMIT], many=True).data,
+            "upcoming": TaskSerializer(upcoming_qs[: self.LIMIT], many=True).data,
+            "pending_follow_up": ActivitySerializer(pending, many=True).data,
+            "stale_deals": DealListSerializer(
+                stale_qs.order_by("-amount_rial")[: self.LIMIT], many=True
+            ).data,
+            "closing_soon": DealListSerializer(closing[: self.LIMIT], many=True).data,
+            "quiet_customers": CustomerListSerializer(quiet[: self.LIMIT], many=True).data,
+            "thresholds": {
+                "stale_days": self.STALE_DEAL_DAYS,
+                "dormant_days": self.DORMANT_DAYS,
+                "horizon_days": self.HORIZON_DAYS,
+                "backlog_days": self.BACKLOG_DAYS,
+            },
+        })
+
+    def _empty(self):
+        """An account with no salesperson behind it owns nothing — and must
+        not be handed the team's worklist as a consolation."""
+        return {
+            "as_of": jalali_str(timezone.now()), "owner": None,
+            "counters": {k: 0 for k in (
+                "overdue", "backlog", "due_today", "pending_follow_up", "stale_deals",
+                "quiet_customers", "activities_today", "open_count",
+                "open_amount", "open_weighted",
+            )},
+            "overdue": [], "due_today": [], "upcoming": [],
+            "pending_follow_up": [], "stale_deals": [], "closing_soon": [],
+            "quiet_customers": [],
+            "thresholds": {
+                "stale_days": self.STALE_DEAL_DAYS,
+                "dormant_days": self.DORMANT_DAYS,
+                "horizon_days": self.HORIZON_DAYS,
+                "backlog_days": self.BACKLOG_DAYS,
+            },
+        }
+
+
+class CrmReportExportView(GatedAPIView):
+    """گزارش‌ها → اکسل. The report exactly as the screen shows it."""
+
+    def get(self, request, key: str):
+        from apps.crm.export import report_workbook
+
+        if key not in rpt.REPORTS:
+            return Response(
+                {"detail": f"گزارش «{key}» تعریف نشده است."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        f = query_filters(request)
+        data = rpt.run_report(key, f, request.query_params.get("axis") or "")
+        context = export_context(request, [("محور گزارش", rpt.AXIS_LABELS.get(data["axis"], data["axis"]))])
+        wb = report_workbook(data, context)
+        return xlsx_response(wb, data["title"])
+
+
+#: Which viewset answers for each drill kind. The export reuses the list
+#: endpoints rather than rebuilding their queries, so an exported file and the
+#: drawer it was opened from cannot list different records — and the scoping
+#: those viewsets apply (dataset, channel, owner) is applied here too, which
+#: is the half that would be dangerous to reimplement.
+DRILL_VIEWSETS = {
+    "deals": "DealViewSet",
+    "customers": "CustomerViewSet",
+    "activities": "ActivityViewSet",
+    "feedback": "CustomerFeedbackViewSet",
+    "invoices": "SalesInvoiceViewSet",
+}
+
+
+class CrmDrillExportView(GatedAPIView):
+    """
+    ریز رکوردها → اکسل: every record behind a number, not one page of them.
+
+    The in-browser CSV this replaces serialised whatever the drawer had
+    loaded — 25 rows — under a header that said how many thousands there
+    were. A file that quietly holds 6٪ of what it claims is worse than no
+    export button at all.
+    """
+
+    #: A ceiling, so one click cannot try to stream a million rows into
+    #: memory. Far above any real drill-down; if it is ever hit, the file
+    #: says so on its «فیلترها» sheet rather than truncating in silence.
+    MAX_ROWS = 20000
+
+    def get(self, request):
+        from apps.crm.export import KIND_TITLE, drill_workbook
+
+        kind = request.query_params.get("kind") or "deals"
+        if kind not in DRILL_VIEWSETS:
+            return Response(
+                {"detail": f"نوع «{kind}» تعریف نشده است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        viewset = globals()[DRILL_VIEWSETS[kind]]()
+        viewset.request = request
+        viewset.action = "list"
+        viewset.detail = False
+        viewset.kwargs = {}
+        viewset.format_kwarg = None
+        qs = viewset.filter_queryset(viewset.get_queryset())
+
+        total = qs.count()
+        rows = viewset.get_serializer(qs[: self.MAX_ROWS], many=True).data
+
+        title = request.query_params.get("title") or KIND_TITLE.get(kind, "ریز اطلاعات")
+        extra: list[tuple[str, str]] = []
+        if total > self.MAX_ROWS:
+            extra.append((
+                "هشدار",
+                f"{total:,} رکورد یافت شد؛ {self.MAX_ROWS:,} ردیف نخست در این فایل است.",
+            ))
+
+        summary = None
+        if kind == "deals":
+            summary = deal_summary(qs)
+        elif kind == "activities":
+            summary = activity_summary(qs)
+
+        wb = drill_workbook(kind, [dict(r) for r in rows], title,
+                            export_context(request, extra), summary)
+        return xlsx_response(wb, title)
+
+
 class CrmReportIndexView(GatedAPIView):
     """The report catalogue, so the UI builds its menu from the server."""
 
@@ -1156,11 +1868,24 @@ class PipelineBoardView(GatedAPIView):
             qs = qs.filter(
                 Q(title__icontains=search) | Q(customer__name_fa__icontains=search)
             )
-        qs = qs.select_related("customer", "owner", "stage")
+        # When each deal was last worked. A card's age says how long it has
+        # existed; this says whether anyone is still on it, which is the
+        # question a manager scanning the board is actually asking.
+        qs = qs.select_related("customer", "owner", "stage").annotate(
+            last_touch=Max("activities__at"),
+        )
+        now = timezone.now()
 
         by_stage: dict[int, list] = {}
+        idle: dict[int, int | None] = {}
         for deal in qs:
             by_stage.setdefault(deal.stage_id, []).append(deal)
+            touch = deal.last_touch or deal.opened_at
+            idle[deal.id] = (now - touch).days if touch else None
+
+        forecast = self._forecast(
+            [d for deals in by_stage.values() for d in deals], now.date()
+        )
 
         columns = []
         for st in PipelineStage.objects.filter(
@@ -1176,9 +1901,51 @@ class PipelineBoardView(GatedAPIView):
                 "count": len(deals),
                 "amount": float(sum(d.amount_rial for d in deals)),
                 "weighted": float(sum(d.weighted_rial for d in deals)),
-                "deals": DealListSerializer(deals, many=True).data,
+                "deals": [
+                    {**row, "idle_days": idle.get(row["id"])}
+                    for row in DealListSerializer(deals, many=True).data
+                ],
             })
-        return Response({"columns": columns})
+        return Response({"columns": columns, "forecast": forecast})
+
+    @staticmethod
+    def _forecast(deals, today) -> list[dict]:
+        """
+        The weighted pipeline by the month each deal is expected to close.
+
+        «ارزش وزنی» on its own is one number with no date on it — it says how
+        much is likely, not when. Bucketing by `expected_close_date` answers
+        the question a sales manager is asked upstairs: how much lands this
+        month, next month, later. Deals with no date, or a date already
+        passed, are shown as such rather than folded into «this month», where
+        they would inflate the figure everyone reads first.
+        """
+        this_key = jalali_month_of(today)
+        # The day after this Jalali month ends — Gregorian month arithmetic
+        # would land back inside the same Jalali month for part of it.
+        _start, month_end = month_bounds(*this_key)
+        next_key = jalali_month_of(month_end)
+
+        buckets = {
+            "overdue": {"key": "overdue", "label": "تاریخش گذشته", "count": 0, "amount": 0.0, "weighted": 0.0},
+            "this": {"key": "this", "label": f"این ماه ({month_label(*this_key)})", "count": 0, "amount": 0.0, "weighted": 0.0},
+            "next": {"key": "next", "label": f"ماه بعد ({month_label(*next_key)})", "count": 0, "amount": 0.0, "weighted": 0.0},
+            "later": {"key": "later", "label": "بعدتر", "count": 0, "amount": 0.0, "weighted": 0.0},
+            "none": {"key": "none", "label": "بدون تاریخ", "count": 0, "amount": 0.0, "weighted": 0.0},
+        }
+        for d in deals:
+            when = d.expected_close_date
+            if not when:
+                b = "none"
+            elif when < today:
+                b = "overdue"
+            else:
+                key = jalali_month_of(when)
+                b = "this" if key == this_key else "next" if key == next_key else "later"
+            buckets[b]["count"] += 1
+            buckets[b]["amount"] += float(d.amount_rial)
+            buckets[b]["weighted"] += float(d.weighted_rial)
+        return list(buckets.values())
 
 
 class CrmMeView(GatedAPIView):
@@ -1298,6 +2065,8 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
     Managers only: the queue is a view of the whole customer file, so there is
     no per-rep slice of it that would still be useful.
     """
+
+    pagination_class = CrmPagination
 
     permission_classes = [CrmManagerOnly, CrmWritePermission]
     serializer_class = MatchCandidateSerializer
@@ -1434,17 +2203,21 @@ class SalesInvoiceViewSet(viewsets.ReadOnlyModelViewSet):
     number that opened it.
     """
 
+    pagination_class = CrmPagination
+
     permission_classes = [CrmAccess]
     serializer_class = SalesInvoiceSerializer
     queryset = SalesInvoice.objects.all()
 
     def get_queryset(self):
         qs = query_filters(self.request).invoices().select_related(
-            "customer", "owner", "deal"
+            "customer", "customer__owner", "owner", "deal", "deal__owner"
         )
         search = (self.request.query_params.get("search") or "").strip()
         if search:
             qs = qs.filter(
-                Q(number__icontains=search) | Q(customer__name_fa__icontains=search)
+                Q(number__icontains=search)
+                | Q(customer__name_fa__icontains=search)
+                | Q(party_name__icontains=search)
             )
         return qs.order_by("-issued_at", "-number")

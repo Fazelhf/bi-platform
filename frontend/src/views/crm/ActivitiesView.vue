@@ -5,6 +5,7 @@ import { crmApi, type CrmActivity } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import ActivityForm from "@/components/crm/ActivityForm.vue";
 import TaskForm from "@/components/crm/TaskForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
@@ -27,11 +28,15 @@ const taskState = ref("open");
 const page = ref(1);
 const PAGE_SIZE = 30;
 
+/** The filter behind the فعالیت‌ها tab — the list, its totals and its export
+ * all read this one object rather than each rebuilding it. */
+const activityParams = computed(() => ({ ...crm.query, kind: kind.value, result: result.value }));
+
 async function load() {
   loading.value = true;
   try {
     if (tab.value === "activities") {
-      const p = { ...crm.query, kind: kind.value, result: result.value };
+      const p = activityParams.value;
       const [res, sum] = await Promise.all([
         crmApi.activities({ ...p, page: page.value, page_size: PAGE_SIZE }),
         crmApi.activitySummary(p),
@@ -136,6 +141,10 @@ function isOverdue(t: any) {
 
       <span class="text-xs text-slate-400 px-2">{{ num(total) }} رکورد</span>
       <span class="flex-1"></span>
+      <CrmExportButton
+        v-if="tab === 'activities'"
+        kind="activities" :params="activityParams" :total="total" title="فعالیت‌ها"
+      />
       <button
         v-if="crm.canEdit"
         class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"

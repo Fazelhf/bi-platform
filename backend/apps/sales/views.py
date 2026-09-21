@@ -37,6 +37,41 @@ from apps.core.permissions import (
     IsExecutiveOrAdmin,
     SalesChannelOwnership,
 )
+def _period_param(raw) -> DimPeriod:
+    """
+    The period a request is about.
+
+    A blank, stale or malformed id is the caller's mistake — an old bookmark,
+    a period someone deleted — so it comes back as a readable 400. It used to
+    raise DoesNotExist and reach the user as «خطای سرور».
+    """
+    try:
+        return DimPeriod.objects.get(pk=raw)
+    except (DimPeriod.DoesNotExist, ValueError, TypeError):
+        raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+
+
+def _amount(value, label: str) -> Decimal:
+    """
+    A figure typed into a sheet, as a Decimal — or a 400 naming the cell.
+
+    Stored raw, «۱۲۳abc» reached the model field, which raised Django's own
+    ValidationError: not a DRF one, so the user got «خطای سرور» and lost the
+    whole sheet instead of being told which cell to fix.
+    """
+    try:
+        return Decimal(str(value if value not in (None, "") else 0))
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValidationError({"detail": f"مقدار «{label}» عدد معتبری نیست."})
+
+
+def _valid_channel(channel: str) -> str:
+    """A channel from the fixed list, or a 400 — never figures filed under a typo."""
+    if channel not in SalesChannel.values:
+        raise ValidationError({"channel": "کانال فروش نامعتبر است."})
+    return channel
+
+
 from apps.sales.permissions import (
     CanApprove,
     CanEnterData,
@@ -240,7 +275,7 @@ class PeriodViewSet(viewsets.ModelViewSet):
         Every month of a year with its current grain and whether it can be
         changed — this is what the CEO's «دوره‌ها» panel renders.
         """
-        from apps.core.periods import has_facts, leaves_of
+        from apps.core.periods import has_any_facts, leaves_of
 
         year = int(request.query_params.get("year") or 0)
         months = DimPeriod.objects.filter(kind="month")
@@ -251,15 +286,15 @@ class PeriodViewSet(viewsets.ModelViewSet):
         for m in months.order_by("jalali_year", "jalali_month"):
             weeks = list(m.children.order_by("seq"))
             day_count = sum(w.children.count() for w in weeks)
-            month_has_facts = has_facts(m)
+            month_has_facts = has_any_facts(m)
             # A week counts as filled if anything under it holds figures, so a
             # week whose days have data still blocks going back to weekly.
             filled_weeks = [
-                w.seq for w in weeks if any(has_facts(l) for l in leaves_of(w))
+                w.seq for w in weeks if any(has_any_facts(l) for l in leaves_of(w))
             ]
             filled_days = [
                 w.seq for w in weeks
-                if w.children.exists() and any(has_facts(d) for d in w.children.all())
+                if w.children.exists() and any(has_any_facts(d) for d in w.children.all())
             ]
 
             grain = "month"
@@ -286,7 +321,7 @@ class PeriodViewSet(viewsets.ModelViewSet):
                 "can_go_daily": bool(weeks) and grain != "day" and not filled_weeks
                                 or (not weeks and not month_has_facts),
                 "blocked_reason": (
-                    "این ماه داده‌ی ماهانه دارد" if month_has_facts and not weeks
+                    "این ماه داده‌ی ثبت‌شده دارد" if month_has_facts and not weeks
                     else f"هفته‌های {'، '.join(map(str, filled_weeks))} داده دارند"
                     if filled_weeks else ""
                 ),
@@ -348,18 +383,18 @@ class TeamViewSet(viewsets.ModelViewSet):
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):
-    queryset = DimEmployee.objects.select_related("team").all()
+    queryset = DimEmployee.objects.select_related("team").order_by("full_name_fa", "id")
     serializer_class = EmployeeSerializer
     filterset_fields = ["team", "is_active"]
 
 
 class ProvinceViewSet(viewsets.ModelViewSet):
-    queryset = DimProvince.objects.all()
+    queryset = DimProvince.objects.order_by("name_fa", "id")
     serializer_class = ProvinceSerializer
 
 
 class BankViewSet(viewsets.ModelViewSet):
-    queryset = DimBank.objects.all()
+    queryset = DimBank.objects.order_by("name_fa", "id")
     serializer_class = BankSerializer
     filterset_fields = ["kind"]
 
@@ -441,7 +476,9 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
 
 
 class SalesProvinceViewSet(viewsets.ModelViewSet):
-    queryset = FactSalesProvince.objects.select_related("province", "period").all()
+    queryset = FactSalesProvince.objects.select_related("province", "period").order_by(
+        "-period__start_date", "province__name_fa", "id"
+    )
     serializer_class = SalesProvinceSerializer
     permission_classes = [DepartmentEntryPermission]
     entry_department = "sales_org"
@@ -454,7 +491,9 @@ class SalesProvinceViewSet(viewsets.ModelViewSet):
 
 
 class CollectionViewSet(viewsets.ModelViewSet):
-    queryset = FactCollection.objects.select_related("bank", "period").all()
+    queryset = FactCollection.objects.select_related("bank", "period").order_by(
+        "-period__start_date", "bank__name_fa", "id"
+    )
     serializer_class = CollectionSerializer
     permission_classes = [DepartmentEntryPermission]
     entry_department = "sales_org"
@@ -490,7 +529,7 @@ class KPIResultViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["post"], permission_classes=[CanApprove])
     def recompute(self, request):
         period_id = request.data.get("period") or request.query_params.get("period")
-        period = DimPeriod.objects.get(pk=period_id)
+        period = _period_param(period_id)
         n = compute_period_kpis(period)
         return Response({"period": period.label, "rows_written": n})
 
@@ -512,8 +551,7 @@ class DashboardSummaryView(APIView):
     def get(self, request):
         from apps.sales.models import SalesChannel
 
-        period_id = request.query_params.get("period")
-        period = DimPeriod.objects.get(pk=period_id)
+        period = _period_param(request.query_params.get("period"))
         channel = request.query_params.get("channel", SalesChannel.TEAM)
         assert_channel_visible(request.user, channel)
 
@@ -535,7 +573,8 @@ class DashboardSummaryView(APIView):
         # own facts.
         province = (
             FactSalesProvince.objects.filter(
-                period_id__in=leaf_ids_for(period), status=ApprovalStatus.APPROVED
+                period_id__in=leaf_ids_for(period), channel=channel,
+                status=ApprovalStatus.APPROVED,
             )
             .select_related("province")
             .values("province__name_fa")
@@ -702,7 +741,9 @@ class SalesInputView(APIView):
     permission_classes = [SalesChannelOwnership]
 
     def _channel(self, request):
-        return request.query_params.get("channel") or request.data.get("channel") or "team"
+        return _valid_channel(
+            request.query_params.get("channel") or request.data.get("channel") or "team"
+        )
 
     def _assert_owner(self, request, channel):
         u = request.user
@@ -714,7 +755,7 @@ class SalesInputView(APIView):
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
                               OpenApiParameter("channel", str)], responses=dict)
     def get(self, request):
-        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        period = _period_param(request.query_params.get("period"))
         channel = self._channel(request)
         # Only POST used to be checked, so another department's sheet — names,
         # figures and all — could simply be read.
@@ -871,7 +912,7 @@ class SalesInputView(APIView):
 
     def post(self, request):
         import uuid
-        period = DimPeriod.objects.get(pk=request.data.get("period"))
+        period = _period_param(request.data.get("period"))
         channel = self._channel(request)
         self._assert_owner(request, channel)
 
@@ -923,7 +964,7 @@ class SalesInputView(APIView):
                 employee = DimEmployee.objects.create(
                     full_name_fa=name, code=f"emp-{uuid.uuid4().hex[:8]}"
                 )
-            values = {m: (row.get(m) or 0) for m in editable}
+            values = {m: _amount(row.get(m), f"{name} · {m}") for m in editable}
             values["status"] = status
             if submit:
                 values["submitted_by"] = user
@@ -960,11 +1001,14 @@ class SalesInputView(APIView):
         # Provinces. Every province is sent back, so skip untouched empty rows
         # to avoid creating 31 zero facts per channel per month. The province
         # target is the CEO's too.
+        known_provinces = set(DimProvince.objects.values_list("id", flat=True))
         for p in request.data.get("provinces", []):
             pid = p.get("province_id")
             if not pid:
                 continue
-            sales = p.get("sales_rial") or 0
+            if pid not in known_provinces:
+                raise ValidationError({"detail": "استان انتخاب‌شده وجود ندارد."})
+            sales = _amount(p.get("sales_rial"), "فروش استان")
             existing = FactSalesProvince.objects.filter(
                 period=period, province_id=pid, channel=channel
             ).first()
@@ -983,9 +1027,9 @@ class SalesInputView(APIView):
             if not gid:
                 continue
             values = {
-                "sales_rial": g.get("sales_rial") or 0,
-                "profit_rial": g.get("profit_rial") or 0,
-                "invoice_count": g.get("invoice_count") or 0,
+                "sales_rial": _amount(g.get("sales_rial"), "فروش بخش مشتری"),
+                "profit_rial": _amount(g.get("profit_rial"), "سود بخش مشتری"),
+                "invoice_count": _amount(g.get("invoice_count"), "تعداد فاکتور"),
             }
             existing = FactSalesByCustomerGroup.objects.filter(
                 period=period, customer_group_id=gid, channel=channel
@@ -1065,7 +1109,7 @@ class SalesTargetView(APIView):
         from apps.core.periods import leaf_ids_for
         from apps.sales.models import SalesTarget
 
-        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        period = _period_param(request.query_params.get("period"))
         month = month_of(period)  # plans are always held on the month
         channel = request.query_params.get("channel", "team")
         leaves = leaf_ids_for(month)
@@ -1141,24 +1185,32 @@ class SalesTargetView(APIView):
     def post(self, request):
         from apps.sales.models import SalesTarget
 
-        period = DimPeriod.objects.get(pk=request.data.get("period"))
+        period = _period_param(request.data.get("period"))
         month = month_of(period)
-        channel = request.data.get("channel", "team")
+        channel = _valid_channel(request.data.get("channel", "team"))
+        known_people = set(DimEmployee.objects.values_list("id", flat=True))
+        known_provinces = set(DimProvince.objects.values_list("id", flat=True))
 
         for row in request.data.get("people", []):
             emp_id = row.get("employee_id")
             if not emp_id:
                 continue
+            # A target for someone who does not exist is saved against nobody
+            # and counted by nothing; refuse it instead of storing a ghost.
+            if emp_id not in known_people:
+                raise ValidationError({"detail": "کارشناس انتخاب‌شده وجود ندارد."})
             SalesTarget.objects.update_or_create(
                 period=month, channel=channel, employee_id=emp_id, province=None,
-                defaults={"target_rial": row.get("target_rial") or 0},
+                defaults={"target_rial": _amount(row.get("target_rial"), "تارگت")},
             )
 
         for row in request.data.get("provinces", []):
             pid = row.get("province_id")
             if not pid:
                 continue
-            target = row.get("target_rial") or 0
+            if pid not in known_provinces:
+                raise ValidationError({"detail": "استان انتخاب‌شده وجود ندارد."})
+            target = _amount(row.get("target_rial"), "تارگت استان")
             exists = SalesTarget.objects.filter(
                 period=month, channel=channel, province_id=pid
             ).exists()
@@ -1238,7 +1290,7 @@ class SalesDashboardDetailView(APIView):
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
                               OpenApiParameter("channel", str)], responses=dict)
     def get(self, request):
-        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        period = _period_param(request.query_params.get("period"))
         channel = request.query_params.get("channel", "team")
         assert_channel_visible(request.user, channel)
 

@@ -22,6 +22,14 @@ export interface ReportRow {
   [measure: string]: any;
 }
 
+/** A report's table layout, defined once on the server (apps.crm.reports.REPORT_COLUMNS). */
+export interface ReportColumn {
+  k: string;
+  label: string;
+  f: "rial" | "count" | "pct" | "days" | "text";
+  total?: boolean;
+}
+
 export interface ReportData {
   key: string;
   axis: string;
@@ -33,6 +41,9 @@ export interface ReportData {
   stacks?: string[];
   kinds?: { code: string; label: string }[];
   axis_labels: Record<string, string>;
+  /** The table layout, from the server — the export uses the same list. */
+  columns: ReportColumn[];
+  axis_label: string;
   window: { start: string | null; end: string | null };
 }
 
@@ -66,8 +77,11 @@ export interface Deal {
   id: number;
   code: string;
   title: string;
-  customer: number;
+  customer: number | null;
   customer_name: string;
+  /** آرپا's party code; the customer is attached once the party is matched. */
+  party_code: string;
+  awaiting_match: boolean;
   owner: number | null;
   owner_name: string;
   stage: number | null;
@@ -87,6 +101,8 @@ export interface Deal {
   other_cost_rial: string;
   margin_pct: number;
   age_days: number;
+  /** Days since the last activity on it — the pipeline board sends this. */
+  idle_days?: number | null;
   opened_at: string;
   opened_jalali: string;
   closed_at: string | null;
@@ -130,6 +146,23 @@ export interface CrmCustomer {
   first_won_jalali: string;
   last_activity_at: string | null;
   stats?: Record<string, number>;
+  /** The 360° extras — only the detail endpoint sends these. */
+  insights?: CustomerInsights;
+}
+
+export interface CustomerInsights {
+  invoiced: number;
+  invoice_count: number;
+  unsettled: number;
+  overdue_debt: number;
+  last_invoice: string;
+  days_quiet: number | null;
+  days_since_buy: number | null;
+  active_months: number;
+  series: { label: string; won: number; invoiced: number }[];
+  health: { score: number; label: string; reasons: { tone: "good" | "warn" | "bad"; text: string }[] };
+  tasks: CrmTask[];
+  invoices: CrmInvoice[];
 }
 
 export interface CrmActivity {
@@ -172,6 +205,15 @@ export interface CrmOptions {
   tags: { id: number; name_fa: string; color: string }[];
   activity_kinds: { code: string; label: string }[];
   activity_results: { code: string; label: string }[];
+}
+
+/** The open pipeline's weighted value by expected close month. */
+export interface ForecastBucket {
+  key: "overdue" | "this" | "next" | "later" | "none";
+  label: string;
+  count: number;
+  amount: number;
+  weighted: number;
 }
 
 export interface PipelineColumn {
@@ -317,6 +359,50 @@ export interface CrmInvoice {
   payment_terms: string;
 }
 
+/** کارتابل امروز — the work that is owed right now, not a windowed report. */
+export interface CrmToday {
+  as_of: string;
+  owner: number | null;
+  counters: {
+    overdue: number;
+    /** Overdue past `thresholds.backlog_days` — counted, not listed. */
+    backlog: number;
+    due_today: number;
+    pending_follow_up: number;
+    stale_deals: number;
+    quiet_customers: number;
+    activities_today: number;
+    open_count: number;
+    open_amount: number;
+    open_weighted: number;
+  };
+  overdue: CrmTask[];
+  due_today: CrmTask[];
+  upcoming: CrmTask[];
+  pending_follow_up: CrmActivity[];
+  stale_deals: Deal[];
+  closing_soon: Deal[];
+  quiet_customers: CrmCustomer[];
+  thresholds: { stale_days: number; dormant_days: number; horizon_days: number; backlog_days: number };
+}
+
+export interface CrmTask {
+  id: number;
+  title: string;
+  customer: number | null;
+  customer_name: string;
+  deal: number | null;
+  owner: number | null;
+  owner_name: string;
+  kind: string;
+  kind_display: string;
+  due_at: string;
+  due_jalali: string;
+  done_at: string | null;
+  is_done: boolean;
+  note: string;
+}
+
 export const crmApi = {
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
@@ -326,6 +412,17 @@ export const crmApi = {
   /** Switch this account between the real customer file and the showroom. */
   async me(): Promise<CrmMe> {
     const { data } = await api.get("/crm/me/");
+    return data;
+  },
+
+  /** Customers and deals matching `q`, scoped like the lists. */
+  async search(q: string): Promise<{ customers: CrmCustomer[]; deals: Deal[] }> {
+    const { data } = await api.get("/crm/search/", { params: { q } });
+    return data;
+  },
+
+  async today(params: Params = {}): Promise<CrmToday> {
+    const { data } = await api.get("/crm/today/", { params: clean(params) });
     return data;
   },
 
@@ -344,7 +441,7 @@ export const crmApi = {
     return data;
   },
 
-  async pipeline(params: Params = {}): Promise<{ columns: PipelineColumn[] }> {
+  async pipeline(params: Params = {}): Promise<{ columns: PipelineColumn[]; forecast: ForecastBucket[] }> {
     const { data } = await api.get("/crm/pipeline/", { params: clean(params) });
     return data;
   },
@@ -466,6 +563,28 @@ export const crmApi = {
   },
 
   /** Fetch the records behind an aggregate row. */
+  /**
+   * گزارش → اکسل. The server builds the workbook: a browser-side CSV could
+   * only ever hold what the screen had already fetched.
+   */
+  async exportReport(key: string, params: Params = {}) {
+    return api.get(`/crm/reports/${key}/export/`, {
+      params: clean(params), responseType: "blob",
+    });
+  },
+
+  /**
+   * ریز رکوردها → اکسل, every matching record rather than the page on screen.
+   * It replays the same `drill` payload the drawer lists from, so the file
+   * and the drawer answer the same question.
+   */
+  async exportDrill(d: Drill, title: string, extra: Params = {}) {
+    return api.get("/crm/export/drill/", {
+      params: clean({ ...d.params, kind: d.kind ?? "deals", title, ...extra }),
+      responseType: "blob",
+    });
+  },
+
   async drill(d: Drill, extra: Params = {}) {
     const params = clean({ ...d.params, ...extra });
     switch (d.kind) {
@@ -489,6 +608,18 @@ export const crmApi = {
    * hunt for each one's twin. Never merges — the whole point of the queue is
    * that fusing two customers' histories is invisible once done.
    */
+  /** Several deals to one stage — each still gets its own stage event. */
+  async bulkMoveDeals(ids: number[], stage: number, extra: Params = {}) {
+    const { data } = await api.post("/crm/deals/bulk-move/", { ids, stage, ...extra });
+    return data as { moved: number };
+  },
+
+  /** Hand the selected rows to another کارشناس (managers only). */
+  async bulkAssign(kind: "deals" | "customers", ids: number[], owner: number) {
+    const { data } = await api.post(`/crm/${kind}/bulk-assign/`, { ids, owner });
+    return data as { updated: number; owner_name: string };
+  },
+
   async bulkReview(ids: number[]) {
     const { data } = await api.post("/crm/customers/bulk-review/", { ids });
     return data as {

@@ -46,12 +46,14 @@ from django.utils.text import slugify
 
 from apps.core import jalali
 from apps.crm.jalali import period_for
+from apps.crm.channels import ChannelResolver
 from apps.crm.matching import fold, name_key
 from apps.crm.models import (
     Customer, CustomerExternalRef, Dataset, ExternalSource, Product,
     SalesInvoice, SalesInvoiceItem,
 )
-from apps.sales.models import DimEmployee, SalesChannel
+from apps.crm.party_sync import INTERCOMPANY_MARKERS
+from apps.sales.models import DimEmployee
 
 HEAD_GLOB = "*فروش کل*.xlsx"
 LINE_GLOB = "*جزئیات فروش*.xlsx"
@@ -61,14 +63,8 @@ KIND = {
     "مرجوع از فروش": SalesInvoice.Kind.RETURN,
 }
 
-#: «مسوول فروش» does not name a person — it names the channel. The two
-#: organisational labels are one channel here: SalesChannel.ORGANIZATIONAL is
-#: documented as «فروش سازمانی: key-account / بانکی».
-CHANNEL = {
-    "گروه فروش همکار": SalesChannel.TEAM,
-    "گروه فروش بانکی": SalesChannel.ORGANIZATIONAL,
-    "گروه فروش سازمانی": SalesChannel.ORGANIZATIONAL,
-}
+#: «مسوول فروش» names a department, not a person — see `apps.crm.channels`,
+#: which decides the department from it, the rep's roster and the آرپا group.
 
 #: A placeholder in the بازاریاب column, not a colleague. 425 of 1,098
 #: invoices carry it; mapped to nobody rather than to an invented employee.
@@ -211,6 +207,13 @@ class Command(BaseCommand):
         self.products = {
             p.code: p for p in Product.objects.filter(dataset=Dataset.REAL)
         }
+        self.customer_info = {
+            pk: (owner_id, is_intercompany)
+            for pk, owner_id, is_intercompany in Customer.objects.filter(
+                dataset=Dataset.REAL
+            ).values_list("pk", "owner_id", "is_intercompany")
+        }
+        self.channels = ChannelResolver()
         self.unknown_reps: dict[str, int] = defaultdict(int)
         self.orphans: list[tuple[str, str, Decimal]] = []
 
@@ -248,14 +251,28 @@ class Command(BaseCommand):
     def _resolve(self, row) -> dict:
         """Everything an invoice needs that is not simply a column."""
         code = fold(row.get("کد طرف حساب"))
+        name = fold(row.get("نام طرف حساب"))
         issued = jdate(row.get("تاریخ برگه"))
+        customer_id = self.customers.get(code)
+        customer_owner, customer_inter = self.customer_info.get(
+            customer_id, (None, False)
+        )
+        owner = self._rep(row.get("نام بازاریاب"))
         return {
-            "customer_id": self.customers.get(code),
+            "customer_id": customer_id,
             "party_code": code,
+            "party_name": name,
             "issued_at": issued,
             "kind": KIND.get(fold(row.get("نوع برگه"))),
-            "owner": self._rep(row.get("نام بازاریاب")),
-            "channel": CHANNEL.get(fold(row.get("مسوول فروش نام")), ""),
+            "owner": owner,
+            "is_intercompany": customer_inter or any(
+                m in name for m in INTERCOMPANY_MARKERS
+            ),
+            "channel": self.channels.invoice(
+                row.get("مسوول فروش نام"),
+                owner.pk if owner else customer_owner,
+                row.get("گروه طرف حساب"),
+            ),
         }
 
     # -- reporting -------------------------------------------------------
@@ -264,7 +281,7 @@ class Command(BaseCommand):
         # same reconciliation the real run will produce.
         self.skipped: dict[str, list] = defaultdict(lambda: [0, Decimal(0)])
         for row, meta in plan:
-            if meta["customer_id"] and meta["issued_at"] and meta["kind"]:
+            if meta["issued_at"] and meta["kind"]:
                 continue
             bucket = self.skipped[meta["kind"] or "?"]
             bucket[0] += 1
@@ -285,13 +302,10 @@ class Command(BaseCommand):
 
         if missing:
             total = sum(dec(r.get("مبلغ فروش")) for r, _m in missing)
-            self.stdout.write(self.style.WARNING(
-                f"\n  {len(missing)} فاکتور مشتری‌اش در CRM نیست — "
-                f"{total:,.0f} ریال. رد می‌شوند."
-            ))
             self.stdout.write(
-                "  (طرف‌حساب‌هایی که زیر بازبینی‌اند هنوز شناسه نگرفته‌اند؛ "
-                "بعد از بازبینی این دستور را دوباره اجرا کن.)"
+                f"\n  {len(missing)} فاکتور هنوز مشتری CRM ندارد — "
+                f"{total:,.0f} ریال. وارد می‌شوند و در فروش شمرده می‌شوند؛"
+                " مشتری‌شان بعد از بازبینی خودکار وصل می‌شود."
             )
             seen = set()
             for row, _m in missing:
@@ -315,7 +329,7 @@ class Command(BaseCommand):
     def _write(self, plan, grouped) -> None:
         made = items = skipped = matched = 0
         for row, meta in plan:
-            if not meta["customer_id"] or not meta["issued_at"] or not meta["kind"]:
+            if not meta["issued_at"] or not meta["kind"]:
                 self.orphans.append((
                     fold(row.get("نام طرف حساب")),
                     fold(row.get("شماره برگه")),
@@ -336,6 +350,9 @@ class Command(BaseCommand):
                     "number": number[:30],
                     "kind": meta["kind"],
                     "customer_id": meta["customer_id"],
+                    "party_code": meta["party_code"][:64],
+                    "party_name": meta["party_name"][:200],
+                    "is_intercompany": meta["is_intercompany"],
                     "issued_at": meta["issued_at"],
                     "period": period_for(meta["issued_at"]),
                     # مبلغ فروش: net of discount, before VAT, and already

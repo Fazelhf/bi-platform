@@ -224,12 +224,32 @@ class PartyWriter:
         accounts by what is on their own screen, and a silent rename
         mid-quarter is its own kind of loss. آرپا's legal name is kept here
         instead, where the review screen can show both.
+
+        It also hands the customer every invoice that was waiting for it.
+        Invoices are imported whether or not their party is matched yet, so
+        that no total depends on the review queue; this is the moment they
+        get a customer. Every resolution path — the bulk import, «same
+        customer» and «different customer» on the review screen — ends here,
+        which is why it is done here and nowhere else.
         """
-        return CustomerExternalRef.objects.update_or_create(
+        from apps.crm.models import SalesInvoice
+
+        code = fold(row.get("کد"))[:64]
+        ref = CustomerExternalRef.objects.update_or_create(
             source=ExternalSource.ARPA,
-            external_id=fold(row.get("کد"))[:64],
+            external_id=code,
             defaults={
                 "customer": customer,
                 "external_name": fold(row.get("نام"))[:200],
             },
         )[0]
+        if code:
+            waiting = SalesInvoice.objects.filter(
+                party_code=code, customer__isnull=True
+            )
+            waiting.update(customer=customer)
+            if customer.is_intercompany:
+                SalesInvoice.objects.filter(party_code=code).update(
+                    is_intercompany=True
+                )
+        return ref

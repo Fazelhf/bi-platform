@@ -4,6 +4,8 @@ import { useRouter } from "vue-router";
 import { crmApi, type CrmActivity, type CrmCustomer, type CrmInvoice, type Deal } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
+import { saveAsFile } from "@/utils/download";
+import { toast } from "@/composables/useUi";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -68,36 +70,27 @@ const resultClass: Record<string, string> = {
   failed: "bg-red-100 text-red-600",
 };
 
-/** Export the drilled rows to CSV — the manager's usual next step. */
-function exportCsv() {
-  const head =
-    kind.value === "deals"
-      ? ["کد", "عنوان", "مشتری", "کارشناس", "استان", "وضعیت", "مبلغ", "سود", "حاشیه", "تاریخ"]
-      : kind.value === "activities"
-      ? ["نوع", "مشتری", "کارشناس", "نتیجه", "مدت (دقیقه)", "تاریخ", "توضیح"]
-      : kind.value === "feedback"
-      ? ["مشتری", "کارشناس", "امتیاز", "توضیح", "تاریخ"]
-      : kind.value === "invoices"
-      ? ["شماره", "نوع", "تاریخ", "مشتری", "بازاریاب", "مبلغ خالص", "مالیات", "تسویه‌نشده", "معامله"]
-      : ["کد", "نام", "گروه", "استان", "کارشناس", "وضعیت", "اولین خرید"];
-  const body = rows.value.map((r: any) =>
-    kind.value === "deals"
-      ? [r.code, r.title, r.customer_name, r.owner_name, r.province_name, r.status_display, r.amount_rial, r.profit_rial, r.margin_pct, r.closed_jalali || r.opened_jalali]
-      : kind.value === "activities"
-      ? [r.kind_display, r.customer_name, r.owner_name, r.result_display, r.duration_min, r.at_jalali, r.note]
-      : kind.value === "feedback"
-      ? [r.customer_name, r.employee_name, r.score, r.note, r.at_jalali]
-      : kind.value === "invoices"
-      ? [r.number, r.kind_display, r.issued_jalali, r.customer_name, r.owner_name, r.amount_rial, r.vat_rial, r.unsettled_rial, r.deal_title]
-      : [r.code, r.name_fa, r.group_name, r.province_name, r.owner_name, r.status_display, r.first_won_jalali],
-  );
-  const csv = [head, ...body].map((line) => line.map((c: any) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${crm.drill?.title ?? "drill"}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+const exporting = ref(false);
+
+/**
+ * خروجی اکسل — the manager's usual next step, and the one place this panel
+ * must not answer from what it is holding.
+ *
+ * The CSV this replaces serialised `rows`, which is one page: a drawer
+ * headed «۴۱۲ رکورد» handed over 25 of them and said nothing. The server
+ * replays the same drill against the database and returns every row.
+ */
+async function exportExcel() {
+  if (!crm.drill) return;
+  exporting.value = true;
+  try {
+    const res = await crmApi.exportDrill(crm.drill.drill, crm.drill.title);
+    saveAsFile(res, `${crm.drill.title}.xlsx`);
+  } catch {
+    toast.error("خروجی اکسل گرفته نشد.");
+  } finally {
+    exporting.value = false;
+  }
 }
 </script>
 
@@ -117,9 +110,16 @@ function exportCsv() {
             </div>
             <div class="flex items-center gap-2 shrink-0">
               <button
-                class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5"
-                @click="exportCsv"
-              >خروجی اکسل</button>
+                class="flex items-center gap-1.5 text-xs bg-white/10 hover:bg-white/20 disabled:opacity-50 rounded-lg px-3 py-1.5 transition"
+                :disabled="exporting || !total"
+                :title="`خروجی اکسل همه ${num(total)} رکورد`"
+                @click="exportExcel"
+              >
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                {{ exporting ? "در حال ساخت…" : "خروجی اکسل" }}
+              </button>
               <button class="text-white/70 hover:text-white text-2xl leading-none px-1" @click="crm.closeDrill()">×</button>
             </div>
           </header>
@@ -245,11 +245,20 @@ function exportCsv() {
                         {{ inv.number }}
                         <span v-if="inv.kind === 'return'" class="text-[11px] rounded-full px-2 py-0.5 bg-red-100 text-red-600 mr-1">{{ inv.kind_display }}</span>
                       </p>
-                      <button class="text-xs text-slate-400 hover:text-ink hover:underline truncate max-w-[220px]" @click="goCustomer(inv.customer)">
-                        {{ inv.customer_name }}
-                      </button>
+                      <button
+                        v-if="inv.customer"
+                        class="text-xs text-slate-400 hover:text-ink hover:underline truncate max-w-[220px]"
+                        @click="goCustomer(inv.customer)"
+                      >{{ inv.customer_name }}</button>
+                      <!-- The party is still in the review queue: the sale counts,
+                           it just has no customer page yet. The badge opens the queue. -->
+                      <button
+                        v-else
+                        class="text-xs text-amber-600 hover:underline truncate max-w-[220px]"
+                        @click="crm.closeDrill(); router.push({ name: 'crm-match-review' })"
+                      >{{ inv.customer_name }} · در انتظار تطبیق</button>
                     </td>
-                    <td class="px-3 text-slate-500">{{ inv.owner_name || "بدون بازاریاب" }}</td>
+                    <td class="px-3 text-slate-500">{{ inv.owner_name || "بدون کارشناس" }}</td>
                     <td class="px-3 text-left whitespace-nowrap" :class="Number(inv.amount_rial) < 0 ? 'text-red-500' : 'text-ink'">{{ rial(inv.amount_rial) }}</td>
                     <td class="px-3 text-left whitespace-nowrap text-slate-500">{{ rial(inv.unsettled_rial) }}</td>
                     <td class="px-3 text-xs">

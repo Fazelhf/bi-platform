@@ -261,7 +261,12 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
             # name, and Django assigns an annotation by setattr — which on a
             # property with no setter raises, so the whole list 500s as soon
             # as there is a single row to serialise.
-            return qs.annotate(quotes_n=Count("quotes"))
+            # The annotation adds a GROUP BY, and Django drops the model's
+            # own ordering when it does — which left the list in whatever
+            # order the database felt like and made page 2 overlap page 1.
+            return qs.annotate(quotes_n=Count("quotes")).order_by(
+                "-requested_on", "-id"
+            )
         return qs.prefetch_related("quotes__supplier", "quotes__reason")
 
     def perform_create(self, serializer):
@@ -306,11 +311,12 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
                 "quote": "این استعلام متعلق به درخواست دیگری است."
             })
 
-        rejections = {
-            int(item["quote"]): item
-            for item in payload.validated_data.get("rejections", [])
-            if item.get("quote")
-        }
+        rejections = {}
+        for item in payload.validated_data.get("rejections", []):
+            try:
+                rejections[int(item.get("quote"))] = item
+            except (TypeError, ValueError):
+                raise ValidationError({"rejections": "شناسهٔ استعلام ردشده معتبر نیست."})
 
         for quote in purchase_request.quotes.all():
             if quote.id == winner.id:
@@ -319,6 +325,12 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
                 quote.decision_note = payload.validated_data.get("decision_note", "")
             else:
                 quote.is_selected = False
+                # Re-awarding used to leave the previous winner holding its
+                # «why we chose it» reason while now marked as a loser — and
+                # the supplier statistics read those reasons.
+                if quote.reason_id and quote.reason.kind == QuoteReason.Kind.WIN:
+                    quote.reason = None
+                    quote.decision_note = ""
                 item = rejections.get(quote.id)
                 if item:
                     reason_id = item.get("reason")

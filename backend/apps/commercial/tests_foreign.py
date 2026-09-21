@@ -32,6 +32,7 @@ from apps.commercial.services import (
     foreign_alerts,
     foreign_dashboard,
     fx,
+    payments,
     stalled,
 )
 
@@ -387,3 +388,39 @@ class ForeignApiTests(ForeignBase):
         # choice no headline figure should make silently.
         self.assertEqual(codes["USD"], "1000.00")
         self.assertEqual(codes["EUR"], "500.00")
+
+
+class PaymentsCurrencyTests(ForeignBase):
+    """A dollar and a euro are different debts and are never added together."""
+
+    def setUp(self):
+        super().setUp()
+        usd = self.mk_order(currency=Currency.USD, pi_no="USD-1")
+        eur = self.mk_order(currency=Currency.EUR, pi_no="EUR-1")
+        self.mk_shipment(
+            usd, container_no="USD0000001",
+            value_amount=Decimal("100000"), paid_amount=Decimal("40000.00"),
+            interest_amount=Decimal("1000"),
+        )
+        self.mk_shipment(
+            eur, container_no="EUR0000001",
+            value_amount=Decimal("50000"), paid_amount=Decimal("10000"),
+            interest_amount=Decimal("500"),
+        )
+
+    def test_totals_are_reported_per_currency(self):
+        report = payments.build(today=date(2026, 4, 1))
+        by = {c["currency"]: c for c in report["by_currency"]}
+        self.assertEqual(by["USD"]["outstanding"], "60000.00")
+        self.assertEqual(by["EUR"]["outstanding"], "40000.00")
+        self.assertEqual(by["USD"]["payable"], "61000.00")
+        self.assertEqual(by["EUR"]["payable"], "40500.00")
+
+    def test_the_headline_is_one_currency_and_says_so(self):
+        totals = payments.build(today=date(2026, 4, 1))["totals"]
+        # The biggest exposure leads, labelled — never 100000 «USD» that is
+        # really dollars and euros in one pile.
+        self.assertEqual(totals["currency"], "USD")
+        self.assertEqual(totals["outstanding"], "60000.00")
+        self.assertEqual(totals["currency_count"], 2)
+        self.assertEqual(totals["shipment_count"], 2)

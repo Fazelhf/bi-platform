@@ -46,7 +46,7 @@ def ensure_weeks(month: DimPeriod, min_days: int = jalali.MIN_WEEK_DAYS) -> list
     """
     if month.kind != PeriodKind.MONTH:
         raise ValueError("only a month can be split into weeks")
-    if has_facts(month):
+    if has_any_facts(month):
         raise ValueError(
             "این ماه داده‌ی ثبت‌شده دارد و دیگر نمی‌تواند به هفته تقسیم شود."
         )
@@ -97,7 +97,7 @@ def ensure_days(week: DimPeriod) -> list[DimPeriod]:
     """
     if week.kind != PeriodKind.WEEK:
         raise ValueError("only a week can be split into days")
-    if has_facts(week):
+    if has_any_facts(week):
         raise ValueError(
             "این هفته داده‌ی ثبت‌شده دارد و دیگر نمی‌تواند به روز تقسیم شود."
         )
@@ -147,7 +147,10 @@ def unsplit(period: DimPeriod) -> int:
     unit = "هفته" if period.kind == PeriodKind.MONTH else "روز"
     # Check the whole subtree: a week whose days hold figures still blocks the
     # month, even though the week row itself is empty.
-    filled = [c for c in period.children.all() if any(has_facts(l) for l in leaves_of(c))]
+    filled = [
+        c for c in period.children.all()
+        if any(has_any_facts(l) for l in leaves_of(c))
+    ]
     if filled:
         names = "، ".join(f"{unit} {c.seq}" for c in filled)
         raise ValueError(f"این {unit}‌ها داده دارند و باید اول پاک شوند: {names}")
@@ -193,15 +196,30 @@ def has_facts(period: DimPeriod, domain: str = "sales") -> bool:
     sales can sit on weeks while production stays on months. Both are safe;
     what would break is one domain writing to a month *and* its weeks.
     """
+    from apps.finance.models import CashMovement
     from apps.production.models import FactProduction
     from apps.sales.models import FactSalesMonthly, FactSalesProvince
 
     if domain == "production":
         return FactProduction.objects.filter(period=period).exists()
+    if domain == "finance":
+        return CashMovement.objects.filter(period=period).exists()
     return (
         FactSalesMonthly.objects.filter(period=period).exists()
         or FactSalesProvince.objects.filter(period=period).exists()
     )
+
+
+def has_any_facts(period: DimPeriod) -> bool:
+    """
+    True when *any* domain stored numbers against this exact period.
+
+    Reshaping the tree is not a per-domain decision: splitting a month moves
+    where every report looks for its figures. A month carrying nothing but
+    cash movements used to pass the sales-only check, and its حرکت‌های نقدی
+    then vanished from گزارش نقدینگی, which reads the leaves.
+    """
+    return any(has_facts(period, d) for d in ("sales", "production", "finance"))
 
 
 def calendar(month: DimPeriod) -> dict:
