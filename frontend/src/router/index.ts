@@ -84,6 +84,109 @@ const router = createRouter({
       name: "forgot-password",
       component: () => import("@/views/ForgotPasswordView.vue"),
     },
+    // A printed document has no sidebar: it is the page that goes to the
+    // customer, so it sits outside the app shell.
+    {
+      path: "/sales2/print/:id",
+      name: "sales2-print",
+      component: () => import("@/views/sales2/DocumentPrintView.vue"),
+      meta: { requiresAuth: true, adminPanel: true },
+    },
+    // فروش ۲ — its own workspace, like CRM: its shell replaces AppShell's
+    // sidebar with a rail of its own pages. `adminPanel` is the guard, the
+    // same rule the API applies (apps.sales2.permissions).
+    {
+      path: "/sales2",
+      component: () => import("@/components/sales2/Sales2Shell.vue"),
+      meta: { requiresAuth: true, adminPanel: true },
+      children: [
+        {
+          path: "",
+          name: "sales2-dashboard",
+          component: () => import("@/views/sales2/Sales2DashboardView.vue"),
+        },
+        {
+          path: "proformas",
+          name: "sales2-proformas",
+          component: () => import("@/views/sales2/DocumentsView.vue"),
+          props: { kind: "proforma" },
+        },
+        {
+          path: "invoices",
+          name: "sales2-invoices",
+          component: () => import("@/views/sales2/DocumentsView.vue"),
+          props: { kind: "invoice" },
+        },
+        {
+          path: "returns",
+          name: "sales2-returns",
+          component: () => import("@/views/sales2/DocumentsView.vue"),
+          props: { kind: "return" },
+        },
+        {
+          path: "documents/new/:kind",
+          name: "sales2-document-new",
+          component: () => import("@/views/sales2/DocumentEditorView.vue"),
+        },
+        {
+          path: "documents/:id",
+          name: "sales2-document",
+          component: () => import("@/views/sales2/DocumentEditorView.vue"),
+        },
+        {
+          path: "deliveries",
+          name: "sales2-deliveries",
+          component: () => import("@/views/sales2/DeliveriesView.vue"),
+        },
+        {
+          path: "receipts",
+          name: "sales2-receipts",
+          component: () => import("@/views/sales2/ReceiptsView.vue"),
+        },
+        {
+          path: "receivables",
+          name: "sales2-receivables",
+          component: () => import("@/views/sales2/ReceivablesView.vue"),
+        },
+        {
+          path: "commission",
+          name: "sales2-commission",
+          component: () => import("@/views/sales2/CommissionView.vue"),
+        },
+        {
+          path: "price-list",
+          name: "sales2-price-list",
+          component: () => import("@/views/sales2/PriceListView.vue"),
+        },
+        // «فی حسابداری» lives on the کالاها page now; old links still land.
+        { path: "accounting-costs", redirect: { name: "sales2-products" } },
+        {
+          path: "customers",
+          name: "sales2-customers",
+          component: () => import("@/views/sales2/CustomersView.vue"),
+        },
+        {
+          path: "customers/:id",
+          name: "sales2-customer",
+          component: () => import("@/views/sales2/CustomerDetailView.vue"),
+        },
+        {
+          path: "products",
+          name: "sales2-products",
+          component: () => import("@/views/sales2/ProductsView.vue"),
+        },
+        {
+          path: "sales-list",
+          name: "sales2-sales-list",
+          component: () => import("@/views/sales2/SalesListView.vue"),
+        },
+        {
+          path: "settings",
+          name: "sales2-settings",
+          component: () => import("@/views/sales2/SettingsView.vue"),
+        },
+      ],
+    },
     {
       path: "/",
       component: () => import("@/components/AppShell.vue"),
@@ -210,6 +313,22 @@ const router = createRouter({
           name: "finance-budget-variance",
           component: () => import("@/views/finance/BudgetVarianceView.vue"),
           meta: { finance: true },
+        },
+        {
+          // Receipts sales recorded, waiting for finance to confirm the money
+          // arrived. The API admits the finance department and admins.
+          path: "finance/sales-receipts",
+          name: "finance-sales-receipts",
+          component: () => import("@/views/finance/SalesReceiptsReviewView.vue"),
+          meta: { finance: true },
+        },
+        {
+          // پورسانت, finance's side of it. The same page as in فروش ۲, and
+          // admins only until it is opened to the finance department.
+          path: "finance/commission",
+          name: "finance-commission",
+          component: () => import("@/views/sales2/CommissionView.vue"),
+          meta: { adminPanel: true },
         },
         {
           path: "finance/budget/actuals",

@@ -19,6 +19,7 @@ import { salesApi } from "@/api/sales";
 import { toast } from "@/composables/useUi";
 import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { num } from "@/utils/format";
+import ExcelImport from "@/components/ExcelImport.vue";
 import MoneyInput from "@/components/MoneyInput.vue";
 import NavIcon from "@/components/NavIcon.vue";
 import { currentPeriodId, type Period } from "@/types";
@@ -191,6 +192,7 @@ async function save(submit: boolean) {
         </p>
       </div>
       <div class="flex items-end gap-3">
+        <ExcelImport import-key="finance-cash" label="ورود از اکسل" @done="load" />
         <label class="flex items-center gap-1.5 text-xs text-slate-500">
           <input v-model="showAllDays" type="checkbox" class="rounded" />
           نمایش همه روزها

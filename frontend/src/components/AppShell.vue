@@ -200,6 +200,13 @@ const primary = computed<Item[]>(() => {
           { name: "finance-budget-variance", label: "انحراف بودجه", icon: "file" },
           // Defining the budget is the CEO's; finance reports against it.
           { name: "finance-budget-plan", label: "تعریف بودجه", icon: "file" },
+          // پورسانت: admins only while فروش ۲ is being built.
+          ...(auth.isAdminPanelUser
+            ? [
+                { name: "finance-commission", label: "پورسانت", icon: "formula" },
+                { name: "finance-sales-receipts", label: "تأیید دریافت‌های فروش", icon: "check" },
+              ]
+            : []),
         ],
       },
     );
@@ -233,6 +240,8 @@ const primary = computed<Item[]>(() => {
       { name: "finance-budget-actuals", label: "ورود ارقام واقعی بودجه", icon: "banknote" },
       { name: "finance-budget-variance", label: "انحراف بودجه", icon: "chart" },
       { name: "finance-budget", label: "داشبورد بودجه", icon: "chart" },
+      // Receipts the sales side recorded, for this manager to confirm.
+      { name: "finance-sales-receipts", label: "تأیید دریافت‌های فروش", icon: "check" },
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
@@ -320,6 +329,8 @@ const pageTitle = computed(() => {
     "sales-b2b-entry": "ورود فروش B2B",
     "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
     "finance-budget": "داشبورد بودجه", "finance-budget-plan": "تعریف بودجه",
+    "finance-commission": "پورسانت",
+    "finance-sales-receipts": "تأیید دریافت‌های فروش",
     "finance-budget-variance": "انحراف بودجه",
     "finance-budget-actuals": "ورود ارقام واقعی بودجه",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
@@ -522,6 +533,24 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           <NavIcon name="contact" :size="20" />
           <template v-if="!collapsed">
             <span class="flex-1 text-right">CRM</span>
+            <svg class="w-3.5 h-3.5 opacity-40 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            </svg>
+          </template>
+        </button>
+
+        <!-- فروش ۲: a third workspace of its own, administrators only until
+             it is merged into the sales section (apps.sales2.permissions). -->
+        <button
+          v-if="auth.isAdminPanelUser"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2 text-slate-500 hover:bg-slate-100"
+          :class="collapsed ? 'justify-center' : ''"
+          title="فروش ۲ — پیش‌فاکتور، فاکتور، حواله و دریافت"
+          @click="router.push({ name: 'sales2-dashboard' })"
+        >
+          <NavIcon name="workflow" :size="20" />
+          <template v-if="!collapsed">
+            <span class="flex-1 text-right">فروش ۲</span>
             <svg class="w-3.5 h-3.5 opacity-40 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             </svg>

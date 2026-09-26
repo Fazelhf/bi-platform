@@ -22,10 +22,12 @@ import {
 import { useBudgetContext } from "@/composables/useBudgetContext";
 import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { confirm, toast } from "@/composables/useUi";
+import ExcelImport from "@/components/ExcelImport.vue";
 import MoneyInput from "@/components/MoneyInput.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 
 const { budgets, budgetId, periodId, months, linkQuery, init } = useBudgetContext();
+const currentMonth = computed(() => months.value.find((p) => p.id === periodId.value));
 const { money, unitLabel } = useMoney();
 
 const sheet = ref<ActualEntrySheet | null>(null);
@@ -228,6 +230,10 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
             <option v-for="p in months" :key="p.id" :value="p.id">{{ p.label }}</option>
           </select>
         </label>
+        <ExcelImport
+          v-if="budgetId && currentMonth" import-key="finance-budget-actuals" label="ورود از اکسل"
+          :params="{ budget: budgetId }" :year="currentMonth.jalali_year" :month="currentMonth.jalali_month" @done="load"
+        />
         <router-link
           :to="{ name: 'finance-budget-variance', query: linkQuery }"
           class="px-3 py-1.5 text-sm rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200"
