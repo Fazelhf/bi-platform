@@ -316,11 +316,12 @@ const router = createRouter({
         },
         {
           // Receipts sales recorded, waiting for finance to confirm the money
-          // arrived. The API admits the finance department and admins.
+          // arrived. Admins only for now, like پورسانت: hidden from the
+          // finance department until فروش ۲ is opened to it.
           path: "finance/sales-receipts",
           name: "finance-sales-receipts",
           component: () => import("@/views/finance/SalesReceiptsReviewView.vue"),
-          meta: { finance: true },
+          meta: { adminPanel: true },
         },
         {
           // پورسانت, finance's side of it. The same page as in فروش ۲, and

@@ -30,6 +30,7 @@ import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -208,6 +209,7 @@ function leave() {
           <div id="office-actions" class="flex items-center gap-2"></div>
 
           <ThemePicker />
+          <RefreshButton />
           <NotificationBell />
 
           <div ref="userMenuRoot" class="relative shrink-0">

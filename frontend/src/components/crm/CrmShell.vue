@@ -24,6 +24,7 @@ import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
 import QuickAdd from "@/components/crm/QuickAdd.vue";
 import CrmSearch from "@/components/crm/CrmSearch.vue";
@@ -207,6 +208,7 @@ onMounted(() => {
         <CrmSearch />
         <QuickAdd />
         <ThemePicker />
+        <RefreshButton />
         <NotificationBell />
 
         <div ref="userMenuRoot" class="relative shrink-0">

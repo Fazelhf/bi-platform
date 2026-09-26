@@ -18,6 +18,7 @@ import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -161,6 +162,7 @@ function leave() {
         </span>
         <div class="flex-1"></div>
         <ThemePicker />
+        <RefreshButton />
         <NotificationBell />
         <div ref="userMenuRoot" class="relative shrink-0">
           <button class="flex items-center" @click="userMenu = !userMenu">

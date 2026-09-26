@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { salesApi } from "@/api/sales";
+import { rosterApi, salesApi } from "@/api/sales";
 import { customerGroupApi, salesInputApi, type SalesInput } from "@/api/salesInput";
 import type { MonthProgress } from "@/types";
 import { toast, confirm, prompt } from "@/composables/useUi";
@@ -46,6 +46,12 @@ const isWeekly = computed(() => weeks.value.length > 1);
  */
 const monthView = ref(false);
 const readonly = computed(() => !!data.value?.is_rollup);
+/** A کارشناس's sheet: their own column only, no adding or removing people. */
+const ownOnly = computed(() => !!data.value?.own_only);
+/** Why this week cannot be entered yet — earlier week empty, or not started. */
+const entryBlock = computed(() => data.value?.entry_block ?? "");
+/** Nothing on the sheet can be typed into: the month roll-up, or a closed week. */
+const frozen = computed(() => readonly.value || !!entryBlock.value);
 
 function openMonthView() {
   if (monthView.value) return;
@@ -163,10 +169,19 @@ async function load() {
   }
 }
 
-function openAddPicker() {
+async function openAddPicker() {
   pickId.value = "";
   newName.value = "";
   showAdd.value = true;
+  // Salespeople only. The picker used to list every person in the company —
+  // the factory floor included — because it read the whole employee table.
+  try {
+    allEmployees.value = (await rosterApi.available(props.channel)).map((e) => ({
+      id: e.id, full_name_fa: e.name, team_name: e.team_name,
+    }));
+  } catch {
+    allEmployees.value = [];
+  }
 }
 
 function addColumn(employeeId: number | null, name: string) {
@@ -418,11 +433,6 @@ onMounted(async () => {
   selectedMonth.value = periods.value[0]?.id ?? null;
   await loadMonth();
   await load();
-  try {
-    allEmployees.value = await salesApi.employees();
-  } catch {
-    allEmployees.value = [];
-  }
 });
 watch([selectedMonth, () => props.channel], async () => {
   await loadMonth();
@@ -438,7 +448,8 @@ watch(selectedDay, load);
       <div>
         <h2 class="text-lg font-bold text-ink">{{ title }}</h2>
         <p class="text-xs text-slate-400 mt-0.5">
-          هر فروشنده یک ستون است. می‌توانید فروشنده اضافه یا حذف کنید؛ ستون «جمع» خودکار محاسبه می‌شود.
+          <template v-if="ownOnly">ارقام فروش خودتان را برای هر هفته، در همان هفته وارد کنید.</template>
+          <template v-else>هر فروشنده یک ستون است. می‌توانید فروشنده اضافه یا حذف کنید؛ ستون «جمع» خودکار محاسبه می‌شود.</template>
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -614,12 +625,18 @@ watch(selectedDay, load);
         </div>
       </section>
 
+      <!-- Closed for entry: say why, instead of letting a save bounce -->
+      <div
+        v-if="entryBlock && !readonly"
+        class="bg-amber-50 border border-amber-200 text-amber-800 rounded-card px-4 py-3 text-sm leading-6"
+      >{{ entryBlock }}</div>
+
       <!-- Main table: metrics as rows, salespeople as columns -->
       <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-bold text-ink">جدول عملکرد فروشندگان</h3>
           <span v-if="readonly" class="text-xs text-slate-400">جمع کل ماه — فقط خواندنی</span>
-          <button v-else class="text-sm bg-accent-500 hover:bg-accent-600 text-white rounded-xl px-3 py-1.5 transition-colors" @click="openAddPicker">
+          <button v-else-if="!ownOnly && !entryBlock" class="text-sm bg-accent-500 hover:bg-accent-600 text-white rounded-xl px-3 py-1.5 transition-colors" @click="openAddPicker">
             + افزودن فروشنده
           </button>
         </div>
@@ -634,7 +651,7 @@ watch(selectedDay, load);
               <tr>
                 <th class="text-right font-medium text-slate-500 py-2 px-3 sticky right-0 bg-surface z-10 min-w-[150px]">شاخص</th>
                 <th v-for="(c, i) in data.columns" :key="i" class="font-medium py-2 px-2 min-w-[130px]">
-                  <div v-if="readonly" class="text-center text-xs text-ink px-2 py-1">{{ c.name }}</div>
+                  <div v-if="frozen || ownOnly" class="text-center text-xs text-ink px-2 py-1">{{ c.name }}</div>
                   <div v-else class="flex items-center justify-center gap-1">
                     <input
                       v-model="c.name"
@@ -657,9 +674,9 @@ watch(selectedDay, load);
                 </td>
                 <td v-for="(c, i) in data.columns" :key="i" class="py-1 px-1">
                   <div
-                    v-if="isLocked(m.field) || readonly"
+                    v-if="isLocked(m.field) || frozen"
                     class="w-full px-2 py-1.5 text-center ltr-nums text-slate-500 bg-slate-100/60 rounded-lg cursor-not-allowed"
-                    :title="isLocked(m.field) ? 'تارگت توسط مدیرعامل تعیین می‌شود' : 'جمع هفته‌ها — برای ویرایش یک هفته را انتخاب کنید'"
+                    :title="isLocked(m.field) ? 'تارگت توسط مدیرعامل تعیین می‌شود' : entryBlock || 'جمع هفته‌ها — برای ویرایش یک هفته را انتخاب کنید'"
                   >{{ num(Number(c[m.field] || 0)) }}</div>
                   <MoneyInput
                     v-else-if="isMoney(m.field)"
@@ -685,8 +702,8 @@ watch(selectedDay, load);
         </p>
       </section>
 
-      <!-- Province block -->
-      <section class="bg-surface rounded-card shadow-soft p-5">
+      <!-- Province block — the channel's, so the manager's; a rep has none -->
+      <section v-if="!ownOnly" class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-start justify-between gap-3 flex-wrap mb-3">
           <div>
             <h3 class="font-bold text-ink">فروش به تفکیک استان</h3>
@@ -757,7 +774,7 @@ watch(selectedDay, load);
               >
                 <td class="py-1 text-slate-600 whitespace-nowrap">{{ p.name }}</td>
                 <td class="py-1">
-                  <div v-if="readonly" class="px-2 py-1.5 text-left ltr-nums text-ink">{{ num(Number(p.sales_rial || 0)) }}</div>
+                  <div v-if="frozen" class="px-2 py-1.5 text-left ltr-nums text-ink">{{ num(Number(p.sales_rial || 0)) }}</div>
                   <MoneyInput
                     v-else
                     v-model="p.sales_rial" placeholder="۰"
@@ -892,15 +909,15 @@ watch(selectedDay, load);
             >
               <td class="py-1.5 text-ink">{{ g.name }}</td>
               <td class="py-1.5">
-                <span v-if="readonly" class="ltr-nums">{{ num(Number(g.sales_rial || 0)) }}</span>
+                <span v-if="frozen" class="ltr-nums">{{ num(Number(g.sales_rial || 0)) }}</span>
                 <MoneyInput v-else v-model="g.sales_rial" class="w-full" />
               </td>
               <td class="py-1.5">
-                <span v-if="readonly" class="ltr-nums">{{ num(Number(g.profit_rial || 0)) }}</span>
+                <span v-if="frozen" class="ltr-nums">{{ num(Number(g.profit_rial || 0)) }}</span>
                 <MoneyInput v-else v-model="g.profit_rial" class="w-full" />
               </td>
               <td class="py-1.5">
-                <span v-if="readonly" class="ltr-nums">{{ num(Number(g.invoice_count || 0)) }}</span>
+                <span v-if="frozen" class="ltr-nums">{{ num(Number(g.invoice_count || 0)) }}</span>
                 <input
                   v-else
                   v-model="g.invoice_count"
@@ -919,7 +936,7 @@ watch(selectedDay, load);
       <!-- Sticky action bar -->
       <!-- z-30: the table's frozen first/last columns are z-10/z-20, so without
            this the sheet scrolled over the save buttons. -->
-      <div v-if="!readonly" class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+      <div v-if="!frozen" class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
         <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm transition-colors" @click="save(false)">ذخیره پیش‌نویس</button>

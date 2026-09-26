@@ -10,6 +10,7 @@ import { inboxApi } from "@/api/platform";
 import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
 
@@ -240,8 +241,9 @@ const primary = computed<Item[]>(() => {
       { name: "finance-budget-actuals", label: "ورود ارقام واقعی بودجه", icon: "banknote" },
       { name: "finance-budget-variance", label: "انحراف بودجه", icon: "chart" },
       { name: "finance-budget", label: "داشبورد بودجه", icon: "chart" },
-      // Receipts the sales side recorded, for this manager to confirm.
-      { name: "finance-sales-receipts", label: "تأیید دریافت‌های فروش", icon: "check" },
+      // تأیید دریافت‌های فروش (the پورسانت side of فروش ۲) is hidden from
+      // finance for now; it comes back when فروش ۲ opens beyond admins. The
+      // Excel import on the cash and budget pages stays.
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
@@ -272,7 +274,12 @@ const primary = computed<Item[]>(() => {
   // Each department manager keeps their own list of کارشناسان. The CEO sees
   // all of them, but reaches the list from inside the فروش group rather than
   // from a row of its own — see the group above.
-  if (!auth.isExecutive && ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)) {
+  // Managers only: a کارشناس does not choose who is on the team.
+  if (
+    !auth.isExecutive &&
+    auth.me?.role !== "operator" &&
+    ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)
+  ) {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
   // No «ارتباطات» group any more. Once مکاتبات، وظایف، پروژه‌ها، گفتگو and
@@ -643,6 +650,7 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           <!-- One control for the whole look: skin + light/dark live together
                inside the palette, so there is no second sun/moon button. -->
           <ThemePicker />
+          <RefreshButton />
           <NotificationBell />
           <div ref="userMenuRoot" class="relative">
             <button class="flex items-center gap-2" @click="userMenu = !userMenu">

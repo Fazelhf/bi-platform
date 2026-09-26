@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { RouterLink, RouterView, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import NotificationBell from "@/components/NotificationBell.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -91,6 +92,7 @@ function logout() {
           </nav>
         </div>
         <div class="flex items-center gap-2 text-sm text-slate-600">
+          <RefreshButton />
           <NotificationBell />
           <span class="text-xs bg-slate-100 rounded-full px-2 py-0.5 whitespace-nowrap">{{ roleLabel }}</span>
           <span class="whitespace-nowrap">{{ auth.username }}</span>
