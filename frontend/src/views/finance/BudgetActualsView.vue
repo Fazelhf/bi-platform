@@ -1,13 +1,12 @@
 <script setup lang="ts">
 /**
- * ورود ارقام واقعی بودجه — the finance team's weekly sheet.
+ * ورود ارقام واقعی بودجه — the finance team's monthly sheet.
  *
  * The CEO defines the budget; this is where finance reports what actually
- * happened against every سرفصل of it. Figures go in one week at a time, like
- * sales entry: the week's plan is the month's pro-rated by day count, and
- * «کل ماه» shows the month as the read-only sum of its weeks.
+ * happened against every سرفصل of it, one figure per سرفصل per month — the
+ * same grain the plan is set and approved at.
  *
- * Enter moves down the column, so a week of figures can be keyed without the
+ * Enter moves down the column, so a month of figures can be keyed without the
  * mouse; nothing is saved until «ذخیره».
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
@@ -23,21 +22,18 @@ import {
 import { useBudgetContext } from "@/composables/useBudgetContext";
 import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { confirm, toast } from "@/composables/useUi";
+import ExcelImport from "@/components/ExcelImport.vue";
 import MoneyInput from "@/components/MoneyInput.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 
 const { budgets, budgetId, periodId, months, linkQuery, init } = useBudgetContext();
+const currentMonth = computed(() => months.value.find((p) => p.id === periodId.value));
 const { money, unitLabel } = useMoney();
 
 const sheet = ref<ActualEntrySheet | null>(null);
 const loading = ref(true);
 const saving = ref(false);
 const error = ref("");
-
-/** The week being keyed; null when the month itself is the entry period. */
-const weekId = ref<number | null>(null);
-/** «کل ماه» — the month read as the sum of its weeks. */
-const monthView = ref(false);
 
 const FA = new Intl.NumberFormat("fa-IR");
 const n = (v: string | number | null | undefined) => Number(v ?? 0);
@@ -90,9 +86,7 @@ function signed(v: number) {
 const sections = computed(() =>
   (["in", "out"] as Direction[]).map((dir) => {
     const lines = (sheet.value?.lines ?? []).filter((l) => l.direction === dir);
-    // One group per parent category, in the order each first appears. Lines
-    // come back ordered by the plan, not by parent, so grouping only while
-    // consecutive printed «فروش» and «سایر» as headers more than once.
+    // One group per parent category, in the order each first appears.
     const byTitle = new Map<string, ActualEntryLine[]>();
     for (const line of lines) {
       const title = line.parent_name || "سایر";
@@ -129,24 +123,22 @@ function moveDown(row: number, e: KeyboardEvent) {
   }
 }
 
-// ---- weeks --------------------------------------------------------------------------
-
-/** Whether the month is cut into weeks (otherwise the month is the entry period). */
-const isWeekly = computed(() => {
-  const s = sheet.value;
-  return !!s && !(s.weeks.length === 1 && s.weeks[0].period_id === s.month.id);
-});
-
 const readonly = computed(() => !sheet.value?.can_edit);
+const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.entered).length);
 
 // ---- load / save ---------------------------------------------------------------------
 
-async function fetchSheet(targetId: number) {
-  if (!budgetId.value) return;
+async function load() {
+  clearDraft();
+  if (!budgetId.value || !periodId.value) {
+    sheet.value = null;
+    loading.value = false;
+    return;
+  }
   loading.value = true;
   error.value = "";
   try {
-    sheet.value = await budgetApi.actuals(budgetId.value, targetId);
+    sheet.value = await budgetApi.actuals(budgetId.value, periodId.value);
   } catch (e: any) {
     sheet.value = null;
     error.value = e?.response?.status === 403
@@ -155,27 +147,6 @@ async function fetchSheet(targetId: number) {
   } finally {
     loading.value = false;
   }
-}
-
-/**
- * Open a month: read it once to learn its weeks, then land on the first week
- * nobody has keyed yet — or the last one, when every week has figures.
- */
-async function openMonth() {
-  clearDraft();
-  monthView.value = false;
-  weekId.value = null;
-  if (!budgetId.value || !periodId.value) {
-    sheet.value = null;
-    loading.value = false;
-    return;
-  }
-  await fetchSheet(periodId.value);
-  const s = sheet.value;
-  if (!s || !s.is_rollup) return;
-  const next = s.weeks.find((w) => w.entered === 0) ?? s.weeks[s.weeks.length - 1];
-  weekId.value = next.period_id;
-  await fetchSheet(next.period_id);
 }
 
 async function leaveDraft(): Promise<boolean> {
@@ -189,21 +160,6 @@ async function leaveDraft(): Promise<boolean> {
   return ok;
 }
 
-async function pickWeek(id: number) {
-  if (!monthView.value && weekId.value === id) return;
-  if (!(await leaveDraft())) return;
-  monthView.value = false;
-  weekId.value = id;
-  await fetchSheet(id);
-}
-
-async function openMonthView() {
-  if (monthView.value || !periodId.value) return;
-  if (!(await leaveDraft())) return;
-  monthView.value = true;
-  await fetchSheet(periodId.value);
-}
-
 async function save() {
   const s = sheet.value;
   if (!s || !budgetId.value || !dirtyCount.value) return;
@@ -214,9 +170,8 @@ async function save() {
       amount_rial: d.amount,
       note: d.note,
     }));
-    const res = await budgetApi.saveActuals(budgetId.value, s.period.id, cells);
-    clearDraft();
-    await fetchSheet(s.period.id);
+    const res = await budgetApi.saveActuals(budgetId.value, s.month.id, cells);
+    await load();
     toast.success(`${FA.format(res.written)} سرفصل ذخیره شد.`);
   } catch (e) {
     toast.error(apiError(e, "ذخیره نشد."));
@@ -229,14 +184,14 @@ async function save() {
 
 watch([budgetId, periodId], async ([b, p], [ob, op]) => {
   if (b === ob && p === op) return;
-  await openMonth();
+  await load();
 });
 
 onMounted(async () => {
   try {
     await loadMoneySettings();
     await init();
-    await openMonth();
+    await load();
   } catch (e) {
     error.value = apiError(e, "بارگذاری ناموفق بود.");
     loading.value = false;
@@ -249,8 +204,6 @@ const beforeUnload = (e: BeforeUnloadEvent) => {
 };
 window.addEventListener("beforeunload", beforeUnload);
 onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
-
-const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.entered).length);
 </script>
 
 <template>
@@ -260,7 +213,7 @@ const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.e
       <div>
         <h1 class="font-bold text-ink">ورود ارقام واقعی بودجه</h1>
         <p class="text-xs text-slate-400 mt-0.5">
-          برای هر سرفصل، رقم واقعی همان هفته را وارد کنید · مبالغ به ریال · نمایش به
+          برای هر سرفصل، رقم واقعی همان ماه را وارد کنید · مبالغ به ریال · نمایش به
           <span class="font-medium">{{ unitLabel }}</span>
         </p>
       </div>
@@ -277,6 +230,10 @@ const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.e
             <option v-for="p in months" :key="p.id" :value="p.id">{{ p.label }}</option>
           </select>
         </label>
+        <ExcelImport
+          v-if="budgetId && currentMonth" import-key="finance-budget-actuals" label="ورود از اکسل"
+          :params="{ budget: budgetId }" :year="currentMonth.jalali_year" :month="currentMonth.jalali_month" @done="load"
+        />
         <router-link
           :to="{ name: 'finance-budget-variance', query: linkQuery }"
           class="px-3 py-1.5 text-sm rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -294,45 +251,8 @@ const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.e
     <DashboardSkeleton v-else-if="loading && !sheet" />
 
     <template v-else-if="sheet">
-      <!-- Week strip: only when the month is cut into weeks -->
-      <section v-if="isWeekly" class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2">
-        <span class="text-xs text-slate-500 px-1">هفته:</span>
-        <button
-          class="px-3 py-1.5 rounded-xl text-sm transition-colors border"
-          :class="monthView
-            ? 'bg-panel text-white border-panel'
-            : 'bg-surface hover:bg-slate-50 text-brand-700 border-brand-500/40'"
-          title="جمع همهٔ هفته‌های این ماه — فقط برای دیدن"
-          @click="openMonthView"
-        >کل ماه</button>
-        <button
-          v-for="w in sheet.weeks"
-          :key="w.period_id"
-          class="px-3 py-1.5 rounded-xl text-sm transition-colors flex items-center gap-1.5"
-          :class="!monthView && weekId === w.period_id
-            ? 'bg-panel text-white'
-            : 'bg-slate-50 hover:bg-slate-100 text-slate-600'"
-          :title="`${w.days} روز · ${FA.format(w.entered)} سرفصل ثبت شده`"
-          @click="pickWeek(w.period_id)"
-        >
-          <span class="w-2 h-2 rounded-full" :class="w.entered ? 'bg-accent-500' : 'bg-slate-300'"></span>
-          {{ w.label }}
-        </button>
-        <span class="text-xs text-slate-400 mr-auto">
-          {{ FA.format(sheet.weeks.filter((w) => w.entered).length) }} از {{ FA.format(sheet.weeks.length) }} هفته شروع شده
-        </span>
-      </section>
-
-      <div v-if="sheet.is_rollup" class="rounded-card p-3 text-sm bg-slate-100 text-slate-600 leading-6">
-        <span class="font-semibold">کل {{ sheet.month.label }}</span> — جمع همهٔ هفته‌ها، فقط خواندنی.
-        برای وارد کردن رقم، یک هفته را انتخاب کنید.
-      </div>
-      <div v-else-if="readonly" class="rounded-card p-3 text-sm bg-slate-100 text-slate-600">
+      <div v-if="readonly" class="rounded-card p-3 text-sm bg-slate-100 text-slate-600">
         ثبت ارقام واقعی با واحد مالی است؛ این برگه برای شما فقط خواندنی است.
-      </div>
-      <div v-else-if="isWeekly" class="rounded-card p-3 text-xs bg-sky-50 text-sky-800 leading-6">
-        در حال ثبت <span class="font-semibold">{{ sheet.period.label }}</span>.
-        «بودجهٔ این هفته» همان بودجهٔ ماه است به نسبت روزهای هفته؛ ستون «جمع ماه تاکنون» جمع همهٔ هفته‌های ثبت‌شده است.
       </div>
 
       <p v-if="!sheet.line_count" class="bg-surface rounded-card shadow-soft p-10 text-center text-sm text-slate-400">
@@ -343,10 +263,12 @@ const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.e
         <!-- Totals, live as figures are typed -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div v-for="s in sections" :key="s.dir" class="bg-surface rounded-card shadow-soft p-4">
-            <p class="text-xs font-semibold" :class="s.dir === 'in' ? 'text-green-700' : 'text-red-600'">{{ s.title }}</p>
+            <p class="text-xs font-semibold" :class="s.dir === 'in' ? 'text-green-700' : 'text-red-600'">
+              {{ s.title }} — {{ sheet.month.label }}
+            </p>
             <div class="grid grid-cols-2 gap-2 mt-2 text-xs">
               <div>
-                <p class="text-slate-400">بودجهٔ این دوره</p>
+                <p class="text-slate-400">بودجهٔ ماه</p>
                 <p class="font-semibold text-slate-600 ltr-nums mt-0.5">{{ money(s.budget, false) }}</p>
               </div>
               <div>
@@ -357,7 +279,7 @@ const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.e
             <p class="text-base font-bold ltr-nums mt-2" :class="verdictText[s.verdict]">{{ signed(s.actual - s.budget) }}</p>
           </div>
           <div class="bg-surface rounded-card shadow-soft p-4">
-            <p class="text-xs font-semibold text-ink">پیشرفت ثبت</p>
+            <p class="text-xs font-semibold text-ink">پیشرفت ثبت — {{ sheet.month.label }}</p>
             <p class="text-2xl font-bold text-ink mt-2">
               {{ FA.format(enteredCount) }}
               <span class="text-sm font-normal text-slate-400">از {{ FA.format(sheet.line_count) }} سرفصل</span>
@@ -373,23 +295,22 @@ const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.e
               <thead>
                 <tr class="text-[11px] text-slate-500 border-b border-slate-100">
                   <th class="text-right font-medium p-3 min-w-[15rem]">سرفصل</th>
-                  <th class="text-left font-medium p-3">{{ sheet.is_rollup || !isWeekly ? "بودجهٔ ماه" : "بودجهٔ این هفته" }}</th>
+                  <th class="text-left font-medium p-3">بودجهٔ ماه</th>
                   <th class="text-left font-medium p-3 min-w-[11rem]">رقم واقعی</th>
                   <th class="text-left font-medium p-3">انحراف</th>
-                  <th v-if="isWeekly && !sheet.is_rollup" class="text-left font-medium p-3">جمع ماه تاکنون</th>
                   <th class="text-right font-medium p-3 min-w-[12rem]">توضیح</th>
                 </tr>
               </thead>
 
               <tbody v-for="s in sections" :key="s.dir">
                 <tr v-if="s.groups.length">
-                  <td colspan="6" class="px-3 pt-4 pb-1 text-xs font-bold" :class="s.dir === 'in' ? 'text-green-700' : 'text-red-600'">
+                  <td colspan="5" class="px-3 pt-4 pb-1 text-xs font-bold" :class="s.dir === 'in' ? 'text-green-700' : 'text-red-600'">
                     {{ s.title }}
                   </td>
                 </tr>
                 <template v-for="g in s.groups" :key="`${s.dir}-${g.title}`">
                   <tr>
-                    <td colspan="6" class="px-3 pt-2 pb-1 text-[11px] text-slate-400">{{ g.title }}</td>
+                    <td colspan="5" class="px-3 pt-2 pb-1 text-[11px] text-slate-400">{{ g.title }}</td>
                   </tr>
                   <tr v-for="line in g.lines" :key="line.line_id" class="border-b border-slate-50 hover:bg-slate-50/50">
                     <td class="p-2 ps-5">
@@ -413,10 +334,6 @@ const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.e
                     </td>
                     <td class="p-2 text-left ltr-nums whitespace-nowrap" :class="verdictText[verdictOf(line.direction, varianceOf(line))]">
                       {{ signed(varianceOf(line)) }}
-                    </td>
-                    <td v-if="isWeekly && !sheet.is_rollup" class="p-2 text-left ltr-nums text-slate-500 whitespace-nowrap">
-                      {{ money(n(line.month_actual_rial), false) }}
-                      <span class="text-[10px] text-slate-400">از {{ money(n(line.month_budget_rial), false) }}</span>
                     </td>
                     <td class="p-1.5">
                       <input

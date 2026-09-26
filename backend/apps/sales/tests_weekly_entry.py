@@ -12,6 +12,8 @@ is the contract underneath it, so a future change cannot quietly break the
 thing that made the bug expensive rather than merely annoying: a week must
 hold exactly what was entered for that week, and nothing else.
 """
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
@@ -31,6 +33,11 @@ class WeeklyEntryIsolationTests(APITestCase):
         self.month = DimPeriod.objects.create(jalali_year=1405, jalali_month=5)
         periods.backfill_dates(self.month)
         self.weeks = periods.ensure_weeks(self.month)
+        # These tests post weeks out of order on purpose; the «earlier week
+        # first» rule has its own tests in tests_entry_rules.py.
+        patcher = mock.patch("apps.sales.views.entry_block", return_value="")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.emp = DimEmployee.objects.create(
             code="emp-w1", full_name_fa="افسانه چوبینی"
         )
@@ -161,6 +168,11 @@ class WeekProgressTests(APITestCase):
         self.month = DimPeriod.objects.create(jalali_year=1405, jalali_month=5)
         periods.backfill_dates(self.month)
         self.weeks = periods.ensure_weeks(self.month)
+        # These tests post weeks out of order on purpose; the «earlier week
+        # first» rule has its own tests in tests_entry_rules.py.
+        patcher = mock.patch("apps.sales.views.entry_block", return_value="")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.emp = DimEmployee.objects.create(code="emp-w2", full_name_fa="صبا موسوی")
 
     def _fill(self, week, status=ApprovalStatus.DRAFT):

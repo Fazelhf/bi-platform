@@ -37,6 +37,12 @@ const offlineReady = ref(false);
 let doUpdate: (reload?: boolean) => Promise<void> = async () => {};
 /** The installed-but-not-yet-active worker, when we found it ourselves. */
 let waiting: ServiceWorker | null = null;
+let registered: ServiceWorkerRegistration | null = null;
+
+/** Ask the server whether a newer bundle exists. Never throws. */
+function checkNow(): Promise<void> {
+  return registered ? registered.update().then(() => {}, () => {}) : Promise.resolve();
+}
 
 function start() {
   if (started) return;
@@ -45,11 +51,17 @@ function start() {
   const { needRefresh, offlineReady: ready, updateServiceWorker } = useRegisterSW({
     onRegisteredSW(_url, registration) {
       if (!registration) return;
+      registered = registration;
 
       // Chrome only checks for a new worker on navigation, and this app is a
-      // SPA: someone who leaves the tab open all week would never be offered
-      // an update. An hourly poll costs one conditional GET of a 12 KB file.
-      setInterval(() => registration.update().catch(() => {}), 60 * 60 * 1000);
+      // SPA: an installed app on a phone is resumed from the background for
+      // days without ever navigating, so it would never learn of a release.
+      // Check every 15 minutes, and every time the app comes back on screen
+      // — that is the moment someone opens it from the home screen.
+      setInterval(checkNow, 15 * 60 * 1000);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") checkNow();
+      });
 
       // A worker that was *already* waiting when this page loaded.
       //
@@ -138,6 +150,21 @@ export function usePwa() {
     await doUpdate(true);
   }
 
+  /**
+   * «تازه‌سازی» — the reload an installed app has no browser button for.
+   * Looks for a new release first: if one is waiting, installing it *is*
+   * the refresh; otherwise the page is simply reloaded.
+   */
+  async function refresh() {
+    await Promise.race([checkNow(), new Promise((r) => setTimeout(r, 3000))]);
+    if (needsUpdate.value || registered?.waiting) {
+      if (!waiting && registered?.waiting) waiting = registered.waiting;
+      await update();
+      return;
+    }
+    window.location.reload();
+  }
+
   /** Already installed? Then «نصب برنامه» would be a button to nowhere. */
   const isInstalled =
     window.matchMedia("(display-mode: standalone)").matches ||
@@ -154,5 +181,6 @@ export function usePwa() {
     isInstalled,
     install,
     update,
+    refresh,
   };
 }

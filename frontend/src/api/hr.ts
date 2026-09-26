@@ -161,6 +161,11 @@ export const hrApi = {
     const { data } = await api.post(`/hr/people/${id}/merge/`, { into });
     return data as { moved: Record<string, number>; person: Person };
   },
+  /** Admin only: attach a login account that already exists to this person. */
+  async linkAccount(id: number, userId: number): Promise<Person> {
+    const { data } = await api.post(`/hr/people/${id}/link-account/`, { user: userId });
+    return data;
+  },
   /** Admin only: a login account for this person, made with the panel's own rules. */
   async createAccount(id: number, payload: Record<string, unknown>): Promise<Person> {
     const { data } = await api.post(`/hr/people/${id}/account/`, payload);

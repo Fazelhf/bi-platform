@@ -24,7 +24,6 @@ from apps.finance.models import (
     BudgetAmountChange,
     BudgetLine,
     BudgetPeriod,
-    BudgetSalesForecast,
     BudgetStatus,
     CashCategory,
     CashMovement,
@@ -52,7 +51,8 @@ from apps.finance.serializers import (
 )
 from apps.finance.services import balance_trend, cash_report
 from apps.finance.services import budget as budget_service
-from apps.sales.models import ApprovalStatus, SalesChannel
+from apps.finance.services import executive as executive_service
+from apps.sales.models import ApprovalStatus
 
 
 def _nonzero(value) -> bool:
@@ -282,12 +282,32 @@ class CashEntryView(APIView):
         written = 0
         removed = 0
 
+        # What this sheet may write into: the days of *its* period, the leaf
+        # categories on offer, and accounts / facilities that exist. Anything
+        # else used to be stored as sent — a parent category counted twice
+        # in every roll-up, a day from another month, an account id that
+        # pointed at nothing.
+        sheet = self._period(request.data.get("period"))
+        day_ids = {d.id for d in leaves_of(sheet)}
+        categories = {c.id: c for c in CashCategory.enterable()}
+        account_ids = set(BankAccount.objects.values_list("id", flat=True))
+        line_ids = set(CreditLine.objects.values_list("id", flat=True))
+
         for day in request.data.get("days", []):
             period_id = day.get("period_id")
             if not period_id:
                 continue
+            if _int(period_id) not in day_ids:
+                raise ValidationError({"detail": "روز ارسال‌شده متعلق به این دوره نیست."})
+            period_id = _int(period_id)
             for direction in (Direction.IN, Direction.OUT):
                 for raw_category_id, rows in (day.get(direction) or {}).items():
+                    category = categories.get(_int(raw_category_id))
+                    if category is None or not category.allows(direction):
+                        raise ValidationError({
+                            "detail": "سرفصل ارسال‌شده قابل ثبت نیست؛ صفحه را تازه کنید."
+                        })
+                    raw_category_id = category.id
                     # A cell is a list of rows, one per account. Older clients
                     # sent a single object; accept both rather than 500.
                     if isinstance(rows, dict):
@@ -297,10 +317,24 @@ class CashEntryView(APIView):
 
                     kept_ids = []
                     for row in rows:
-                        amount = row.get("amount_rial")
                         account_id = row.get("account") or None
                         line_id = row.get("credit_line") or None
                         note = row.get("note", "")
+                        if account_id is not None and _int(account_id) not in account_ids:
+                            raise ValidationError({"detail": "حساب بانکی انتخاب‌شده وجود ندارد."})
+                        if line_id is not None and _int(line_id) not in line_ids:
+                            raise ValidationError({"detail": "تسهیلات انتخاب‌شده وجود ندارد."})
+                        try:
+                            amount = Decimal(str(row.get("amount_rial") or 0))
+                        except (InvalidOperation, ValueError):
+                            raise ValidationError({
+                                "detail": f"مبلغ «{category.name_fa}» عدد معتبری نیست."
+                            })
+                        if amount < 0:
+                            raise ValidationError({
+                                "detail": f"مبلغ «{category.name_fa}» نمی‌تواند منفی باشد؛ "
+                                          "برداشت را در ستون برداشت وارد کنید."
+                            })
 
                         existing = CashMovement.objects.filter(
                             period_id=period_id, direction=direction,
@@ -311,16 +345,18 @@ class CashEntryView(APIView):
                         # than filling the table with empty days.
                         if existing is None and not _nonzero(amount):
                             continue
+                        values = {"amount_rial": amount or 0, "note": note or ""}
+                        # Saving the sheet again must not walk an approved
+                        # figure back to پیش‌نویس. Only an explicit submit
+                        # moves the status of a row that already exists.
+                        if submit or existing is None:
+                            values["status"] = status
+                            values["submitted_by"] = request.user if submit else None
                         movement, _ = CashMovement.objects.update_or_create(
                             period_id=period_id, direction=direction,
                             category_id=raw_category_id,
                             credit_line_id=line_id, account_id=account_id,
-                            defaults={
-                                "amount_rial": amount or 0,
-                                "note": note or "",
-                                "status": status,
-                                "submitted_by": request.user if submit else None,
-                            },
+                            defaults=values,
                         )
                         kept_ids.append(movement.id)
                         written += 1
@@ -335,7 +371,7 @@ class CashEntryView(APIView):
                     removed += stale.count()
                     stale.delete()
 
-        period = self._period(request.data.get("period"))
+        period = sheet
         audit_log(request.user, period, AuditLog.Action.UPDATE,
                   {"cash_entry": {"before": None, "after": f"{written} حرکت"}})
 
@@ -599,22 +635,6 @@ class BudgetGridView(APIView):
             for a in BudgetAmount.objects.filter(budget_period__budget=budget)
         }
 
-        forecasts = {
-            (f.budget_period_id, f.channel): f
-            for f in BudgetSalesForecast.objects.filter(budget_period__budget=budget)
-        }
-
-        def sales_cell(bp_id: int, channel: str) -> dict:
-            row = forecasts.get((bp_id, channel))
-            return {
-                "amount_rial": str(row.amount_rial) if row else "0",
-                "baseline_rial": (
-                    str(row.baseline_rial)
-                    if row and row.baseline_rial is not None
-                    else None
-                ),
-            }
-
         def cell(bp_id: int, line_id: int) -> dict:
             row = stored.get((bp_id, line_id))
             return {
@@ -648,16 +668,6 @@ class BudgetGridView(APIView):
                 }
                 for line in lines
             ],
-            # Accrual sales by channel — shown above the cash lines, never
-            # summed into them.
-            "sales": [
-                {
-                    "channel": channel.value,
-                    "label": channel.label,
-                    "cells": {str(bp.id): sales_cell(bp.id, channel.value) for bp in periods},
-                }
-                for channel in SalesChannel
-            ],
             "unit": FinanceSettingSerializer(FinanceSetting.get()).data,
             "can_edit": is_ceo(request.user),
         })
@@ -678,7 +688,14 @@ class BudgetGridView(APIView):
                 budget_period=bp, line=line
             )
             if "amount_rial" in cell:
-                amount = Decimal(str(cell.get("amount_rial") or 0))
+                try:
+                    amount = Decimal(str(cell.get("amount_rial") or 0))
+                except (InvalidOperation, ValueError):
+                    raise ValidationError({"detail": f"مبلغ «{line}» عدد معتبری نیست."})
+                # The direction of a سرفصل already says in or out; a minus
+                # sign on top would flip it silently in every total.
+                if amount < 0:
+                    raise ValidationError({"detail": f"مبلغ «{line}» نمی‌تواند منفی باشد."})
                 if created:
                     row.amount_rial = amount
                     row.save(update_fields=["amount_rial", "updated_at"])
@@ -703,24 +720,6 @@ class BudgetGridView(APIView):
                 row.variance_note = str(cell.get("variance_note") or "")
                 row.save(update_fields=["variance_note", "updated_at"])
 
-        channels = set(SalesChannel.values)
-        for cell in request.data.get("sales_cells", []):
-            channel = cell.get("channel")
-            if channel not in channels:
-                continue
-            try:
-                bp = BudgetPeriod.objects.get(pk=cell.get("budget_period_id"))
-            except (BudgetPeriod.DoesNotExist, ValueError, TypeError):
-                continue
-            amount = Decimal(str(cell.get("amount_rial") or 0))
-            row, created = BudgetSalesForecast.objects.get_or_create(
-                budget_period=bp, channel=channel
-            )
-            if created or row.amount_rial != amount:
-                row.amount_rial = amount
-                row.save(update_fields=["amount_rial", "updated_at"])
-                written += 1
-
         return Response({"written": written})
 
 
@@ -732,7 +731,7 @@ class BudgetVarianceView(APIView):
     @extend_schema(
         parameters=[
             OpenApiParameter("budget", int, required=True),
-            OpenApiParameter("period", int, required=True, description="ماه یا هفته"),
+            OpenApiParameter("period", int, required=True, description="ماه"),
         ],
         responses=dict,
     )
@@ -799,13 +798,12 @@ def _int(value):
 
 
 def _entry_period_param(value) -> DimPeriod:
+    """The month figures belong to: a week or a day sent is read as its month."""
     try:
         period = DimPeriod.objects.get(pk=value)
     except (DimPeriod.DoesNotExist, ValueError, TypeError):
         raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
-    if period.kind == PeriodKind.DAY:
-        raise ValidationError({"period": "ارقام واقعی بودجه هفتگی وارد می‌شوند، نه روزانه."})
-    return period
+    return period if period.kind == PeriodKind.MONTH else month_of(period)
 
 
 def _require_month_in_budget(budget: Budget, period: DimPeriod) -> None:
@@ -816,9 +814,9 @@ def _require_month_in_budget(budget: Budget, period: DimPeriod) -> None:
 
 class BudgetActualEntryView(APIView):
     """
-    ورود ارقام واقعی بودجه — the finance team's weekly sheet.
+    ورود ارقام واقعی بودجه — the finance team's monthly sheet.
 
-    Every سرفصل of the budget, its plan for the week and the actual keyed
+    Every سرفصل of the budget, its plan for the month and the actual keyed
     against it. The CEO defines the plan; finance reports against it here and
     cannot move it.
     """
@@ -828,7 +826,7 @@ class BudgetActualEntryView(APIView):
     @extend_schema(
         parameters=[
             OpenApiParameter("budget", int, required=True),
-            OpenApiParameter("period", int, required=True, description="هفته یا ماه"),
+            OpenApiParameter("period", int, required=True, description="ماه"),
         ],
         responses=dict,
     )
@@ -837,8 +835,7 @@ class BudgetActualEntryView(APIView):
         period = _entry_period_param(request.query_params.get("period"))
         _require_month_in_budget(budget, period)
         sheet = budget_service.entry_sheet(budget, period)
-        # A split month is the sum of its weeks: read it, key the weeks.
-        sheet["can_edit"] = is_finance(request.user) and not sheet["is_rollup"]
+        sheet["can_edit"] = is_finance(request.user)
         sheet["unit"] = FinanceSettingSerializer(FinanceSetting.get()).data
         return Response(sheet)
 
@@ -847,14 +844,6 @@ class BudgetActualEntryView(APIView):
         budget = _budget_param(request.data.get("budget"))
         period = _entry_period_param(request.data.get("period"))
         _require_month_in_budget(budget, period)
-        if (
-            period.kind == PeriodKind.MONTH
-            and period.children.filter(kind=PeriodKind.WEEK).exists()
-        ):
-            raise ValidationError({
-                "period": "این ماه به هفته تقسیم شده؛ ارقام واقعی را در هر هفته وارد کنید."
-            })
-
         lines = {ln.id: ln for ln in BudgetLine.objects.filter(budget=budget, is_active=True)}
         written = 0
         for cell in request.data.get("cells", []):
@@ -865,6 +854,8 @@ class BudgetActualEntryView(APIView):
                 amount = Decimal(str(cell.get("amount_rial") or 0))
             except (InvalidOperation, ValueError):
                 raise ValidationError({"detail": f"مبلغ «{line}» عدد معتبری نیست."})
+            if amount < 0:
+                raise ValidationError({"detail": f"مبلغ «{line}» نمی‌تواند منفی باشد."})
             note = str(cell.get("note") or "")[:250]
 
             existing = BudgetActual.objects.filter(line=line, period=period).first()
@@ -909,3 +900,37 @@ class BudgetNoteView(APIView):
         row.variance_note = str(request.data.get("variance_note") or "")
         row.save(update_fields=["variance_note", "updated_at"])
         return Response({"variance_note": row.variance_note})
+
+
+# --------------------------------------------------------------------------
+# charts and the CEO's financial picture
+# --------------------------------------------------------------------------
+
+def _period_param(value) -> DimPeriod:
+    try:
+        return DimPeriod.objects.get(pk=value)
+    except (DimPeriod.DoesNotExist, ValueError, TypeError):
+        raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+
+
+class ExecutiveFinanceView(APIView):
+    """نمای مالی on the CEO's overview: cash, credit and budget for one month."""
+
+    permission_classes = [FinanceAccess]
+
+    @extend_schema(parameters=[OpenApiParameter("period", int, required=True)], responses=dict)
+    def get(self, request):
+        assert_finance_visible(request.user)
+        return Response(executive_service.summary(_period_param(request.query_params.get("period"))))
+
+
+class BudgetHeatmapView(APIView):
+    """Top-level groups × months: how far each strayed from plan."""
+
+    permission_classes = [FinanceAccess]
+
+    @extend_schema(parameters=[OpenApiParameter("budget", int, required=True)], responses=dict)
+    def get(self, request):
+        assert_finance_visible(request.user)
+        return Response(budget_service.heatmap(_budget_param(request.query_params.get("budget"))))
+

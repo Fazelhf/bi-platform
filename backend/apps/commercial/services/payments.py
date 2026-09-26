@@ -68,24 +68,53 @@ def build(today: date | None = None, outstanding_only: bool = False) -> dict:
 
     rows.sort(key=lambda r: Decimal(r["outstanding"]), reverse=True)
 
-    value = sum((Decimal(r["value_amount"]) for r in rows), ZERO)
-    paid = sum((Decimal(r["paid_amount"]) for r in rows), ZERO)
-    outstanding = sum((Decimal(r["outstanding"]) for r in rows), ZERO)
-    interest = sum((Decimal(r["interest_amount"]) for r in rows), ZERO)
+    # Per currency, never one pile: a dollar and a euro are different debts,
+    # and a «مانده» added across them is a figure nobody can pay.
+    fields = {"value": "value_amount", "paid": "paid_amount",
+              "outstanding": "outstanding", "interest": "interest_amount"}
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        bucket = buckets.setdefault(
+            row["currency"],
+            {"value": ZERO, "paid": ZERO, "outstanding": ZERO, "interest": ZERO,
+             "shipment_count": 0, "unpaid_count": 0, "overdue_count": 0},
+        )
+        for field, key in fields.items():
+            bucket[field] += Decimal(row[key])
+        bucket["shipment_count"] += 1
+        bucket["unpaid_count"] += 1 if Decimal(row["outstanding"]) > 0 else 0
+        bucket["overdue_count"] += 1 if (row["overdue_days"] or 0) > 0 else 0
 
-    return {
-        "rows": rows,
-        "totals": {
-            "value": as_str(value),
-            "paid": as_str(paid),
-            "outstanding": as_str(outstanding),
-            "interest": as_str(interest),
+    by_currency = [
+        {
+            "currency": currency,
+            "value": as_str(b["value"]),
+            "paid": as_str(b["paid"]),
+            "outstanding": as_str(b["outstanding"]),
+            "interest": as_str(b["interest"]),
             # What the company owes if every invoice and its stated interest
             # were settled today — the figure the workbook calls «Payable».
-            "payable": as_str(outstanding + interest),
-            "paid_pct": round(float(paid / value * 100), 1) if value else 0.0,
-            "shipment_count": len(rows),
-            "unpaid_count": sum(1 for r in rows if Decimal(r["outstanding"]) > 0),
-            "overdue_count": sum(1 for r in rows if (r["overdue_days"] or 0) > 0),
-        },
+            "payable": as_str(b["outstanding"] + b["interest"]),
+            "paid_pct": (
+                round(float(b["paid"] / b["value"] * 100), 1) if b["value"] else 0.0
+            ),
+            "shipment_count": b["shipment_count"],
+            "unpaid_count": b["unpaid_count"],
+            "overdue_count": b["overdue_count"],
+        }
+        for currency, b in sorted(buckets.items())
+    ]
+
+    # The headline keeps its old shape so the page still has one row of
+    # figures, but it is one currency's — named, and with the count of the
+    # others beside it, so it is never read as the whole exposure.
+    lead = max(by_currency, key=lambda c: Decimal(c["value"]), default=None)
+    totals = dict(lead) if lead else {
+        "currency": "", "value": "0", "paid": "0", "outstanding": "0",
+        "interest": "0", "payable": "0", "paid_pct": 0.0,
+        "unpaid_count": 0, "overdue_count": 0,
     }
+    totals["currency_count"] = len(by_currency)
+    totals["shipment_count"] = len(rows)
+
+    return {"rows": rows, "totals": totals, "by_currency": by_currency}

@@ -232,6 +232,42 @@ class PersonViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=["post"], url_path="link-account")
+    def link_account(self, request, pk=None):
+        """
+        وصل کردن حساب کاربری موجود به این فرد.
+
+        For someone who already signs in — an account made in the admin panel
+        before this person was on the chart. Creating a second login for them
+        would split their records between two accounts, so the one they have
+        is attached instead. Same gate as creating one: attaching a login
+        decides whose CRM and sales records it opens.
+        """
+        from apps.adminpanel.permissions import require
+
+        if not request.user.is_admin_panel_user:
+            raise PermissionDenied("وصل کردن حساب کاربری فقط برای ادمین مجاز است.")
+        require(request.user, "users.create")
+
+        person = self.get_object()
+        if person.user_id:
+            raise ValidationError({"detail": "این فرد حساب کاربری دارد."})
+
+        user = get_user_model().objects.filter(pk=request.data.get("user") or 0).first()
+        if user is None:
+            raise ValidationError({"user": "حساب کاربری را انتخاب کنید."})
+        if not user.is_active:
+            raise ValidationError({"user": "این حساب غیرفعال است؛ اول از پنل ادمین فعالش کنید."})
+        taken = DimEmployee.objects.filter(user=user).exclude(pk=person.pk).first()
+        if taken is not None:
+            raise ValidationError({"user": f"این حساب به «{taken.full_name_fa}» وصل است."})
+
+        person.user = user
+        person.save(update_fields=["user", "updated_at"])
+        audit_log(request.user, person, AuditLog.Action.UPDATE,
+                  {"user": {"before": None, "after": user.username}})
+        return Response(PersonSerializer(self.get_queryset().get(pk=person.pk)).data)
+
     @action(detail=False, methods=["get"])
     def duplicates(self, request):
         """Groups of people whose names match once spelling is ignored."""

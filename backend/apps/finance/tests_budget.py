@@ -4,10 +4,9 @@ Budget tests.
 The rules a budget report cannot get wrong without quietly lying:
 
 * the CEO defines the plan; the finance team reports against it and cannot move it;
-* an actual is what finance keyed for a سرفصل, weekly, and a month is its weeks' sum;
+* an actual is what finance keyed for a سرفصل for the month — the budget is monthly;
 * the cash ledger no longer counts toward the budget;
 * over budget is judged by direction, never by sign;
-* a week's plan is the month's, pro-rated, and never stored;
 * the approved figure survives every later edit, and the edit is recorded.
 """
 from datetime import date
@@ -21,7 +20,6 @@ from apps.finance.models import (
     BudgetAmountChange,
     BudgetLine,
     BudgetPeriod,
-    BudgetSalesForecast,
     BudgetStatus,
     CashCategory,
     Direction,
@@ -141,82 +139,54 @@ class VarianceTests(BudgetTestCase):
         self.assertEqual(gap, D(-40 - 20))
 
 
-class WeeklyTests(BudgetTestCase):
-    def test_a_week_gets_the_month_pro_rated_by_days(self):
+class MonthlyTests(BudgetTestCase):
+    """The budget is monthly: a week asked for is read as its whole month."""
+
+    def test_a_week_reads_as_its_month(self):
         month, week1, _week2, bp = self.weekly_month()
-        self.line(self.rent, Direction.OUT, 3000, bp=bp)
+        rent = self.line(self.rent, Direction.OUT, 3000, bp=bp)
+        self.actual(rent, 700, period=month)
 
         report = budget_service.build(self.budget, week1)
-
-        self.assertEqual(report["grain"], "week")
-        self.assertTrue(report["prorated"])
-        self.assertEqual(self.row(report, kind="line", code="rent")["budget_rial"], "600")
-        # Nothing was written for the week.
-        self.assertFalse(BudgetPeriod.objects.filter(period=week1).exists())
-
-    def test_a_month_is_the_sum_of_its_weeks(self):
-        month, week1, week2, bp = self.weekly_month()
-        rent = self.line(self.rent, Direction.OUT, 3000, bp=bp)
-        self.actual(rent, 100, period=week1)
-        self.actual(rent, 50, period=week2)
-
-        self.assertEqual(self.row(budget_service.build(self.budget, month), kind="line", code="rent")["actual_rial"], "150")
-        self.assertEqual(self.row(budget_service.build(self.budget, week1), kind="line", code="rent")["actual_rial"], "100")
-
-        sheet = budget_service.entry_sheet(self.budget, month)
-        self.assertTrue(sheet["is_rollup"])
-        self.assertEqual(sheet["lines"][0]["actual_rial"], "150")
-        self.assertEqual([w["entered"] for w in sheet["weeks"]], [1, 1])
+        row = self.row(report, kind="line", code="rent")
+        self.assertEqual((row["budget_rial"], row["actual_rial"]), ("3000", "700"))
+        self.assertEqual(report["period"]["id"], month.id)
+        self.assertNotIn("prorated", report)
 
 
 class ActualEntryTests(BudgetTestCase):
-    """«ورود ارقام واقعی بودجه» — finance keys every سرفصل, week by week."""
+    """«ورود ارقام واقعی بودجه» — finance keys every سرفصل for the month."""
 
-    def test_finance_keys_a_week_and_reads_it_back(self):
-        month, week1, _week2, bp = self.weekly_month()
+    def test_finance_keys_a_month_and_reads_it_back(self):
+        month, _week1, _week2, bp = self.weekly_month()
         rent = self.line(self.rent, Direction.OUT, 3000, bp=bp)
 
         response = self.client.post("/api/finance/budget-actuals/", {
-            "budget": self.budget.id, "period": week1.id,
-            "cells": [{"line_id": rent.id, "amount_rial": "700", "note": "اجارهٔ انبار هم آمد"}],
+            "budget": self.budget.id, "period": month.id,
+            "cells": [{"line_id": rent.id, "amount_rial": "3500", "note": "اجارهٔ انبار هم آمد"}],
         }, format="json")
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["written"], 1)
 
         sheet = self.client.get("/api/finance/budget-actuals/", {
-            "budget": self.budget.id, "period": week1.id,
+            "budget": self.budget.id, "period": month.id,
         }).data
         line = sheet["lines"][0]
         self.assertTrue(sheet["can_edit"])
-        self.assertFalse(sheet["is_rollup"])
-        self.assertEqual((line["budget_rial"], line["actual_rial"]), ("600", "700"))
+        self.assertEqual((line["budget_rial"], line["actual_rial"]), ("3000", "3500"))
         self.assertEqual(line["note"], "اجارهٔ انبار هم آمد")
-        self.assertEqual(line["verdict"], "bad")  # spent more than the week's share
+        self.assertEqual(line["verdict"], "bad")
+        self.assertEqual(BudgetActual.objects.get(line=rent).period_id, month.id)
 
-        month_sheet = self.client.get("/api/finance/budget-actuals/", {
-            "budget": self.budget.id, "period": month.id,
-        }).data
-        self.assertTrue(month_sheet["is_rollup"])
-        self.assertFalse(month_sheet["can_edit"])
-
-    def test_a_month_cut_into_weeks_takes_figures_only_on_its_weeks(self):
-        month, _week1, _week2, bp = self.weekly_month()
+    def test_a_week_sent_is_stored_on_its_month(self):
+        month, week1, _week2, bp = self.weekly_month()
         rent = self.line(self.rent, Direction.OUT, 3000, bp=bp)
         response = self.client.post("/api/finance/budget-actuals/", {
-            "budget": self.budget.id, "period": month.id,
-            "cells": [{"line_id": rent.id, "amount_rial": "700"}],
-        }, format="json")
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(BudgetActual.objects.exists())
-
-    def test_a_month_never_cut_is_its_own_entry_period(self):
-        rent = self.line(self.rent, Direction.OUT, 1000)
-        response = self.client.post("/api/finance/budget-actuals/", {
-            "budget": self.budget.id, "period": self.month.id,
+            "budget": self.budget.id, "period": week1.id,
             "cells": [{"line_id": rent.id, "amount_rial": "900"}],
         }, format="json")
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(BudgetActual.objects.get(line=rent).period_id, self.month.id)
+        self.assertEqual(BudgetActual.objects.get(line=rent).period_id, month.id)
 
     def test_blank_cells_are_not_stored(self):
         rent = self.line(self.rent, Direction.OUT, 1000)
@@ -400,44 +370,23 @@ class ManualCategoryTests(BudgetTestCase):
         self.assertIn("direction", response.data)
 
 
-class SalesForecastTests(BudgetTestCase):
-    """Accrual sales: compared with recorded sales, kept out of the cash totals."""
+class QuarantineTests(BudgetTestCase):
+    """The budget reads nothing from another module — only what is keyed into it."""
 
-    def test_forecast_meets_recorded_sales_and_stays_out_of_cash_totals(self):
-        from apps.sales.models import DimEmployee, FactSalesMonthly
-
-        BudgetSalesForecast.objects.create(budget_period=self.bp, channel="team", amount_rial=D(300))
-        employee = DimEmployee.objects.create(full_name_fa="فروشنده تست")
-        FactSalesMonthly.objects.create(
-            period=self.days[0], employee=employee, channel="team", revenue_rial=D(330),
-        )
-
+    def test_the_report_carries_only_budget_figures(self):
+        rent = self.line(self.rent, Direction.OUT, 1000)
+        self.actual(rent, 400)
         report = budget_service.build(self.budget, self.month)
-        team = next(r for r in report["sales"]["rows"] if r["channel"] == "team")
+        self.assertNotIn("sales", report)
+        self.assertEqual(report["totals"]["out"]["actual_rial"], "400")
 
-        self.assertEqual((team["budget_rial"], team["actual_rial"]), ("300", "330"))
-        self.assertEqual(team["verdict"], "good")  # selling more than forecast is good news
-        self.assertEqual(report["sales"]["total"]["budget_rial"], "300")
-        # Counting the sale here and its collection on وصول نقدی would plan
-        # the same rial twice.
-        self.assertEqual(report["totals"]["in"]["budget_rial"], "0")
+    def test_budget_code_imports_no_other_module(self):
+        import inspect
 
-    def test_grid_saves_the_forecast_and_approval_stamps_it(self):
-        self.client.force_authenticate(self.ceo)
-        response = self.client.post("/api/finance/budget-grid/", {
-            "cells": [],
-            "sales_cells": [{"budget_period_id": self.bp.id, "channel": "psp", "amount_rial": "50"}],
-        }, format="json")
-        self.assertEqual(response.status_code, 200, response.data)
+        from apps.finance import budget_models
+        from apps.finance.services import budget as service
 
-        response = self.client.post(
-            f"/api/finance/budgets/{self.budget.id}/approve/", {"period": self.month.id},
-        )
-        self.assertEqual(response.status_code, 200, response.data)
-
-        forecast = BudgetSalesForecast.objects.get(budget_period=self.bp, channel="psp")
-        self.assertEqual((forecast.amount_rial, forecast.baseline_rial), (D(50), D(50)))
-
-        grid = self.client.get("/api/finance/budget-grid/", {"budget": self.budget.id}).data
-        psp = next(r for r in grid["sales"] if r["channel"] == "psp")
-        self.assertEqual(psp["cells"][str(self.bp.id)]["amount_rial"], "50")
+        for module in (budget_models, service):
+            source = inspect.getsource(module)
+            for other in ("apps.sales", "apps.crm", "apps.commercial", "apps.hr"):
+                self.assertNotIn(other, source, f"{module.__name__} reads {other}")

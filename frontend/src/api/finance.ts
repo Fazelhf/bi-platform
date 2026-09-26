@@ -188,6 +188,41 @@ export interface FinanceSettings {
   unit_divisor: number;
 }
 
+import type { VarianceCell } from "./budget";
+
+/** نمای مالی on the CEO's overview — one month of cash, credit and budget. */
+export interface FinanceSummary {
+  month: { id: number; label: string };
+  cash: {
+    opening_rial: string;
+    closing_rial: string;
+    low_threshold_rial: string;
+    in_rial: string;
+    out_rial: string;
+    net_rial: string;
+    warnings: { level: "warning" | "danger"; text: string; amount: string }[];
+    has_movements: boolean;
+  };
+  credit: {
+    owed_by_company_rial: string;
+    owed_to_company_rial: string;
+    partner_net_rial: string;
+    facility_count: number;
+  };
+  budget: null | {
+    id: number;
+    title: string;
+    status: string;
+    status_label: string;
+    has_actuals: boolean;
+    totals: { in: VarianceCell; out: VarianceCell; net: VarianceCell };
+    material_bad: number;
+    top_bad: { label: string; direction: "in" | "out"; variance_rial: string; variance_pct: number | null }[];
+  };
+  trend: { period_id: number; label: string; in: string; out: string; net: string }[];
+  composition: { in: { label: string; rial: string }[]; out: { label: string; rial: string }[] };
+}
+
 export const financeApi = {
   async entry(periodId: number): Promise<CashEntry> {
     const { data } = await api.get("/finance/entry/", { params: { period: periodId } });
@@ -260,6 +295,10 @@ export const financeApi = {
   },
   async yearTrend(year?: number): Promise<YearTrend> {
     const { data } = await api.get("/finance/balance-trend/", { params: { year } });
+    return data;
+  },
+  async executiveSummary(periodId: number): Promise<FinanceSummary> {
+    const { data } = await api.get("/finance/executive-summary/", { params: { period: periodId } });
     return data;
   },
   async settings(): Promise<FinanceSettings> {

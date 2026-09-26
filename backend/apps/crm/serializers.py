@@ -461,19 +461,46 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
     """One آرپا invoice, flattened for the drill-down drawer."""
 
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
-    customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
-    owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True, default="")
+    customer_name = serializers.SerializerMethodField()
+    owner_name = serializers.SerializerMethodField()
     deal_title = serializers.CharField(source="deal.title", read_only=True, default="")
     issued_jalali = serializers.SerializerMethodField()
+    awaiting_match = serializers.SerializerMethodField()
 
     class Meta:
         model = SalesInvoice
         fields = (
             "id", "number", "kind", "kind_display", "issued_at", "issued_jalali",
-            "customer", "customer_name", "owner", "owner_name", "deal",
-            "deal_title", "amount_rial", "vat_rial", "total_rial",
-            "unsettled_rial", "payment_terms",
+            "customer", "customer_name", "party_code", "awaiting_match",
+            "owner", "owner_name", "deal", "deal_title", "amount_rial",
+            "vat_rial", "total_rial", "unsettled_rial", "payment_terms",
+            "channel",
         )
+
+    def get_customer_name(self, obj) -> str:
+        # An invoice whose آرپا party is still in the review queue has no CRM
+        # customer yet; آرپا's own name for the party is what there is.
+        return obj.customer.name_fa if obj.customer_id else obj.party_name
+
+    def get_awaiting_match(self, obj) -> bool:
+        return not obj.customer_id
+
+    def get_owner_name(self, obj) -> str:
+        """
+        The salesperson the sale is attributed to — the same fallback the
+        reports sum on (`Filters.invoices`): the invoice's بازاریاب, then its
+        deal's owner, then the customer's owner in دیدار. Showing only the
+        first would list a sale under «بدون کارشناس» in the drawer that the
+        chart which opened it had credited to someone.
+        """
+        for person in (
+            obj.owner,
+            obj.deal.owner if obj.deal_id else None,
+            obj.customer.owner if obj.customer_id else None,
+        ):
+            if person:
+                return person.full_name_fa
+        return ""
 
     def get_issued_jalali(self, obj) -> str:
         return jalali_str(obj.issued_at)

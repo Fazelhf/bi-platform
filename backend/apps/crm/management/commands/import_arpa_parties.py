@@ -295,10 +295,15 @@ class Command(BaseCommand):
             + (f"، {held} دست‌نخورده چون زیر بازبینی است" if held else "")
         ))
 
-
-
-
-
+        # Groups have just been filled in, and the department follows from
+        # the rep's roster and the آرپا group — see apps.crm.channels.
+        from apps.crm.channels import rederive_customer_channels
+        moved = rederive_customer_channels(Dataset.REAL)
+        if moved:
+            self.stdout.write(
+                "  دپارتمان مشتری عوض شد: "
+                + "، ".join(f"{k}={v}" for k, v in sorted(moved.items()))
+            )
 
     def _queue(self, row, match) -> None:
         CustomerMatchCandidate.objects.update_or_create(

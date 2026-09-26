@@ -18,6 +18,10 @@ export interface SalesInput {
   stock_fields?: string[];
   /** One entry per week (or day) of a split period, with that child's totals. */
   breakdown?: { period_id: number; seq: number; label: string; totals: Record<string, string> }[];
+  /** A کارشناس's own sheet: one column, theirs; no provinces, no roster edits. */
+  own_only?: boolean;
+  /** Why this period cannot be entered yet ("" when it can). */
+  entry_block?: string;
 }
 
 export interface CustomerGroupRow {

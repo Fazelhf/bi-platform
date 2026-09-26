@@ -90,7 +90,7 @@ function openProfile(p: Person) {
 
 async function afterAccount(p: Person) {
   accountFor.value = null;
-  toast.success(`حساب «${p.username}» برای ${p.full_name_fa} ساخته شد.`);
+  toast.success(`حساب «${p.username}» به ${p.full_name_fa} وصل شد.`);
   await load();
 }
 

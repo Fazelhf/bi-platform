@@ -150,7 +150,12 @@ export default defineConfig({
     // free one, and the dev server comes up looking healthy while pointing at
     // nothing. That is how two trees ended up serving each other's frontends
     // against each other's databases.
-    port: 5174,
+    //
+    // `PORT` overrides it for tooling that hands out ports — a second preview
+    // of this tree while another session holds 5174. strictPort still
+    // applies: an assigned port that turns out to be taken fails loudly
+    // instead of drifting. Run by hand, it is 5174 as before.
+    port: Number(process.env.PORT) || 5174,
     strictPort: true,
     proxy: {
       // Dev: proxy API to Django so there are no CORS surprises.

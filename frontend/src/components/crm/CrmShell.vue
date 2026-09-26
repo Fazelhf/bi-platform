@@ -24,8 +24,10 @@ import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
 import QuickAdd from "@/components/crm/QuickAdd.vue";
+import CrmSearch from "@/components/crm/CrmSearch.vue";
 
 const auth = useAuthStore();
 const crm = useCrmStore();
@@ -45,6 +47,9 @@ const mobileOpen = ref(false);
  * no entry.
  */
 const NAV = [
+  // First, deliberately: this is the screen a rep opens in the morning, and
+  // the only one that tells them what to do rather than what happened.
+  { name: "crm-today", label: "کارتابل امروز", icon: "check" },
   { name: "crm-dashboard", label: "داشبورد", icon: "grid" },
   { name: "crm-customers", label: "مشتری‌ها", icon: "team" },
   { name: "crm-deals", label: "معامله‌ها", icon: "box" },
@@ -200,8 +205,10 @@ onMounted(() => {
 
         <div class="flex-1"></div>
 
+        <CrmSearch />
         <QuickAdd />
         <ThemePicker />
+        <RefreshButton />
         <NotificationBell />
 
         <div ref="userMenuRoot" class="relative shrink-0">

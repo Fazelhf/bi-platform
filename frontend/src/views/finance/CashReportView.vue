@@ -14,6 +14,7 @@ import { toast } from "@/composables/useUi";
 import { loadMoneySettings, setMoneySettings, useMoney } from "@/composables/useMoney";
 import { num } from "@/utils/format";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
+import ComboTrendChart from "@/components/charts/ComboTrendChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import AccountsPanel from "@/views/finance/AccountsPanel.vue";
 // تسهیلات و قرض are not a section of their own and not even a tab: they are
@@ -113,6 +114,20 @@ const trendSeries = computed(() => [
 const balanceSeries = computed(() => [
   { name: "موجودی", values: activeDays.value.map((d) => n(d.balance)) },
 ]);
+
+/** The period's money by category, largest first — where it came from and went. */
+function mix(side: "in" | "out") {
+  const r = report.value;
+  if (!r) return { labels: [] as string[], values: [] as number[] };
+  const rows = r.categories[side]
+    .map((c) => ({ label: c.name, value: n(r.totals[side][String(c.id)]) }))
+    .filter((x) => x.value > 0)
+    .sort((a, b) => b.value - a.value);
+  return { labels: rows.map((x) => x.label), values: rows.map((x) => x.value) };
+}
+const inMix = computed(() => mix("in"));
+const outMix = computed(() => mix("out"));
+const netValues = computed(() => activeDays.value.map((d) => n(d.net)));
 </script>
 
 <template>
@@ -226,18 +241,43 @@ const balanceSeries = computed(() => [
         </div>
       </div>
 
-      <div class="grid lg:grid-cols-2 gap-4">
+      <!-- Flows as bars, the balance they produce as a line on its own axis:
+           on one axis the balance flattens the day's movements to nothing. -->
+      <div v-if="activeDays.length" class="grid lg:grid-cols-3 gap-4">
+        <div class="lg:col-span-2">
+          <ComboTrendChart
+            title="واریز، برداشت و موجودی"
+            :categories="trendCategories"
+            :bars="trendSeries.map((s, i) => ({ ...s, tone: i === 0 ? 'in' : 'out' }))"
+            :lines="balanceSeries.map((s) => ({ ...s, name: 'موجودی پایان روز', tone: 'actual', area: true, secondAxis: true }))"
+            :height="300"
+          />
+        </div>
         <SeriesChart
-          v-if="activeDays.length"
-          title="واریز و برداشت روزانه"
-          :categories="trendCategories"
-          :series="trendSeries"
+          v-if="outMix.values.length"
+          title="برداشت‌ها به کجا رفت"
+          kind="pie"
+          :categories="outMix.labels"
+          :series="[{ name: 'برداشت', values: outMix.values }]"
+          :height="300"
         />
+      </div>
+      <div v-if="activeDays.length" class="grid lg:grid-cols-3 gap-4">
+        <div class="lg:col-span-2">
+          <ComboTrendChart
+            title="خالص هر روز"
+            :categories="trendCategories"
+            :bars="[{ name: 'خالص روز', values: netValues, tone: 'net' }]"
+            :height="240"
+          />
+        </div>
         <SeriesChart
-          v-if="activeDays.length"
-          title="روند موجودی"
-          :categories="trendCategories"
-          :series="balanceSeries"
+          v-if="inMix.values.length"
+          title="واریزها از کجا آمد"
+          kind="pie"
+          :categories="inMix.labels"
+          :series="[{ name: 'واریز', values: inMix.values }]"
+          :height="240"
         />
       </div>
 

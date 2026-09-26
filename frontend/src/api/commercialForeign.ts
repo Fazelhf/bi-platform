@@ -372,13 +372,19 @@ export interface PaymentRow {
   paid_pct: number | null;
 }
 
+/** One currency's debts. Currencies are never added together. */
+export interface PaymentsCurrencyTotals {
+  currency: string;
+  value: string; paid: string; outstanding: string; interest: string;
+  payable: string; paid_pct: number;
+  shipment_count: number; unpaid_count: number; overdue_count: number;
+}
+
 export interface PaymentsReport {
   rows: PaymentRow[];
-  totals: {
-    value: string; paid: string; outstanding: string; interest: string;
-    payable: string; paid_pct: number;
-    shipment_count: number; unpaid_count: number; overdue_count: number;
-  };
+  /** The largest currency's figures, plus how many currencies there are. */
+  totals: PaymentsCurrencyTotals & { currency_count: number };
+  by_currency: PaymentsCurrencyTotals[];
 }
 
 export interface HistoryRow {

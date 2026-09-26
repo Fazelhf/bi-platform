@@ -423,3 +423,37 @@ class ChannelVisibilityTests(APITestCase):
             f"/api/sales/dashboard/summary/?period={self.period.id}&channel=b2b"
         )
         self.assertEqual(res.status_code, 403)
+
+
+class WeeklyRollupDashboardTests(APITestCase):
+    """A month entered week by week must still show on the monthly dashboard."""
+
+    def test_month_dashboard_sums_its_weeks(self):
+        from apps.core.models import PeriodKind
+
+        ceo = get_user_model().objects.create_user(username="ceo-roll", password="x", role="executive")
+        month = DimPeriod.objects.create(jalali_year=1405, jalali_month=7)
+        weeks = [
+            DimPeriod.objects.create(
+                jalali_year=1405, jalali_month=7, kind=PeriodKind.WEEK, parent=month, seq=i,
+            )
+            for i in (1, 2)
+        ]
+        rep = DimEmployee.objects.create(code="roll-1", full_name_fa="صبا موسوی")
+        for week, revenue in zip(weeks, (100, 250)):
+            FactSalesMonthly.objects.create(
+                period=week, employee=rep, channel=SalesChannel.TEAM,
+                revenue_rial=Decimal(revenue), invoice_count=2,
+                status=ApprovalStatus.APPROVED,
+            )
+
+        self.client.force_authenticate(ceo)
+        res = self.client.get(f"/api/sales/dashboard/detail/?period={month.id}&channel=team")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.data["salespeople"]), 1)
+        self.assertEqual(res.data["salespeople"][0]["revenue"], 350)
+        self.assertEqual(res.data["salespeople"][0]["invoices"], 4)
+
+        # A single week still shows just that week.
+        res = self.client.get(f"/api/sales/dashboard/detail/?period={weeks[1].id}&channel=team")
+        self.assertEqual(res.data["salespeople"][0]["revenue"], 250)

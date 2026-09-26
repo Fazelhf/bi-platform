@@ -46,7 +46,7 @@ function cancel() {
       <div class="absolute inset-0 bg-black/40" @click="cancel"></div>
       <div class="relative bg-surface rounded-3xl shadow-pop w-full max-w-sm p-6 animate-pop">
         <h3 v-if="state.dialog.title" class="font-bold text-ink text-lg mb-2">{{ state.dialog.title }}</h3>
-        <p v-if="state.dialog.message" class="text-sm text-slate-500 mb-4 leading-6">{{ state.dialog.message }}</p>
+        <p v-if="state.dialog.message" class="text-sm text-slate-500 mb-4 leading-6 whitespace-pre-line">{{ state.dialog.message }}</p>
         <input
           v-if="state.dialog.mode === 'prompt'"
           v-model="state.dialog.value"

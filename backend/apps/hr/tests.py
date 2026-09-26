@@ -269,3 +269,49 @@ class HardDeleteTests(HrTestCase):
         self.assertFalse(DimEmployee.objects.filter(pk=self.junk.pk).exists())
         self.assertEqual(FactSalesMonthly.objects.count(), 0)
         self.assertEqual(EmployeeChannel.objects.count(), 0)
+
+
+class LinkAccountTests(HrTestCase):
+    """Someone who already signs in keeps that one login when they join the chart."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.admin = User.objects.create_superuser(
+            username="root3", password="x", email="r3@example.com"
+        )
+        self.rep = self.person("سارا موسوی")
+        self.existing = User.objects.create_user(username="s.mousavi", password="x", role="operator")
+
+    def link(self, person, user):
+        return self.client.post(
+            f"/api/hr/people/{person.id}/link-account/", {"user": user.id}, format="json"
+        )
+
+    def test_admin_links_an_existing_account(self):
+        self.client.force_authenticate(self.admin)
+        res = self.link(self.rep, self.existing)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.rep.refresh_from_db()
+        self.assertEqual(self.rep.user_id, self.existing.id)
+        self.assertEqual(res.data["username"], "s.mousavi")
+
+    def test_an_account_linked_to_someone_else_is_refused(self):
+        other = self.person("فرد دیگر")
+        other.user = self.existing
+        other.save(update_fields=["user"])
+        self.client.force_authenticate(self.admin)
+        res = self.link(self.rep, self.existing)
+        self.assertEqual(res.status_code, 400)
+        self.rep.refresh_from_db()
+        self.assertIsNone(self.rep.user_id)
+
+    def test_a_person_who_has_an_account_cannot_take_another(self):
+        self.rep.user = get_user_model().objects.create_user(username="own", password="x")
+        self.rep.save(update_fields=["user"])
+        self.client.force_authenticate(self.admin)
+        self.assertEqual(self.link(self.rep, self.existing).status_code, 400)
+
+    def test_ceo_cannot_link_accounts(self):
+        self.client.force_authenticate(self.ceo)
+        self.assertEqual(self.link(self.rep, self.existing).status_code, 403)

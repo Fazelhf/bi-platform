@@ -17,6 +17,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db.models import Count
 from rest_framework.test import APITestCase
 
 from apps.commercial.models import (
@@ -192,6 +193,26 @@ class AwardTests(CommercialTestCase):
             )
         self.assertEqual(self.req.quotes.filter(is_selected=True).count(), 1)
         self.assertEqual(self.req.quotes.get(is_selected=True).id, self.q_c.id)
+
+    def test_the_old_winner_does_not_keep_its_winning_reason(self):
+        self.client.force_authenticate(self.manager)
+        self.client.post(
+            f"/api/commercial/requests/{self.req.id}/award/",
+            {"quote": self.q_a.id, "reason": self.win_quality.id,
+             "decision_note": "کیفیت بهتر"},
+            format="json",
+        )
+        # The department changes its mind and names no reason for dropping A.
+        self.client.post(
+            f"/api/commercial/requests/{self.req.id}/award/",
+            {"quote": self.q_c.id}, format="json",
+        )
+        self.q_a.refresh_from_db()
+        # «کیفیت بهتر» on a quote that lost would feed the supplier stats a
+        # reason for winning attached to a loss.
+        self.assertFalse(self.q_a.is_selected)
+        self.assertIsNone(self.q_a.reason)
+        self.assertEqual(self.q_a.decision_note, "")
 
     def test_a_quote_from_another_request_is_refused(self):
         other = self._request()
@@ -508,3 +529,58 @@ class QuickQuoteTests(CommercialTestCase):
         }, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertEqual(PurchaseRequest.objects.count(), 0)
+
+
+class EditTests(CommercialTestCase):
+    """A row created with a code derived from its Persian name must stay editable."""
+
+    def test_supplier_with_persian_code_can_be_edited(self):
+        self.client.force_authenticate(self.manager)
+        created = self.client.post("/api/commercial/suppliers/", {"name_fa": "پارس گستر"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        edited = self.client.patch(
+            f"/api/commercial/suppliers/{created.data['id']}/",
+            {**created.data, "name_fa": "پارس گستر نوین"}, format="json",
+        )
+        self.assertEqual(edited.status_code, 200, edited.data)
+        self.assertEqual(edited.data["name_fa"], "پارس گستر نوین")
+
+    def test_material_with_persian_code_can_be_edited(self):
+        self.client.force_authenticate(self.manager)
+        created = self.client.post("/api/commercial/materials/", {"name_fa": "چسب حرارتی"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        edited = self.client.patch(
+            f"/api/commercial/materials/{created.data['id']}/",
+            {"name_fa": "چسب حرارتی ۲", "code": created.data["code"]}, format="json",
+        )
+        self.assertEqual(edited.status_code, 200, edited.data)
+
+
+class RequestListOrderingTests(CommercialTestCase):
+    """
+    The استعلام list is newest first and stays that way under pagination.
+
+    Counting the quotes adds a GROUP BY, and Django drops the model's own
+    ordering when it does — which left the list in whatever order the database
+    felt like, so a row could show up on two pages and another on none.
+    """
+
+    def test_the_list_comes_back_newest_first(self):
+        made = [self._request(on=date(2026, 7, day)) for day in (5, 1, 9, 3)]
+        self.client.force_authenticate(self.manager)
+        response = self.client.get("/api/commercial/requests/")
+        self.assertEqual(response.status_code, 200, response.data)
+
+        got = [r["id"] for r in response.data["results"]]
+        newest_first = [
+            r.id for r in
+            sorted(made, key=lambda r: (r.requested_on, r.id), reverse=True)
+        ]
+        self.assertEqual(got, newest_first)
+        # Ordered at the database, not by luck — this is what keeps page 2
+        # from repeating page 1.
+        self.assertTrue(
+            PurchaseRequest.objects.annotate(n=Count("quotes")).order_by(
+                "-requested_on", "-id"
+            ).ordered
+        )

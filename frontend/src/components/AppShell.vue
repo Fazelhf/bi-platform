@@ -10,6 +10,7 @@ import { inboxApi } from "@/api/platform";
 import NavIcon from "@/components/NavIcon.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
+import RefreshButton from "@/components/RefreshButton.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
 
@@ -200,6 +201,13 @@ const primary = computed<Item[]>(() => {
           { name: "finance-budget-variance", label: "انحراف بودجه", icon: "file" },
           // Defining the budget is the CEO's; finance reports against it.
           { name: "finance-budget-plan", label: "تعریف بودجه", icon: "file" },
+          // پورسانت: admins only while فروش ۲ is being built.
+          ...(auth.isAdminPanelUser
+            ? [
+                { name: "finance-commission", label: "پورسانت", icon: "formula" },
+                { name: "finance-sales-receipts", label: "تأیید دریافت‌های فروش", icon: "check" },
+              ]
+            : []),
         ],
       },
     );
@@ -233,6 +241,9 @@ const primary = computed<Item[]>(() => {
       { name: "finance-budget-actuals", label: "ورود ارقام واقعی بودجه", icon: "banknote" },
       { name: "finance-budget-variance", label: "انحراف بودجه", icon: "chart" },
       { name: "finance-budget", label: "داشبورد بودجه", icon: "chart" },
+      // تأیید دریافت‌های فروش (the پورسانت side of فروش ۲) is hidden from
+      // finance for now; it comes back when فروش ۲ opens beyond admins. The
+      // Excel import on the cash and budget pages stays.
     );
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
@@ -263,7 +274,12 @@ const primary = computed<Item[]>(() => {
   // Each department manager keeps their own list of کارشناسان. The CEO sees
   // all of them, but reaches the list from inside the فروش group rather than
   // from a row of its own — see the group above.
-  if (!auth.isExecutive && ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)) {
+  // Managers only: a کارشناس does not choose who is on the team.
+  if (
+    !auth.isExecutive &&
+    auth.me?.role !== "operator" &&
+    ["sales_team", "sales_org", "sales_b2b"].includes(auth.department)
+  ) {
     items.push({ name: "roster", label: rosterLabel.value, icon: "team" });
   }
   // No «ارتباطات» group any more. Once مکاتبات، وظایف، پروژه‌ها، گفتگو and
@@ -320,6 +336,8 @@ const pageTitle = computed(() => {
     "sales-b2b-entry": "ورود فروش B2B",
     "finance-cash-report": "نقدینگی", "finance-cash-entry": "ورود اطلاعات نقدینگی",
     "finance-budget": "داشبورد بودجه", "finance-budget-plan": "تعریف بودجه",
+    "finance-commission": "پورسانت",
+    "finance-sales-receipts": "تأیید دریافت‌های فروش",
     "finance-budget-variance": "انحراف بودجه",
     "finance-budget-actuals": "ورود ارقام واقعی بودجه",
     "production-entry": "ورود اطلاعات تولید", profile: "پروفایل",
@@ -527,6 +545,24 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
             </svg>
           </template>
         </button>
+
+        <!-- فروش ۲: a third workspace of its own, administrators only until
+             it is merged into the sales section (apps.sales2.permissions). -->
+        <button
+          v-if="auth.isAdminPanelUser"
+          class="w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition mt-2 text-slate-500 hover:bg-slate-100"
+          :class="collapsed ? 'justify-center' : ''"
+          title="فروش ۲ — پیش‌فاکتور، فاکتور، حواله و دریافت"
+          @click="router.push({ name: 'sales2-dashboard' })"
+        >
+          <NavIcon name="workflow" :size="20" />
+          <template v-if="!collapsed">
+            <span class="flex-1 text-right">فروش ۲</span>
+            <svg class="w-3.5 h-3.5 opacity-40 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            </svg>
+          </template>
+        </button>
       </nav>
 
       <!-- Bottom: profile, settings (admin+CEO only), logout -->
@@ -614,6 +650,7 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           <!-- One control for the whole look: skin + light/dark live together
                inside the palette, so there is no second sun/moon button. -->
           <ThemePicker />
+          <RefreshButton />
           <NotificationBell />
           <div ref="userMenuRoot" class="relative">
             <button class="flex items-center gap-2" @click="userMenu = !userMenu">

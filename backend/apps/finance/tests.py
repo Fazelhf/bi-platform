@@ -20,6 +20,7 @@ from apps.finance.models import (
     FinanceSetting,
 )
 from apps.finance.services import cash_report
+from apps.sales.models import ApprovalStatus
 
 
 class TreasuryTestCase(APITestCase):
@@ -316,3 +317,78 @@ class FinanceAccessTests(TreasuryTestCase):
         }, format="json")
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(CashMovement.objects.get().credit_line)
+
+
+class EntryStatusTests(TreasuryTestCase):
+    """Editing the sheet must not walk an approved figure back to پیش‌نویس."""
+
+    def test_resaving_keeps_an_approved_row_approved(self):
+        movement = self.movement(0, Direction.IN, self.sales, 1_000)
+        CashMovement.objects.filter(pk=movement.pk).update(
+            status=ApprovalStatus.APPROVED
+        )
+
+        response = self.client.post("/api/finance/entry/", {
+            "period": self.month.id,
+            "days": [{
+                "period_id": self.days[0].id,
+                "in": {str(self.sales.id): [{"amount_rial": "2000"}]},
+                "out": {},
+            }],
+        }, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+
+        movement.refresh_from_db()
+        self.assertEqual(movement.amount_rial, Decimal("2000"))
+        self.assertEqual(movement.status, ApprovalStatus.APPROVED)
+
+    def test_a_new_row_starts_as_a_draft(self):
+        self.client.post("/api/finance/entry/", {
+            "period": self.month.id,
+            "days": [{
+                "period_id": self.days[1].id,
+                "in": {str(self.sales.id): [{"amount_rial": "500"}]},
+                "out": {},
+            }],
+        }, format="json")
+        fresh = CashMovement.objects.get(period=self.days[1], category=self.sales)
+        self.assertEqual(fresh.status, ApprovalStatus.DRAFT)
+
+
+class EntryValidationTests(TreasuryTestCase):
+    """The sheet writes only into its own days, leaf categories and real accounts."""
+
+    def post(self, day_id, category_id, row, direction="in"):
+        return self.client.post("/api/finance/entry/", {
+            "period": self.month.id,
+            "days": [{"period_id": day_id, direction: {str(category_id): [row]}}],
+        }, format="json")
+
+    def test_a_parent_category_is_refused(self):
+        parent = CashCategory.objects.get(code="sales")
+        response = self.post(self.days[0].id, parent.id, {"amount_rial": "10"})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(CashMovement.objects.exists())
+
+    def test_a_day_from_another_month_is_refused(self):
+        other = DimPeriod.objects.create(
+            jalali_year=1405, jalali_month=6, kind=PeriodKind.MONTH,
+        )
+        response = self.post(other.id, self.sales.id, {"amount_rial": "10"})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(CashMovement.objects.exists())
+
+    def test_text_and_negative_amounts_are_refused_with_a_message(self):
+        for amount in ("abc", "-10"):
+            with self.subTest(amount=amount):
+                response = self.post(self.days[0].id, self.sales.id, {"amount_rial": amount})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("detail", response.data)
+        self.assertFalse(CashMovement.objects.exists())
+
+    def test_an_account_that_does_not_exist_is_refused(self):
+        response = self.post(
+            self.days[0].id, self.sales.id, {"amount_rial": "10", "account": 999999},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(CashMovement.objects.exists())

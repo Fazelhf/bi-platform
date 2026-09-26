@@ -13,11 +13,10 @@ Four ideas the design rests on:
   reading both would count the same rial twice the moment it was keyed in
   both places.
 
-* **Budget is monthly, comparison is weekly.** Approval happens on a month —
-  that is the grain the plan is argued at. Actuals arrive weekly, on the
-  leaves of `DimPeriod`. A weekly budget figure is *never stored*; it is the
-  month pro-rated by days, because weeks are not all the same length. Storing
-  both would double count exactly the way the period tree warns about.
+* **Everything is monthly.** The plan is set and approved per month, the
+  actuals are keyed per month, and every report compares a month with a
+  month. There is no weekly budget figure anywhere to drift from the monthly
+  one.
 
 * **Editable, but the approved figure survives.** The team wanted budgets to
   stay editable after approval. Full versioning would answer «what was
@@ -39,7 +38,6 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.models import DimPeriod, PeriodKind, TimeStampedModel
-from apps.sales.models import SalesChannel
 
 from .models import CashCategory, CreditLine, Direction, FinanceSetting
 
@@ -228,11 +226,6 @@ class BudgetPeriod(TimeStampedModel):
                 amount.baseline_rial = amount.amount_rial
                 amount.save(update_fields=["baseline_rial", "updated_at"])
                 stamped += 1
-        for forecast in self.sales_forecasts.all():
-            if forecast.baseline_rial is None:
-                forecast.baseline_rial = forecast.amount_rial
-                forecast.save(update_fields=["baseline_rial", "updated_at"])
-                stamped += 1
         self.status = BudgetStatus.APPROVED
         self.approved_at = timezone.now()
         self.approved_by = user
@@ -286,21 +279,6 @@ class BudgetAmount(TimeStampedModel):
             and self.budget_period.budget_id != self.line.budget_id
         ):
             raise ValidationError({"line": "این سرفصل به بودجهٔ دیگری تعلق دارد."})
-
-    def for_week(self, week: DimPeriod) -> Decimal:
-        """
-        This month's plan, pro-rated onto one of its weeks by day count.
-
-        Never stored — storing it would put figures on two levels of the
-        period tree at once. Calendar pro-rating is honest for steady lines
-        (اجاره, حقوق, سربار) and misleading for lumpy ones (اقساط, خرید
-        جمبو), which is why the weekly view is labelled «رصد جریان نقد» and
-        the monthly one «انحراف بودجه».
-        """
-        month_days = self.budget_period.period.days
-        if not month_days or not week.days:
-            return ZERO
-        return (self.amount_rial * week.days / month_days).quantize(Decimal("1"))
 
     def __str__(self) -> str:
         return f"{self.line} · {self.budget_period.period.label}"
@@ -357,48 +335,12 @@ def is_material(variance_rial: Decimal, budget_rial: Decimal) -> bool:
     return pct >= setting.variance_threshold_pct
 
 
-class BudgetSalesForecast(TimeStampedModel):
-    """
-    Expected sales for one channel in one month of a budget.
-
-    Accrual, not cash, so it never enters the budget's in/out totals: the cash
-    a sale turns into is planned separately, on وصول نقدی and وصول مطالبات.
-    Counting both would plan the same rial twice.
-
-    Kept on the budget rather than on SalesTarget because SalesTarget is set
-    per salesperson or per province, and a cash plan is argued per channel.
-    Its actual is the channel's recorded sales (FactSalesMonthly.revenue_rial),
-    so the forecast gets a variance like any other line.
-    """
-
-    budget_period = models.ForeignKey(
-        BudgetPeriod, on_delete=models.CASCADE, related_name="sales_forecasts"
-    )
-    channel = models.CharField(max_length=16, choices=SalesChannel.choices)
-    amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
-    baseline_rial = models.DecimalField(
-        max_digits=20, decimal_places=0, null=True, blank=True,
-        help_text="مبلغ در لحظهٔ تصویب — پس از آن تغییر نمی‌کند",
-    )
-
-    class Meta:
-        unique_together = ("budget_period", "channel")
-        ordering = ("channel",)
-        verbose_name = "sales forecast (پیش‌بینی فروش)"
-        verbose_name_plural = "sales forecasts"
-
-    def __str__(self) -> str:
-        return f"{self.get_channel_display()} · {self.budget_period}"
-
-
 class BudgetActual(TimeStampedModel):
     """
-    What actually happened on one سرفصل in one week, as the finance team keys it.
+    What actually happened on one سرفصل in one month, as the finance team keys it.
 
-    Weekly: a month cut into weeks takes one figure per week and the month is
-    their sum; a month never cut takes its figure on the month itself. Days are
-    never an entry grain here — a week the sales team enters day by day is
-    still one week for the budget.
+    Monthly, like the plan it is compared with: one figure per سرفصل per month,
+    whether or not the sales team cut that month into weeks.
 
     Manual on purpose. Reading the cash ledger as the actual tied every سرفصل
     to a cash category keyed exactly the same way; the finance team now
@@ -408,7 +350,7 @@ class BudgetActual(TimeStampedModel):
     line = models.ForeignKey(BudgetLine, on_delete=models.CASCADE, related_name="actuals")
     period = models.ForeignKey(
         DimPeriod, on_delete=models.PROTECT, related_name="budget_actuals",
-        help_text="هفته، یا ماهی که به هفته تقسیم نشده",
+        help_text="ماه — ارقام واقعی بودجه ماهانه ثبت می‌شوند",
     )
     amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     note = models.CharField(max_length=250, blank=True)

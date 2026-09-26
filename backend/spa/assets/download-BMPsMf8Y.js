@@ -1,0 +1,1 @@
+function d(t,o){const a=String(t.headers["content-disposition"]??""),n=/filename\*=UTF-8''([^;]+)/.exec(a),s=n?decodeURIComponent(n[1]):o,c=URL.createObjectURL(t.data),e=document.createElement("a");e.href=c,e.download=s,e.click(),URL.revokeObjectURL(c)}export{d as s};

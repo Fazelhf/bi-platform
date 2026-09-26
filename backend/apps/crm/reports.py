@@ -106,6 +106,9 @@ class Filters:
     customer: int | None = None
     tag: int | None = None
     status: str = ""
+    #: "0" narrows deals to those with no invoice attached, "1" to those with
+    #: one — how «موفق، فاکتورنشده» drills to exactly the deals it counted.
+    invoiced: str = ""
 
     #: The channels in view; None means all of them. Set from the account (see
     #: `Scope.channels`); a `channel` query param may only narrow within what
@@ -150,6 +153,7 @@ class Filters:
         f.customer = num("customer")
         f.tag = num("tag")
         f.status = (q.get("status") or "").strip()
+        f.invoiced = (q.get("invoiced") or "").strip()
         f.result = (q.get("result") or "").strip()
         f.kind = (q.get("kind") or "").strip()
         f.granularity = (q.get("granularity") or "month").strip()
@@ -230,6 +234,10 @@ class Filters:
             qs = qs.filter(items__product_id=self.product).distinct()
         if self.status:
             qs = qs.filter(status=self.status)
+        if self.invoiced == "0":
+            qs = qs.filter(invoices__isnull=True)
+        elif self.invoiced == "1":
+            qs = qs.filter(invoices__isnull=False).distinct()
         return qs
 
     def activities(self):
@@ -272,27 +280,38 @@ class Filters:
             qs = qs.filter(province_id=self.province)
         return qs
 
-    def invoices(self):
+    def invoices(self, include_intercompany: bool = False):
         """
-        Invoices billed inside the window — what accounting says was sold.
+        The company's sales: آرپا's invoices, enriched from دیدار.
 
-        Scoped by the same rules as every other queryset here, so a کارشناس
-        sees the invoices on their own accounts and a department sees its own
-        book. The channel is read off the *customer*, not the invoice: آرپا
-        fills «مسوول فروش» on one invoice in seven, and filtering on that would
-        hide six sevenths of a department's billing from it.
+        This is the one population every «فروش» figure is summed over. The
+        invoice is the record of money; دیدار contributes who sold it.
 
-        Sister-company billing is left out. It is real revenue in the ledger
-        but not the sales team's work — «آرال رول آریا - فی ما بین» alone would
-        otherwise add 250bn Rial to 1405 and to whoever it is assigned to.
+        `rep_id` is that person, taken in order from the invoice's own
+        بازاریاب, the deal the invoice is linked to, and the customer's owner
+        in دیدار. آرپا leaves the first empty on two thirds of billing
+        («بازاریاب بدون پورسانت»), so without the other two most sales would
+        belong to nobody — and a کارشناس scoped to their own records would
+        not see the customers they manage being billed.
+
+        The department is the invoice's own `channel`, decided at import from
+        آرپا and the sales roster (`apps.crm.channels`), so an invoice whose
+        customer is not matched yet is still in the right book.
+
+        Sister-company billing is excluded unless asked for: real revenue in
+        the ledger, not the sales team's work.
         """
         if self.blind:
             return SalesInvoice.objects.none()
-        qs = self.by_channel(
-            SalesInvoice.objects.filter(dataset=self.dataset)
-            .exclude(customer__is_intercompany=True),
-            "customer__channel",
+        qs = SalesInvoice.objects.filter(dataset=self.dataset).annotate(
+            rep_id=Coalesce(
+                "owner_id", "deal__owner_id", "customer__owner_id",
+                output_field=IntegerField(),
+            )
         )
+        if not include_intercompany:
+            qs = qs.exclude(is_intercompany=True)
+        qs = self.by_channel(qs, "channel")
         # `issued_at` is a date, not a timestamp: compared against the aware
         # datetimes `_window` builds, the window edges shift by the timezone
         # offset and invoices on the first day can fall outside.
@@ -301,7 +320,7 @@ class Filters:
         if self.end:
             qs = qs.filter(issued_at__lt=self.end)
         if self.owner:
-            qs = qs.filter(owner_id=self.owner)
+            qs = qs.filter(rep_id=self.owner)
         if self.group:
             qs = qs.filter(customer__group_id=self.group)
         if self.source:
@@ -341,7 +360,7 @@ class Filters:
             v = getattr(self, name)
             if v:
                 out[name] = v
-        for name in ("status", "result", "kind"):
+        for name in ("status", "result", "kind", "invoiced"):
             v = getattr(self, name)
             if v:
                 out[name] = v
@@ -448,75 +467,82 @@ DEAL_MEASURES = {
 }
 
 
-INVOICE_MEASURES = {
-    "invoiced": _money(Sum("amount_rial")),
-    "invoiced_count": Count("id", distinct=True),
+SALES_MEASURES = {
+    "count": Count("id", distinct=True),
+    "amount": _money(Sum("amount_rial")),
+    "unsettled": _money(Sum("unsettled_rial")),
+    "vat": _money(Sum("vat_rial")),
 }
 
-#: The same «بر محور …» dimensions, as paths from an invoice rather than a
-#: deal. Most are identical because both hang off a customer and an owner.
-#: Stage and lost reason have no invoice equivalent — a bill has no pipeline
-#: stage — so those axes simply carry no invoiced figure.
-INVOICE_PATHS = {
-    "owner_id": ("owner_id", "owner__full_name_fa"),
-    "customer__province_id": ("customer__province_id", "customer__province__name_fa"),
-    "customer__group_id": ("customer__group_id", "customer__group__name_fa"),
-    "lead_source_id": ("customer__lead_source_id", "customer__lead_source__name_fa"),
-    "customer_id": ("customer_id", "customer__name_fa"),
-    "owner__team_id": ("owner__team_id", "owner__team__name_fa"),
+#: «بر محور …» for sales, as paths from an invoice. `user` has no label path:
+#: the rep is the computed `rep_id`, whose name is looked up afterwards.
+SALES_AXES: dict[str, Axis] = {
+    "user": Axis("user", "کاربر", "rep_id", "", "owner"),
+    "province": Axis("province", "استان", "customer__province_id", "customer__province__name_fa", "province"),
+    "group": Axis("group", "گروه مشتری", "customer__group_id", "customer__group__name_fa", "group"),
+    "source": Axis("source", "منبع سرنخ", "customer__lead_source_id", "customer__lead_source__name_fa", "source"),
+    "customer": Axis("customer", "مشتری", "customer_id", "customer__name_fa", "customer"),
+    "team": Axis("team", "تیم", "rep_id", "", "owner"),
 }
 
-
+#: What the null bucket of each axis actually is. «بدون بازاریاب» on the user
+#: axis is the one that matters: after falling back to the deal and the
+#: customer's owner it is what is left of «بازاریاب بدون پورسانت», and it has
+#: to read as that rather than as a rendering glitch.
 UNATTRIBUTED = {
-    "user": "بدون بازاریاب",
+    "user": "بدون کارشناس",
     "team": "بدون تیم",
     "province": "استان نامشخص",
     "group": "گروه نامشخص",
     "source": "منبع نامشخص",
+    "customer": "در انتظار تطبیق مشتری",
 }
 
 
-def _with_invoices(rows: list[dict], f: "Filters", axis: "Axis") -> list[dict]:
-    """
-    Put the invoiced figure beside the won-deal figure on every row.
+def _sales_rows(f: "Filters", axis: Axis) -> list[dict]:
+    qs = f.invoices()
+    if axis.label_path:
+        grouped = (
+            qs.values(axis.id_path, axis.label_path)
+            .annotate(**SALES_MEASURES).order_by()
+        )
+        rows = [
+            {"id": r[axis.id_path], "label": r[axis.label_path],
+             **{k: _num(r[k]) for k in SALES_MEASURES}}
+            for r in grouped
+        ]
+    else:
+        rows = [
+            {"id": r["rep_id"], "label": None,
+             **{k: _num(r[k]) for k in SALES_MEASURES}}
+            for r in qs.values("rep_id").annotate(**SALES_MEASURES).order_by()
+        ]
+        from apps.sales.models import DimEmployee
 
-    Rows that exist only on the invoice side are added, not dropped: a
-    customer billed heavily with no deal in دیدار is exactly the gap this
-    comparison exists to show, and leaving it off because there was no deal
-    row to hang it on would hide the largest discrepancies first.
-    """
-    paths = INVOICE_PATHS.get(axis.id_path)
+        people = {
+            e.pk: e for e in DimEmployee.objects.filter(
+                pk__in=[r["id"] for r in rows if r["id"]]
+            ).select_related("team")
+        }
+        if axis.key == "team":
+            by_team: dict = {}
+            for r in rows:
+                person = people.get(r["id"])
+                team = person.team if person else None
+                key = team.pk if team else None
+                bucket = by_team.setdefault(key, {
+                    "id": key, "label": team.name_fa if team else None,
+                    **{k: 0.0 for k in SALES_MEASURES},
+                })
+                for k in SALES_MEASURES:
+                    bucket[k] += r[k]
+            rows = list(by_team.values())
+        else:
+            for r in rows:
+                person = people.get(r["id"])
+                r["label"] = person.full_name_fa if person else None
     for r in rows:
-        r.setdefault("invoiced", 0.0)
-        r.setdefault("invoiced_count", 0.0)
-    if not paths:
-        return rows
-
-    by_id = {r["id"]: r for r in rows}
-    id_path, label_path = paths
-    for inv in (
-        f.invoices().values(id_path, label_path)
-        .annotate(**INVOICE_MEASURES).order_by()
-    ):
-        gid = inv[id_path]
-        row = by_id.get(gid)
-        if row is None:
-            row = {
-                "id": gid, "label": inv[label_path] or "—",
-                **{k: 0.0 for k in DEAL_MEASURES},
-                "margin_pct": 0.0,
-            }
-            rows.append(row)
-            by_id[gid] = row
-        row["invoiced"] = _num(inv["invoiced"])
-        row["invoiced_count"] = _num(inv["invoiced_count"])
-
-    # The null bucket is not a data gap to hide behind «—». On the owner axis
-    # it is «بازاریاب بدون پورسانت», which in 1404–1405 carried two thirds of
-    # everything billed; it tops a ranking by billing, and has to read as
-    # what it is rather than as a rendering glitch.
-    for r in rows:
-        if r["id"] is None and r["label"] in ("—", "", None):
+        if not r["label"]:
             r["label"] = UNATTRIBUTED.get(axis.key, "نامشخص")
     return rows
 
@@ -567,63 +593,71 @@ def _num(v) -> float:
 # --------------------------------------------------------------------------
 def report_sales(f: Filters, axis_key: str) -> dict:
     """
-    گزارش کلی فروش — two figures side by side on every row.
+    گزارش کلی فروش — one figure: what was sold.
 
-    `amount` is won deals from دیدار, on the date they were won. `invoiced` is
-    آرپا's invoices, net of returns and before VAT, on the date they were
-    issued. They are kept apart rather than blended because they answer
-    different questions — what the team closed, and what was billed — and in
-    1404 they differed by 2x to 70x month to month. Collapsing them into one
-    «sales» number would hide the very gap the manager needs to see.
+    Sales are آرپا's invoices, net of discount and returns and before VAT,
+    counted on the date they were issued. دیدار no longer adds a second
+    «sales» figure beside it. The two measured different things — won
+    deals against billed invoices — and in 1404 they were 2x to 70x apart
+    month to month, so showing both as «فروش» meant every reader chose a
+    number. دیدار's contribution is who sold it (see `Filters.invoices`)
+    and, in the pipeline, the won deals that have not been billed yet.
     """
-    qs = f.deals("closed_at").filter(status=Deal.Status.WON)
-    invoices = f.invoices()
-    drill = {"status": "won"}
-
     if axis_key == "time":
+        qs = f.invoices()
         rows = []
-        for jy, jm, s, e in _time_buckets(f):
-            agg = qs.filter(closed_at__gte=_aware(s), closed_at__lt=_aware(e)).aggregate(**DEAL_MEASURES)
-            billed = invoices.filter(issued_at__gte=s, issued_at__lt=e).aggregate(**INVOICE_MEASURES)
-            d = dict(f.drill_base()); d.update(drill)
-            d["date_from"], d["date_to"] = s.isoformat(), (e - dt.timedelta(days=1)).isoformat()
+        for jy, jm, s_, e in _time_buckets(f):
+            agg = qs.filter(issued_at__gte=s_, issued_at__lt=e).aggregate(**SALES_MEASURES)
+            d = dict(f.drill_base())
+            d["date_from"], d["date_to"] = s_.isoformat(), (e - dt.timedelta(days=1)).isoformat()
             rows.append({
                 "id": f"{jy}-{jm}", "label": month_label(jy, jm),
                 **{k: _num(v) for k, v in agg.items()},
-                **{k: _num(v) for k, v in billed.items()},
-                "drill": {"kind": "deals", "params": d},
+                "drill": {"kind": "invoices", "params": d},
             })
         return _shape("sales", "time", rows, chronological=True)
 
-    axis = DEAL_AXES.get(axis_key, DEAL_AXES["user"])
-    rows = _grouped(qs, axis, DEAL_MEASURES)
-    for r in rows:
-        r["margin_pct"] = _pct(r["profit"], r["amount"])
-    rows = _with_invoices(rows, f, axis)
-    # Ranked by the larger of the two, so a rep or customer that is big on
-    # either side is near the top: ranking by deals alone buries an account
-    # billed heavily without a deal logged, which is the case worth finding.
-    for r in rows:
-        r["_rank"] = max(r["invoiced"], r["amount"])
-    rows = _finish(rows, f, axis, "_rank", "deals", drill)
-    for r in rows:
-        r.pop("_rank", None)
-    return _shape("sales", axis_key, rows)
+    axis = SALES_AXES.get(axis_key, SALES_AXES["user"])
+    rows = _sales_rows(f, axis)
+    extra = None if axis.key != "team" else {}
+    rows = _finish(rows, f, axis if axis.key != "team" else None, "amount", "invoices", extra)
+    return _shape("sales", axis.key, rows)
 
 
 def report_profit(f: Filters, axis_key: str) -> dict:
     """
-    سود فروش. Same population as `sales` but measured on margin, and every
-    row can be opened to see *which* deals and *which* product lines produced
-    it — the manager's "دلیل سودش بیاره".
+    سود معاملات — margin, which only دیدار knows.
+
+    آرپا's invoices carry no cost, so profit cannot be read off the sales
+    population; it comes from the won deals and their product lines, and
+    every row still opens onto *which* deals produced it. It is labelled as
+    deal profit on screen for that reason — set beside «فروش» it is not a
+    margin on that figure.
     """
-    data = report_sales(f, axis_key)
+    qs = f.deals("closed_at").filter(status=Deal.Status.WON)
+    drill = {"status": "won"}
+    if axis_key == "time":
+        rows = []
+        for jy, jm, s_, e in _time_buckets(f):
+            agg = qs.filter(closed_at__gte=_aware(s_), closed_at__lt=_aware(e)).aggregate(**DEAL_MEASURES)
+            d = dict(f.drill_base()); d.update(drill)
+            d["date_from"], d["date_to"] = s_.isoformat(), (e - dt.timedelta(days=1)).isoformat()
+            rows.append({
+                "id": f"{jy}-{jm}", "label": month_label(jy, jm),
+                **{k: _num(v) for k, v in agg.items()},
+                "drill": {"kind": "deals", "params": d},
+            })
+        data = _shape("profit", "time", rows, chronological=True)
+    else:
+        axis = DEAL_AXES.get(axis_key, DEAL_AXES["user"])
+        rows = _grouped(qs, axis, DEAL_MEASURES)
+        data = _shape("profit", axis_key, _finish(rows, f, axis, "profit", "deals", drill))
     for r in data["rows"]:
         r["margin_pct"] = _pct(r["profit"], r["amount"])
         # Net of the deal-level costs that eat the gross margin.
         r["overhead"] = _num(r.get("discount")) + _num(r.get("shipping"))
-    data["key"] = "profit"
-    data["rows"].sort(key=lambda r: r["profit"], reverse=True)
+    if data["axis"] != "time":
+        data["rows"].sort(key=lambda r: r["profit"], reverse=True)
     return data
 
 
@@ -1010,21 +1044,28 @@ def report_products(f: Filters, _axis_key: str = "product") -> dict:
 def report_provinces(f: Filters, _axis_key: str = "province") -> dict:
     """
     استان و تارگت — "استان اصفهان کارِ کیه، چقدر فروخته، تارگتش چقدر بود".
-    Actuals come from won CRM deals; targets reuse the existing
-    sales.FactSalesProvince rows the CEO already maintains, so there is one
-    target number in the whole platform rather than two that disagree.
+    Actuals are sales — the invoices, the same figure as the dashboard's
+    «فروش» — so a province's achievement cannot disagree with the total it
+    is part of. Profit is still deal profit, the only kind دیدار or آرپا
+    records. Targets reuse the sales.FactSalesProvince / SalesTarget rows the
+    CEO already maintains, so there is one target number in the platform.
     """
     won = f.deals("closed_at").filter(status=Deal.Status.WON)
+    sales = f.invoices()
     agg = (
-        won.values("customer__province_id", "customer__province__name_fa")
+        sales.values("customer__province_id", "customer__province__name_fa")
         .annotate(
             amount=_money(Sum("amount_rial")),
-            profit=_money(Sum("profit_rial")),
             count=Count("id", distinct=True),
             customers=Count("customer_id", distinct=True),
         )
         .order_by()
     )
+    profit_by_province = {
+        r["customer__province_id"]: _num(r["profit"])
+        for r in won.values("customer__province_id")
+        .annotate(profit=_money(Sum("profit_rial"))).order_by()
+    }
 
     # Targets for every Jalali month the window touches. Only MONTH rows —
     # a month's weeks share its jalali_year/jalali_month, so an unfiltered
@@ -1054,16 +1095,23 @@ def report_provinces(f: Filters, _axis_key: str = "province") -> dict:
             if r["province_id"] and _num(r["t"]):
                 targets[r["province_id"]] = _num(r["t"])
 
-    # Who works each province: the reps owning customers there, ranked by sales.
+    # Who works each province: the reps its sales are attributed to, ranked.
+    from apps.sales.models import DimEmployee
+
+    by_rep = list(
+        sales.values("customer__province_id", "rep_id")
+        .annotate(amount=_money(Sum("amount_rial"))).order_by()
+    )
+    names = dict(
+        DimEmployee.objects.filter(
+            pk__in={r["rep_id"] for r in by_rep if r["rep_id"]}
+        ).values_list("pk", "full_name_fa")
+    )
     owners: dict[int, list[dict]] = {}
-    for r in (
-        won.values(
-            "customer__province_id", "owner_id", "owner__full_name_fa"
-        ).annotate(amount=_money(Sum("amount_rial"))).order_by()
-    ):
+    for r in by_rep:
         owners.setdefault(r["customer__province_id"], []).append({
-            "id": r["owner_id"],
-            "name": r["owner__full_name_fa"] or "—",
+            "id": r["rep_id"],
+            "name": names.get(r["rep_id"]) or UNATTRIBUTED["user"],
             "amount": _num(r["amount"]),
         })
 
@@ -1073,19 +1121,21 @@ def report_provinces(f: Filters, _axis_key: str = "province") -> dict:
         amount = _num(r["amount"])
         target = targets.get(pid, 0.0)
         reps = sorted(owners.get(pid, []), key=lambda x: x["amount"], reverse=True)
-        d = dict(f.drill_base()); d["province"] = pid; d["status"] = "won"
+        d = dict(f.drill_base())
+        if pid:
+            d["province"] = pid
         rows.append({
             "id": pid,
-            "label": r["customer__province__name_fa"] or "—",
+            "label": r["customer__province__name_fa"] or UNATTRIBUTED["province"],
             "amount": amount,
-            "profit": _num(r["profit"]),
+            "profit": profit_by_province.get(pid, 0.0),
             "count": r["count"],
             "customers": r["customers"],
             "target": target,
             "achievement_pct": _pct(amount, target) if target else 0.0,
             "owners": reps,
             "owner_label": "، ".join(x["name"] for x in reps[:3]) or "—",
-            "drill": {"kind": "deals", "params": d},
+            "drill": {"kind": "invoices", "params": d},
         })
     rows.sort(key=lambda r: r["amount"], reverse=True)
     return _shape("provinces", "province", rows)
@@ -1173,8 +1223,8 @@ def report_sources(f: Filters, _axis_key: str = "source") -> dict:
 # Registry + envelope
 # --------------------------------------------------------------------------
 REPORTS = {
-    "sales": (report_sales, "گزارش کلی فروش", ["time", "user", "product", "province", "group", "source", "customer"]),
-    "profit": (report_profit, "سود فروش", ["user", "time", "product", "group", "customer", "province"]),
+    "sales": (report_sales, "گزارش کلی فروش", ["time", "user", "team", "province", "group", "source", "customer"]),
+    "profit": (report_profit, "سود معاملات", ["user", "time", "group", "customer", "province"]),
     "incoming": (report_incoming, "فرصت‌های جدید", ["time", "user", "source", "group", "province"]),
     "lost": (report_lost, "دلایل از دست رفتن فرصت", ["reason", "time", "user", "product", "stage"]),
     "funnel": (report_funnel, "قیف فروش", ["stage"]),
@@ -1186,6 +1236,105 @@ REPORTS = {
     "provinces": (report_provinces, "فروش و تارگت استان", ["province"]),
     "satisfaction": (report_satisfaction, "رضایت مشتری", ["user"]),
     "sources": (report_sources, "بهترین منابع سرنخ", ["source"]),
+}
+
+#: The table layout of every report: which row keys become columns, in which
+#: order, how each is formatted and whether it may be added up.
+#:
+#: It lives here, beside the reports themselves, because two readers need the
+#: same answer: the screen's table and the Excel export. When the list was in
+#: the frontend the exported file had to guess at it, and the two drifted the
+#: moment a report gained a column.
+#:
+#: `f` (format): rial | count | pct | days | text. `total` marks an additive
+#: measure — a footer total for an average or a ratio would be a lie, so those
+#: are left out and recomputed in `_shape`.
+REPORT_COLUMNS: dict[str, list[dict]] = {
+    # Sales are the invoices: net of discount and returns, before VAT. Cost
+    # and margin are not columns here because آرپا's invoices carry no cost —
+    # they live on «سود معاملات», which is built from دیدار's deals.
+    "sales": [
+        {"k": "count", "label": "تعداد فاکتور", "f": "count", "total": True},
+        {"k": "amount", "label": "فروش", "f": "rial", "total": True},
+        {"k": "unsettled", "label": "تسویه‌نشده", "f": "rial", "total": True},
+        {"k": "vat", "label": "مالیات و عوارض", "f": "rial", "total": True},
+    ],
+    "profit": [
+        {"k": "amount", "label": "فروش", "f": "rial", "total": True},
+        {"k": "cost", "label": "هزینه", "f": "rial", "total": True},
+        {"k": "discount", "label": "تخفیف", "f": "rial", "total": True},
+        {"k": "shipping", "label": "حمل", "f": "rial", "total": True},
+        {"k": "profit", "label": "سود خالص", "f": "rial", "total": True},
+        {"k": "margin_pct", "label": "حاشیه", "f": "pct"},
+    ],
+    "incoming": [
+        {"k": "count", "label": "ورودی", "f": "count", "total": True},
+        {"k": "amount", "label": "مبلغ ورودی", "f": "rial", "total": True},
+        {"k": "won_count", "label": "موفق", "f": "count", "total": True},
+        {"k": "open_count", "label": "جاری", "f": "count", "total": True},
+        {"k": "lost_count", "label": "ناموفق", "f": "count", "total": True},
+        {"k": "won_amount", "label": "مبلغ موفق", "f": "rial", "total": True},
+    ],
+    "lost": [
+        {"k": "count", "label": "تعداد", "f": "count", "total": True},
+        {"k": "amount", "label": "مبلغ از دست رفته", "f": "rial", "total": True},
+    ],
+    "funnel": [
+        {"k": "count", "label": "معاملات فعلی", "f": "count", "total": True},
+        {"k": "amount", "label": "مبلغ", "f": "rial", "total": True},
+        {"k": "weighted", "label": "ارزش وزنی", "f": "rial", "total": True},
+        {"k": "ever", "label": "تا کنون رسیده", "f": "count"},
+        {"k": "reach_pct", "label": "نرخ عبور", "f": "pct"},
+    ],
+    "conversion": [
+        {"k": "won", "label": "موفق", "f": "count", "total": True},
+        {"k": "lost", "label": "ناموفق", "f": "count", "total": True},
+        {"k": "closed", "label": "بسته‌شده", "f": "count", "total": True},
+        {"k": "rate", "label": "نرخ تبدیل", "f": "pct"},
+        {"k": "days_to_win", "label": "روز تا موفقیت", "f": "days"},
+        {"k": "days_to_lose", "label": "روز تا شکست", "f": "days"},
+    ],
+    "new_customers": [{"k": "count", "label": "مشتری جدید", "f": "count", "total": True}],
+    "activities": [{"k": "count", "label": "تعداد فعالیت", "f": "count", "total": True}],
+    "calls": [
+        {"k": "calls", "label": "کل تماس", "f": "count", "total": True},
+        {"k": "success", "label": "موفق", "f": "count", "total": True},
+        {"k": "no_answer", "label": "بی‌پاسخ", "f": "count", "total": True},
+        {"k": "follow_up", "label": "نیاز به پیگیری", "f": "count", "total": True},
+        {"k": "success_rate", "label": "نرخ موفقیت", "f": "pct"},
+        {"k": "customers", "label": "مشتریان", "f": "count", "total": True},
+        {"k": "minutes", "label": "دقیقه", "f": "count", "total": True},
+    ],
+    "products": [
+        {"k": "quantity", "label": "مقدار", "f": "count", "total": True},
+        {"k": "deals", "label": "معاملات", "f": "count", "total": True},
+        {"k": "amount", "label": "فروش ناخالص", "f": "rial", "total": True},
+        {"k": "cost", "label": "بهای تمام‌شده", "f": "rial", "total": True},
+        {"k": "profit", "label": "سود", "f": "rial", "total": True},
+        {"k": "margin_pct", "label": "حاشیه", "f": "pct"},
+    ],
+    "provinces": [
+        {"k": "count", "label": "معاملات", "f": "count", "total": True},
+        {"k": "customers", "label": "مشتریان", "f": "count", "total": True},
+        {"k": "owner_label", "label": "کارشناس", "f": "text"},
+        {"k": "amount", "label": "فروش", "f": "rial", "total": True},
+        {"k": "target", "label": "تارگت", "f": "rial", "total": True},
+        {"k": "achievement_pct", "label": "تحقق", "f": "pct"},
+    ],
+    "satisfaction": [
+        {"k": "total", "label": "بازخورد", "f": "count", "total": True},
+        {"k": "happy", "label": "راضی", "f": "count", "total": True},
+        {"k": "unhappy", "label": "ناراضی", "f": "count", "total": True},
+        {"k": "avg_score", "label": "میانگین امتیاز", "f": "count"},
+        {"k": "unhappy_pct", "label": "درصد نارضایتی", "f": "pct"},
+    ],
+    "sources": [
+        {"k": "leads", "label": "سرنخ", "f": "count", "total": True},
+        {"k": "won", "label": "موفق", "f": "count", "total": True},
+        {"k": "conversion_pct", "label": "نرخ تبدیل", "f": "pct"},
+        {"k": "amount", "label": "فروش", "f": "rial", "total": True},
+        {"k": "profit", "label": "سود", "f": "rial", "total": True},
+    ],
 }
 
 AXIS_LABELS = {
@@ -1247,6 +1396,8 @@ def _shape(key: str, axis: str, rows: list[dict], chronological: bool = False) -
         "rows": rows,
         "totals": totals,
         "chronological": chronological,
+        "columns": REPORT_COLUMNS.get(key, [{"k": "count", "label": "تعداد", "f": "count", "total": True}]),
+        "axis_label": AXIS_LABELS.get(axis, axis),
     }
 
 
@@ -1278,19 +1429,29 @@ def dashboard(f: Filters) -> dict:
     )
     lost_agg = lost.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
 
-    # What accounting billed in the same window, beside what the team won.
-    billed = f.invoices()
-    billed_agg = billed.aggregate(
+    # Sales: the invoices. One figure, reconciled to آرپا — the card's sub
+    # line carries the two amounts that stand between آرپا's own total and
+    # this one, so a manager holding the accounting report can see the gap
+    # is accounted for rather than wonder about it.
+    sales = f.invoices()
+    sales_agg = sales.aggregate(
         n=Count("id", distinct=True),
         amount=_money(Sum("amount_rial")),
         unsettled=_money(Sum("unsettled_rial")),
     )
-    # Of the value won, how much has an invoice attached. Summed over the
-    # deals themselves, not over a join to their invoices: a deal billed in
-    # three instalments would otherwise count three times.
-    won_billed = Deal.objects.filter(
-        pk__in=won.filter(invoices__isnull=False).values("pk")
+    intercompany = f.invoices(include_intercompany=True).filter(
+        is_intercompany=True
     ).aggregate(amount=_money(Sum("amount_rial")))
+    unmatched = sales.filter(customer__isnull=True).aggregate(
+        n=Count("id", distinct=True), amount=_money(Sum("amount_rial"))
+    )
+    # Won in دیدار but not billed in آرپا. Pipeline, not sales: counting it
+    # as sales would add every deal that was in fact invoiced but could not
+    # be matched to its invoice a second time. Summed over the deals, not a
+    # join, so a deal with three invoices is not tripled.
+    unbilled = Deal.objects.filter(
+        pk__in=won.filter(invoices__isnull=True).values("pk")
+    ).aggregate(n=Count("id"), amount=_money(Sum("amount_rial")))
     in_agg = opened.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
 
     open_now = f.by_channel(
@@ -1337,19 +1498,18 @@ def dashboard(f: Filters) -> dict:
     cards = [
         card("incoming", "فرصت‌های جدید", _num(in_agg["n"]), "count", "deals",
              {"date_basis": "opened"}, {"amount": _num(in_agg["amount"])}),
-        card("won", "فروش موفق", _num(won_agg["n"]), "count", "deals",
-             {"status": "won"}, {"amount": _num(won_agg["amount"])}),
-        # Beside «فروش موفق», not instead of it: the two measure different
-        # things and the distance between them is itself the finding.
-        card("invoiced", "فروش فاکتورشده", _num(billed_agg["amount"]), "rial",
-             "invoices", {},
-             {"count": _num(billed_agg["n"]),
-              "won_amount": _num(won_agg["amount"]),
-              "unsettled": _num(billed_agg["unsettled"]),
-              "won_billed_pct": _pct(won_billed["amount"], won_agg["amount"])}),
+        card("sales", "فروش", _num(sales_agg["amount"]), "rial", "invoices", {},
+             {"count": _num(sales_agg["n"]),
+              "unsettled": _num(sales_agg["unsettled"]),
+              "intercompany": _num(intercompany["amount"]),
+              "unmatched": _num(unmatched["amount"]),
+              "unmatched_count": _num(unmatched["n"])}),
+        card("unbilled", "موفق، فاکتورنشده", _num(unbilled["amount"]), "rial", "deals",
+             {"status": "won", "invoiced": "0"},
+             {"count": _num(unbilled["n"])}),
         card("lost", "معاملات شکست خورده", _num(lost_agg["n"]), "count", "deals",
              {"status": "lost"}, {"amount": _num(lost_agg["amount"])}),
-        card("profit", "سود فروش", _num(won_agg["profit"]), "rial", "deals",
+        card("profit", "سود معاملات", _num(won_agg["profit"]), "rial", "deals",
              {"status": "won"},
              {"margin_pct": _pct(won_agg["profit"], won_agg["amount"])}),
         card("pipeline", "فروش در جریان", _num(pipeline_agg["amount"]), "rial", "deals",

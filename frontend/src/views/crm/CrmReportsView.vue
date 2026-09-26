@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { crmApi, type ReportData } from "@/api/crm";
+import { crmApi, type ReportColumn, type ReportData } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
+import { saveAsFile } from "@/utils/download";
+import { toast } from "@/composables/useUi";
 import CrmChart from "@/components/crm/CrmChart.vue";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
 import Skeleton from "@/components/Skeleton.vue";
@@ -29,98 +31,11 @@ const chartKind = ref<"bar" | "line">("bar");
 const measure = ref<"amount" | "count">("amount");
 
 /**
- * Column layout per report. `k` is the row key, `f` the format, and `total`
- * says whether the figure is additive (a footer total for an average would
- * be a lie, so those are marked false).
+ * The table layout comes from the server (`apps.crm.reports.REPORT_COLUMNS`),
+ * so the screen and the Excel export cannot show different columns. The
+ * fallback is only for a report added before a backend that sends them.
  */
-type Col = { k: string; label: string; f: "rial" | "count" | "pct" | "days" | "text"; total?: boolean };
-const COLUMNS: Record<string, Col[]> = {
-  sales: [
-    { k: "count", label: "تعداد معامله", f: "count", total: true },
-    { k: "amount", label: "معامله موفق", f: "rial", total: true },
-    { k: "invoiced_count", label: "تعداد فاکتور", f: "count", total: true },
-    { k: "invoiced", label: "فاکتورشده", f: "rial", total: true },
-    { k: "cost", label: "بهای تمام‌شده", f: "rial", total: true },
-    { k: "profit", label: "سود", f: "rial", total: true },
-    { k: "margin_pct", label: "حاشیه سود", f: "pct" },
-  ],
-  profit: [
-    { k: "amount", label: "فروش", f: "rial", total: true },
-    { k: "cost", label: "هزینه", f: "rial", total: true },
-    { k: "discount", label: "تخفیف", f: "rial", total: true },
-    { k: "shipping", label: "حمل", f: "rial", total: true },
-    { k: "profit", label: "سود خالص", f: "rial", total: true },
-    { k: "margin_pct", label: "حاشیه", f: "pct" },
-  ],
-  incoming: [
-    { k: "count", label: "ورودی", f: "count", total: true },
-    { k: "amount", label: "مبلغ ورودی", f: "rial", total: true },
-    { k: "won_count", label: "موفق", f: "count", total: true },
-    { k: "open_count", label: "جاری", f: "count", total: true },
-    { k: "lost_count", label: "ناموفق", f: "count", total: true },
-    { k: "won_amount", label: "مبلغ موفق", f: "rial", total: true },
-  ],
-  lost: [
-    { k: "count", label: "تعداد", f: "count", total: true },
-    { k: "amount", label: "مبلغ از دست رفته", f: "rial", total: true },
-  ],
-  funnel: [
-    { k: "count", label: "معاملات فعلی", f: "count", total: true },
-    { k: "amount", label: "مبلغ", f: "rial", total: true },
-    { k: "weighted", label: "ارزش وزنی", f: "rial", total: true },
-    { k: "ever", label: "تا کنون رسیده", f: "count" },
-    { k: "reach_pct", label: "نرخ عبور", f: "pct" },
-  ],
-  conversion: [
-    { k: "won", label: "موفق", f: "count", total: true },
-    { k: "lost", label: "ناموفق", f: "count", total: true },
-    { k: "closed", label: "بسته‌شده", f: "count", total: true },
-    { k: "rate", label: "نرخ تبدیل", f: "pct" },
-    { k: "days_to_win", label: "روز تا موفقیت", f: "days" },
-    { k: "days_to_lose", label: "روز تا شکست", f: "days" },
-  ],
-  new_customers: [{ k: "count", label: "مشتری جدید", f: "count", total: true }],
-  activities: [{ k: "count", label: "تعداد فعالیت", f: "count", total: true }],
-  calls: [
-    { k: "calls", label: "کل تماس", f: "count", total: true },
-    { k: "success", label: "موفق", f: "count", total: true },
-    { k: "no_answer", label: "بی‌پاسخ", f: "count", total: true },
-    { k: "follow_up", label: "نیاز به پیگیری", f: "count", total: true },
-    { k: "success_rate", label: "نرخ موفقیت", f: "pct" },
-    { k: "customers", label: "مشتریان", f: "count", total: true },
-    { k: "minutes", label: "دقیقه", f: "count", total: true },
-  ],
-  products: [
-    { k: "quantity", label: "مقدار", f: "count", total: true },
-    { k: "deals", label: "معاملات", f: "count", total: true },
-    { k: "amount", label: "فروش ناخالص", f: "rial", total: true },
-    { k: "cost", label: "بهای تمام‌شده", f: "rial", total: true },
-    { k: "profit", label: "سود", f: "rial", total: true },
-    { k: "margin_pct", label: "حاشیه", f: "pct" },
-  ],
-  provinces: [
-    { k: "count", label: "معاملات", f: "count", total: true },
-    { k: "customers", label: "مشتریان", f: "count", total: true },
-    { k: "owner_label", label: "کارشناس", f: "text" },
-    { k: "amount", label: "فروش", f: "rial", total: true },
-    { k: "target", label: "تارگت", f: "rial", total: true },
-    { k: "achievement_pct", label: "تحقق", f: "pct" },
-  ],
-  satisfaction: [
-    { k: "total", label: "بازخورد", f: "count", total: true },
-    { k: "happy", label: "راضی", f: "count", total: true },
-    { k: "unhappy", label: "ناراضی", f: "count", total: true },
-    { k: "avg_score", label: "میانگین امتیاز", f: "count" },
-    { k: "unhappy_pct", label: "درصد نارضایتی", f: "pct" },
-  ],
-  sources: [
-    { k: "leads", label: "سرنخ", f: "count", total: true },
-    { k: "won", label: "موفق", f: "count", total: true },
-    { k: "conversion_pct", label: "نرخ تبدیل", f: "pct" },
-    { k: "amount", label: "فروش", f: "rial", total: true },
-    { k: "profit", label: "سود", f: "rial", total: true },
-  ],
-};
+type Col = ReportColumn;
 
 /** Which measure the chart plots, per report. */
 const CHART_KEY: Record<string, { amount: string; count: string; fmt: "rial" | "count" | "percent" | "days" }> = {
@@ -139,7 +54,7 @@ const CHART_KEY: Record<string, { amount: string; count: string; fmt: "rial" | "
   sources: { amount: "amount", count: "won", fmt: "rial" },
 };
 
-const cols = computed<Col[]>(() => COLUMNS[reportKey.value] ?? [{ k: "count", label: "تعداد", f: "count", total: true }]);
+const cols = computed<Col[]>(() => data.value?.columns ?? [{ k: "count", label: "تعداد", f: "count", total: true }]);
 
 async function load() {
   loading.value = true;
@@ -198,9 +113,8 @@ const series = computed(() => {
   }
   if (reportKey.value === "sales") {
     return [
-      { name: "معامله موفق", values: rows.map((r) => r.amount), color: "#22c55e" },
-      { name: "فاکتورشده", values: rows.map((r) => r.invoiced ?? 0), color: "#3b82f6" },
-      { name: "سود", values: rows.map((r) => r.profit), type: "line" as const, color: "#0ea5e9" },
+      { name: "فروش", values: rows.map((r) => r.amount), color: "#22c55e" },
+      { name: "تسویه‌نشده", values: rows.map((r) => r.unsettled), type: "line" as const, color: "#f59e0b" },
     ];
   }
   if (reportKey.value === "profit") {
@@ -241,20 +155,26 @@ function pick(i: number) {
   if (row?.drill?.kind) crm.openDrill(row.drill, `${data.value?.title} — ${row.label}`);
 }
 
-function exportCsv() {
+const exporting = ref(false);
+
+/**
+ * خروجی اکسل — built by the server from the database.
+ *
+ * This used to be a CSV assembled here out of `data.rows`, which Excel opens
+ * as unformatted text and which carried none of the context (which window,
+ * whose book) that makes an exported number safe to quote.
+ */
+async function exportExcel() {
   if (!data.value) return;
-  const head = [data.value.axis_labels[axis.value] ?? "عنوان", ...cols.value.map((c) => c.label)];
-  const body = data.value.rows.map((r) => [r.label, ...cols.value.map((c) => r[c.k] ?? "")]);
-  const totals = ["مجموع", ...cols.value.map((c) => data.value!.totals[c.k] ?? "")];
-  const csv = [head, ...body, totals]
-    .map((line) => line.map((c: any) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-  const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${data.value.title}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  exporting.value = true;
+  try {
+    const res = await crmApi.exportReport(reportKey.value, { ...crm.query, axis: axis.value });
+    saveAsFile(res, `${data.value.title}.xlsx`);
+  } catch {
+    toast.error("خروجی اکسل گرفته نشد.");
+  } finally {
+    exporting.value = false;
+  }
 }
 
 const tabBtn = (on: boolean) =>
@@ -313,8 +233,15 @@ const tabBtn = (on: boolean) =>
                 @click="chartKind = 'line'"
               >خطی</button>
             </div>
-            <button class="text-xs rounded-lg px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200" @click="exportCsv">
-              خروجی اکسل
+            <button
+              class="flex items-center gap-1.5 text-xs rounded-lg px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition"
+              :disabled="exporting || !data?.rows.length"
+              @click="exportExcel"
+            >
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              {{ exporting ? "در حال ساخت…" : "خروجی اکسل" }}
             </button>
           </div>
         </div>

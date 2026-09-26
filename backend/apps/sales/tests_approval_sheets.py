@@ -7,6 +7,8 @@ this, each salesperson arrived as a separate item and the provincial block
 never arrived at all: it had no approval status, so it reached the dashboards
 the moment it was saved.
 """
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
@@ -26,6 +28,11 @@ class SheetApprovalTests(APITestCase):
         self.month = DimPeriod.objects.create(jalali_year=1405, jalali_month=5)
         periods.backfill_dates(self.month)
         self.weeks = periods.ensure_weeks(self.month)
+        # These tests post weeks out of order on purpose; the «earlier week
+        # first» rule has its own tests in tests_entry_rules.py.
+        patcher = mock.patch("apps.sales.views.entry_block", return_value="")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
         self.ali = DimEmployee.objects.create(code="sh-1", full_name_fa="علی رضایی")
         self.sara = DimEmployee.objects.create(code="sh-2", full_name_fa="سارا کریمی")

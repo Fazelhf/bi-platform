@@ -1699,124 +1699,424 @@ class InvoiceLinkTests(APITestCase):
         self.assertEqual(stats.already, 1)
 
 
-class SalesSideBySideTests(APITestCase):
+class MergedSalesTests(APITestCase):
     """
-    Won deals and billed invoices on the same screens, never blended.
+    One sales figure: آرپا's invoices, attributed through دیدار.
 
-    In 1404 the two differed by 2x to 70x from month to month. One «sales»
-    number built from either would be wrong for half the questions asked of
-    it; built from both, it would be wrong for all of them.
+    Replaces the side-by-side version. Showing won deals and invoices both
+    as «فروش» meant every reader picked a number, and in 1404 the two were
+    2x to 70x apart. The tests below pin the three things that make the one
+    figure trustworthy: it reconciles to آرپا, it is attributed to a person
+    wherever دیدار knows one, and it lands in the right department.
     """
 
     def setUp(self):
         from datetime import date
-        self.ceo = _user("ceo-sbs", "executive")
-        self.rep_emp = DimEmployee.objects.create(code="e-sbs", full_name_fa="کارشناس الف")
-        self.other_emp = DimEmployee.objects.create(code="e-sbs2", full_name_fa="کارشناس ب")
+        self.ceo = _user("ceo-m", "executive")
         now = timezone.now()
+        self.rep = DimEmployee.objects.create(code="e-m1", full_name_fa="کارشناس الف")
+        self.deal_owner = DimEmployee.objects.create(code="e-m2", full_name_fa="کارشناس معامله")
+        self.bank_rep = DimEmployee.objects.create(code="e-m3", full_name_fa="کارشناس بانکی")
+
         self.customer = Customer.objects.create(
-            code="didar-co-s1", name_fa="مشتری فروش", dataset=Dataset.REAL,
-            owner=self.rep_emp, first_contact_at=now - timedelta(days=400),
-            channel=SalesChannel.TEAM,
+            code="didar-co-m1", name_fa="مشتری فروش", dataset=Dataset.REAL,
+            owner=self.rep, first_contact_at=now - timedelta(days=400),
         )
-        self.sister = Customer.objects.create(
-            code="arpa-s2", name_fa="آرال رول آریا - فی ما بین", dataset=Dataset.REAL,
-            first_contact_at=now - timedelta(days=400), is_intercompany=True,
-            channel=SalesChannel.TEAM,
-        )
-        self.bank_customer = Customer.objects.create(
-            code="arpa-s3", name_fa="بانک", dataset=Dataset.REAL,
+        self.bank = Customer.objects.create(
+            code="arpa-m3", name_fa="بانک", dataset=Dataset.REAL,
             first_contact_at=now - timedelta(days=400),
             channel=SalesChannel.ORGANIZATIONAL,
         )
         self.start, self.end = date(2025, 9, 23), date(2025, 10, 22)  # مهر 1404
         self.day = date(2025, 10, 1)
-
-        Deal.objects.create(
-            code="d-sbs", title="م", customer=self.customer, owner=self.rep_emp,
+        self.won = Deal.objects.create(
+            code="d-m1", title="م", customer=self.customer, owner=self.deal_owner,
             dataset=Dataset.REAL, status="won", amount_rial=10_000_000,
             opened_at=now - timedelta(days=60),
             closed_at=timezone.make_aware(timezone.datetime(2025, 10, 5)),
         )
-        for code, customer, owner, amount, day in (
-            ("i1", self.customer, self.rep_emp, 30_000_000, self.day),
-            ("i2", self.customer, None, 5_000_000, self.day),
-            ("i3", self.sister, None, 900_000_000, self.day),
-            ("i4", self.bank_customer, self.other_emp, 7_000_000, self.day),
-            # The window's first day, which a datetime comparison drops.
-            ("i5", self.customer, self.rep_emp, 1_000_000, self.start),
-        ):
-            SalesInvoice.objects.create(
-                code=f"arpa-inv-{code}", number=code, customer=customer,
-                owner=owner, issued_at=day, amount_rial=amount,
-                unsettled_rial=amount, dataset=Dataset.REAL,
+        self.unbilled = Deal.objects.create(
+            code="d-m2", title="بی‌فاکتور", customer=self.bank, owner=self.bank_rep,
+            dataset=Dataset.REAL, status="won", amount_rial=4_000_000,
+            opened_at=now - timedelta(days=60),
+            closed_at=timezone.make_aware(timezone.datetime(2025, 10, 6)),
+        )
+
+        def invoice(code, amount, **kw):
+            kw.setdefault("customer", self.customer)
+            kw.setdefault("channel", SalesChannel.TEAM)
+            kw.setdefault("issued_at", self.day)
+            return SalesInvoice.objects.create(
+                code=f"arpa-inv-{code}", number=code, amount_rial=amount,
+                unsettled_rial=amount, dataset=Dataset.REAL, **kw,
             )
+
+        self.i_own = invoice("i1", 30_000_000, owner=self.rep)
+        self.i_deal = invoice("i2", 5_000_000, deal=self.won)          # rep from deal
+        self.i_customer = invoice("i3", 2_000_000)                     # rep from customer
+        self.i_sister = invoice("i4", 900_000_000, is_intercompany=True)
+        self.i_bank = invoice("i5", 7_000_000, customer=self.bank,
+                              channel=SalesChannel.ORGANIZATIONAL, owner=self.bank_rep)
+        # Arrived before its آرپا party was matched — still a sale.
+        self.i_waiting = invoice("i6", 3_000_000, customer=None,
+                                 party_code="777001", party_name="هنوز تطبیق‌نخورده")
+        # The window's first day, which a datetime comparison drops.
+        self.i_edge = invoice("i7", 1_000_000, owner=self.rep, issued_at=self.start)
 
     def _window(self):
         return {"date_from": self.start.isoformat(), "date_to": self.end.isoformat()}
 
-    def test_intercompany_billing_is_not_counted_as_sales(self):
-        f = rpt.Filters.from_query(self._window())
-        total = f.invoices().aggregate(s=Sum("amount_rial"))["s"]
-        self.assertEqual(total, 30_000_000 + 5_000_000 + 7_000_000 + 1_000_000)
+    def _f(self, **extra):
+        return rpt.Filters.from_query({**self._window(), **extra})
+
+    SALES = 30_000_000 + 5_000_000 + 2_000_000 + 7_000_000 + 3_000_000 + 1_000_000
+
+    # -- reconciliation -------------------------------------------------
+    def test_sales_is_every_invoice_except_intercompany(self):
+        total = self._f().invoices().aggregate(s=Sum("amount_rial"))["s"]
+        self.assertEqual(total, self.SALES)
+
+    def test_an_unmatched_invoice_is_still_a_sale(self):
+        """
+        An invoice whose party waits in the review queue used to be skipped,
+        and that hid 24% of 1405 from every total.
+        """
+        self.assertTrue(self._f().invoices().filter(number="i6").exists())
+
+    def test_won_deals_are_not_added_to_sales(self):
+        f = self._f()
+        rows = [r for r in rpt.report_sales(f, "time")["rows"] if r["amount"]]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["amount"], self.SALES)
+        self.assertNotIn("invoiced", rows[0])
+
+    def test_every_breakdown_sums_to_the_same_total(self):
+        for axis in ("user", "team", "province", "group", "source", "customer"):
+            data = rpt.report_sales(self._f(), axis)
+            self.assertEqual(data["totals"]["amount"], self.SALES, axis)
 
     def test_an_invoice_on_the_first_day_of_the_window_is_inside_it(self):
-        f = rpt.Filters.from_query(self._window())
-        self.assertTrue(f.invoices().filter(number="i5").exists())
+        self.assertTrue(self._f().invoices().filter(number="i7").exists())
 
-    def test_the_monthly_trend_carries_both_figures(self):
-        f = rpt.Filters.from_query(self._window())
-        rows = rpt.report_sales(f, "time")["rows"]
-        mehr = [r for r in rows if r["invoiced"] or r["amount"]]
-        self.assertEqual(len(mehr), 1)
-        self.assertEqual(mehr[0]["amount"], 10_000_000)
-        self.assertEqual(mehr[0]["invoiced"], 43_000_000)
+    # -- attribution ----------------------------------------------------
+    def test_the_rep_falls_back_to_the_deal_then_the_customer_owner(self):
+        reps = dict(self._f().invoices().values_list("number", "rep_id"))
+        self.assertEqual(reps["i1"], self.rep.pk)          # invoice's own بازاریاب
+        self.assertEqual(reps["i2"], self.deal_owner.pk)   # the linked deal
+        self.assertEqual(reps["i3"], self.rep.pk)          # the customer's owner
+        self.assertIsNone(reps["i6"])                      # nothing to go on
 
-    def test_by_salesperson_keeps_billing_that_has_no_deal_behind_it(self):
-        """
-        «کارشناس ب» won nothing in دیدار but billed 7m. Dropping the row for
-        want of a deal would hide exactly the gap the comparison is for.
-        """
-        f = rpt.Filters.from_query(self._window())
-        rows = {r["label"]: r for r in rpt.report_sales(f, "user")["rows"]}
-        self.assertEqual(rows["کارشناس ب"]["invoiced"], 7_000_000)
-        self.assertEqual(rows["کارشناس ب"]["amount"], 0)
-        self.assertEqual(rows["کارشناس الف"]["invoiced"], 31_000_000)
+    def test_by_salesperson_names_what_is_left_unattributed(self):
+        rows = {r["label"]: r["amount"] for r in rpt.report_sales(self._f(), "user")["rows"]}
+        self.assertEqual(rows["کارشناس الف"], 30_000_000 + 2_000_000 + 1_000_000)
+        self.assertEqual(rows["کارشناس معامله"], 5_000_000)
+        self.assertEqual(rows["بدون کارشناس"], 3_000_000)
+        self.assertNotIn("—", rows)
 
-    def test_billing_with_no_salesperson_is_named_not_dashed(self):
-        f = rpt.Filters.from_query(self._window())
-        labels = {r["label"] for r in rpt.report_sales(f, "user")["rows"]}
-        self.assertIn("بدون بازاریاب", labels)
-        self.assertNotIn("—", labels)
+    def test_the_customer_axis_shows_the_review_queue_as_what_it_is(self):
+        labels = {r["label"] for r in rpt.report_sales(self._f(), "customer")["rows"]}
+        self.assertIn("در انتظار تطبیق مشتری", labels)
 
-    def test_the_dashboard_shows_billing_beside_won_deals(self):
+    # -- the dashboard --------------------------------------------------
+    def test_the_dashboard_has_one_sales_card_that_reconciles(self):
         self.client.force_authenticate(self.ceo)
         res = self.client.get("/api/crm/dashboard/", self._window())
         self.assertEqual(res.status_code, 200)
         cards = {c["key"]: c for c in res.data["cards"]}
-        self.assertIn("won", cards)
-        self.assertEqual(cards["invoiced"]["value"], 43_000_000)
-        self.assertEqual(cards["invoiced"]["sub"]["won_amount"], 10_000_000)
-        keys = [c["key"] for c in res.data["cards"]]
-        self.assertEqual(keys.index("invoiced"), keys.index("won") + 1)
+        self.assertNotIn("won", cards)
+        self.assertNotIn("invoiced", cards)
+        sales = cards["sales"]
+        self.assertEqual(sales["value"], self.SALES)
+        self.assertEqual(sales["sub"]["intercompany"], 900_000_000)
+        self.assertEqual(sales["sub"]["unmatched"], 3_000_000)
+        self.assertEqual(sales["drill"]["kind"], "invoices")
 
-    def test_a_department_sees_only_its_own_book_of_invoices(self):
-        """The channel comes from the customer: آرپا fills «مسوول فروش» on
-        one invoice in seven, so filtering on the invoice hides the rest."""
-        self.client.force_authenticate(_user("team-mgr-sbs", "manager", "sales_team"))
+    def test_won_but_unbilled_is_pipeline_and_drills_to_those_deals(self):
+        self.client.force_authenticate(self.ceo)
+        cards = {c["key"]: c for c in self.client.get(
+            "/api/crm/dashboard/", self._window()).data["cards"]}
+        unbilled = cards["unbilled"]
+        self.assertEqual(unbilled["value"], 4_000_000)
+
+        res = self.client.get("/api/crm/deals/", unbilled["drill"]["params"])
+        self.assertEqual({d["code"] for d in res.data["results"]}, {"d-m2"})
+
+    def test_profit_is_labelled_as_deal_profit(self):
+        self.assertEqual(rpt.report_profit(self._f(), "user")["title"], "سود معاملات")
+
+    # -- scope ----------------------------------------------------------
+    def test_a_department_sees_its_own_sales_by_the_invoice_department(self):
+        self.client.force_authenticate(_user("bank-mgr-m", "manager", "sales_org"))
         res = self.client.get("/api/crm/invoices/", self._window())
-        self.assertEqual(res.status_code, 200)
-        numbers = {r["number"] for r in res.data["results"]}
-        self.assertIn("i1", numbers)
-        self.assertNotIn("i4", numbers)   # فروش بانکی's customer
-        self.assertNotIn("i3", numbers)   # intercompany
+        self.assertEqual({r["number"] for r in res.data["results"]}, {"i5"})
 
-    def test_a_salesperson_sees_only_their_own_invoices(self):
-        user = _user("rep-sbs", "operator", "sales_team")
-        self.rep_emp.user = user
-        self.rep_emp.save(update_fields=["user"])
+    def test_a_salesperson_sees_the_sales_attributed_to_them(self):
+        """Including those credited through their customer — without the
+        fallback a rep would not see their own accounts being billed."""
+        user = _user("rep-m", "operator", "sales_team")
+        self.rep.user = user
+        self.rep.save(update_fields=["user"])
         self.client.force_authenticate(user)
 
         res = self.client.get("/api/crm/invoices/", self._window())
-        numbers = {r["number"] for r in res.data["results"]}
-        self.assertEqual(numbers, {"i1", "i5"})
+        self.assertEqual({r["number"] for r in res.data["results"]}, {"i1", "i3", "i7"})
+
+    def test_the_drawer_names_an_unmatched_invoice_by_its_party(self):
+        self.client.force_authenticate(self.ceo)
+        rows = {r["number"]: r for r in self.client.get(
+            "/api/crm/invoices/", self._window()).data["results"]}
+        self.assertEqual(rows["i6"]["customer_name"], "هنوز تطبیق‌نخورده")
+        self.assertTrue(rows["i6"]["awaiting_match"])
+        self.assertEqual(rows["i3"]["owner_name"], "کارشناس الف")
+
+
+class InvoiceAttachesOnMatchTests(APITestCase):
+    """An invoice imported before its party is matched gets its customer
+    the moment the party is resolved — by any path."""
+
+    def setUp(self):
+        from datetime import date
+        self.waiting = SalesInvoice.objects.create(
+            code="arpa-inv-w1", number="w1", customer=None, party_code="888001",
+            party_name="طرف منتظر", issued_at=date(2025, 10, 1),
+            amount_rial=5_000_000, dataset=Dataset.REAL,
+        )
+        self.customer = Customer.objects.create(
+            code="didar-co-w1", name_fa="مشتری دیدار", dataset=Dataset.REAL,
+            first_contact_at=timezone.now(),
+        )
+        self.payload = {"کد": "888001", "نام": "طرف منتظر", "نوع": "حقوقی"}
+
+    def _candidate(self):
+        return CustomerMatchCandidate.objects.create(
+            source=ExternalSource.ARPA, external_id="888001",
+            external_name="طرف منتظر", customer=self.customer,
+            method="phone", score=Decimal("0.5"), payload=self.payload,
+        )
+
+    def test_accepting_a_match_attaches_the_waiting_invoice(self):
+        crm_merge.accept(self._candidate())
+        self.waiting.refresh_from_db()
+        self.assertEqual(self.waiting.customer_id, self.customer.pk)
+
+    def test_rejecting_a_match_attaches_it_to_the_new_account(self):
+        created = crm_merge.reject(self._candidate())
+        self.waiting.refresh_from_db()
+        self.assertEqual(self.waiting.customer_id, created.pk)
+
+    def test_an_intercompany_customer_marks_its_waiting_invoices(self):
+        self.customer.is_intercompany = True
+        self.customer.save(update_fields=["is_intercompany"])
+        crm_merge.accept(self._candidate())
+        self.waiting.refresh_from_db()
+        self.assertTrue(self.waiting.is_intercompany)
+
+
+class ChannelResolverTests(APITestCase):
+    """
+    Department from evidence, strongest first. Every imported customer used
+    to be «همکار», so the bank department's manager saw none of its sales.
+    """
+
+    def setUp(self):
+        from apps.crm.channels import ChannelResolver
+        self.team_rep = DimEmployee.objects.create(code="c-t", full_name_fa="همکار")
+        self.b2b_rep = DimEmployee.objects.create(code="c-b", full_name_fa="بی‌تو‌بی")
+        self.two = DimEmployee.objects.create(code="c-2", full_name_fa="دو کانال")
+        EmployeeChannel.objects.create(employee=self.team_rep, channel=SalesChannel.TEAM, is_active=True)
+        EmployeeChannel.objects.create(employee=self.b2b_rep, channel=SalesChannel.B2B, is_active=True)
+        EmployeeChannel.objects.create(employee=self.two, channel=SalesChannel.ORGANIZATIONAL, is_active=True)
+        EmployeeChannel.objects.create(employee=self.two, channel=SalesChannel.PSP, is_active=True)
+        self.r = ChannelResolver()
+
+    def test_arpa_organizational_label_is_the_b2b_book(self):
+        """«گروه فروش سازمانی» was mapped to `organizational`; the one rep
+        آرپا tags with it sits on the B2B roster."""
+        self.assertEqual(self.r.invoice("گروه فروش سازمانی", None, ""), SalesChannel.B2B)
+        self.assertEqual(self.r.invoice("گروه فروش بانکی", None, ""), SalesChannel.ORGANIZATIONAL)
+
+    def test_the_invoice_label_beats_the_roster(self):
+        self.assertEqual(
+            self.r.invoice("گروه فروش همکار", self.b2b_rep.pk, ""), SalesChannel.TEAM
+        )
+
+    def test_a_single_roster_channel_decides(self):
+        self.assertEqual(self.r.invoice("", self.b2b_rep.pk, "سایر طرف حسابها"), SalesChannel.B2B)
+
+    def test_a_rep_in_two_channels_decides_nothing(self):
+        self.assertEqual(
+            self.r.invoice("", self.two.pk, "نمابر مهر بانکها"), SalesChannel.ORGANIZATIONAL
+        )
+        self.assertEqual(self.r.invoice("", self.two.pk, "سایر طرف حسابها"), SalesChannel.TEAM)
+
+    def test_the_group_decides_when_nothing_else_does(self):
+        self.assertEqual(self.r.customer(None, "نمابر مهر سازمانها"), SalesChannel.B2B)
+        self.assertEqual(self.r.customer(None, "مشتریان مشترک"), SalesChannel.TEAM)
+
+    def test_rederiving_moves_imported_customers_and_their_deals(self):
+        from apps.crm.channels import rederive_customer_channels
+        now = timezone.now()
+        imported = Customer.objects.create(
+            code="arpa-ch1", name_fa="وارد شده", dataset=Dataset.REAL,
+            owner=self.b2b_rep, first_contact_at=now,
+        )
+        CustomerExternalRef.objects.create(
+            customer=imported, source=ExternalSource.ARPA, external_id="ch1",
+        )
+        typed = Customer.objects.create(
+            code="c-typed", name_fa="ساخته در برنامه", dataset=Dataset.REAL,
+            owner=self.b2b_rep, first_contact_at=now, channel=SalesChannel.TEAM,
+        )
+        deal = Deal.objects.create(
+            code="d-ch1", title="م", customer=imported, dataset=Dataset.REAL,
+            opened_at=now,
+        )
+
+        rederive_customer_channels()
+
+        imported.refresh_from_db(); typed.refresh_from_db(); deal.refresh_from_db()
+        self.assertEqual(imported.channel, SalesChannel.B2B)
+        self.assertEqual(deal.channel, SalesChannel.B2B)
+        # A customer a department created in the app is left where they put it.
+        self.assertEqual(typed.channel, SalesChannel.TEAM)
+
+
+class WorkScreensTests(APITestCase):
+    """
+    The screens added on top of the lists — کارتابل امروز, global search, the
+    Excel exports and the bulk actions — each answer from the same scope as
+    the lists. None of them may become the side door a list closed: a rep's
+    search, worklist or export holds their own book and nothing else.
+
+    Reuses ScopeTests' fixture: two reps with a customer and a deal each, and
+    a manager over both.
+    """
+
+    setUp = ScopeTests.setUp
+
+    def _task(self, owner, customer, days_ago, title):
+        from apps.crm.models import Task
+        return Task.objects.create(
+            title=title, customer=customer, owner=owner, dataset=Dataset.REAL,
+            due_at=timezone.now() - timedelta(days=days_ago),
+        )
+
+    # ---- کارتابل امروز ----------------------------------------------------
+    def test_today_lists_only_the_reps_own_work(self):
+        self._task(self.mine, self.my_customer, 2, "کار من")
+        self._task(self.theirs, self.their_customer, 2, "کار دیگری")
+        self.client.force_authenticate(self.rep)
+        data = self.client.get("/api/crm/today/").data
+        self.assertEqual([t["title"] for t in data["overdue"]], ["کار من"])
+
+    def test_today_ignores_an_owner_param_from_a_rep(self):
+        self._task(self.theirs, self.their_customer, 2, "کار دیگری")
+        self.client.force_authenticate(self.rep)
+        data = self.client.get("/api/crm/today/", {"owner": self.theirs.id}).data
+        self.assertEqual(data["overdue"], [])
+
+    def test_old_overdue_tasks_are_counted_not_listed(self):
+        """Imported history must not bury today's work (see BACKLOG_DAYS)."""
+        self._task(self.mine, self.my_customer, 2, "تازه")
+        self._task(self.mine, self.my_customer, 200, "قدیمی")
+        self.client.force_authenticate(self.rep)
+        data = self.client.get("/api/crm/today/").data
+        self.assertEqual([t["title"] for t in data["overdue"]], ["تازه"])
+        self.assertEqual(data["counters"]["backlog"], 1)
+
+    def test_unlinked_account_gets_an_empty_worklist(self):
+        self._task(self.theirs, self.their_customer, 2, "کار دیگری")
+        self.client.force_authenticate(self.unlinked)
+        data = self.client.get("/api/crm/today/").data
+        self.assertEqual(data["overdue"], [])
+        self.assertEqual(data["counters"]["open_count"], 0)
+
+    # ---- search -----------------------------------------------------------
+    def test_search_finds_only_what_the_lists_would_show(self):
+        self.client.force_authenticate(self.rep)
+        data = self.client.get("/api/crm/search/", {"q": "معامله"}).data
+        self.assertEqual([d["title"] for d in data["deals"]], ["معامله من"])
+        data = self.client.get("/api/crm/search/", {"q": "مشتری"}).data
+        self.assertEqual([c["name_fa"] for c in data["customers"]], ["مشتری من"])
+
+    # ---- Excel ------------------------------------------------------------
+    def _sheet_rows(self, res):
+        from io import BytesIO
+        from openpyxl import load_workbook
+        self.assertEqual(res.status_code, 200, getattr(res, "data", None))
+        ws = load_workbook(BytesIO(res.content)).worksheets[0]
+        # Title block, blank line, header — data starts on row 5. The bold
+        # «جمع کل» line under the data is a total, not a record.
+        return [
+            r for r in ws.iter_rows(min_row=5, values_only=True)
+            if any(r) and r[0] != "جمع کل"
+        ]
+
+    def test_drill_export_holds_every_row_not_one_page(self):
+        now = timezone.now()
+        for i in range(40):
+            Deal.objects.create(
+                code=f"d-bulk-{i}", title=f"انبوه {i}", customer=self.my_customer,
+                owner=self.mine, stage=self.stage, dataset=Dataset.REAL,
+                opened_at=now - timedelta(days=2),
+            )
+        self.client.force_authenticate(self.rep)
+        res = self.client.get("/api/crm/export/drill/", {"kind": "deals", "status": "open", "page_size": 25})
+        titles = [r[1] for r in self._sheet_rows(res)]
+        self.assertEqual(len(titles), 41)
+        self.assertNotIn("معامله دیگری", titles)
+
+    def test_drill_export_can_be_narrowed_to_ticked_rows(self):
+        self.client.force_authenticate(self.boss)
+        res = self.client.get("/api/crm/export/drill/", {
+            "kind": "deals", "status": "open", "ids": str(self.their_deal.id),
+        })
+        self.assertEqual([r[1] for r in self._sheet_rows(res)], ["معامله دیگری"])
+
+    def test_report_export_is_a_workbook(self):
+        self.client.force_authenticate(self.boss)
+        res = self.client.get("/api/crm/reports/incoming/export/", {"axis": "user"})
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("spreadsheetml", res["Content-Type"])
+
+    # ---- bulk actions -------------------------------------------------------
+    def test_a_rep_cannot_reassign_in_bulk(self):
+        self.client.force_authenticate(self.rep)
+        res = self.client.post("/api/crm/deals/bulk-assign/", {
+            "ids": [self.my_deal.id], "owner": self.theirs.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+
+    def test_bulk_move_cannot_reach_someone_elses_deal(self):
+        other_stage = PipelineStage.objects.create(
+            code="s-next", name_fa="مرحله بعد", kind="open", order=2,
+            probability_pct=50, dataset=Dataset.REAL,
+        )
+        self.client.force_authenticate(self.rep)
+        res = self.client.post("/api/crm/deals/bulk-move/", {
+            "ids": [self.my_deal.id, self.their_deal.id], "stage": other_stage.id,
+        }, format="json")
+        self.assertEqual(res.data["moved"], 1)
+        self.their_deal.refresh_from_db()
+        self.assertEqual(self.their_deal.stage_id, self.stage.id)
+        # And the one it did move left a stage event, like a drag would.
+        self.assertTrue(self.my_deal.stage_events.filter(to_stage=other_stage).exists())
+
+    # ---- lists --------------------------------------------------------------
+    def test_lists_honour_the_page_size_they_ask_for(self):
+        now = timezone.now()
+        for i in range(12):
+            Deal.objects.create(
+                code=f"d-page-{i}", title=f"صفحه {i}", customer=self.my_customer,
+                owner=self.mine, stage=self.stage, dataset=Dataset.REAL,
+                opened_at=now - timedelta(days=2),
+            )
+        self.client.force_authenticate(self.rep)
+        data = self.client.get("/api/crm/deals/", {"status": "open", "page_size": 5}).data
+        self.assertEqual(len(data["results"]), 5)
+        self.assertEqual(data["count"], 13)
+
+    def test_unknown_ordering_is_ignored_not_obeyed(self):
+        self.client.force_authenticate(self.boss)
+        res = self.client.get("/api/crm/deals/", {"status": "open", "ordering": "owner__user__password"})
+        self.assertEqual(res.status_code, 200)

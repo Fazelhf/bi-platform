@@ -11,6 +11,8 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from apps.accounts.twofactor import LoginView
 from apps.adminpanel.views import LiveAnnouncementView
 
+from apps.core.excel_import import ImportListView, ImportRunView, ImportTemplateView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # --- Auth (JWT) ---
@@ -29,6 +31,11 @@ urlpatterns = [
     path("api/crm/", include("apps.crm.urls")),
     path("api/finance/", include("apps.finance.urls")),
     path("api/commercial/", include("apps.commercial.urls")),
+    # فروش ۲ — the ERP-style sales module, admins only until it is merged.
+    path("api/sales2/", include("apps.sales2.urls")),
+    path("api/imports/", ImportListView.as_view(), name="imports"),
+    path("api/imports/<slug:key>/template/", ImportTemplateView.as_view(), name="import-template"),
+    path("api/imports/<slug:key>/run/", ImportRunView.as_view(), name="import-run"),
     path("api/hr/", include("apps.hr.urls")),
     path("api/office/", include("apps.office.urls")),
     path("api/executive/", include("apps.core.urls")),

@@ -64,11 +64,18 @@ function cardValue(c: DashCard): string {
 
 function cardSub(c: DashCard): string {
   const s = c.sub ?? {};
-  // Checked first: the invoiced card also carries `count`, which the pipeline
-  // branch below would otherwise claim and caption as «معامله · وزنی».
-  if (s.won_amount !== undefined) {
-    return `${num(s.count)} فاکتور · معامله موفق ${rial(s.won_amount)}`;
+  // Keyed by card, not guessed from which fields `sub` happens to carry: two
+  // cards now both send `count`, and the shape-sniffing below gave the sales
+  // card the pipeline's «معامله · وزنی» caption.
+  if (c.key === "sales") {
+    // The reconciliation, in one line: add the intercompany figure back and
+    // this card equals آرپا's own total for the window.
+    const parts = [`${num(s.count)} فاکتور`];
+    if (s.intercompany) parts.push(`فی‌مابین جدا ${rial(s.intercompany)}`);
+    if (s.unmatched) parts.push(`${rial(s.unmatched)} در انتظار تطبیق`);
+    return parts.join(" · ");
   }
+  if (c.key === "unbilled") return `${num(s.count)} معامله موفق بدون فاکتور`;
   if (s.amount !== undefined) return rial(s.amount);
   if (s.margin_pct !== undefined) return `حاشیه ${pct(s.margin_pct)}`;
   if (s.won !== undefined) return `${num(s.won)} از ${num(s.closed)} معامله بسته‌شده`;
@@ -79,8 +86,8 @@ function cardSub(c: DashCard): string {
 
 const CARD_STYLE: Record<string, { accent: string; icon: string }> = {
   incoming: { accent: "text-sky-600", icon: "M12 5v14M5 12h14" },
-  won: { accent: "text-emerald-600", icon: "M20 6L9 17l-5-5" },
-  invoiced: { accent: "text-blue-600", icon: "M6 2h9l5 5v15H6zM14 2v6h6M9 13h6M9 17h6" },
+  sales: { accent: "text-emerald-600", icon: "M6 2h9l5 5v15H6zM14 2v6h6M9 13h6M9 17h6" },
+  unbilled: { accent: "text-amber-600", icon: "M12 8v4M12 16h.01M4 4h16v16H4z" },
   lost: { accent: "text-red-500", icon: "M18 6L6 18M6 6l12 12" },
   profit: { accent: "text-emerald-600", icon: "M3 17l6-6 4 4 7-7" },
   pipeline: { accent: "text-violet-600", icon: "M4 6h16M7 12h10M10 18h4" },
@@ -91,9 +98,29 @@ const CARD_STYLE: Record<string, { accent: string; icon: string }> = {
   overdue: { accent: "text-orange-600", icon: "M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" },
 };
 
+/**
+ * Where a card goes when it has no records of its own to list.
+ *
+ * A rate or an average is not a set of rows — «نرخ تبدیل» is a ratio of two
+ * counts — so there is nothing to drill into. It still opens: onto the report
+ * that breaks it down, which is where the next question about it gets
+ * answered. A tile that looks like a button and does nothing reads as broken.
+ */
+const CARD_TARGET: Record<string, { name: string; query?: Record<string, string> }> = {
+  conversion: { name: "crm-reports", query: { report: "conversion", axis: "time" } },
+  velocity: { name: "crm-reports", query: { report: "conversion", axis: "user" } },
+  overdue: { name: "crm-activities", query: { tab: "tasks" } },
+};
+
 function openCard(c: DashCard) {
   if (c.drill?.kind) crm.openDrill(c.drill, c.label);
-  else if (c.key === "overdue") router.push({ name: "crm-activities", query: { tab: "tasks" } });
+  else if (CARD_TARGET[c.key]) router.push(CARD_TARGET[c.key]);
+}
+
+/** A widget's title opens its full module — the drill on a bar answers «which
+ *  records», the title answers «show me all of this». */
+function goReport(report: string, axis = "") {
+  router.push({ name: "crm-reports", query: { report, ...(axis ? { axis } : {}) } });
 }
 
 function openRow(rows: ReportRow[], i: number, title: string) {
@@ -103,11 +130,10 @@ function openRow(rows: ReportRow[], i: number, title: string) {
 
 // ---- chart data -----------------------------------------------------------
 const trendCats = computed(() => data.value?.trend.map((r) => r.label) ?? []);
-// Won deals and billed invoices as two bars per month, never one. They
-// differed by 2x to 70x month to month in 1404 — the gap is the reading.
+// One series: sales are the invoices. Won deals are pipeline, not a second
+// «sales» bar beside them.
 const trendSeries = computed(() => [
-  { name: "معامله موفق (دیدار)", values: data.value?.trend.map((r) => r.amount) ?? [], color: "#22c55e" },
-  { name: "فاکتورشده (آرپا)", values: data.value?.trend.map((r) => r.invoiced ?? 0) ?? [], color: "#3b82f6" },
+  { name: "فروش", values: data.value?.trend.map((r) => r.amount) ?? [], color: "#22c55e" },
   { name: "سود", values: data.value?.trend.map((r) => r.profit) ?? [], type: "line" as const, color: "#0ea5e9" },
 ]);
 
@@ -120,8 +146,7 @@ const incomingSeries = computed(() => [
 
 const sellerCats = computed(() => data.value?.top_sellers.map((r) => r.label) ?? []);
 const sellerSeries = computed(() => [
-  { name: "معامله موفق", values: data.value?.top_sellers.map((r) => r.amount) ?? [], color: "#22c55e" },
-  { name: "فاکتورشده", values: data.value?.top_sellers.map((r) => r.invoiced ?? 0) ?? [], color: "#3b82f6" },
+  { name: "فروش", values: data.value?.top_sellers.map((r) => r.amount) ?? [], color: "#22c55e" },
 ]);
 
 const funnelRows = computed(() => data.value?.funnel.filter((r) => r.kind === "open") ?? []);
@@ -220,7 +245,7 @@ async function onSaved(id?: number) {
       <button
         v-for="c in data?.cards" :key="c.key"
         class="bg-surface rounded-card shadow-soft p-4 text-right transition hover:shadow-pop hover:-translate-y-0.5 group"
-        :class="c.drill?.kind || c.key === 'overdue' ? 'cursor-pointer' : 'cursor-default'"
+        :class="c.drill?.kind || CARD_TARGET[c.key] ? 'cursor-pointer' : 'cursor-default'"
         @click="openCard(c)"
       >
         <div class="flex items-start justify-between gap-2">
@@ -235,16 +260,13 @@ async function onSaved(id?: number) {
           {{ cardValue(c) }}
         </p>
         <p class="text-[11px] text-slate-400 mt-0.5 truncate">{{ cardSub(c) }}</p>
-        <p v-if="c.drill?.kind" class="text-[10px] text-slate-300 mt-1 group-hover:text-slate-400">
-          برای دیدن ریز اطلاعات کلیک کنید
-        </p>
       </button>
     </div>
 
     <!-- ============ Trend + incoming ============ -->
     <div class="grid lg:grid-cols-2 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">روند فروش و سود</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('sales', 'time')">روند فروش</button>
         <CrmChart
           :categories="trendCats" :series="trendSeries" format="rial" :height="H_MAIN"
           @pick="(i) => openRow(data!.trend, i, 'فروش ماه')"
@@ -252,7 +274,7 @@ async function onSaved(id?: number) {
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">معامله‌های جدید به تفکیک وضعیت</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('incoming', 'time')">معامله‌های جدید به تفکیک وضعیت</button>
         <CrmChart
           :categories="incomingCats" :series="incomingSeries" format="count" :height="H_MAIN"
           @pick="(i) => openRow(data!.incoming_trend, i, 'معامله‌های جدید')"
@@ -264,7 +286,7 @@ async function onSaved(id?: number) {
     <div class="grid lg:grid-cols-2 gap-4">
       <div :class="card">
         <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-          <h3 class="text-sm font-semibold text-ink">قیف فروش</h3>
+          <button type="button" class="widget-title text-sm font-semibold text-ink" @click="router.push({ name: 'crm-pipeline' })">قیف فروش</button>
           <p class="text-[11px] text-slate-400">رسیده · همین‌جا</p>
         </div>
         <FunnelChart
@@ -277,7 +299,7 @@ async function onSaved(id?: number) {
            their own rows, so these three charts would each draw a single bar
            labelled with the reader's own name. -->
       <div v-if="crm.seesAll" :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">بهترین فروشنده‌ها</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('sales', 'user')">بهترین فروشنده‌ها</button>
         <CrmChart
           :categories="sellerCats" :series="sellerSeries" format="rial" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.top_sellers, i, 'فروش کارشناس')"
@@ -288,7 +310,7 @@ async function onSaved(id?: number) {
     <!-- ============ Lost reasons / activities / sources ============ -->
     <div class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">اصلی‌ترین دلایل از دست رفتن</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('lost', 'reason')">اصلی‌ترین دلایل از دست رفتن</button>
         <CrmChart
           v-if="lostCats.length" :categories="lostCats" :series="lostSeries"
           format="count" :height="H_WIDE" horizontal
@@ -298,7 +320,7 @@ async function onSaved(id?: number) {
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">فعالیت‌های انجام شده</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="router.push({ name: 'crm-activities' })">فعالیت‌های انجام شده</button>
         <CrmChart
           :categories="actCats" :series="actSeries" format="count" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.activities_by_kind, i, 'فعالیت')"
@@ -306,7 +328,7 @@ async function onSaved(id?: number) {
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">بهترین منابع سرنخ</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('sources')">بهترین منابع سرنخ</button>
         <table class="w-full text-xs">
           <thead>
             <tr class="text-slate-400">
@@ -335,7 +357,7 @@ async function onSaved(id?: number) {
     <!-- ============ People ============ -->
     <div v-if="crm.seesAll" class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">فعال‌ترین کارشناسان</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('activities', 'user')">فعال‌ترین کارشناسان</button>
         <CrmChart
           :categories="activeCats" :series="activeSeries" format="count" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.top_active, i, 'فعالیت‌های')"
@@ -343,7 +365,7 @@ async function onSaved(id?: number) {
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">مشتریان جدید بر اساس کارشناس</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('new_customers', 'user')">مشتریان جدید بر اساس کارشناس</button>
         <CrmChart
           :categories="newCustCats" :series="newCustSeries" format="count" :height="H_WIDE" horizontal
           @pick="(i) => openRow(data!.new_customers_by_user, i, 'مشتریان جدید')"
@@ -351,7 +373,7 @@ async function onSaved(id?: number) {
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">رضایت مشتری از کارشناسان</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('satisfaction')">رضایت مشتری از کارشناسان</button>
         <table class="w-full text-xs">
           <thead>
             <tr class="text-slate-400">
@@ -380,7 +402,7 @@ async function onSaved(id?: number) {
     <!-- ============ Geography + segments ============ -->
     <div class="grid lg:grid-cols-2 gap-4">
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">فروش و تارگت استان‌ها</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('provinces')">فروش و تارگت استان‌ها</button>
         <div class="overflow-x-auto">
           <table class="w-full text-xs min-w-[420px]">
             <thead>
@@ -412,7 +434,7 @@ async function onSaved(id?: number) {
       </div>
 
       <div :class="card">
-        <h3 class="text-sm font-semibold text-ink mb-3">فروش بر اساس گروه مشتری</h3>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('sales', 'group')">فروش بر اساس گروه مشتری</button>
         <CrmChart
           :categories="groupCats" :series="groupSeries" kind="pie" format="rial" :height="H_MAIN"
           @pick="(i) => openRow(data!.by_group, i, 'گروه مشتری')"
@@ -421,3 +443,20 @@ async function onSaved(id?: number) {
     </div>
 </div>
 </template>
+
+<style scoped>
+/* A widget title that opens its module. It stays a heading — no arrow, no
+   underline — because eleven decorated links on one page is not a dashboard,
+   it is a menu. The pointer is the affordance. */
+.widget-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  text-align: right;
+  align-self: flex-start;
+  border-radius: 0.375rem;
+}
+.widget-title { transition: color 0.15s; }
+.widget-title:hover { color: rgb(100 116 139); }
+.widget-title:focus-visible { outline: 2px solid rgb(148 163 184); outline-offset: 3px; }
+</style>

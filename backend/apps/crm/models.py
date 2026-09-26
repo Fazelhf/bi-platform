@@ -906,13 +906,26 @@ class SalesInvoice(DatasetModel):
     code = models.SlugField(unique=True)
     number = models.CharField(max_length=30)  # شماره برگه
     kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.SALE)
+    # Nullable because an invoice is a fact before it is matched. The import
+    # used to skip any invoice whose آرپا party was still waiting in the
+    # review queue, and that hid 24% of 1405's billing (367bn Rial) from every
+    # total — a matching question silently became a revenue question. Now
+    # every invoice lands, keyed by `party_code`, and the customer is attached
+    # the moment the party is resolved (see `PartyWriter.link`).
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="invoices"
+        Customer, null=True, blank=True,
+        on_delete=models.PROTECT, related_name="invoices",
     )
+    party_code = models.CharField(max_length=64, blank=True, db_index=True)
+    party_name = models.CharField(max_length=200, blank=True)
     deal = models.ForeignKey(
         Deal, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="invoices",
     )
+    # Billing to a sister company. Stored on the invoice rather than read off
+    # the customer, because an unmatched invoice has no customer to ask — and
+    # «آرال رول آریا - فی ما بین» alone is 250bn Rial of 1405.
+    is_intercompany = models.BooleanField(default=False)
 
     issued_at = models.DateField()
     period = models.ForeignKey(

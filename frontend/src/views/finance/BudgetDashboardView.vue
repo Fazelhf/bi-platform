@@ -14,6 +14,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import {
   apiError,
   budgetApi,
+  type BudgetHeatmapData,
   type BudgetSeries,
   type VarianceReport,
   type Waterfall,
@@ -24,6 +25,10 @@ import SeriesChart from "@/components/charts/SeriesChart.vue";
 import BudgetWaterfall from "@/components/charts/BudgetWaterfall.vue";
 import BudgetTornado from "@/components/charts/BudgetTornado.vue";
 import BudgetCumulativeChart from "@/components/charts/BudgetCumulativeChart.vue";
+import BudgetHeatmap from "@/components/charts/BudgetHeatmap.vue";
+import BulletBars from "@/components/charts/BulletBars.vue";
+import ComboTrendChart from "@/components/charts/ComboTrendChart.vue";
+import GaugeChart from "@/components/charts/GaugeChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import { useAuthStore } from "@/stores/auth";
 
@@ -104,20 +109,10 @@ const kpis = computed(() => {
   const unexplained = bad.filter((x) => x.kind === "line" && !x.note);
   const inPct = achievement("in");
   const outPct = achievement("out");
-  const salesBudget = n(r.sales.total.budget_rial);
-  const salesPct = salesBudget
-    ? Math.round((n(r.sales.total.actual_rial) / salesBudget) * 1000) / 10
-    : null;
   const tone = (v: string) =>
     v === "good" ? "text-green-600" : v === "bad" ? "text-red-600" : "text-slate-500";
 
   return [
-    {
-      title: "تحقق فروش",
-      value: salesPct === null ? "—" : `${FA.format(salesPct)}٪`,
-      sub: `${money(n(r.sales.total.actual_rial))} از ${money(n(r.sales.total.budget_rial), false)}`,
-      tone: tone(r.sales.total.verdict),
-    },
     {
       title: "تحقق ورودی",
       value: inPct === null ? "—" : `${FA.format(inPct)}٪`,
@@ -166,10 +161,6 @@ const inSeries = computed(() => [
   { name: "مورد انتظار", values: points.value.map((p) => n(p.budget_in)) },
   { name: "واقعی", values: points.value.map((p) => n(p.actual_in)) },
 ]);
-const salesSeries = computed(() => [
-  { name: "پیش‌بینی", values: points.value.map((p) => n(p.budget_sales)) },
-  { name: "فروش ثبت‌شده", values: points.value.map((p) => n(p.actual_sales)) },
-]);
 const outSeries = computed(() => [
   { name: "مورد انتظار", values: points.value.map((p) => n(p.budget_out)) },
   { name: "واقعی", values: points.value.map((p) => n(p.actual_out)) },
@@ -191,6 +182,43 @@ const cumulativeActual = computed(() =>
 const steps = computed(() =>
   (fall.value?.steps ?? []).map((s) => ({ label: s.label, effect: n(s.effect_rial), verdict: s.verdict })),
 );
+
+// ---- more ways to read the same month ----------------------------------------
+
+const heat = ref<BudgetHeatmapData | null>(null);
+
+async function loadHeatmap() {
+  if (!budgetId.value) return;
+  try {
+    heat.value = await budgetApi.heatmap(budgetId.value);
+  } catch {
+    heat.value = null;
+  }
+}
+watch(budgetId, loadHeatmap);
+
+/** Achievement at a glance: inflows good when high, spend good when at plan. */
+const gauges = computed(() => {
+  const r = report.value;
+  if (!r) return [];
+  const pctOf = (c: { budget_rial: string; actual_rial: string }) =>
+    n(c.budget_rial) ? (n(c.actual_rial) / n(c.budget_rial)) * 100 : null;
+  const sub = (c: { budget_rial: string; actual_rial: string }) =>
+    `${money(n(c.actual_rial))} از ${money(n(c.budget_rial), false)}`;
+  return [
+    { title: "تحقق ورودی نقد", value: pctOf(r.totals.in), good: true, sub: sub(r.totals.in) },
+    { title: "مصرف بودجهٔ خروجی", value: pctOf(r.totals.out), good: false, sub: sub(r.totals.out) },
+  ];
+});
+
+/** The month's top-level groups, plan against actual. */
+function groupsOf(dir: "in" | "out") {
+  return (report.value?.rows ?? [])
+    .filter((r) => r.depth === 0 && r.direction === dir && (n(r.budget_rial) || n(r.actual_rial)))
+    .map((r) => ({ label: r.label, budget: n(r.budget_rial), actual: n(r.actual_rial), verdict: r.verdict }));
+}
+const inGroups = computed(() => groupsOf("in"));
+const outGroups = computed(() => groupsOf("out"));
 
 const worst = computed(() =>
   leafRows.value
@@ -268,6 +296,34 @@ const worst = computed(() =>
         </div>
       </div>
 
+      <!-- 1b. Achievement at a glance -->
+      <div v-if="report" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <GaugeChart
+          v-for="g in gauges" :key="g.title"
+          :title="g.title" :value="g.value" :good-when-high="g.good" :subtitle="g.sub"
+        />
+      </div>
+
+      <!-- 1c. Group by group -->
+      <div v-if="report && (inGroups.length || outGroups.length)" class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+        <div v-if="outGroups.length" class="xl:col-span-2">
+          <BulletBars :title="`خروجی به تفکیک گروه — ${report.month.label}`" :items="outGroups" />
+        </div>
+        <BulletBars v-if="inGroups.length" :title="`ورودی به تفکیک گروه — ${report.month.label}`" :items="inGroups" />
+      </div>
+      <div v-if="report && outGroups.length" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <SeriesChart
+          title="ترکیب خروجی — بودجه" kind="pie" :height="260"
+          :categories="outGroups.map((g) => g.label)"
+          :series="[{ name: 'بودجه', values: outGroups.map((g) => g.budget) }]"
+        />
+        <SeriesChart
+          title="ترکیب خروجی — واقعی" kind="pie" :height="260"
+          :categories="outGroups.map((g) => g.label)"
+          :series="[{ name: 'واقعی', values: outGroups.map((g) => g.actual) }]"
+        />
+      </div>
+
       <!-- 2. Where did it go differently? -->
       <div v-if="report && fall" class="grid grid-cols-1 xl:grid-cols-5 gap-3">
         <div class="xl:col-span-3">
@@ -292,11 +348,30 @@ const worst = computed(() =>
         :actual="cumulativeActual"
       />
 
-      <div v-if="points.length" class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <SeriesChart title="فروش ماهانه" :categories="labels" :series="salesSeries" :height="240" />
-        <SeriesChart title="ورودی ماهانه" :categories="labels" :series="inSeries" :height="240" />
-        <SeriesChart title="خروجی ماهانه" :categories="labels" :series="outSeries" :height="240" />
+      <div v-if="points.length">
+        <div>
+          <ComboTrendChart
+            title="جریان نقد ماهانه — واقعی (ستون) در برابر بودجه (خط‌چین)"
+            :categories="labels"
+            :bars="[
+              { name: 'ورودی واقعی', values: inSeries[1].values, tone: 'in' },
+              { name: 'خروجی واقعی', values: outSeries[1].values, tone: 'out' },
+            ]"
+            :lines="[
+              { name: 'ورودی بودجه', values: inSeries[0].values, tone: 'in', dashed: true },
+              { name: 'خروجی بودجه', values: outSeries[0].values, tone: 'out', dashed: true },
+            ]"
+            :height="300"
+          />
+        </div>
       </div>
+
+      <!-- The whole budget on one screen -->
+      <BudgetHeatmap
+        v-if="heat && heat.groups.length"
+        title="نقشهٔ انحراف — گروه‌ها در ماه‌های بودجه"
+        :months="heat.months" :groups="heat.groups" :cells="heat.cells"
+      />
 
       <!-- The meeting agenda -->
       <section v-if="report" class="bg-surface rounded-card shadow-soft">

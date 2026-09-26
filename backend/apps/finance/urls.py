@@ -21,8 +21,11 @@ urlpatterns = [
     path("budget-variance/", views.BudgetVarianceView.as_view(), name="budget-variance"),
     path("budget-series/", views.BudgetSeriesView.as_view(), name="budget-series"),
     path("budget-waterfall/", views.BudgetWaterfallView.as_view(), name="budget-waterfall"),
-    # What actually happened, keyed weekly by finance, and why it differed.
+    # What actually happened, keyed monthly by finance, and why it differed.
     path("budget-actuals/", views.BudgetActualEntryView.as_view(), name="budget-actuals"),
     path("budget-notes/", views.BudgetNoteView.as_view(), name="budget-notes"),
+    path("budget-heatmap/", views.BudgetHeatmapView.as_view(), name="budget-heatmap"),
+    # The CEO's overview: one call for cash, credit and budget.
+    path("executive-summary/", views.ExecutiveFinanceView.as_view(), name="executive-summary"),
     path("", include(router.urls)),
 ]

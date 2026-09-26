@@ -5,6 +5,10 @@ import { crmApi, type CrmCustomer } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
+import SortHeader from "@/components/crm/SortHeader.vue";
+import { useSort } from "@/composables/useListPrefs";
+import { toast } from "@/composables/useUi";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -22,13 +26,22 @@ const status = ref("");
 const page = ref(1);
 const PAGE_SIZE = 30;
 
+const { ordering, sortBy, dir } = useSort("");
+
+/** The question this list is asking — shared by the fetch and the export. */
+const exportParams = computed(() => {
+  const { owner, group, province, source } = crm.query;
+  return {
+    owner, group, province, source,
+    search: search.value, status: status.value, ordering: ordering.value,
+  };
+});
+
 async function load() {
   loading.value = true;
   try {
-    const { owner, group, province, source } = crm.query;
     const res = await crmApi.customers({
-      owner, group, province, source,
-      search: search.value, status: status.value,
+      ...exportParams.value,
       page: page.value, page_size: PAGE_SIZE,
     });
     rows.value = res.results;
@@ -45,6 +58,7 @@ watch(() => crm.revision, load);
 
 watch(() => [crm.filters.owner, crm.filters.group, crm.filters.province, crm.filters.source], () => { page.value = 1; load(); });
 watch([status, page], load);
+watch(ordering, () => { page.value = 1; load(); });
 
 let t: number | undefined;
 watch(search, () => { window.clearTimeout(t); t = window.setTimeout(() => { page.value = 1; load(); }, 350); });
@@ -74,6 +88,26 @@ function onSaved() {
  * not deleted, which loses them.
  */
 const canCurate = computed(() => crm.canEdit && crm.isManager);
+
+const assignTo = ref<number | "">("");
+
+/** Hand the ticked accounts to another کارشناس — the manager's most common
+ *  clean-up after someone leaves or a territory is redrawn. */
+async function assignSelected() {
+  if (!assignTo.value) return;
+  acting.value = true;
+  try {
+    const res = await crmApi.bulkAssign("customers", [...selected.value], Number(assignTo.value));
+    toast.success(`${num(res.updated)} مشتری به ${res.owner_name} سپرده شد`);
+    assignTo.value = "";
+    selected.value = new Set();
+    await load();
+  } catch (e: any) {
+    toast.error(e?.response?.data?.detail ?? "تغییر کارشناس انجام نشد.");
+  } finally {
+    acting.value = false;
+  }
+}
 
 const selected = ref<Set<number>>(new Set());
 const acting = ref(false);
@@ -142,6 +176,23 @@ async function removeSelected() {
   }
 }
 
+/** «آخرین تماس» as an age, coloured once it is long enough to matter. */
+function daysAgo(iso: string | null | undefined): number | null {
+  return iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
+}
+function sinceText(iso: string | null | undefined): string {
+  const d = daysAgo(iso);
+  if (d === null) return "هرگز";
+  if (d < 1) return "امروز";
+  return `${num(d)} روز پیش`;
+}
+function quietClass(iso: string | null | undefined): string {
+  const d = daysAgo(iso);
+  if (d === null || d >= 90) return "text-red-500";
+  if (d >= 30) return "text-amber-600";
+  return "text-slate-400";
+}
+
 const statusClass: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-700",
   lead: "bg-sky-100 text-sky-700",
@@ -167,6 +218,7 @@ const statusClass: Record<string, string> = {
         <option value="lost">از دست رفته</option>
       </select>
       <span class="text-xs text-slate-400 px-2">{{ num(total) }} مشتری</span>
+      <CrmExportButton kind="customers" :params="exportParams" :total="total" title="مشتریان" />
       <button
         v-if="crm.canEdit"
         class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"
@@ -186,6 +238,20 @@ const statusClass: Record<string, string> = {
         :disabled="acting"
         @click="sendToReview"
       >ارسال به بازبینی</button>
+      <select v-model="assignTo" class="bg-white/10 rounded-xl px-3 py-2 text-sm outline-none">
+        <option value="" class="text-ink">سپردن به کارشناس…</option>
+        <option v-for="e in crm.options?.employees ?? []" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
+      </select>
+      <button
+        v-if="assignTo"
+        class="bg-white text-ink rounded-xl px-4 py-2 text-sm disabled:opacity-50"
+        :disabled="acting"
+        @click="assignSelected"
+      >ثبت کارشناس</button>
+      <CrmExportButton
+        kind="customers" :params="{ ...exportParams, ids: [...selected].join(',') }"
+        :total="selected.size" title="مشتریان انتخاب‌شده" subtle
+      />
       <button
         class="bg-red-500/90 rounded-xl px-4 py-2 text-sm disabled:opacity-50"
         :disabled="acting"
@@ -257,13 +323,14 @@ const statusClass: Record<string, string> = {
               <th v-if="canCurate" class="w-10 px-3">
                 <input type="checkbox" :checked="allOnPage" @change="toggleAll" />
               </th>
-              <th class="text-right font-medium px-4 py-3">مشتری</th>
-              <th class="text-right font-medium px-3">گروه</th>
-              <th class="text-right font-medium px-3">استان</th>
-              <th v-if="crm.seesAll" class="text-right font-medium px-3">کارشناس</th>
+              <SortHeader label="مشتری" :dir="dir('name')" @sort="sortBy('name')" />
+              <SortHeader label="گروه" :dir="dir('group')" @sort="sortBy('group')" />
+              <SortHeader label="استان" :dir="dir('province')" @sort="sortBy('province')" />
+              <SortHeader v-if="crm.seesAll" label="کارشناس" :dir="dir('owner')" @sort="sortBy('owner')" />
               <th class="text-right font-medium px-3">منبع سرنخ</th>
-              <th class="text-right font-medium px-3">وضعیت</th>
-              <th class="text-right font-medium px-4">اولین خرید</th>
+              <SortHeader label="وضعیت" :dir="dir('status')" @sort="sortBy('status')" />
+              <SortHeader label="آخرین تماس" :dir="dir('last_activity')" @sort="sortBy('last_activity')" />
+              <SortHeader label="اولین خرید" :dir="dir('first_won')" @sort="sortBy('first_won')" />
             </tr>
           </thead>
           <tbody>
@@ -292,6 +359,7 @@ const statusClass: Record<string, string> = {
                   {{ c.status_display }}
                 </span>
               </td>
+              <td class="px-3 text-xs whitespace-nowrap" :class="quietClass(c.last_activity_at)">{{ sinceText(c.last_activity_at) }}</td>
               <td class="px-4 text-xs text-slate-400 whitespace-nowrap">{{ c.first_won_jalali || "—" }}</td>
             </tr>
           </tbody>
@@ -300,7 +368,7 @@ const statusClass: Record<string, string> = {
 
       <div v-if="pages > 1" class="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
         <button class="text-sm px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 disabled:opacity-40" :disabled="page <= 1" @click="page--">قبلی</button>
-        <span class="text-xs text-slate-400">صفحه {{ num(page) }} از {{ num(pages) }}</span>
+        <span class="text-xs text-slate-400">صفحه {{ num(page) }} از {{ num(pages) }} · {{ num(total) }} مشتری</span>
         <button class="text-sm px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 disabled:opacity-40" :disabled="page >= pages" @click="page++">بعدی</button>
       </div>
     </div>

@@ -37,6 +37,41 @@ from apps.core.permissions import (
     IsExecutiveOrAdmin,
     SalesChannelOwnership,
 )
+def _period_param(raw) -> DimPeriod:
+    """
+    The period a request is about.
+
+    A blank, stale or malformed id is the caller's mistake — an old bookmark,
+    a period someone deleted — so it comes back as a readable 400. It used to
+    raise DoesNotExist and reach the user as «خطای سرور».
+    """
+    try:
+        return DimPeriod.objects.get(pk=raw)
+    except (DimPeriod.DoesNotExist, ValueError, TypeError):
+        raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+
+
+def _amount(value, label: str) -> Decimal:
+    """
+    A figure typed into a sheet, as a Decimal — or a 400 naming the cell.
+
+    Stored raw, «۱۲۳abc» reached the model field, which raised Django's own
+    ValidationError: not a DRF one, so the user got «خطای سرور» and lost the
+    whole sheet instead of being told which cell to fix.
+    """
+    try:
+        return Decimal(str(value if value not in (None, "") else 0))
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValidationError({"detail": f"مقدار «{label}» عدد معتبری نیست."})
+
+
+def _valid_channel(channel: str) -> str:
+    """A channel from the fixed list, or a 400 — never figures filed under a typo."""
+    if channel not in SalesChannel.values:
+        raise ValidationError({"channel": "کانال فروش نامعتبر است."})
+    return channel
+
+
 from apps.sales.permissions import (
     CanApprove,
     CanEnterData,
@@ -86,6 +121,121 @@ def assert_channel_visible(user, channel: str) -> None:
 def current_jalali_year() -> int:
     """The Jalali year we are in right now."""
     return from_gregorian(timezone.localdate())[0]
+
+
+def own_employee(user):
+    """
+    The salesperson a کارشناس account *is*, or None for anyone who works the
+    whole sheet (a department manager, the CEO, a superuser).
+
+    A rep used to open the same sheet as their manager — every colleague's
+    column, every figure — and could type into any of them. A rep's account
+    now reaches only its own column. One that is not linked to a person has
+    no column at all, which is refused rather than guessed at.
+    """
+    if user.is_superuser or user.role != "operator":
+        return None
+    employee = DimEmployee.objects.filter(user=user).first()
+    if employee is None:
+        raise PermissionDenied(
+            "حساب شما به هیچ کارشناس فروشی وصل نیست؛ با مدیر بخش تماس بگیرید."
+        )
+    return employee
+
+
+def entry_block(user, period, channel: str, employee=None) -> str:
+    """
+    Why this sheet cannot be filled in right now — or "" when it can.
+
+    Weekly entry exists so the month is recorded as it happens. Nothing
+    enforced that: a rep could leave هفته ۱ to ۳ empty and, in the last week,
+    type the whole month into هفته ۴ — the month total came out right and
+    every weekly figure was fiction. Two rules close that:
+
+    * a period cannot be filled before it has started;
+    * the first figures for a week (or day) need every earlier one in the
+      same month to hold figures already. Editing a period that already has
+      them is always allowed, so fixing last week's typo is never blocked.
+
+    The CEO and superusers are not held to either — they correct history.
+    """
+    if user.is_superuser or user.role == "executive":
+        return ""
+    today = timezone.localdate()
+    if period.start_date and period.start_date > today:
+        return "این دوره هنوز شروع نشده است؛ ارقام هر دوره از شروع همان دوره وارد می‌شود."
+    if period.parent_id is None or not period.start_date:
+        return ""
+
+    from apps.core.periods import leaves_of
+
+    def filled(ids):
+        qs = FactSalesMonthly.objects.filter(period_id__in=ids, channel=channel)
+        if employee is not None:
+            qs = qs.filter(employee=employee)
+        return set(qs.values_list("period_id", flat=True))
+
+    if filled([period.id]):
+        return ""
+    earlier = [
+        p for p in leaves_of(month_of(period))
+        if p.start_date and p.start_date < period.start_date
+    ]
+    done = filled([p.id for p in earlier])
+    missing = [p for p in earlier if p.id not in done]
+    if not missing:
+        return ""
+    names = "، ".join(
+        f"هفته {p.seq}" if p.kind == PeriodKind.WEEK else p.label for p in missing
+    )
+    return (
+        f"اول {names} را ثبت کنید. ارقام هر هفته در همان هفته وارد می‌شود، "
+        "نه یک‌جا در هفته‌ی آخر."
+    )
+
+
+#: Departments whose people are never salespeople — the factory, finance, …
+NON_SALES_DEPARTMENTS = ("production", "finance", "commercial")
+
+
+def sales_eligible_ids(channel: str) -> set[int]:
+    """
+    The people who may appear as a column on this channel's sheet.
+
+    The «افزودن فروشنده» picker used to list every DimEmployee — and that table
+    is the whole company since منابع انسانی took it over, so a manager could
+    put a machine operator from the factory floor on the sales sheet. Now:
+
+    * a channel the chart has claimed takes only its own people: the roster
+      plus anyone seated in a unit that sells for this channel;
+    * an unclaimed channel also takes anyone not placed elsewhere — nobody
+      seated only in non-sales units, nobody whose login belongs to a
+      non-sales department.
+    """
+    from apps.hr.models import Position
+    from apps.hr.services.rosters import unit_channels
+
+    roster = set(
+        EmployeeChannel.objects.filter(channel=channel, is_active=True)
+        .values_list("employee_id", flat=True)
+    )
+    channels = unit_channels()
+    seats = list(
+        Position.objects.filter(holder__isnull=False, holder__is_active=True)
+        .values_list("unit_id", "holder_id")
+    )
+    in_channel = {h for u, h in seats if channels.get(u) == channel}
+    if _chart_owns(channel):
+        return roster | in_channel
+    seated = {h for _, h in seats}
+    seated_in_sales = {h for u, h in seats if channels.get(u)}
+    others = set(
+        DimEmployee.objects.filter(is_active=True)
+        .exclude(id__in=seated - seated_in_sales)
+        .exclude(user__department__in=NON_SALES_DEPARTMENTS)
+        .values_list("id", flat=True)
+    )
+    return roster | in_channel | others
 
 
 # -------------------- Dimensions (read-mostly) --------------------
@@ -240,7 +390,7 @@ class PeriodViewSet(viewsets.ModelViewSet):
         Every month of a year with its current grain and whether it can be
         changed — this is what the CEO's «دوره‌ها» panel renders.
         """
-        from apps.core.periods import has_facts, leaves_of
+        from apps.core.periods import has_any_facts, leaves_of
 
         year = int(request.query_params.get("year") or 0)
         months = DimPeriod.objects.filter(kind="month")
@@ -251,15 +401,15 @@ class PeriodViewSet(viewsets.ModelViewSet):
         for m in months.order_by("jalali_year", "jalali_month"):
             weeks = list(m.children.order_by("seq"))
             day_count = sum(w.children.count() for w in weeks)
-            month_has_facts = has_facts(m)
+            month_has_facts = has_any_facts(m)
             # A week counts as filled if anything under it holds figures, so a
             # week whose days have data still blocks going back to weekly.
             filled_weeks = [
-                w.seq for w in weeks if any(has_facts(l) for l in leaves_of(w))
+                w.seq for w in weeks if any(has_any_facts(l) for l in leaves_of(w))
             ]
             filled_days = [
                 w.seq for w in weeks
-                if w.children.exists() and any(has_facts(d) for d in w.children.all())
+                if w.children.exists() and any(has_any_facts(d) for d in w.children.all())
             ]
 
             grain = "month"
@@ -286,7 +436,7 @@ class PeriodViewSet(viewsets.ModelViewSet):
                 "can_go_daily": bool(weeks) and grain != "day" and not filled_weeks
                                 or (not weeks and not month_has_facts),
                 "blocked_reason": (
-                    "این ماه داده‌ی ماهانه دارد" if month_has_facts and not weeks
+                    "این ماه داده‌ی ثبت‌شده دارد" if month_has_facts and not weeks
                     else f"هفته‌های {'، '.join(map(str, filled_weeks))} داده دارند"
                     if filled_weeks else ""
                 ),
@@ -348,18 +498,18 @@ class TeamViewSet(viewsets.ModelViewSet):
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):
-    queryset = DimEmployee.objects.select_related("team").all()
+    queryset = DimEmployee.objects.select_related("team").order_by("full_name_fa", "id")
     serializer_class = EmployeeSerializer
     filterset_fields = ["team", "is_active"]
 
 
 class ProvinceViewSet(viewsets.ModelViewSet):
-    queryset = DimProvince.objects.all()
+    queryset = DimProvince.objects.order_by("name_fa", "id")
     serializer_class = ProvinceSerializer
 
 
 class BankViewSet(viewsets.ModelViewSet):
-    queryset = DimBank.objects.all()
+    queryset = DimBank.objects.order_by("name_fa", "id")
     serializer_class = BankSerializer
     filterset_fields = ["kind"]
 
@@ -373,6 +523,12 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
     permission_classes = [SalesChannelOwnership]
     filterset_fields = ["period", "employee", "status", "channel"]
 
+    def get_queryset(self):
+        # A کارشناس reaches their own rows only — reads and writes alike.
+        qs = super().get_queryset()
+        own = own_employee(self.request.user)
+        return qs.filter(employee=own) if own is not None else qs
+
     def _assert_owns_channel(self, channel):
         user = self.request.user
         if user.is_superuser:
@@ -382,10 +538,16 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._assert_owns_channel(serializer.validated_data.get("channel", "team"))
+        own = own_employee(self.request.user)
+        if own is not None and serializer.validated_data.get("employee") != own:
+            raise PermissionDenied("فقط ارقام خودتان را می‌توانید ثبت کنید.")
         instance = serializer.save()
         audit_log(self.request.user, instance, AuditLog.Action.CREATE)
 
     def perform_update(self, serializer):
+        own = own_employee(self.request.user)
+        if own is not None and serializer.validated_data.get("employee", own) != own:
+            raise PermissionDenied("فقط ارقام خودتان را می‌توانید ثبت کنید.")
         before = snapshot(serializer.instance)
         # Any edit to an approved row sends it back to draft.
         instance = serializer.save(status=ApprovalStatus.DRAFT)
@@ -441,7 +603,9 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
 
 
 class SalesProvinceViewSet(viewsets.ModelViewSet):
-    queryset = FactSalesProvince.objects.select_related("province", "period").all()
+    queryset = FactSalesProvince.objects.select_related("province", "period").order_by(
+        "-period__start_date", "province__name_fa", "id"
+    )
     serializer_class = SalesProvinceSerializer
     permission_classes = [DepartmentEntryPermission]
     entry_department = "sales_org"
@@ -454,7 +618,9 @@ class SalesProvinceViewSet(viewsets.ModelViewSet):
 
 
 class CollectionViewSet(viewsets.ModelViewSet):
-    queryset = FactCollection.objects.select_related("bank", "period").all()
+    queryset = FactCollection.objects.select_related("bank", "period").order_by(
+        "-period__start_date", "bank__name_fa", "id"
+    )
     serializer_class = CollectionSerializer
     permission_classes = [DepartmentEntryPermission]
     entry_department = "sales_org"
@@ -490,7 +656,7 @@ class KPIResultViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["post"], permission_classes=[CanApprove])
     def recompute(self, request):
         period_id = request.data.get("period") or request.query_params.get("period")
-        period = DimPeriod.objects.get(pk=period_id)
+        period = _period_param(period_id)
         n = compute_period_kpis(period)
         return Response({"period": period.label, "rows_written": n})
 
@@ -512,8 +678,7 @@ class DashboardSummaryView(APIView):
     def get(self, request):
         from apps.sales.models import SalesChannel
 
-        period_id = request.query_params.get("period")
-        period = DimPeriod.objects.get(pk=period_id)
+        period = _period_param(request.query_params.get("period"))
         channel = request.query_params.get("channel", SalesChannel.TEAM)
         assert_channel_visible(request.user, channel)
 
@@ -534,7 +699,10 @@ class DashboardSummaryView(APIView):
         # but province sales are merged, so we scope province to the channel's
         # own facts.
         province = (
-            FactSalesProvince.objects.filter(period=period, status=ApprovalStatus.APPROVED)
+            FactSalesProvince.objects.filter(
+                period_id__in=leaf_ids_for(period), channel=channel,
+                status=ApprovalStatus.APPROVED,
+            )
             .select_related("province")
             .values("province__name_fa")
             .annotate(sales=Sum("sales_rial"), target=Sum("target_rial"))
@@ -542,7 +710,7 @@ class DashboardSummaryView(APIView):
         )
 
         collections = (
-            FactCollection.objects.filter(period=period)
+            FactCollection.objects.filter(period_id__in=leaf_ids_for(period))
             .select_related("bank")
             .values("bank__name_fa")
             .annotate(amount=Sum("amount_rial"))
@@ -700,7 +868,9 @@ class SalesInputView(APIView):
     permission_classes = [SalesChannelOwnership]
 
     def _channel(self, request):
-        return request.query_params.get("channel") or request.data.get("channel") or "team"
+        return _valid_channel(
+            request.query_params.get("channel") or request.data.get("channel") or "team"
+        )
 
     def _assert_owner(self, request, channel):
         u = request.user
@@ -712,11 +882,13 @@ class SalesInputView(APIView):
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
                               OpenApiParameter("channel", str)], responses=dict)
     def get(self, request):
-        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        period = _period_param(request.query_params.get("period"))
         channel = self._channel(request)
         # Only POST used to be checked, so another department's sheet — names,
         # figures and all — could simply be read.
         self._assert_owner(request, channel)
+        # A کارشناس reads their own column and nothing else.
+        own = own_employee(request.user)
         # A month cut into weeks (or a week cut into days) holds no figures
         # of its own, so reading it used to return an empty sheet. It now
         # returns the roll-up of its leaves, read-only — the manager sees the
@@ -727,7 +899,8 @@ class SalesInputView(APIView):
         is_rollup = period.children.exists()
         leaf_ids = [p.id for p in leaves_of(period)] if is_rollup else [period.id]
         facts = FactSalesMonthly.objects.filter(
-            period_id__in=leaf_ids, channel=channel
+            period_id__in=leaf_ids, channel=channel,
+            **({"employee": own} if own else {}),
         ).select_related("employee", "period").order_by(
             # Oldest leaf first, so a stock measure ends on its latest value.
             "period__start_date", "period_id", "employee__id",
@@ -792,15 +965,16 @@ class SalesInputView(APIView):
             .select_related("employee")
             .order_by("employee__full_name_fa")
         )
-        for member in roster:
-            if member.employee_id in entered:
+        blanks = [own] if own else [member.employee for member in roster]
+        for employee in blanks:
+            if employee.id in entered:
                 continue
             columns.append({
-                "employee_id": member.employee_id,
-                "name": member.employee.full_name_fa,
+                "employee_id": employee.id,
+                "name": employee.full_name_fa,
                 "status": ApprovalStatus.DRAFT,
                 **{m: "0" for m in fields},
-                "target_rial": str(plans.get(member.employee_id, 0)),
+                "target_rial": str(plans.get(employee.id, 0)),
             })
 
         # Every province is listed from the start — managers fill in the ones
@@ -810,7 +984,9 @@ class SalesInputView(APIView):
         for p in FactSalesProvince.objects.filter(period_id__in=leaf_ids, channel=channel):
             saved[p.province_id] = saved.get(p.province_id, Decimal(0)) + (p.sales_rial or 0)
         provinces = []
-        for prov in DimProvince.objects.all().order_by("id"):
+        # The provincial and segment blocks are the whole channel's, so they
+        # stay with the manager; a rep's sheet is their own column only.
+        for prov in ([] if own else DimProvince.objects.all().order_by("id")):
             provinces.append({
                 "province_id": prov.id,
                 "name": prov.name_fa,
@@ -826,7 +1002,7 @@ class SalesInputView(APIView):
         # rows come back as zeros rather than as gaps. B2B only — the other
         # channels do not report a segment split.
         customer_groups = []
-        if channel == SalesChannel.B2B:
+        if channel == SalesChannel.B2B and not own:
             stored: dict[int, dict] = {}
             for g in FactSalesByCustomerGroup.objects.filter(
                 period_id__in=leaf_ids, channel=channel
@@ -865,11 +1041,16 @@ class SalesInputView(APIView):
             "is_rollup": is_rollup,
             "stock_fields": sorted(STOCK_FIELDS),
             "breakdown": _breakdown(period, facts, fields, STOCK_FIELDS) if is_rollup else [],
+            # A rep's sheet: one column, no adding or removing people.
+            "own_only": own is not None,
+            # Why the sheet is closed for entry right now (future week, or an
+            # earlier week still empty) — the page shows it and locks inputs.
+            "entry_block": "" if is_rollup else entry_block(request.user, period, channel, own),
         })
 
     def post(self, request):
         import uuid
-        period = DimPeriod.objects.get(pk=request.data.get("period"))
+        period = _period_param(request.data.get("period"))
         channel = self._channel(request)
         self._assert_owner(request, channel)
 
@@ -883,6 +1064,10 @@ class SalesInputView(APIView):
                 "این ماه به هفته تقسیم شده است؛ اطلاعات باید در هر هفته جداگانه "
                 "وارد شود، نه روی خود ماه."
             )
+        own = own_employee(request.user)
+        block = entry_block(request.user, period, channel, own)
+        if block:
+            raise ValidationError({"detail": block})
         submit = bool(request.data.get("submit"))
         status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
         user = request.user
@@ -895,11 +1080,19 @@ class SalesInputView(APIView):
         # «تارگت» section — never through this sheet, whoever is posting.
         editable = [f for f in metric_fields_for(channel) if f not in TARGET_FIELDS]
 
+        if own is not None:
+            return self._post_own(request, period, channel, own, editable, submit, status)
+
         # Once منابع انسانی owns this channel, the sheet only takes people who
         # already exist. A typed name used to create a new person on the spot,
         # which is exactly how «شیما نظام آبادی» and «شیما نظام ابادی» became
         # two people — and names are renamed in HR, not in a column header.
         chart_owned = _chart_owns(channel)
+        eligible = None  # built on first need: most saves add nobody new
+        already = set(
+            FactSalesMonthly.objects.filter(period=period, channel=channel)
+            .values_list("employee_id", flat=True)
+        )
         kept_employee_ids = set()
         for row in request.data.get("columns", []):
             name = (row.get("name") or "").strip()
@@ -921,7 +1114,14 @@ class SalesInputView(APIView):
                 employee = DimEmployee.objects.create(
                     full_name_fa=name, code=f"emp-{uuid.uuid4().hex[:8]}"
                 )
-            values = {m: (row.get(m) or 0) for m in editable}
+            elif employee.id not in already:
+                # Someone new to this sheet must be a salesperson: the picker
+                # once offered the whole company, factory floor included.
+                if eligible is None:
+                    eligible = sales_eligible_ids(channel)
+                if employee.id not in eligible:
+                    raise ValidationError({"detail": f"«{name}» کارشناس فروش این بخش نیست."})
+            values = {m: _amount(row.get(m), f"{name} · {m}") for m in editable}
             values["status"] = status
             if submit:
                 values["submitted_by"] = user
@@ -958,11 +1158,14 @@ class SalesInputView(APIView):
         # Provinces. Every province is sent back, so skip untouched empty rows
         # to avoid creating 31 zero facts per channel per month. The province
         # target is the CEO's too.
+        known_provinces = set(DimProvince.objects.values_list("id", flat=True))
         for p in request.data.get("provinces", []):
             pid = p.get("province_id")
             if not pid:
                 continue
-            sales = p.get("sales_rial") or 0
+            if pid not in known_provinces:
+                raise ValidationError({"detail": "استان انتخاب‌شده وجود ندارد."})
+            sales = _amount(p.get("sales_rial"), "فروش استان")
             existing = FactSalesProvince.objects.filter(
                 period=period, province_id=pid, channel=channel
             ).first()
@@ -981,9 +1184,9 @@ class SalesInputView(APIView):
             if not gid:
                 continue
             values = {
-                "sales_rial": g.get("sales_rial") or 0,
-                "profit_rial": g.get("profit_rial") or 0,
-                "invoice_count": g.get("invoice_count") or 0,
+                "sales_rial": _amount(g.get("sales_rial"), "فروش بخش مشتری"),
+                "profit_rial": _amount(g.get("profit_rial"), "سود بخش مشتری"),
+                "invoice_count": _amount(g.get("invoice_count"), "تعداد فاکتور"),
             }
             existing = FactSalesByCustomerGroup.objects.filter(
                 period=period, customer_group_id=gid, channel=channel
@@ -1009,6 +1212,32 @@ class SalesInputView(APIView):
                                  f"فروش {SalesChannel(channel).label} · {period.label}")
 
         return Response({"ok": True, "submitted": submit, "salespeople": len(kept_employee_ids)})
+
+    def _post_own(self, request, period, channel, own, editable, submit, status):
+        """
+        A کارشناس saving their own column. Only that row is written: nobody
+        else's figures, no pruning, no roster changes, and not the channel's
+        provincial or segment blocks, which are the manager's.
+        """
+        row = next(
+            (r for r in request.data.get("columns", []) if r.get("employee_id") == own.id),
+            None,
+        )
+        if row is None:
+            raise ValidationError({"detail": "ستون شما در این برگه پیدا نشد."})
+        values = {m: _amount(row.get(m), m) for m in editable}
+        values["status"] = status
+        if submit:
+            values["submitted_by"] = request.user
+        fact, _ = FactSalesMonthly.objects.update_or_create(
+            period=period, employee=own, channel=channel, defaults=values
+        )
+        audit_log(request.user, period, AuditLog.Action.UPDATE,
+                  {"sales_input": {"before": None, "after": f"{channel} · {own.full_name_fa}"}})
+        if submit:
+            notify_submitted(request.user, fact, CHANNEL_DEPARTMENT.get(channel, ""),
+                             f"فروش {SalesChannel(channel).label} · {own.full_name_fa} · {period.label}")
+        return Response({"ok": True, "submitted": submit, "salespeople": 1})
 
 
 class SalesApprovalSheetsView(APIView):
@@ -1063,7 +1292,7 @@ class SalesTargetView(APIView):
         from apps.core.periods import leaf_ids_for
         from apps.sales.models import SalesTarget
 
-        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        period = _period_param(request.query_params.get("period"))
         month = month_of(period)  # plans are always held on the month
         channel = request.query_params.get("channel", "team")
         leaves = leaf_ids_for(month)
@@ -1139,24 +1368,32 @@ class SalesTargetView(APIView):
     def post(self, request):
         from apps.sales.models import SalesTarget
 
-        period = DimPeriod.objects.get(pk=request.data.get("period"))
+        period = _period_param(request.data.get("period"))
         month = month_of(period)
-        channel = request.data.get("channel", "team")
+        channel = _valid_channel(request.data.get("channel", "team"))
+        known_people = set(DimEmployee.objects.values_list("id", flat=True))
+        known_provinces = set(DimProvince.objects.values_list("id", flat=True))
 
         for row in request.data.get("people", []):
             emp_id = row.get("employee_id")
             if not emp_id:
                 continue
+            # A target for someone who does not exist is saved against nobody
+            # and counted by nothing; refuse it instead of storing a ghost.
+            if emp_id not in known_people:
+                raise ValidationError({"detail": "کارشناس انتخاب‌شده وجود ندارد."})
             SalesTarget.objects.update_or_create(
                 period=month, channel=channel, employee_id=emp_id, province=None,
-                defaults={"target_rial": row.get("target_rial") or 0},
+                defaults={"target_rial": _amount(row.get("target_rial"), "تارگت")},
             )
 
         for row in request.data.get("provinces", []):
             pid = row.get("province_id")
             if not pid:
                 continue
-            target = row.get("target_rial") or 0
+            if pid not in known_provinces:
+                raise ValidationError({"detail": "استان انتخاب‌شده وجود ندارد."})
+            target = _amount(row.get("target_rial"), "تارگت استان")
             exists = SalesTarget.objects.filter(
                 period=month, channel=channel, province_id=pid
             ).exists()
@@ -1188,22 +1425,64 @@ def _ratio(num, den):
     return float(num) / float(den) if den else None
 
 
+def _rolled_up_facts(period, channel):
+    """
+    One approved row per salesperson for a period, whatever grain it was entered at.
+
+    Figures live only on leaf periods. A month entered week by week holds
+    nothing of its own, so filtering on `period=month` returned an empty
+    dashboard for exactly the months kept most carefully. The weeks are summed
+    here instead — stock measures (a balance, not a flow) take the latest
+    week's value, the same rule the entry sheet's roll-up uses.
+    """
+    from types import SimpleNamespace
+
+    from apps.sales.services.approval_sheets import STOCK_FIELDS
+
+    numeric = [
+        f.name for f in FactSalesMonthly._meta.concrete_fields
+        if f.get_internal_type() in {
+            "DecimalField", "IntegerField", "PositiveIntegerField",
+            "PositiveSmallIntegerField", "BigIntegerField", "SmallIntegerField",
+        }
+    ]
+    rows: dict[int, SimpleNamespace] = {}
+    facts = (
+        FactSalesMonthly.objects.filter(
+            period_id__in=leaf_ids_for(period), channel=channel,
+            status=ApprovalStatus.APPROVED,
+        )
+        .select_related("employee", "employee__team")
+        .order_by("period__start_date", "period_id", "employee__id")
+    )
+    for f in facts:
+        row = rows.get(f.employee_id)
+        if row is None:
+            row = rows[f.employee_id] = SimpleNamespace(
+                employee=f.employee, **{n: 0 for n in numeric}
+            )
+        for n in numeric:
+            value = getattr(f, n) or 0
+            setattr(row, n, value if n in STOCK_FIELDS else getattr(row, n) + value)
+    return sorted(rows.values(), key=lambda r: r.employee.id)
+
+
 class SalesDashboardDetailView(APIView):
     """Per-salesperson and per-team series for the sales chart dashboards."""
 
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
                               OpenApiParameter("channel", str)], responses=dict)
     def get(self, request):
-        period = DimPeriod.objects.get(pk=request.query_params.get("period"))
+        period = _period_param(request.query_params.get("period"))
         channel = request.query_params.get("channel", "team")
         assert_channel_visible(request.user, channel)
 
         # ---- Salesperson block (channel-scoped) — Sheet3 rows 18-30 ----
-        facts = list(
-            FactSalesMonthly.objects.filter(
-                period=period, channel=channel, status=ApprovalStatus.APPROVED
-            ).select_related("employee").order_by("employee__id")
-        )
+        facts = _rolled_up_facts(period, channel)
+        # A کارشناس sees their own figures, not their colleagues'.
+        own = own_employee(request.user)
+        if own is not None:
+            facts = [f for f in facts if f.employee.id == own.id]
         channel_revenue = sum(float(f.revenue_rial) for f in facts)
 
         salespeople = []
@@ -1237,9 +1516,7 @@ class SalesDashboardDetailView(APIView):
         # viewing (previously this aggregated across all channels, so the B2B and
         # banking dashboards showed company-wide team totals that did not match
         # their own recorded figures).
-        all_facts = FactSalesMonthly.objects.filter(
-            period=period, channel=channel, status=ApprovalStatus.APPROVED
-        ).select_related("employee", "employee__team")
+        all_facts = facts
 
         agg: dict[int, dict] = {}
         for f in all_facts:
@@ -1279,13 +1556,16 @@ class SalesDashboardDetailView(APIView):
             })
 
         # ---- Provinces (channel-scoped) ----
-        provinces = [{
-            "name": p.province.name_fa,
-            "sales": float(p.sales_rial),
-            "target": float(p.target_rial),
+        provinces = [] if own is not None else [{
+            "name": p["province__name_fa"],
+            "sales": float(p["sales"] or 0),
+            "target": float(p["target"] or 0),
         } for p in FactSalesProvince.objects.filter(
-            period=period, channel=channel, status=ApprovalStatus.APPROVED
-        ).select_related("province").order_by("-sales_rial")]
+            period_id__in=leaf_ids_for(period), channel=channel,
+            status=ApprovalStatus.APPROVED,
+        ).values("province__name_fa").annotate(
+            sales=Sum("sales_rial"), target=Sum("target_rial"),
+        ).order_by("-sales")]
 
         return Response({
             "period": PeriodSerializer(period).data,
@@ -1350,9 +1630,15 @@ class RosterViewSet(viewsets.ModelViewSet):
             return
         if u.department != CHANNEL_DEPARTMENT.get(channel):
             raise PermissionDenied("این بخش متعلق به شما نیست.")
+        # Who is on the team is the manager's call, never a rep's.
+        if self.request.method not in SAFE_METHODS and own_employee(u) is not None:
+            raise PermissionDenied("تغییر اعضای تیم فقط با مدیر بخش است.")
 
     def get_queryset(self):
         qs = super().get_queryset()
+        own = own_employee(self.request.user)
+        if own is not None:
+            qs = qs.filter(employee=own)
         if self.detail:
             return qs
         channel = self._channel()
@@ -1427,8 +1713,14 @@ class RosterViewSet(viewsets.ModelViewSet):
             if not employee:
                 return Response({"detail": "کارشناس پیدا نشد."},
                                 status=http_status.HTTP_400_BAD_REQUEST)
+            if employee.id not in sales_eligible_ids(channel):
+                return Response({"detail": f"«{employee.full_name_fa}» کارشناس فروش نیست."},
+                                status=http_status.HTTP_400_BAD_REQUEST)
         elif name:
             employee = DimEmployee.objects.filter(full_name_fa=name).first()
+            if employee and employee.id not in sales_eligible_ids(channel):
+                return Response({"detail": f"«{name}» کارشناس فروش نیست."},
+                                status=http_status.HTTP_400_BAD_REQUEST)
             if not employee:
                 employee = DimEmployee.objects.create(
                     code=f"emp-{uuid.uuid4().hex[:8]}", full_name_fa=name,
@@ -1502,9 +1794,14 @@ class RosterViewSet(viewsets.ModelViewSet):
         """کارشناسانی که در این بخش نیستند — برای افزودن از میان افراد موجود."""
         channel = self._channel()
         self._assert_owner(channel)
-        taken = EmployeeChannel.objects.filter(channel=channel).values_list("employee_id", flat=True)
+        if own_employee(request.user) is not None:
+            raise PermissionDenied("تغییر اعضای تیم فقط با مدیر بخش است.")
+        taken = EmployeeChannel.objects.filter(
+            channel=channel, is_active=True
+        ).values_list("employee_id", flat=True)
+        # Salespeople only — never the whole company (see sales_eligible_ids).
         rows = (
-            DimEmployee.objects.filter(is_active=True)
+            DimEmployee.objects.filter(is_active=True, id__in=sales_eligible_ids(channel))
             .exclude(id__in=taken)
             .exclude(full_name_fa__in=["", "0"])
             .select_related("team")
