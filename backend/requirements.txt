@@ -1,5 +1,7 @@
 # --- Core ---
-Django==5.2.17
+# 5.1, not 5.2: the host runs PostgreSQL 13 and Django 5.2 requires 14+.
+# Move to 5.2 LTS once the database is upgraded — 5.1 is out of support.
+Django==5.1.15
 djangorestframework==3.17.2
 django-environ==0.11.2
 django-cors-headers==4.4.0
