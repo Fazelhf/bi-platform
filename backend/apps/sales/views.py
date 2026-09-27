@@ -1310,17 +1310,26 @@ class SalesTargetView(APIView):
         # Union rather than a plain filter: someone deactivated mid-year who
         # still has figures or a plan for this month must not vanish from it.
         #
-        # Only this channel's salespeople: DimEmployee is the whole company
-        # since منابع انسانی took it over, so the page listed the factory
-        # floor and finance next to the reps — the same leak the entry sheet's
-        # picker had, closed the same way.
+        # Only this channel's salespeople — its roster, the same people who
+        # have a column on the entry sheet. DimEmployee is the whole company
+        # since منابع انسانی took it over, and the looser «may be added to the
+        # sheet» rule still let everyone without a seat through on a channel
+        # the chart has not claimed.
+        roster = set(
+            EmployeeChannel.objects.filter(channel=channel, is_active=True)
+            .values_list("employee_id", flat=True)
+        )
         employees = list(
-            DimEmployee.objects.filter(is_active=True, id__in=sales_eligible_ids(channel))
+            DimEmployee.objects.filter(is_active=True, id__in=roster)
             .exclude(full_name_fa__in=["", "0"])
             .select_related("team")
         )
         seen = {e.id for e in employees}
-        extra_ids = (set(actual_by_emp) | {e for e, p in plans if e and p is None}) - seen
+        # Anyone else only for a real reason: figures this month, or a plan
+        # that is not zero. The page used to save a 0 for every name it
+        # listed, so a zero plan says nothing about who sells.
+        planned = {e for (e, prov), t in plans.items() if e and prov is None and t}
+        extra_ids = (set(actual_by_emp) | planned) - seen
         employees += list(
             DimEmployee.objects.filter(id__in=extra_ids).select_related("team")
         )
@@ -1378,19 +1387,26 @@ class SalesTargetView(APIView):
             # A new plan only for this channel's salespeople; one already
             # stored (or someone with figures this month) stays editable even
             # if they have since moved out of the channel.
-            has_history = SalesTarget.objects.filter(
+            target = _amount(row.get("target_rial"), "تارگت")
+            stored = SalesTarget.objects.filter(
                 period=month, channel=channel, employee_id=emp_id, province=None
-            ).exists() or FactSalesMonthly.objects.filter(
+            ).exists()
+            if not stored and not _nonzero(target):
+                continue  # no plan set and none stored — nothing to do
+            has_history = stored or FactSalesMonthly.objects.filter(
                 period_id__in=channel_units(month, channel), channel=channel, employee_id=emp_id
             ).exists()
             if not has_history:
                 if eligible is None:
-                    eligible = sales_eligible_ids(channel)
+                    eligible = set(
+                        EmployeeChannel.objects.filter(channel=channel, is_active=True)
+                        .values_list("employee_id", flat=True)
+                    )
                 if emp_id not in eligible:
                     raise ValidationError({"detail": "این شخص کارشناس فروش این بخش نیست."})
             SalesTarget.objects.update_or_create(
                 period=month, channel=channel, employee_id=emp_id, province=None,
-                defaults={"target_rial": _amount(row.get("target_rial"), "تارگت")},
+                defaults={"target_rial": target},
             )
 
         for row in request.data.get("provinces", []):

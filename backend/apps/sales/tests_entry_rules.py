@@ -173,6 +173,13 @@ class EntryRuleTests(APITestCase):
         accountant = DimEmployee.objects.create(
             code="er-tfin", full_name_fa="حسابدار", user=office,
         )
+        # The case that reached the live site: nobody here sits anywhere on the
+        # chart, and the old page had saved a 0 target for everyone it listed.
+        unplaced = DimEmployee.objects.create(code="er-tu", full_name_fa="بدون جایگاه")
+        zeroed = DimEmployee.objects.create(code="er-tz", full_name_fa="تارگت صفر")
+        SalesTarget.objects.create(
+            period=self.month, employee=zeroed, channel="team", target_rial=0,
+        )
         ceo = get_user_model().objects.create_user(
             "er_ceo", password="Pass-12345!", role="executive",
         )
@@ -183,6 +190,8 @@ class EntryRuleTests(APITestCase):
         ids = {p["employee_id"] for p in res.data["people"]}
         no_marketer = DimEmployee.objects.get(code="no-marketer")
         self.assertEqual(ids, {self.ali.id, self.sara.id, no_marketer.id})
+        self.assertNotIn(unplaced.id, ids)
+        self.assertNotIn(zeroed.id, ids)
 
         res = self.client.post("/api/sales/targets/", {
             "period": self.month.id, "channel": "team",
