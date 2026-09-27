@@ -3,11 +3,16 @@ import { computed, onMounted, ref, watch } from "vue";
 import { salesApi } from "@/api/sales";
 import { productionInputApi, type ProdInput } from "@/api/productionInput";
 import { num } from "@/utils/format";
+import { submitHint, submittedMessage } from "@/utils/approval";
 import { selectIfZero } from "@/utils/inputs";
 import MoneyInput from "@/components/MoneyInput.vue";
 import ExportActions from "@/components/ExportActions.vue";
 
 const periods = ref<{ id: number; label: string }[]>([]);
+/** The month picked, and within it the week or day تولید records at. */
+const selectedMonth = ref<number | null>(null);
+const units = ref<{ id: number; label: string }[]>([]);
+const grain = ref<"month" | "week" | "day">("month");
 const selectedPeriod = ref<number | null>(null);
 const data = ref<ProdInput | null>(null);
 const loading = ref(true);
@@ -65,18 +70,41 @@ async function save(submit: boolean) {
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
   try {
     await productionInputApi.save(buildPayload(submit));
-    saving.value = submit ? "برای تایید ارسال شد ✓" : "ذخیره شد ✓";
+    saving.value = submit ? `${submittedMessage()} ✓` : "ذخیره شد ✓";
     if (submit) await load();
   } catch (e: any) {
     saving.value = "خطا: " + (e?.response?.status === 403 ? "دسترسی ندارید" : "ذخیره نشد");
   }
 }
 
+/**
+ * The periods تولید records at inside the chosen month — the month itself,
+ * its weeks, or its days, as the CEO set it for this section.
+ */
+async function loadUnits() {
+  if (!selectedMonth.value) return;
+  const progress = await salesApi.monthProgress(selectedMonth.value, { department: "production" });
+  grain.value = (progress.grain ?? "month") as typeof grain.value;
+  if (grain.value === "month") {
+    units.value = [{ id: selectedMonth.value, label: progress.period.label }];
+  } else if (grain.value === "week") {
+    units.value = progress.weeks.map((w) => ({ id: w.id, label: w.label }));
+  } else {
+    units.value = progress.weeks.flatMap((w) =>
+      (w.day_periods ?? []).map((d) => ({ id: d.id, label: d.label })),
+    );
+  }
+  // Open on the first week/day of the month.
+  selectedPeriod.value = units.value[0]?.id ?? null;
+}
+
 onMounted(async () => {
   periods.value = await salesApi.periods();
-  selectedPeriod.value = periods.value[0]?.id ?? null;
+  selectedMonth.value = periods.value[0]?.id ?? null;
+  await loadUnits();
   await load();
 });
+watch(selectedMonth, loadUnits);
 watch(selectedPeriod, load);
 </script>
 
@@ -86,13 +114,21 @@ watch(selectedPeriod, load);
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div>
         <h2 class="text-lg font-bold text-ink">ورود اطلاعات تولید</h2>
-        <p class="text-xs text-slate-400 mt-0.5">چهار جدول زیر را با دقت پر کنید؛ شاخص‌ها پس از تایید مدیرعامل محاسبه می‌شوند.</p>
+        <p class="text-xs text-slate-400 mt-0.5">چهار جدول زیر را با دقت پر کنید؛ شاخص‌ها پس از تأیید مدیر تولید محاسبه می‌شوند.</p>
       </div>
       <div class="flex items-center gap-3">
         <span class="text-sm" :class="saving.startsWith('خطا') ? 'text-red-500' : 'text-accent-600'">{{ saving }}</span>
         <ExportActions :excel="false" />
-        <select v-model.number="selectedPeriod" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
+        <select v-model.number="selectedMonth" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
+        </select>
+        <select
+          v-if="grain !== 'month'"
+          v-model.number="selectedPeriod"
+          class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm"
+          :title="grain === 'week' ? 'تولید هفتگی ثبت می‌شود' : 'تولید روزانه ثبت می‌شود'"
+        >
+          <option v-for="u in units" :key="u.id" :value="u.id">{{ u.label }}</option>
         </select>
       </div>
     </div>
@@ -206,7 +242,7 @@ watch(selectedPeriod, load);
       <!-- z-30: the table's frozen first/last columns are z-10/z-20, so without
            this the sheet scrolled over the save buttons. -->
       <div class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
-        <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
+        <span class="text-sm text-white/70 px-2">{{ submitHint() }}</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm" @click="save(false)">ذخیره پیش‌نویس</button>
           <button class="px-5 py-2 rounded-xl bg-accent-500 hover:bg-accent-600 text-sm font-medium" @click="save(true)">ذخیره و ارسال برای تایید</button>

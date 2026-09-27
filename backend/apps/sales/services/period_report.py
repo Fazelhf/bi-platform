@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from apps.core.models import DimPeriod, PeriodKind
-from apps.core.periods import leaf_ids_for
+from apps.core.periods import channel_department, unit_ids
 from apps.sales.models import (
     FactSalesByCustomerGroup,
     FactSalesMonthly,
@@ -79,7 +79,7 @@ def previous_span(start: DimPeriod, length: int) -> list[DimPeriod]:
     return sorted(months, key=_month_key)
 
 
-def _leaves(months: list[DimPeriod]) -> list[int]:
+def _leaves(months: list[DimPeriod], channel: str) -> list[int]:
     """
     Fact ids to sum over.
 
@@ -89,7 +89,8 @@ def _leaves(months: list[DimPeriod]) -> list[int]:
     """
     ids: list[int] = []
     for month in months:
-        ids.extend(leaf_ids_for(month))
+        # At the channel's own grain for that month.
+        ids.extend(unit_ids(month, channel_department(channel)))
     return ids
 
 
@@ -109,12 +110,13 @@ class Totals:
     names: dict = field(default_factory=dict)
 
 
-def _sum_by_employee(months: list[DimPeriod], channel: str) -> dict[int, Totals]:
-    """Per-salesperson totals across the whole span."""
+def _sum_by_employee(months: list[DimPeriod], channel: str, employee=None) -> dict[int, Totals]:
+    """Per-salesperson totals across the whole span — one person's when `employee` is given."""
     out: dict[int, Totals] = {}
-    leaves = _leaves(months)
+    leaves = _leaves(months, channel)
+    only = {"employee": employee} if employee is not None else {}
     rows = FactSalesMonthly.objects.filter(
-        period_id__in=leaves, channel=channel
+        period_id__in=leaves, channel=channel, **only
     ).select_related("employee")
     for row in rows:
         t = out.setdefault(row.employee_id, Totals())
@@ -132,7 +134,7 @@ def _sum_by_employee(months: list[DimPeriod], channel: str) -> dict[int, Totals]
     # weeks in each month.
     plans = SalesTarget.objects.filter(
         period_id__in=[m.id for m in months], channel=channel,
-        province__isnull=True, employee__isnull=False,
+        province__isnull=True, employee__isnull=False, **only,
     )
     for plan in plans:
         out.setdefault(plan.employee_id, Totals()).target += plan.target_rial
@@ -155,7 +157,13 @@ def _ratio(numerator: Decimal, denominator: Decimal):
 # --------------------------------------------------------------------------
 # The report
 # --------------------------------------------------------------------------
-def build(start: DimPeriod, end: DimPeriod, channel: str = "b2b") -> dict:
+def build(start: DimPeriod, end: DimPeriod, channel: str = "b2b", employee=None) -> dict:
+    """
+    The report for a span. With `employee` (a کارشناس) it holds that one
+    person's figures only: their row, their totals, their trend — and no
+    province or segment cuts, which are the whole department's numbers and
+    so would show a rep everyone else's sales in aggregate.
+    """
     months = months_between(start, end)
     if not months:
         raise PeriodRangeError("در این بازه هیچ ماهی تعریف نشده است.")
@@ -164,8 +172,8 @@ def build(start: DimPeriod, end: DimPeriod, channel: str = "b2b") -> dict:
     prior = previous_span(start, length)
     comparable = len(prior) == length  # a short tail is not a fair comparison
 
-    current = _sum_by_employee(months, channel)
-    before = _sum_by_employee(prior, channel) if comparable else {}
+    current = _sum_by_employee(months, channel, employee)
+    before = _sum_by_employee(prior, channel, employee) if comparable else {}
 
     names: dict[int, str] = {}
     for bucket in (current, before):
@@ -241,9 +249,11 @@ def build(start: DimPeriod, end: DimPeriod, channel: str = "b2b") -> dict:
             "prev_sales_rial": str(was_total.sales) if was_total else None,
             "growth_pct": _growth(now_total.sales, was_total.sales) if was_total else None,
         },
-        "provinces": _provinces(months, prior if comparable else [], channel),
-        "customer_groups": _customer_groups(months, prior if comparable else [], channel),
-        "monthly": _monthly(months, channel),
+        "provinces": [] if employee is not None else
+                     _provinces(months, prior if comparable else [], channel),
+        "customer_groups": [] if employee is not None else
+                           _customer_groups(months, prior if comparable else [], channel),
+        "monthly": _monthly(months, channel, employee),
     }
 
 
@@ -263,8 +273,8 @@ def _provinces(months, prior, channel) -> list[dict]:
             bucket["target"] += row.target_rial
         return out
 
-    now = totals(_leaves(months))
-    was = totals(_leaves(prior)) if prior else {}
+    now = totals(_leaves(months, channel))
+    was = totals(_leaves(prior, channel)) if prior else {}
 
     rows = [
         {
@@ -300,8 +310,8 @@ def _customer_groups(months, prior, channel) -> list[dict]:
             bucket["invoices"] += row.invoice_count
         return out
 
-    now = totals(_leaves(months))
-    was = totals(_leaves(prior)) if prior else {}
+    now = totals(_leaves(months, channel))
+    was = totals(_leaves(prior, channel)) if prior else {}
     grand = sum((d["sales"] for d in now.values()), ZERO)
 
     rows = [
@@ -321,21 +331,22 @@ def _customer_groups(months, prior, channel) -> list[dict]:
     return rows
 
 
-def _monthly(months, channel) -> list[dict]:
+def _monthly(months, channel, employee=None) -> list[dict]:
     """The span month by month, for the trend line."""
+    only = {"employee": employee} if employee is not None else {}
     out = []
     for month in months:
-        leaves = leaf_ids_for(month)
+        leaves = unit_ids(month, channel_department(channel))
         sales = ZERO
         profit = ZERO
         for row in FactSalesMonthly.objects.filter(
-            period_id__in=leaves, channel=channel
+            period_id__in=leaves, channel=channel, **only
         ):
             sales += row.revenue_rial
             profit += row.profit_rial
         target = ZERO
         for plan in SalesTarget.objects.filter(
-            period=month, channel=channel, province__isnull=True, employee__isnull=False
+            period=month, channel=channel, province__isnull=True, employee__isnull=False, **only
         ):
             target += plan.target_rial
         out.append({

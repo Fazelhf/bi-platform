@@ -11,10 +11,17 @@ class CanEnterData(BasePermission):
 
 
 class CanApprove(BasePermission):
-    """Only managers/executives may hit approval endpoints."""
+    """
+    CEO and superusers only: KPI recomputes and production benchmarks.
+
+    It used to lean on `can_approve`, which now also covers department
+    managers — approving their own section's figures must not hand them the
+    factory's benchmarks.
+    """
 
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.can_approve)
+        u = request.user
+        return bool(u and u.is_authenticated and (u.is_superuser or u.role == "executive"))
 
 
 class CanManageCustomerGroups(BasePermission):

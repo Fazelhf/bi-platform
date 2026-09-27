@@ -28,12 +28,12 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
+from apps.core.approval import approves
 from apps.core.audit import log as audit_log
 from apps.core.models import AuditLog, DimPeriod, PeriodKind
 from apps.core.notify import notify_decision
-from apps.core.periods import leaves_of
 from apps.core.permissions import CHANNEL_DEPARTMENT
 from apps.sales.models import (
     ApprovalStatus,
@@ -218,18 +218,23 @@ def decide_sheet(user, *, period_id, channel: str, action: str, note: str = "") 
         raise ValidationError({"action": "اقدام نامعتبر است."})
     if channel not in CHANNEL_LABELS:
         raise ValidationError({"channel": "کانال فروش نامعتبر است."})
+    if not approves(user, CHANNEL_DEPARTMENT.get(channel, "")):
+        raise PermissionDenied("فقط مدیر همین بخش مجاز به تایید یا رد این برگه است.")
     period = DimPeriod.objects.filter(pk=period_id).first()
     if period is None:
         raise ValidationError({"period": "دوره پیدا نشد."})
+    from apps.core.periods import channel_department, grain_of, unit_ids
+
+    dept = channel_department(channel)
     period = sheet_period(period)
-    if period.kind == PeriodKind.MONTH and period.children.exists():
+    if period.kind == PeriodKind.MONTH and grain_of(period, dept) != "month":
         # The list never offers a split month; this stops a hand-built request
         # approving four weeks at once under one click nobody made per week.
         raise ValidationError(
             {"period": "این ماه هفته‌بندی شده است؛ هر هفته جداگانه تایید می‌شود."}
         )
 
-    leaf_ids = [p.id for p in leaves_of(period)]
+    leaf_ids = unit_ids(period, dept)
     pending = [
         model.objects.filter(
             period_id__in=leaf_ids, channel=channel, status=ApprovalStatus.SUBMITTED,

@@ -35,18 +35,20 @@ def backfill_dates(period: DimPeriod) -> DimPeriod:
 
 
 @transaction.atomic
-def ensure_weeks(month: DimPeriod, min_days: int = jalali.MIN_WEEK_DAYS) -> list[DimPeriod]:
+def ensure_weeks(
+    month: DimPeriod, min_days: int = jalali.MIN_WEEK_DAYS, guard: bool = True,
+) -> list[DimPeriod]:
     """
     Create (idempotently) the week children of a month.
 
-    Refuses if the month itself already carries facts: splitting it then would
-    leave figures on both the month and its weeks, and every total would be
-    counted twice. Such a month must stay monthly — which is exactly how the
-    existing history keeps working.
+    With `guard`, refuses if the month itself already carries facts. Since
+    each section records at its own grain (PeriodGrain), a monthly section's
+    figures on the month and a weekly section's on its weeks are both valid,
+    so the calendar is deepened with guard=False by ensure_depth().
     """
     if month.kind != PeriodKind.MONTH:
         raise ValueError("only a month can be split into weeks")
-    if has_any_facts(month):
+    if guard and has_any_facts(month):
         raise ValueError(
             "این ماه داده‌ی ثبت‌شده دارد و دیگر نمی‌تواند به هفته تقسیم شود."
         )
@@ -82,7 +84,7 @@ def ensure_weeks(month: DimPeriod, min_days: int = jalali.MIN_WEEK_DAYS) -> list
 
 
 @transaction.atomic
-def ensure_days(week: DimPeriod) -> list[DimPeriod]:
+def ensure_days(week: DimPeriod, guard: bool = True) -> list[DimPeriod]:
     """
     Create (idempotently) the day children of a week.
 
@@ -97,7 +99,7 @@ def ensure_days(week: DimPeriod) -> list[DimPeriod]:
     """
     if week.kind != PeriodKind.WEEK:
         raise ValueError("only a week can be split into days")
-    if has_any_facts(week):
+    if guard and has_any_facts(week):
         raise ValueError(
             "این هفته داده‌ی ثبت‌شده دارد و دیگر نمی‌تواند به روز تقسیم شود."
         )
@@ -187,6 +189,235 @@ def leaf_ids_for(period: DimPeriod) -> list[int]:
     return [p.id for p in leaves_of(period)]
 
 
+# --------------------------------------------------------------------------
+# Per-section grain
+# --------------------------------------------------------------------------
+# The tree is the calendar — as deep as the finest section needs in a month —
+# and each section (PeriodGrain.department) stores and totals its figures at
+# its own level of it. Every read of a section's facts goes through
+# units_of(period, department), never through the raw tree.
+
+LEVEL = {"month": 0, "week": 1, "day": 2}
+KIND_LEVEL = {PeriodKind.MONTH: 0, PeriodKind.WEEK: 1, PeriodKind.DAY: 2}
+
+
+def channel_department(channel: str) -> str:
+    """The section a sales channel's figures belong to ("" for none)."""
+    from apps.core.permissions import CHANNEL_DEPARTMENT
+
+    return CHANNEL_DEPARTMENT.get(channel, "")
+
+
+def _deepest(period: DimPeriod) -> int:
+    """The finest level (by kind) anywhere under a period."""
+    here = KIND_LEVEL.get(period.kind, 0)
+    return max([here, *(_deepest(c) for c in period.children.all())])
+
+
+def physical_grain(month: DimPeriod) -> str:
+    """How deep the calendar under a month goes right now."""
+    return {0: "month", 1: "week", 2: "day"}[_deepest(month)]
+
+
+def ensure_depth(month: DimPeriod, grain: str) -> None:
+    """Deepen the calendar under a month to `grain`. Never removes anything."""
+    from apps.core.models import SiteSetting
+
+    level = LEVEL[grain]
+    if level >= 1 and not month.children.exists():
+        ensure_weeks(month, min_days=SiteSetting.get().min_week_days, guard=False)
+    if level >= 2:
+        for week in month.children.filter(kind=PeriodKind.WEEK).order_by("seq"):
+            # A week with no dates cannot be cut into days; it is left as is
+            # rather than failing whatever read happened to deepen the month.
+            if not week.children.exists() and week.start_date and week.end_date:
+                ensure_days(week, guard=False)
+
+
+def _materialise(month: DimPeriod) -> None:
+    """
+    Write down every section's grain for a month the first time any of them
+    touches it.
+
+    All sections at once, and judged against the calendar *before* anything is
+    deepened: otherwise مالی opening a month (and cutting it into days) would
+    make the next section to look at it daily too.
+
+    * تولید starts at its default — its sheet has only ever written the month.
+    * The others start at their default, or at the calendar's current depth
+      when that is finer: a month someone already cut into weeks for weekly
+      sales stays weekly.
+    """
+    from apps.core.models import GRAIN_DEPARTMENTS, GrainDefault, PeriodGrain
+
+    have = set(PeriodGrain.objects.filter(month=month).values_list("department", flat=True))
+    missing = [d for d, _ in GRAIN_DEPARTMENTS if d not in have]
+    if not missing:
+        return
+    depth = _deepest(month)
+    finest = 0
+    for dept in missing:
+        default = LEVEL[GrainDefault.for_department(dept)]
+        level = default if dept == "production" else max(default, depth)
+        finest = max(finest, level)
+        PeriodGrain.objects.get_or_create(
+            month=month, department=dept,
+            defaults={"grain": {0: "month", 1: "week", 2: "day"}[level]},
+        )
+    ensure_depth(month, {0: "month", 1: "week", 2: "day"}[finest])
+
+
+def grain_of(period: DimPeriod, department: str) -> str:
+    """
+    The grain a section records the month of `period` at.
+
+    A month nobody has set yet is written down on first use (see
+    _materialise): a later change of default must not quietly re-grain a
+    month that has already been worked in.
+    """
+    from apps.core.models import GRAIN_DEPARTMENTS, PeriodGrain
+
+    month = month_of(period)
+    if department not in dict(GRAIN_DEPARTMENTS):
+        return physical_grain(month)
+    row = PeriodGrain.objects.filter(month=month, department=department).first()
+    if row is None:
+        with transaction.atomic():
+            _materialise(month)
+        row = PeriodGrain.objects.get(month=month, department=department)
+    return row.grain
+
+
+def units_of(period: DimPeriod, department: str) -> list[DimPeriod]:
+    """
+    The periods a section's figures for `period` are stored on.
+
+    A month read by a weekly section is its weeks; by a monthly one, the month
+    itself. A period finer than the section records at (a week, for a monthly
+    section) holds none of its figures, so it comes back empty. With no
+    section, the plain leaves — the old rule.
+    """
+    if not department:
+        return leaves_of(period)
+    level = LEVEL[grain_of(period, department)]
+
+    def collect(node: DimPeriod) -> list[DimPeriod]:
+        here = KIND_LEVEL.get(node.kind, 0)
+        if here == level:
+            return [node]
+        if here > level:
+            return []
+        return [x for c in node.children.order_by("seq") for x in collect(c)]
+
+    return collect(period)
+
+
+def unit_ids(period: DimPeriod, department: str) -> list[int]:
+    return [p.id for p in units_of(period, department)]
+
+
+def children_for(period: DimPeriod, department: str) -> list[DimPeriod]:
+    """A period's children as a section sees them: none below its grain."""
+    if not department:
+        return list(period.children.order_by("seq"))
+    if KIND_LEVEL.get(period.kind, 0) >= LEVEL[grain_of(period, department)]:
+        return []
+    return list(period.children.order_by("seq"))
+
+
+def is_unit(period: DimPeriod, department: str) -> bool:
+    """Does this section store figures on exactly this period?"""
+    if not department:
+        return not period.children.exists()
+    return KIND_LEVEL.get(period.kind, 0) == LEVEL[grain_of(period, department)]
+
+
+def month_nodes(month: DimPeriod) -> list[DimPeriod]:
+    """The month and everything under it."""
+    out = [month]
+    for week in month.children.all():
+        out.append(week)
+        out.extend(week.children.all())
+    return out
+
+
+def department_has_facts(month: DimPeriod, department: str) -> bool:
+    """Has this section stored any figure anywhere in this month?"""
+    from apps.core.permissions import CHANNEL_DEPARTMENT
+    from apps.finance.models import CashMovement
+    from apps.production.models import (
+        FactPrintColor,
+        FactProduction,
+        FactProductionCost,
+        FactProductionRevenue,
+    )
+    from apps.sales.models import FactSalesByCustomerGroup, FactSalesMonthly, FactSalesProvince
+
+    ids = [p.id for p in month_nodes(month)]
+    if department == "production":
+        models = (FactProduction, FactProductionCost, FactProductionRevenue, FactPrintColor)
+        return any(m.objects.filter(period_id__in=ids).exists() for m in models)
+    if department == "finance":
+        return CashMovement.objects.filter(period_id__in=ids).exists()
+    channels = [c for c, d in CHANNEL_DEPARTMENT.items() if d == department]
+    return any(
+        m.objects.filter(period_id__in=ids, channel__in=channels).exists()
+        for m in (FactSalesMonthly, FactSalesProvince, FactSalesByCustomerGroup)
+    )
+
+
+def trim_depth(month: DimPeriod) -> None:
+    """
+    Drop calendar levels no section records at any more — only where nothing
+    is stored in them, so no figure is ever lost to a tidy-up.
+    """
+    needed = max(
+        (LEVEL[g] for g in month.grains.values_list("grain", flat=True)), default=0,
+    )
+    weeks = list(month.children.all())
+    if needed < 2:
+        for week in weeks:
+            days = list(week.children.all())
+            if days and not any(has_any_facts(d) for d in days):
+                week.children.all().delete()
+    if needed < 1 and weeks:
+        if not any(has_any_facts(n) for n in month_nodes(month)[1:]):
+            month.children.all().delete()
+
+
+@transaction.atomic
+def set_grain(month: DimPeriod, department: str, grain: str) -> str:
+    """
+    Record a section's grain for a month.
+
+    Refused once the section holds figures in that month: they sit at the old
+    level, and moving them would mean inventing how a month's total splits
+    into weeks (or folding weeks into a number nobody typed).
+    """
+    from apps.core.models import GRAIN_DEPARTMENTS, PeriodGrain
+
+    if month.kind != PeriodKind.MONTH:
+        raise ValueError("دانه‌بندی برای یک ماه تعیین می‌شود.")
+    if department not in dict(GRAIN_DEPARTMENTS):
+        raise ValueError("بخش نامعتبر است.")
+    if grain not in LEVEL:
+        raise ValueError("دانه‌بندی نامعتبر است.")
+    current = grain_of(month, department)
+    if current == grain:
+        return grain
+    if department_has_facts(month, department):
+        raise ValueError(
+            f"«{dict(GRAIN_DEPARTMENTS)[department]}» در {month.label} داده‌ی ثبت‌شده دارد؛ "
+            "دانه‌بندی این ماه دیگر قابل تغییر نیست."
+        )
+    ensure_depth(month, grain)
+    PeriodGrain.objects.update_or_create(
+        month=month, department=department, defaults={"grain": grain},
+    )
+    trim_depth(month)
+    return grain
+
+
 def has_facts(period: DimPeriod, domain: str = "sales") -> bool:
     """
     True when *this* domain has stored numbers against this exact period.
@@ -268,7 +499,16 @@ def calendar(month: DimPeriod) -> dict:
     }
 
 
-def reconciliation(month: DimPeriod) -> dict:
+def _channels(department: str) -> list[str] | None:
+    """The sales channels a section owns; None means every channel."""
+    from apps.core.permissions import CHANNEL_DEPARTMENT
+
+    if not department:
+        return None
+    return [c for c, d in CHANNEL_DEPARTMENT.items() if d == department]
+
+
+def reconciliation(month: DimPeriod, department: str = "") -> dict:
     """
     Prove that جمع هفته‌ها == ماه, rather than asserting it.
 
@@ -284,23 +524,36 @@ def reconciliation(month: DimPeriod) -> dict:
 
     from apps.core.models import FactKPI, KPIScope
 
+    channels = _channels(department)
+
     def revenue_of(p) -> Decimal:
         rows = FactKPI.objects.filter(
             period=p, scope=KPIScope.COMPANY, kpi__code="revenue"
         )
+        if channels is not None:
+            rows = rows.filter(channel__in=channels)
         return sum((r.actual or Decimal(0) for r in rows), Decimal(0))
 
-    weeks = list(month.children.order_by("seq"))
+    def sales_level(nodes) -> list[DimPeriod]:
+        """With no section named, only the levels sales figures sit on — the
+        calendar may be deeper for another section (مالی's days)."""
+        if department or any(_holds(x, None) for n in nodes for x in [n, *leaves_of(n)]):
+            return nodes
+        return []
+
+    weeks = sales_level(children_for(month, department))
     month_total = revenue_of(month)
     weeks_total = sum((revenue_of(w) for w in weeks), Decimal(0))
-    orphan = has_facts(month) and bool(weeks)
+    # Figures on the month while this section records by the week would be
+    # counted by nothing that reads the weeks.
+    orphan = bool(weeks) and _holds(month, channels)
 
     # With a day layer the same proof has to hold one level down: each week's
     # KPI must equal the sum of its days. Checking only month-vs-weeks would
     # declare a balanced month while a week silently disagreed with its days.
     day_checks = []
     for w in weeks:
-        days = list(w.children.order_by("seq"))
+        days = sales_level(children_for(w, department))
         if not days:
             continue
         w_total = revenue_of(w)
@@ -311,7 +564,7 @@ def reconciliation(month: DimPeriod) -> dict:
             "week_total": str(w_total),
             "days_total": str(d_total),
             "difference": str(w_total - d_total),
-            "balanced": w_total == d_total and not (has_facts(w) and bool(days)),
+            "balanced": w_total == d_total and not (_holds(w, channels) and bool(days)),
             "day_count": len(days),
         })
 
@@ -335,11 +588,26 @@ def reconciliation(month: DimPeriod) -> dict:
     }
 
 
-def _state_of(period: DimPeriod) -> str:
+def _holds(period: DimPeriod, channels: list[str] | None) -> bool:
+    """Sales figures stored on exactly this period (for these channels)."""
+    from apps.sales.models import FactSalesMonthly, FactSalesProvince
+
+    for model in (FactSalesMonthly, FactSalesProvince):
+        qs = model.objects.filter(period=period)
+        if channels is not None:
+            qs = qs.filter(channel__in=channels)
+        if qs.exists():
+            return True
+    return False
+
+
+def _state_of(period: DimPeriod, channels: list[str] | None = None) -> str:
     """empty / draft / submitted / approved for one leaf period."""
     from apps.sales.models import ApprovalStatus, FactSalesMonthly
 
     rows = FactSalesMonthly.objects.filter(period=period)
+    if channels is not None:
+        rows = rows.filter(channel__in=channels)
     if rows.filter(status=ApprovalStatus.APPROVED).exists():
         return "approved"
     if rows.filter(status=ApprovalStatus.SUBMITTED).exists():
@@ -347,14 +615,21 @@ def _state_of(period: DimPeriod) -> str:
     return "draft" if rows.exists() else "empty"
 
 
-def progress(month: DimPeriod) -> dict:
+def progress(month: DimPeriod, department: str = "") -> dict:
     """
     How much of a month has been filled in — drives the dots strip and the
-    "ماه هنوز کامل نشده" badge on the dashboards.
+    "ماه هنوز کامل نشده" badge on the dashboards. With a section, at that
+    section's grain and for its channels only.
     """
     from apps.sales.models import ApprovalStatus, FactSalesMonthly
 
-    weeks = list(month.children.order_by("seq"))
+    channels = _channels(department)
+
+    def sales_rows(ids):
+        qs = FactSalesMonthly.objects.filter(period_id__in=ids)
+        return qs.filter(channel__in=channels) if channels is not None else qs
+
+    weeks = children_for(month, department)
     if not weeks:
         # A plain monthly period: it is its own single "week".
         weeks = [month]
@@ -366,8 +641,8 @@ def progress(month: DimPeriod) -> dict:
         # Figures live on leaves. Once a week is split into days its own row is
         # empty by design, so its state has to come from the days beneath it —
         # otherwise every daily week would show as "not entered".
-        leaf_ids = [p.id for p in leaves_of(wk)]
-        rows = FactSalesMonthly.objects.filter(period_id__in=leaf_ids)
+        leaf_ids = unit_ids(wk, department)
+        rows = sales_rows(leaf_ids)
         state = "empty"
         if rows.filter(status=ApprovalStatus.APPROVED).exists():
             state = "approved"
@@ -380,12 +655,12 @@ def progress(month: DimPeriod) -> dict:
             # "data as of" is the last day actually filled, not the end of the
             # week — with daily entry a week is usually half done.
             filled_days = (
-                FactSalesMonthly.objects.filter(period_id__in=leaf_ids)
+                sales_rows(leaf_ids)
                 .order_by("-period__end_date").values_list("period__end_date", flat=True)
                 .first()
             )
             as_of = filled_days or wk.end_date
-        days = list(wk.children.order_by("seq")) if wk.pk != month.pk else []
+        days = children_for(wk, department) if wk.pk != month.pk else []
         items.append({
             "id": wk.id,
             "seq": wk.seq,
@@ -400,7 +675,7 @@ def progress(month: DimPeriod) -> dict:
                     "label": d.label,
                     "date": d.start_date.isoformat() if d.start_date else None,
                     "jalali_day": jalali.from_gregorian(d.start_date)[2] if d.start_date else None,
-                    "state": _state_of(d),
+                    "state": _state_of(d, channels),
                 }
                 for d in days
             ],

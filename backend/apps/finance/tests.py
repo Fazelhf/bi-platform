@@ -355,6 +355,67 @@ class EntryStatusTests(TreasuryTestCase):
         self.assertEqual(fresh.status, ApprovalStatus.DRAFT)
 
 
+class CashApprovalFlowTests(TreasuryTestCase):
+    """A finance کارشناس submits, the finance manager decides; the manager's own is final."""
+
+    def setUp(self):
+        super().setUp()
+        self.clerk = get_user_model().objects.create_user(
+            "fin_clerk", password="Fin-12345!", role="operator", department="finance",
+        )
+
+    def submit(self, user, amount="500"):
+        self.client.force_authenticate(user)
+        return self.client.post("/api/finance/entry/", {
+            "period": self.month.id, "submit": True,
+            "days": [{
+                "period_id": self.days[0].id,
+                "in": {str(self.sales.id): [{"amount_rial": amount}]},
+                "out": {},
+            }],
+        }, format="json")
+
+    def test_the_managers_own_submission_is_approved_at_once(self):
+        res = self.submit(self.finance)
+        self.assertEqual(res.status_code, 200, res.data)
+        row = CashMovement.objects.get(period=self.days[0])
+        self.assertEqual(row.status, ApprovalStatus.APPROVED)
+        self.assertEqual(row.approved_by, self.finance)
+
+    def test_a_clerks_submission_waits_for_the_manager(self):
+        from apps.core.models import Notification
+
+        self.assertEqual(self.submit(self.clerk).status_code, 200)
+        self.assertEqual(
+            CashMovement.objects.get(period=self.days[0]).status, ApprovalStatus.SUBMITTED,
+        )
+        self.assertEqual(
+            list(Notification.objects.filter(verb="submitted").values_list("recipient", flat=True)),
+            [self.finance.id],
+        )
+
+        self.client.force_authenticate(self.finance)
+        pending = self.client.get("/api/finance/approvals/").data
+        self.assertEqual([s["period"]["id"] for s in pending["sheets"]], [self.month.id])
+        self.assertTrue(pending["can_decide"])
+
+        res = self.client.post("/api/finance/approvals/", {
+            "period": self.month.id, "action": "approve",
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(
+            CashMovement.objects.get(period=self.days[0]).status, ApprovalStatus.APPROVED,
+        )
+        self.assertTrue(Notification.objects.filter(recipient=self.clerk, verb="approved").exists())
+
+    def test_the_clerk_cannot_approve_their_own(self):
+        self.submit(self.clerk)
+        res = self.client.post("/api/finance/approvals/", {
+            "period": self.month.id, "action": "approve",
+        }, format="json")
+        self.assertEqual(res.status_code, 403)
+
+
 class EntryValidationTests(TreasuryTestCase):
     """The sheet writes only into its own days, leaf categories and real accounts."""
 

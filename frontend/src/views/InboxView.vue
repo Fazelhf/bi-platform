@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { inboxApi, type SalesSheet } from "@/api/platform";
+import { inboxApi, type CashSheet, type SalesSheet } from "@/api/platform";
 import { useAuthStore } from "@/stores/auth";
 import { toast, prompt } from "@/composables/useUi";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
@@ -20,24 +20,30 @@ import { num, rial } from "@/utils/format";
 const auth = useAuthStore();
 const sheets = ref<SalesSheet[]>([]);
 const production = ref<any[]>([]);
+const cash = ref<CashSheet[]>([]);
 const loading = ref(true);
 const busy = ref<string>("");
 const salesPreview = ref<SalesSheet | null>(null);
 const productionPreview = ref<any | null>(null);
 
-// A manager only sees their own section (the server already scopes sales
-// sheets); only the CEO can actually decide.
+// A manager sees and decides their own section (the server scopes sales
+// sheets and checks every decision); a کارشناس only sees the status.
+const canDecide = computed(() => !!auth.me?.can_approve);
 const visibleProduction = computed(() =>
   auth.isExecutive || auth.department === "production" ? production.value : [],
 );
-const totalPending = computed(() => sheets.value.length + visibleProduction.value.length);
+const seesCash = computed(() => auth.isExecutive || auth.department === "finance");
+const totalPending = computed(
+  () => sheets.value.length + visibleProduction.value.length + cash.value.length,
+);
 
 async function load() {
   loading.value = true;
   try {
-    [sheets.value, production.value] = await Promise.all([
+    [sheets.value, production.value, cash.value] = await Promise.all([
       inboxApi.salesSheets(),
       inboxApi.pendingProduction(),
+      seesCash.value ? inboxApi.cashSheets() : Promise.resolve([]),
     ]);
   } finally {
     loading.value = false;
@@ -99,9 +105,25 @@ async function decideProduction(row: any, action: Action) {
   }
 }
 
+async function decideCash(sheet: CashSheet, action: Action) {
+  const note = await noteFor(action);
+  if (note === null) return;
+  busy.value = `cash-${sheet.period.id}`;
+  try {
+    await inboxApi.decideCash(sheet.period.id, action, note);
+    toast.success(`نقدینگی ${sheet.period.label} ${VERB[action]}.`);
+    await load();
+  } catch (e: any) {
+    toast.error(e?.response?.data?.detail || "انجام نشد یا دسترسی ندارید.");
+    await load();
+  } finally {
+    busy.value = "";
+  }
+}
+
 const STATUS_FA: Record<string, string> = {
   draft: "پیش‌نویس",
-  submitted: "در انتظار تأیید مدیرعامل",
+  submitted: "در انتظار تأیید مدیر بخش",
   needs_revision: "برگشت برای اصلاح",
   approved: "تأییدشده",
   rejected: "ردشده",
@@ -184,8 +206,11 @@ onMounted(load);
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-xl font-bold text-ink">کارتابل تایید اطلاعات</h1>
-        <p v-if="!auth.isExecutive" class="text-xs text-slate-400 mt-0.5">
-          تأیید نهایی بر عهده‌ی مدیرعامل است؛ در این صفحه وضعیت درخواست‌های بخش شما نمایش داده می‌شود.
+        <p v-if="!canDecide" class="text-xs text-slate-400 mt-0.5">
+          تأیید با مدیر بخش شماست؛ در این صفحه وضعیت اطلاعات ارسالی شما نمایش داده می‌شود.
+        </p>
+        <p v-else-if="!auth.isExecutive" class="text-xs text-slate-400 mt-0.5">
+          اطلاعاتی که کارشناسان بخش شما ارسال می‌کنند اینجا می‌آید؛ تأیید شما نهایی است.
         </p>
       </div>
       <span
@@ -244,7 +269,7 @@ onMounted(load);
                       :class="[btn, 'border-slate-300 text-slate-600 hover:bg-slate-50']"
                       @click="salesPreview = s"
                     >بررسی</button>
-                    <template v-if="auth.isExecutive">
+                    <template v-if="canDecide">
                       <button
                         :class="[btn, 'border-green-600 text-green-700 hover:bg-green-50']"
                         :disabled="busy === `sheet-${s.key}`"
@@ -262,7 +287,7 @@ onMounted(load);
                       >رد</button>
                     </template>
                     <span v-else class="px-2.5 py-1 text-xs rounded-full bg-amber-50 text-amber-600">
-                      {{ STATUS_FA[s.status] ?? "در انتظار تأیید مدیرعامل" }}
+                      {{ STATUS_FA[s.status] ?? STATUS_FA.submitted }}
                     </span>
                   </div>
                 </td>
@@ -297,7 +322,7 @@ onMounted(load);
                     :class="[btn, 'border-slate-300 text-slate-600 hover:bg-slate-50']"
                     @click="productionPreview = r"
                   >پیش‌نمایش</button>
-                  <template v-if="auth.isExecutive">
+                  <template v-if="canDecide">
                     <button
                       :class="[btn, 'border-green-600 text-green-700 hover:bg-green-50']"
                       :disabled="busy === `production-${r.id}`"
@@ -315,7 +340,55 @@ onMounted(load);
                     >ارسال برای اصلاح</button>
                   </template>
                   <span v-else class="px-2.5 py-1 text-xs rounded-full bg-amber-50 text-amber-600">
-                    {{ STATUS_FA[r.status] ?? "در انتظار تأیید مدیرعامل" }}
+                    {{ STATUS_FA[r.status] ?? STATUS_FA.submitted }}
+                  </span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ============ Cash (finance) pending ============ -->
+      <div v-if="cash.length" class="bg-surface rounded-card shadow-soft p-4">
+        <h2 class="text-sm font-semibold text-ink mb-3">نقدینگی — در انتظار تایید</h2>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-slate-400 border-b border-slate-100">
+              <th class="text-right font-medium py-2">دوره</th>
+              <th class="text-left font-medium py-2">واریز</th>
+              <th class="text-left font-medium py-2">برداشت</th>
+              <th class="text-left font-medium py-2">ارسال‌کننده</th>
+              <th class="text-left font-medium py-2 w-72">وضعیت / اقدام</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in cash" :key="s.period.id" class="border-b border-slate-50 hover:bg-slate-50/60 transition-colors">
+              <td class="py-2">{{ s.period.label }} <span class="text-xs text-slate-400">· {{ num(s.movements) }} حرکت</span></td>
+              <td class="py-2 text-left ltr-nums">{{ rial(s.in_rial) }}</td>
+              <td class="py-2 text-left ltr-nums">{{ rial(s.out_rial) }}</td>
+              <td class="py-2 text-left">{{ s.submitted_by || "—" }}</td>
+              <td class="py-2 text-left whitespace-nowrap">
+                <div class="flex items-center justify-end gap-1">
+                  <template v-if="canDecide && (auth.department === 'finance' || auth.me?.is_superuser)">
+                    <button
+                      :class="[btn, 'border-green-600 text-green-700 hover:bg-green-50']"
+                      :disabled="busy === `cash-${s.period.id}`"
+                      @click="decideCash(s, 'approve')"
+                    >تایید</button>
+                    <button
+                      :class="[btn, 'border-red-600 text-red-600 hover:bg-red-50']"
+                      :disabled="busy === `cash-${s.period.id}`"
+                      @click="decideCash(s, 'reject')"
+                    >رد</button>
+                    <button
+                      :class="[btn, 'border-amber-500 text-amber-600 hover:bg-amber-50']"
+                      :disabled="busy === `cash-${s.period.id}`"
+                      @click="decideCash(s, 'request-revision')"
+                    >ارسال برای اصلاح</button>
+                  </template>
+                  <span v-else class="px-2.5 py-1 text-xs rounded-full bg-amber-50 text-amber-600">
+                    {{ STATUS_FA.submitted }}
                   </span>
                 </div>
               </td>
@@ -444,7 +517,7 @@ onMounted(load);
         </div>
 
         <footer class="px-6 py-3 border-t border-slate-100 shrink-0">
-          <div v-if="auth.isExecutive" class="flex justify-end gap-2">
+          <div v-if="canDecide" class="flex justify-end gap-2">
             <button
               class="px-3 py-1.5 text-sm rounded-lg border border-amber-500 text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-50"
               :disabled="busy === `sheet-${salesPreview.key}`"
@@ -462,7 +535,7 @@ onMounted(load);
             >تایید کل دوره</button>
           </div>
           <p v-else class="text-xs text-slate-400 text-center">
-            وضعیت: {{ STATUS_FA[salesPreview.status] ?? "در انتظار تأیید مدیرعامل" }}
+            وضعیت: {{ STATUS_FA[salesPreview.status] ?? STATUS_FA.submitted }}
           </p>
         </footer>
       </div>
@@ -492,7 +565,7 @@ onMounted(load);
           </div>
         </dl>
 
-        <div v-if="auth.isExecutive" class="flex justify-end gap-2 pt-4 mt-2 border-t border-slate-100">
+        <div v-if="canDecide" class="flex justify-end gap-2 pt-4 mt-2 border-t border-slate-100">
           <button
             class="px-3 py-1.5 text-sm rounded-lg border border-amber-500 text-amber-600 hover:bg-amber-50 transition-colors"
             :disabled="busy === `production-${productionPreview.id}`"
@@ -510,7 +583,7 @@ onMounted(load);
           >تایید</button>
         </div>
         <p v-else class="text-xs text-slate-400 pt-4 mt-2 border-t border-slate-100 text-center">
-          وضعیت: {{ STATUS_FA[productionPreview.status] ?? "در انتظار تأیید مدیرعامل" }}
+          وضعیت: {{ STATUS_FA[productionPreview.status] ?? STATUS_FA.submitted }}
         </p>
       </div>
     </div>

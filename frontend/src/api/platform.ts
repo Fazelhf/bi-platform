@@ -200,4 +200,22 @@ export const inboxApi = {
     const { data } = await api.post(`/production/production/${id}/${action}/`, { note });
     return data;
   },
+  /** Cash sheets a finance کارشناس submitted, one per month. */
+  async cashSheets(): Promise<CashSheet[]> {
+    const { data } = await api.get("/finance/approvals/");
+    return data.sheets;
+  },
+  async decideCash(period: number, action: "approve" | "reject" | "request-revision", note = "") {
+    const { data } = await api.post("/finance/approvals/", { period, action, note });
+    return data;
+  },
 };
+
+export interface CashSheet {
+  period: { id: number; label: string };
+  in_rial: string;
+  out_rial: string;
+  movements: number;
+  submitted_by: string;
+  submitted_at: string | null;
+}

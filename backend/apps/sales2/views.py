@@ -101,11 +101,13 @@ class OptionsView(APIView):
             },
             "warehouses": WarehouseSerializer(Warehouse.objects.filter(is_active=True), many=True).data,
             # The sales team only: people with an active sales channel, not
-            # everyone on the payroll.
+            # everyone on the payroll. «فروش بدون بازاریاب» is a sheet column,
+            # not someone a document or a commission can belong to — a sale
+            # with no rep is a document with no salesperson.
             "salespeople": [
                 {"id": e.id, "name": e.full_name_fa}
                 for e in DimEmployee.objects.filter(
-                    is_active=True, memberships__is_active=True,
+                    is_active=True, is_placeholder=False, memberships__is_active=True,
                 ).distinct().order_by("full_name_fa")
             ],
             "bank_accounts": [

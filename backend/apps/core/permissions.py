@@ -73,20 +73,22 @@ class SalesChannelOwnership(BasePermission):
 
 class ApprovalPermission(BasePermission):
     """
-    For approve/reject/request-revision actions. ONLY the CEO (executive) or a
-    superuser may decide on a record. Department managers submit data but may
-    not approve/reject their own (or any) section — they only see the status.
+    For approve/reject/request-revision actions: the manager of the department
+    the record belongs to (see apps.core.approval). The CEO and superusers may
+    decide on anything, as a fallback — they are not a step in the chain.
     """
 
-    message = "فقط مدیرعامل مجاز به تایید یا رد اطلاعات است."
+    message = "فقط مدیر همین بخش مجاز به تایید یا رد این اطلاعات است."
 
     def has_permission(self, request, view):
         u = request.user
         return bool(u and u.is_authenticated and u.can_approve)
 
     def has_object_permission(self, request, view, obj):
-        u = request.user
-        return bool(u.is_superuser or u.role == "executive")
+        from apps.core.approval import approves, department_of
+
+        dept = department_of(obj, getattr(view, "entry_department", ""))
+        return approves(request.user, dept)
 
 
 class IsExecutiveOrAdmin(BasePermission):

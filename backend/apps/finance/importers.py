@@ -8,7 +8,7 @@ from apps.core import jalali
 from apps.core.audit import log as audit_log
 from apps.core.excel_import import Col, Importer, Param, fold
 from apps.core.models import AuditLog, DimPeriod, PeriodKind
-from apps.core.periods import leaves_of
+from apps.core.periods import units_of
 from apps.finance.budget_models import Budget, BudgetActual, BudgetLine, BudgetPeriod
 from apps.finance.models import BankAccount, CashCategory, CashMovement, Direction
 from apps.sales.models import ApprovalStatus
@@ -29,11 +29,11 @@ class FinanceImporter(Importer):
 
 
 def _leaf_for(day, cache: dict):
-    """The leaf period a date is recorded on — the one the cash grid writes to."""
+    """The period a date is recorded on at مالی's grain — the one the cash grid writes to."""
     jy, jm, _ = jalali.from_gregorian(day)
     if (jy, jm) not in cache:
         month = DimPeriod.objects.filter(kind=PeriodKind.MONTH, jalali_year=jy, jalali_month=jm).first()
-        cache[(jy, jm)] = leaves_of(month) if month else None
+        cache[(jy, jm)] = units_of(month, "finance") if month else None
     leaves = cache[(jy, jm)]
     if leaves is None:
         return None

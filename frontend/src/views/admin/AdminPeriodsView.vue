@@ -1,144 +1,129 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import api from "@/api/client";
-import { salesApi } from "@/api/sales";
-import PeriodCalendar from "@/components/PeriodCalendar.vue";
 import { toast, confirm } from "@/composables/useUi";
-import type { MonthCalendar } from "@/types";
 
 /**
- * The CEO decides, month by month, whether data is recorded once for the
- * whole month, week by week, or day by day.
+ * «دوره‌ها» — the CEO decides, section by section and month by month, whether
+ * figures are recorded once for the month, week by week, or day by day.
  *
- * Days live under weeks rather than directly under the month, so everything
- * built for weekly reporting keeps working and the day layer sits one level
- * below it.
+ * Each section has its own grain: making فروش همکار weekly no longer makes
+ * تولید or مالی weekly too. The calendar underneath is shared and simply goes
+ * as deep as the finest section needs.
  *
- * A switch is only offered when it is safe: a month that already holds
- * figures cannot be cut into weeks, and weeks that hold figures cannot be
- * collapsed back — in both directions the numbers would have to be invented.
- * The API says why, and this page shows that reason instead of a dead button.
+ * A section that already has figures in a month keeps that month's grain —
+ * changing it would mean inventing how a total splits, or folding numbers
+ * nobody typed. Such a cell is locked and says why.
  */
+type Grain = "month" | "week" | "day";
+
+interface Section {
+  department: string;
+  label: string;
+  grain: Grain;
+  locked: boolean;
+}
 interface MonthRow {
   id: number;
   label: string;
   jalali_year: number;
   jalali_month: number;
-  grain: "month" | "week" | "day";
-  week_count: number;
-  day_count: number;
   days: number;
-  can_go_weekly: boolean;
-  can_go_monthly: boolean;
-  can_go_daily: boolean;
-  blocked_reason: string;
+  sections: Section[];
 }
 
-const rows = ref<MonthRow[]>([]);
+const GRAIN_LABEL: Record<Grain, string> = { month: "ماهانه", week: "هفتگی", day: "روزانه" };
+const GRAINS: Grain[] = ["month", "week", "day"];
+
+const months = ref<MonthRow[]>([]);
+const departments = ref<{ key: string; label: string }[]>([]);
+const defaults = ref<Record<string, Grain>>({});
 const loading = ref(true);
-const busy = ref<number | null>(null);
-const openMonth = ref<number | null>(null);
-const calendar = ref<MonthCalendar | null>(null);
+const busy = ref("");
+const year = ref<number | null>(null);
 
-const years = computed(() => [...new Set(rows.value.map((r) => r.jalali_year))]);
-const weeklyCount = computed(() => rows.value.filter((r) => r.grain === "week").length);
-const dailyCount = computed(() => rows.value.filter((r) => r.grain === "day").length);
-
-const GRAIN_LABEL: Record<string, string> = { month: "ماهانه", week: "هفتگی", day: "روزانه" };
+const years = computed(() => {
+  const y = months.value[0]?.jalali_year ?? year.value ?? 1405;
+  return [y - 1, y, y + 1];
+});
 
 async function load() {
   loading.value = true;
   try {
-    const { data } = await api.get("/sales/periods/year-grain/");
-    rows.value = data;
+    const { data } = await api.get("/sales/periods/grains/", {
+      params: year.value ? { year: year.value } : {},
+    });
+    months.value = data.months;
+    departments.value = data.departments;
+    defaults.value = data.defaults;
+    if (!year.value && data.months.length) year.value = data.months[0].jalali_year;
   } finally {
     loading.value = false;
   }
 }
 
-async function setGrain(row: MonthRow, grain: "month" | "week" | "day") {
-  if (row.grain === grain) return;
-
-  // Going coarser throws period rows away, so it is always confirmed.
-  if (grain !== "day" && row.grain === "day") {
-    const ok = await confirm({
-      title: "بازگشت از ثبت روزانه",
-      message: `روزهای «${row.label}» حذف می‌شوند و ثبت ${GRAIN_LABEL[grain]} خواهد شد. ادامه می‌دهید؟`,
-    });
-    if (!ok) return;
-  } else if (grain === "month") {
-    const ok = await confirm({
-      title: "بازگشت به ثبت ماهانه",
-      message: `هفته‌های «${row.label}» حذف می‌شوند و اطلاعات یک‌جا برای کل ماه وارد خواهد شد. ادامه می‌دهید؟`,
-    });
-    if (!ok) return;
-  }
-
-  busy.value = row.id;
+async function setGrain(row: MonthRow, s: Section, grain: Grain) {
+  if (s.grain === grain || s.locked) return;
+  busy.value = `${row.id}:${s.department}`;
   try {
-    if (grain === "day") {
-      // One action for the whole month; splitting week by week from here
-      // would be six clicks for a single decision.
-      await api.post(`/sales/periods/${row.id}/split-days/`);
-    } else if (grain === "week") {
-      if (row.grain === "day") {
-        // Drop the days from each week, keeping the weeks themselves.
-        const progress = await salesApi.monthProgress(row.id);
-        for (const w of progress.weeks) {
-          await api.post(`/sales/periods/${w.id}/unsplit/`);
-        }
-      } else {
-        await api.post(`/sales/periods/${row.id}/split/`);
-      }
-    } else {
-      await api.post(`/sales/periods/${row.id}/unsplit/`);
-    }
-    toast.success(`«${row.label}» ${GRAIN_LABEL[grain]} شد.`);
-    await load();
-    if (openMonth.value === row.id) await showCalendar(row);
+    await api.post(`/sales/periods/${row.id}/grain/`, { department: s.department, grain });
+    s.grain = grain;
+    toast.success(`${s.label} · ${row.label}: ${GRAIN_LABEL[grain]}`);
   } catch (e: any) {
     toast.error(e?.response?.data?.detail ?? "تغییر انجام نشد.");
+    await load();
   } finally {
-    busy.value = null;
+    busy.value = "";
   }
 }
 
-async function showCalendar(row: MonthRow) {
-  if (openMonth.value === row.id) {
-    openMonth.value = null;
+/** This month and every later one in view, for one section — the usual switch. */
+async function fromHere(row: MonthRow, dept: string, grain: Grain) {
+  const later = months.value.filter((m) => m.jalali_month >= row.jalali_month);
+  const cells = later
+    .map((m) => ({ m, s: m.sections.find((x) => x.department === dept)! }))
+    .filter(({ s }) => s && !s.locked && s.grain !== grain);
+  const label = departments.value.find((d) => d.key === dept)?.label ?? dept;
+  if (!cells.length) {
+    toast.success("همه‌ی ماه‌های بعد از قبل همین دانه‌بندی را دارند.");
     return;
   }
-  openMonth.value = row.id;
-  calendar.value = null;
-  const progress = await salesApi.monthProgress(row.id);
-  calendar.value = progress.calendar;
+  const ok = await confirm({
+    title: `${label}: ${GRAIN_LABEL[grain]} از ${row.label} به بعد`,
+    message: `${cells.length} ماه ${GRAIN_LABEL[grain]} می‌شوند. ماه‌هایی که این بخش در آن‌ها داده دارد دست‌نخورده می‌مانند.`,
+  });
+  if (!ok) return;
+  busy.value = `from:${dept}`;
+  try {
+    for (const { m, s } of cells) {
+      await api.post(`/sales/periods/${m.id}/grain/`, { department: dept, grain });
+      s.grain = grain;
+    }
+    toast.success(`${cells.length} ماه ${GRAIN_LABEL[grain]} شد.`);
+  } catch (e: any) {
+    toast.error(e?.response?.data?.detail ?? "بخشی از تغییر انجام نشد.");
+    await load();
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function setDefault(dept: string, grain: Grain) {
+  try {
+    await api.post("/sales/periods/grain-defaults/", { department: dept, grain });
+    defaults.value[dept] = grain;
+    toast.success("پیش‌فرض ماه‌های جدید ذخیره شد.");
+  } catch (e: any) {
+    toast.error(e?.response?.data?.detail ?? "ذخیره نشد.");
+  }
+}
+
+async function pickYear(y: number) {
+  year.value = y;
+  await load();
 }
 
 onMounted(load);
-
-/** Everything from this month on becomes weekly — the usual way to switch. */
-async function weeklyFromHere(row: MonthRow) {
-  const later = rows.value.filter(
-    (r) => r.jalali_year > row.jalali_year
-      || (r.jalali_year === row.jalali_year && r.jalali_month >= row.jalali_month),
-  );
-  const doable = later.filter((r) => r.can_go_weekly);
-  const ok = await confirm({
-    title: "هفتگی‌کردن از این ماه به بعد",
-    message: `${doable.length} ماه هفتگی می‌شوند. ماه‌هایی که داده دارند دست‌نخورده می‌مانند.`,
-  });
-  if (!ok) return;
-  busy.value = row.id;
-  try {
-    for (const r of doable) {
-      await api.post(`/sales/periods/${r.id}/split/`);
-    }
-    toast.success(`${doable.length} ماه هفتگی شد.`);
-    await load();
-  } finally {
-    busy.value = null;
-  }
-}
 </script>
 
 <template>
@@ -147,73 +132,83 @@ async function weeklyFromHere(row: MonthRow) {
       <div>
         <h2 class="font-bold text-ink">دوره‌های ثبت اطلاعات</h2>
         <p class="text-xs text-slate-400 mt-1 leading-6">
-          برای هر ماه تعیین کنید اطلاعات یک‌بار برای کل ماه ثبت شود، هفته‌به‌هفته یا روزبه‌روز.
-          تارگت‌ها در هر سه حالت ماهانه‌اند.
+          برای هر بخش جداگانه تعیین کنید اطلاعات ماهانه، هفتگی یا روزانه ثبت شود.
+          تغییر یک بخش روی بخش‌های دیگر اثری ندارد. تارگت‌ها همیشه ماهانه‌اند.
         </p>
       </div>
-      <span class="text-xs text-slate-400 ltr-nums">
-        {{ weeklyCount }} ماه هفتگی · {{ dailyCount }} ماه روزانه · از {{ rows.length }}
-      </span>
+      <div class="flex bg-slate-100 rounded-xl p-0.5">
+        <button
+          v-for="y in years" :key="y"
+          class="px-3 py-1 rounded-lg text-xs ltr-nums"
+          :class="year === y ? 'bg-surface shadow-soft text-ink font-medium' : 'text-slate-500 hover:text-ink'"
+          @click="pickYear(y)"
+        >{{ y }}</button>
+      </div>
+    </div>
+
+    <!-- Defaults for months not set yet -->
+    <div class="bg-surface rounded-card shadow-soft p-3">
+      <p class="text-xs font-semibold text-slate-500 mb-2">پیش‌فرض ماه‌های جدید</p>
+      <div class="flex flex-wrap gap-3">
+        <label v-for="d in departments" :key="d.key" class="flex items-center gap-2 text-xs text-slate-600">
+          {{ d.label }}
+          <select
+            class="border border-slate-200 rounded-lg px-2 py-1 bg-surface text-xs"
+            :value="defaults[d.key]"
+            @change="setDefault(d.key, ($event.target as HTMLSelectElement).value as Grain)"
+          >
+            <option v-for="g in GRAINS" :key="g" :value="g">{{ GRAIN_LABEL[g] }}</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <div v-if="loading" class="text-slate-400 text-sm">در حال بارگذاری…</div>
 
-    <div v-else v-for="y in years" :key="y" class="space-y-2">
-      <h3 class="text-sm font-semibold text-slate-500 ltr-nums">سال {{ y }}</h3>
+    <div v-else-if="!months.length" class="text-slate-400 text-sm">برای این سال ماهی تعریف نشده است.</div>
 
-      <div
-        v-for="row in rows.filter(r => r.jalali_year === y)"
-        :key="row.id"
-        class="bg-surface rounded-card shadow-soft p-3"
-      >
-        <div class="flex items-center gap-3 flex-wrap">
-          <span class="font-medium text-ink w-28">{{ row.label }}</span>
-
-          <!-- Grain switch -->
-          <div class="flex bg-slate-100 rounded-xl p-0.5">
-            <button
-              v-for="opt in (['month', 'week', 'day'] as const)"
-              :key="opt"
-              class="px-3 py-1 rounded-lg text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              :class="row.grain === opt ? 'bg-surface shadow-soft text-ink font-medium' : 'text-slate-500 hover:text-ink'"
-              :disabled="busy === row.id
-                || (opt === 'week' && row.grain !== 'week' && !row.can_go_weekly)
-                || (opt === 'month' && row.grain !== 'month' && !row.can_go_monthly)
-                || (opt === 'day' && row.grain !== 'day' && !row.can_go_daily)"
-              @click="setGrain(row, opt)"
-            >{{ GRAIN_LABEL[opt] }}</button>
-          </div>
-
-          <span v-if="row.grain === 'day'" class="text-xs text-slate-400 ltr-nums">
-            {{ row.week_count }} هفته · {{ row.day_count }} روز ثبت
-          </span>
-          <span v-else-if="row.grain === 'week'" class="text-xs text-slate-400 ltr-nums">
-            {{ row.week_count }} هفته · {{ row.days }} روز
-          </span>
-          <span v-else class="text-xs text-slate-400 ltr-nums">{{ row.days }} روز</span>
-
-          <span v-if="row.blocked_reason" class="text-xs text-amber-600">
-            {{ row.blocked_reason }}
-          </span>
-
-          <div class="mr-auto flex items-center gap-3">
-            <button
-              v-if="row.can_go_weekly"
-              class="text-xs text-slate-500 hover:text-ink hover:underline"
-              @click="weeklyFromHere(row)"
-            >هفتگی از این ماه به بعد</button>
-            <button
-              v-if="row.grain !== 'month'"
-              class="text-xs text-brand-600 hover:underline"
-              @click="showCalendar(row)"
-            >{{ openMonth === row.id ? "بستن تقویم" : "تقویم" }}</button>
-          </div>
-        </div>
-
-        <div v-if="openMonth === row.id" class="border-t border-slate-100 mt-3 pt-3">
-          <PeriodCalendar :calendar="calendar" />
-        </div>
-      </div>
+    <div v-else class="bg-surface rounded-card shadow-soft overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-slate-400 border-b border-slate-100 text-xs">
+            <th class="text-right font-medium p-3">ماه</th>
+            <th v-for="d in departments" :key="d.key" class="text-center font-medium p-3 whitespace-nowrap">
+              {{ d.label }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in months" :key="row.id" class="border-b border-slate-50">
+            <td class="p-3 font-medium text-ink whitespace-nowrap">{{ row.label }}</td>
+            <td v-for="s in row.sections" :key="s.department" class="p-2 text-center">
+              <div
+                class="inline-flex bg-slate-100 rounded-xl p-0.5"
+                :title="s.locked ? 'این بخش در این ماه داده دارد؛ دانه‌بندی قابل تغییر نیست.' : ''"
+              >
+                <button
+                  v-for="g in GRAINS" :key="g"
+                  class="px-2 py-1 rounded-lg text-[11px] transition-colors disabled:cursor-not-allowed"
+                  :class="[
+                    s.grain === g ? 'bg-surface shadow-soft text-ink font-medium' : 'text-slate-500 hover:text-ink',
+                    s.locked && s.grain !== g ? 'opacity-30' : '',
+                  ]"
+                  :disabled="s.locked || busy === `${row.id}:${s.department}` || busy.startsWith('from:')"
+                  @click="setGrain(row, s, g)"
+                >{{ GRAIN_LABEL[g] }}</button>
+              </div>
+              <div class="mt-1 flex justify-center gap-2 text-[10px]">
+                <span v-if="s.locked" class="text-amber-600">دارای داده 🔒</span>
+                <button
+                  v-else
+                  class="text-slate-400 hover:text-brand-600 hover:underline"
+                  :disabled="busy.startsWith('from:')"
+                  @click="fromHere(row, s.department, s.grain)"
+                >همین از این ماه به بعد</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </template>

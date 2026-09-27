@@ -47,6 +47,11 @@ class DimEmployee(TimeStampedModel):
     )
     #: False = بایگانی: kept only so old figures still have a name.
     is_active = models.BooleanField(default=True)
+    #: A sheet column that is not a person — «فروش بدون بازاریاب», the sales
+    #: no rep brought in. It sits on a channel roster like a salesperson so it
+    #: gets its own column and target, but it is kept out of the people lists
+    #: and the chart sync never retires it for holding no seat.
+    is_placeholder = models.BooleanField(default=False)
     mobile = models.CharField(max_length=30, blank=True)
     hired_on = models.DateField(null=True, blank=True)
     archived_at = models.DateField(null=True, blank=True)

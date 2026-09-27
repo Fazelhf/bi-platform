@@ -85,7 +85,10 @@ class FormulaEngineIntegrationTests(TestCase):
 
 
 class WorkflowSideEffectTests(APITestCase):
-    """Submit must audit-log and notify approvers; approve must notify back."""
+    """
+    The approval chain: a کارشناس submits, their department manager decides,
+    the submitter hears back. The CEO is not a step — only a fallback.
+    """
 
     def setUp(self):
         self.period = DimPeriod.objects.create(jalali_year=1405, jalali_month=2)
@@ -97,44 +100,76 @@ class WorkflowSideEffectTests(APITestCase):
         self.manager = User.objects.create(
             username="mgr", role=Role.MANAGER, department=Department.SALES_TEAM
         )
+        self.other_manager = User.objects.create(
+            username="org-mgr", role=Role.MANAGER, department=Department.SALES_ORG
+        )
+        self.rep = User.objects.create(
+            username="rep", role=Role.OPERATOR, department=Department.SALES_TEAM
+        )
+        emp.user = self.rep
+        emp.save(update_fields=["user"])
         self.ceo = User.objects.create(username="boss", role=Role.EXECUTIVE)
 
-    def test_submit_notifies_ceo_and_logs(self):
-        self.client.force_authenticate(self.manager)
+    def submit_as_rep(self):
+        self.client.force_authenticate(self.rep)
         r = self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/submit/")
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 200, r.data)
+        return r
+
+    def test_rep_submit_notifies_their_manager_not_the_ceo_and_logs(self):
+        r = self.submit_as_rep()
+        self.assertEqual(r.data["status"], ApprovalStatus.SUBMITTED)
         self.assertTrue(
-            Notification.objects.filter(recipient=self.ceo, verb="submitted").exists()
+            Notification.objects.filter(recipient=self.manager, verb="submitted").exists()
         )
+        self.assertFalse(Notification.objects.filter(recipient=self.ceo).exists())
+        self.assertFalse(Notification.objects.filter(recipient=self.other_manager).exists())
         self.assertTrue(
             AuditLog.objects.filter(action="submit", object_id=str(self.fact.id)).exists()
         )
 
-    def test_ceo_approves_and_submitter_notified(self):
+    def test_a_managers_own_submit_is_approved_at_once(self):
         self.client.force_authenticate(self.manager)
-        self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/submit/")
-        self.client.force_authenticate(self.ceo)
+        r = self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/submit/")
+        self.assertEqual(r.status_code, 200)
+        self.fact.refresh_from_db()
+        self.assertEqual(self.fact.status, ApprovalStatus.APPROVED)
+        self.assertEqual(self.fact.approved_by, self.manager)
+        self.assertFalse(Notification.objects.filter(verb="submitted").exists())
+
+    def test_manager_approves_and_submitter_notified(self):
+        self.submit_as_rep()
+        self.client.force_authenticate(self.manager)
         r = self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/approve/")
         self.assertEqual(r.status_code, 200)
         self.assertTrue(
-            Notification.objects.filter(recipient=self.manager, verb="approved").exists()
+            Notification.objects.filter(recipient=self.rep, verb="approved").exists()
         )
 
-    def test_department_manager_cannot_approve(self):
-        """Only the CEO decides — a section manager gets 403 on approve/reject."""
-        self.client.force_authenticate(self.manager)
-        self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/submit/")
-        r = self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/approve/")
-        self.assertEqual(r.status_code, 403)
+    def test_another_departments_manager_and_the_rep_cannot_decide(self):
+        self.submit_as_rep()
+        self.client.force_authenticate(self.other_manager)
+        self.assertEqual(
+            self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/approve/").status_code, 403,
+        )
+        self.client.force_authenticate(self.rep)
+        self.assertEqual(
+            self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/approve/").status_code, 403,
+        )
         self.fact.refresh_from_db()
-        self.assertNotEqual(self.fact.status, ApprovalStatus.APPROVED)
-        r2 = self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/reject/")
-        self.assertEqual(r2.status_code, 403)
+        self.assertEqual(self.fact.status, ApprovalStatus.SUBMITTED)
+
+    def test_submission_goes_to_the_ceo_when_the_department_has_no_manager(self):
+        self.manager.is_active = False
+        self.manager.save(update_fields=["is_active"])
+        self.submit_as_rep()
+        self.assertTrue(
+            Notification.objects.filter(recipient=self.ceo, verb="submitted").exists()
+        )
 
     def test_request_revision_flow(self):
+        self.submit_as_rep()
         self.client.force_authenticate(self.manager)
-        self.client.post(f"/api/sales/sales-monthly/{self.fact.id}/submit/")
-        self.client.force_authenticate(self.ceo)
         r = self.client.post(
             f"/api/sales/sales-monthly/{self.fact.id}/request-revision/",
             {"note": "عدد فروش را بازبینی کنید"},
@@ -143,7 +178,7 @@ class WorkflowSideEffectTests(APITestCase):
         self.fact.refresh_from_db()
         self.assertEqual(self.fact.status, ApprovalStatus.NEEDS_REVISION)
         self.assertTrue(
-            Notification.objects.filter(recipient=self.manager, verb="revision").exists()
+            Notification.objects.filter(recipient=self.rep, verb="revision").exists()
         )
 
     def test_update_writes_audit_diff(self):

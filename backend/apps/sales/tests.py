@@ -287,7 +287,10 @@ class RosterTests(APITestCase):
 
         res = self.client.get("/api/sales/roster/")
         self.assertEqual(res.status_code, 200)
-        self.assertEqual([m["employee_name"] for m in res.data], ["صبا موسوی"])
+        # «فروش بدون بازاریاب» is a team column by design; the org rep is not.
+        self.assertEqual(
+            [m["employee_name"] for m in res.data], ["صبا موسوی", "فروش بدون بازاریاب"]
+        )
 
         # ...and cannot look into someone else's.
         self.assertEqual(

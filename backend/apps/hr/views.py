@@ -93,6 +93,8 @@ class PersonViewSet(viewsets.ModelViewSet):
         )
         if self.action != "list":
             return qs
+        # A sheet column such as «فروش بدون بازاریاب» is not a person.
+        qs = qs.filter(is_placeholder=False)
         state = self.request.query_params.get("status", "active")
         if state == "archived":
             return qs.filter(is_active=False).order_by("-archived_at", "full_name_fa")
@@ -320,7 +322,9 @@ class ChartView(APIView):
                 "positions": len(all_seats),
                 "vacant": sum(1 for s in all_seats if not s["holder"]),
                 "people": len({s["holder"] for s in all_seats if s["holder"]}),
-                "unplaced": DimEmployee.objects.filter(is_active=True, positions__isnull=True).count(),
+                "unplaced": DimEmployee.objects.filter(
+                    is_active=True, is_placeholder=False, positions__isnull=True,
+                ).count(),
                 "archived": DimEmployee.objects.filter(is_active=False).count(),
                 "duplicates": len(people_service.duplicate_groups()),
             },

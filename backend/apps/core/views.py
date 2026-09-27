@@ -67,15 +67,15 @@ class ExecutiveTrendView(APIView):
     twelve, because the page needs the shape of the year before it can draw
     anything.
 
-    Figures are read from the LEAF periods of each month, so a month that has
-    been split into weeks totals its weeks and a month that has not totals
-    itself. Reading the month row directly would return zero for every split
-    month.
+    Figures are read from the whole of each month — the month and every week
+    and day under it. Each section stores at exactly one of those levels (its
+    own grain, PeriodGrain), so this totals every section correctly whatever
+    grain each records at, with nothing counted twice.
     """
 
     @extend_schema(parameters=[OpenApiParameter("year", int)], responses=dict)
     def get(self, request):
-        from apps.core.periods import leaf_ids_for
+        from apps.core.periods import month_nodes
         from apps.sales.models import SalesChannel, SalesTarget
 
         year = int(request.query_params.get("year") or 0)
@@ -91,7 +91,7 @@ class ExecutiveTrendView(APIView):
         )
 
         # One query per fact table rather than per month.
-        leaf_map = {m.id: leaf_ids_for(m) for m in months}
+        leaf_map = {m.id: [p.id for p in month_nodes(m)] for m in months}
         all_leaves = [i for ids in leaf_map.values() for i in ids]
 
         revenue_rows = (
