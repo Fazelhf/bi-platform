@@ -45,9 +45,24 @@ cleanup_stage() {
   git worktree prune >/dev/null 2>&1 || true
 }
 
+# The stage and the live site share ONE virtualenv, so installing the new
+# commit's requirements changes the packages under the live code too. The
+# deploy of ۵ مهر ۱۴۰۵ failed at migrate (Django 5.2 against PostgreSQL 13)
+# and left Django 5.2 installed under the old code: the site was one restart
+# away from going down. Any failure after the install puts the live folder's
+# own requirements back.
+DEPS_CHANGED=""
+restore_deps() {
+  [ -n "$DEPS_CHANGED" ] || return 0
+  echo "▸ برگرداندن وابستگی‌های نسخه‌ی فعلی سایت…"
+  pip install -r "$APP_DIR/backend/requirements.txt" -q \
+    || echo "⚠️ برگرداندن وابستگی‌ها ناموفق بود — این را دستی اجرا کنید: pip install -r $APP_DIR/backend/requirements.txt"
+}
+
 fail() {
   echo
   echo "❌ $*"
+  restore_deps
   echo "سایت دست نخورد و روی نسخه‌ی قبلی ماند."
   cleanup_stage
   exit 1
@@ -107,11 +122,16 @@ fi
 cd "$STAGE/backend" || fail "پوشه‌ی آزمایشی باز نشد"
 
 say "نصب/به‌روزرسانی وابستگی‌ها…"
+DEPS_CHANGED=1
 pip install -r requirements.txt -q || fail "نصب وابستگی‌ها ناموفق بود"
 
 say "آیا نسخه‌ی جدید روی همین پایتون راه می‌افتد؟"
 python -c "import passenger_wsgi" || fail "نسخه‌ی جدید راه نمی‌افتد (خطای بالا را ببینید)"
 python manage.py check || fail "manage.py check خطا داد"
+# `check` never opens the database; this does — so a Django that cannot talk
+# to this server's database is caught here, before anything is migrated.
+python manage.py shell -c "from django.db import connection; connection.ensure_connection(); print('   دیتابیس:', connection.vendor, connection.pg_version if connection.vendor == 'postgresql' else '')" \
+  || fail "نسخه‌ی جدید به دیتابیس سرور وصل نمی‌شود"
 
 say "اعمال مایگریشن‌ها (فقط افزودنی‌اند؛ نسخه‌ی فعلی سایت با آن‌ها کار می‌کند)…"
 python manage.py migrate --noinput || fail "مایگریشن ناموفق بود"
@@ -142,6 +162,7 @@ rollback() {
   echo "❌ $1"
   echo "▸ برگرداندن خودکار سایت به نسخه‌ی قبلی ($(git -C "$APP_DIR" log --oneline -1 "$PREV"))…"
   cd "$APP_DIR" && git checkout --quiet --detach "$PREV"
+  restore_deps
   restart_app
   if site_is_up; then
     echo "✅ سایت روی نسخه‌ی قبلی برگشت و کار می‌کند."
