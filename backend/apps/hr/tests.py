@@ -24,7 +24,8 @@ from apps.sales.models import DimEmployee, EmployeeChannel, FactSalesMonthly, Sa
 
 def _roster(channel):
     return set(
-        EmployeeChannel.objects.filter(channel=channel, is_active=True)
+        # «فروش بدون بازاریاب» is on the team roster by design, not by the chart.
+        EmployeeChannel.objects.filter(channel=channel, is_active=True, employee__is_placeholder=False)
         .values_list("employee__full_name_fa", flat=True)
     )
 
@@ -268,7 +269,7 @@ class HardDeleteTests(HrTestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.assertFalse(DimEmployee.objects.filter(pk=self.junk.pk).exists())
         self.assertEqual(FactSalesMonthly.objects.count(), 0)
-        self.assertEqual(EmployeeChannel.objects.count(), 0)
+        self.assertFalse(EmployeeChannel.objects.filter(employee_id=self.junk.id).exists())
 
 
 class LinkAccountTests(HrTestCase):

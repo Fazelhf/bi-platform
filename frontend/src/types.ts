@@ -76,6 +76,8 @@ export interface Reconciliation {
 /** What `/sales/periods/<id>/weeks/` returns — drives the progress strip. */
 export interface MonthProgress {
   period: Period;
+  /** The grain of the section asked about (month / week / day), when one was. */
+  grain?: "month" | "week" | "day" | null;
   weeks: WeekSlot[];
   entered: number;
   total: number;

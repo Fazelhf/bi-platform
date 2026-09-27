@@ -6,14 +6,15 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import filters, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.audit import log as audit_log
 from apps.core.models import AuditLog, DimPeriod, PeriodKind
-from apps.core.notify import notify_submitted
-from apps.core.periods import leaves_of, month_of
+from apps.core.approval import approves, submission_status
+from apps.core.notify import notify_decision, notify_submitted
+from apps.core.periods import month_of, units_of
 from decimal import Decimal, InvalidOperation
 
 from apps.finance.models import (
@@ -32,6 +33,7 @@ from apps.finance.models import (
     FinanceSetting,
 )
 from apps.finance.permissions import (
+    FINANCE_DEPARTMENT,
     BudgetActualAccess,
     BudgetPlanAccess,
     CategoryAccess,
@@ -211,7 +213,7 @@ class CashEntryView(APIView):
     def get(self, request):
         period = self._period(request.query_params.get("period"))
         days = sorted(
-            leaves_of(period), key=lambda p: (p.start_date or p.id, p.id)
+            units_of(period, FINANCE_DEPARTMENT), key=lambda p: (p.start_date or p.id, p.id)
         )
         # Leaves only: a parent is a roll-up, never a column someone types into.
         categories = list(CashCategory.enterable())
@@ -278,7 +280,10 @@ class CashEntryView(APIView):
             raise ValidationError({"detail": "فقط واحد مالی می‌تواند ثبت کند."})
 
         submit = bool(request.data.get("submit"))
-        status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
+        # A finance کارشناس's submission waits for the finance manager; the
+        # manager's own is final as sent (apps.core.approval).
+        status = submission_status(request.user, FINANCE_DEPARTMENT, submit)
+        approved = status == ApprovalStatus.APPROVED
         written = 0
         removed = 0
 
@@ -288,7 +293,7 @@ class CashEntryView(APIView):
         # in every roll-up, a day from another month, an account id that
         # pointed at nothing.
         sheet = self._period(request.data.get("period"))
-        day_ids = {d.id for d in leaves_of(sheet)}
+        day_ids = {d.id for d in units_of(sheet, FINANCE_DEPARTMENT)}
         categories = {c.id: c for c in CashCategory.enterable()}
         account_ids = set(BankAccount.objects.values_list("id", flat=True))
         line_ids = set(CreditLine.objects.values_list("id", flat=True))
@@ -352,6 +357,7 @@ class CashEntryView(APIView):
                         if submit or existing is None:
                             values["status"] = status
                             values["submitted_by"] = request.user if submit else None
+                            values["approved_by"] = request.user if approved else None
                         movement, _ = CashMovement.objects.update_or_create(
                             period_id=period_id, direction=direction,
                             category_id=raw_category_id,
@@ -375,16 +381,16 @@ class CashEntryView(APIView):
         audit_log(request.user, period, AuditLog.Action.UPDATE,
                   {"cash_entry": {"before": None, "after": f"{written} حرکت"}})
 
-        if submit:
+        if submit and not approved:
             first = CashMovement.objects.filter(
-                period_id__in=[d.id for d in leaves_of(period)]
+                period_id__in=[d.id for d in units_of(period, FINANCE_DEPARTMENT)]
             ).first()
             if first:
                 notify_submitted(request.user, first, "finance",
                                  f"نقدینگی · {period.label}")
 
         return Response({
-            "ok": True, "submitted": submit,
+            "ok": True, "submitted": submit, "status": status,
             "movements": written, "removed": removed,
         })
 
@@ -394,6 +400,85 @@ class CashEntryView(APIView):
             return DimPeriod.objects.get(pk=raw)
         except (DimPeriod.DoesNotExist, ValueError, TypeError):
             raise ValidationError({"period": "دوره انتخاب نشده یا معتبر نیست."})
+
+
+class CashApprovalView(APIView):
+    """
+    کارتابل — the finance half: a کارشناس's submitted cash sheet, one item per
+    month, decided by the finance manager.
+
+    Submitting used to mark movements «در انتظار تایید» with nothing anywhere
+    able to approve them, so they never reached a dashboard that reads
+    approved figures only.
+
+    GET lists the pending months; POST {period, action, note} decides one.
+    """
+
+    permission_classes = [FinanceAccess]
+
+    ACTIONS = {
+        "approve": (ApprovalStatus.APPROVED, "approved", AuditLog.Action.APPROVE),
+        "reject": (ApprovalStatus.REJECTED, "rejected", AuditLog.Action.REJECT),
+        "request-revision": (ApprovalStatus.NEEDS_REVISION, "revision", AuditLog.Action.REVISION),
+    }
+
+    def get(self, request):
+        sheets: dict[int, dict] = {}
+        rows = CashMovement.objects.filter(status=ApprovalStatus.SUBMITTED).select_related(
+            "period", "submitted_by",
+        ).order_by("period__start_date", "id")
+        for m in rows:
+            month = month_of(m.period)
+            sheet = sheets.setdefault(month.id, {
+                "period": {"id": month.id, "label": month.label},
+                "in_rial": Decimal(0), "out_rial": Decimal(0), "movements": 0,
+                "submitted_by": "", "submitted_at": None,
+            })
+            key = "in_rial" if m.direction == Direction.IN else "out_rial"
+            sheet[key] += m.amount_rial or 0
+            sheet["movements"] += 1
+            if sheet["submitted_at"] is None or m.updated_at > sheet["submitted_at"]:
+                sheet["submitted_at"] = m.updated_at
+                if m.submitted_by_id:
+                    u = m.submitted_by
+                    sheet["submitted_by"] = u.display_name_fa or u.get_full_name() or u.username
+        out = []
+        for s in sheets.values():
+            out.append({
+                **s,
+                "in_rial": str(s["in_rial"]), "out_rial": str(s["out_rial"]),
+                "submitted_at": s["submitted_at"].isoformat() if s["submitted_at"] else None,
+            })
+        return Response({"sheets": out, "can_decide": approves(request.user, FINANCE_DEPARTMENT)})
+
+    @transaction.atomic
+    def post(self, request):
+        if not approves(request.user, FINANCE_DEPARTMENT):
+            raise PermissionDenied("فقط مدیر مالی مجاز به تایید یا رد این اطلاعات است.")
+        action = (request.data.get("action") or "").strip()
+        if action not in self.ACTIONS:
+            raise ValidationError({"action": "اقدام نامعتبر است."})
+        month = month_of(CashEntryView._period(request.data.get("period")))
+        pending = CashMovement.objects.filter(
+            period_id__in=[d.id for d in units_of(month, FINANCE_DEPARTMENT)],
+            status=ApprovalStatus.SUBMITTED,
+        )
+        representative = pending.exclude(submitted_by=None).first() or pending.first()
+        if representative is None:
+            return Response({"detail": "این دوره قبلاً تعیین تکلیف شده است."}, status=409)
+
+        new_status, verb, audit_action = self.ACTIONS[action]
+        fields = {"status": new_status}
+        if new_status == ApprovalStatus.APPROVED:
+            fields["approved_by"] = request.user
+        count = pending.update(**fields)
+        note = request.data.get("note") or ""
+        changes = {"cash_sheet": {"before": ApprovalStatus.SUBMITTED, "after": new_status}}
+        if note:
+            changes["note"] = {"before": None, "after": note}
+        audit_log(request.user, month, audit_action, changes)
+        notify_decision(request.user, representative, verb, f"نقدینگی · {month.label}")
+        return Response({"period": month.id, "status": new_status, "movements": count})
 
 
 class CashReportView(APIView):

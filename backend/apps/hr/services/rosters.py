@@ -78,6 +78,8 @@ def sync_rosters(today: date | None = None) -> dict[str, dict[str, int]]:
         removed = (
             EmployeeChannel.objects.filter(channel=channel, is_active=True)
             .exclude(employee_id__in=people)
+            # «فروش بدون بازاریاب» holds no seat by nature; it is not leaving.
+            .exclude(employee__is_placeholder=True)
             .update(is_active=False, left_at=today)
         )
         summary[channel] = {"members": len(people), "added": added, "removed": removed}

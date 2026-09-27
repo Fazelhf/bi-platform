@@ -159,3 +159,93 @@ class EntryRuleTests(APITestCase):
         res = self.post(self.manager, self.weeks[0], [self.col(self.ali, 1), self.col(worker, 1)])
         self.assertEqual(res.status_code, 400, res.data)
         self.assertFalse(FactSalesMonthly.objects.filter(employee=worker).exists())
+
+    def test_targets_list_only_salespeople(self):
+        """The «تارگت» page used to list the whole company, factory included."""
+        from apps.sales.models import SalesTarget
+
+        factory = OrgUnit.objects.create(name_fa="تولید")
+        worker = DimEmployee.objects.create(code="er-tf", full_name_fa="کارگر تولید")
+        Position.objects.create(unit=factory, title_fa="اپراتور", holder=worker)
+        office = get_user_model().objects.create_user(
+            "er_fin", password="Pass-12345!", role="manager", department="finance",
+        )
+        accountant = DimEmployee.objects.create(
+            code="er-tfin", full_name_fa="حسابدار", user=office,
+        )
+        ceo = get_user_model().objects.create_user(
+            "er_ceo", password="Pass-12345!", role="executive",
+        )
+        self.client.force_authenticate(ceo)
+
+        res = self.client.get("/api/sales/targets/", {"period": self.month.id, "channel": "team"})
+        self.assertEqual(res.status_code, 200)
+        ids = {p["employee_id"] for p in res.data["people"]}
+        no_marketer = DimEmployee.objects.get(code="no-marketer")
+        self.assertEqual(ids, {self.ali.id, self.sara.id, no_marketer.id})
+
+        res = self.client.post("/api/sales/targets/", {
+            "period": self.month.id, "channel": "team",
+            "people": [{"employee_id": accountant.id, "target_rial": "100"}],
+        }, format="json")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertFalse(SalesTarget.objects.filter(employee=accountant).exists())
+
+        res = self.client.post("/api/sales/targets/", {
+            "period": self.month.id, "channel": "team",
+            "people": [{"employee_id": self.ali.id, "target_rial": "100"}],
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertNotIn(worker.id, ids)
+
+
+class NoMarketerColumnTests(APITestCase):
+    """«فروش بدون بازاریاب» — a column on the فروش همکار sheet that is not a person."""
+
+    def setUp(self):
+        self.month = DimPeriod.objects.create(jalali_year=1404, jalali_month=6)
+        self.column = DimEmployee.objects.get(code="no-marketer")
+        User = get_user_model()
+        self.manager = User.objects.create_user(
+            "nm_mgr", password="Pass-12345!", role="manager", department="sales_team",
+        )
+
+    def test_it_is_on_the_team_sheet_and_takes_figures(self):
+        self.client.force_authenticate(self.manager)
+        res = self.client.get("/api/sales/input/", {"period": self.month.id, "channel": "team"})
+        self.assertIn(self.column.id, [c["employee_id"] for c in res.data["columns"]])
+
+        res = self.client.post("/api/sales/input/", {
+            "period": self.month.id, "channel": "team", "submit": False,
+            "columns": [{"employee_id": self.column.id, "name": self.column.full_name_fa,
+                         "revenue_rial": "500"}],
+            "provinces": [], "customer_groups": [],
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(
+            int(FactSalesMonthly.objects.get(period=self.month, employee=self.column).revenue_rial), 500,
+        )
+
+    def test_it_is_not_offered_on_other_channels(self):
+        User = get_user_model()
+        bank_mgr = User.objects.create_user(
+            "nm_bank", password="Pass-12345!", role="manager", department="sales_org",
+        )
+        self.client.force_authenticate(bank_mgr)
+        res = self.client.get("/api/sales/roster/available/", {"channel": "organizational"})
+        self.assertNotIn(self.column.id, {r["id"] for r in res.data})
+
+    def test_the_chart_sync_keeps_it_and_hr_does_not_list_it(self):
+        from apps.hr.services.rosters import sync_rosters
+
+        OrgUnit.objects.create(name_fa="فروش همکار", sales_channel="team")
+        sync_rosters()
+        self.assertTrue(
+            EmployeeChannel.objects.get(employee=self.column, channel="team").is_active
+        )
+
+        admin = get_user_model().objects.create_superuser("nm_admin", password="Pass-12345!")
+        self.client.force_authenticate(admin)
+        res = self.client.get("/api/hr/people/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertNotIn(self.column.id, [p["id"] for p in res.data])

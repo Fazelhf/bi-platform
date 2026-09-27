@@ -19,6 +19,7 @@ import { salesApi } from "@/api/sales";
 import { toast } from "@/composables/useUi";
 import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { num } from "@/utils/format";
+import { submitHint, submittedMessage } from "@/utils/approval";
 import ExcelImport from "@/components/ExcelImport.vue";
 import MoneyInput from "@/components/MoneyInput.vue";
 import NavIcon from "@/components/NavIcon.vue";
@@ -169,7 +170,7 @@ async function save(submit: boolean) {
     });
     toast.success(
       submit
-        ? "برای تایید مدیرعامل ارسال شد."
+        ? submittedMessage()
         : `${num(result.movements)} حرکت ذخیره شد.`,
     );
     await load();
@@ -355,7 +356,7 @@ async function save(submit: boolean) {
           {{ saving
             || (missingAccount
               ? `${num(missingAccount)} مبلغ هنوز حساب ندارد.`
-              : "پس از تکمیل، برای تایید مدیرعامل ارسال کنید.") }}
+              : submitHint()) }}
         </span>
         <div class="flex gap-2">
           <button

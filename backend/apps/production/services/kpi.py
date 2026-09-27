@@ -36,6 +36,7 @@ hours_per_shift consistently for actual, desired and ideal, which is the
 internally coherent reading. Confirm with the plant manager before relying on
 the absolute number — the trend is valid either way.
 """
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -123,14 +124,29 @@ class Totals:
     per_machine: dict = field(default_factory=dict)
 
 
+def _units(period: DimPeriod) -> list[int]:
+    """The periods تولید's figures for `period` sit on, at its own grain."""
+    from apps.core.periods import unit_ids
+
+    return unit_ids(period, "production")
+
+
 def _collect(period: DimPeriod, only_approved: bool) -> Totals:
-    rows = FactProduction.objects.filter(period=period).select_related("machine")
+    rows = FactProduction.objects.filter(period_id__in=_units(period)).select_related("machine")
     if only_approved:
         rows = rows.filter(status=ApprovalStatus.APPROVED)
 
     t = Totals()
     for r in rows:
-        t.per_machine[r.machine_id] = r
+        # A month recorded week by week has several rows per line: add them.
+        m = t.per_machine.get(r.machine_id)
+        if m is None:
+            t.per_machine[r.machine_id] = SimpleNamespace(
+                output_units=r.output_units, active_shifts=r.active_shifts,
+            )
+        else:
+            m.output_units += r.output_units
+            m.active_shifts += r.active_shifts
         if r.machine.kind == DimMachine.Kind.PRINT:
             t.print_area += r.output_units
             continue
@@ -158,33 +174,43 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
     (Re)compute all production KPIs for a period. Idempotent: replaces this
     period's production rows only, leaving sales KPIs untouched.
     """
+    from apps.core.periods import month_of
+
     catalog = ensure_kpi_catalog()
-    bench, _ = ProductionBenchmark.objects.get_or_create(period=period)
+    # The benchmark is set for the month; a week or a day gets its share of
+    # it by length, so a weekly line is judged against a week's capacity.
+    month = month_of(period)
+    bench, _ = ProductionBenchmark.objects.get_or_create(period=month)
+    share = Decimal(1)
+    if period.pk != month.pk and period.days and month.days:
+        share = Decimal(period.days) / Decimal(month.days)
+    days_in_period = Decimal(bench.days_in_month) * share
+    units = _units(period)
     t = _collect(period, only_approved)
 
     # --- Cost & revenue ---
     total_cost = sum(
-        (c.amount_rial for c in FactProductionCost.objects.filter(period=period)),
+        (c.amount_rial for c in FactProductionCost.objects.filter(period_id__in=units)),
         Decimal(0),
     )
     total_revenue = sum(
         (r.amount_rial for r in FactProductionRevenue.objects.filter(
-            period=period).select_related("product")),
+            period_id__in=units).select_related("product")),
         Decimal(0),
     )
 
     # --- Waste from the material balance (all streams combined) ---
-    balances = list(FactMaterialBalance.objects.filter(period=period))
+    balances = list(FactMaterialBalance.objects.filter(period_id__in=units))
     total_in = sum((b.input_weight for b in balances), Decimal(0))
     total_out = sum((b.output_weight for b in balances), Decimal(0))
 
     # --- Benchmark-derived denominators ---
     per_shift = Decimal(bench.ideal_output_per_shift)
     desired_output = per_shift * t.active_shifts
-    ideal_output = per_shift * Decimal(bench.ideal_shift_count)
+    ideal_output = per_shift * Decimal(bench.ideal_shift_count) * share
     man_hours = Decimal(bench.total_headcount) * Decimal(bench.hours_per_shift)
-    scheduled_shifts = Decimal(t.machines or 0) * Decimal(bench.days_in_month)
-    capacity_output = per_shift * Decimal(bench.monthly_shift_capacity)
+    scheduled_shifts = Decimal(t.machines or 0) * days_in_period
+    capacity_output = per_shift * Decimal(bench.monthly_shift_capacity) * share
 
     # --- The 7 company-level KPIs: (code, actual, desired, ideal) ---
     # Built-in fallbacks; an active DB formula for (kpi, slot) overrides.
@@ -266,7 +292,7 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
         if r is None:
             continue
         avg = _div(r.output_units, r.active_shifts)
-        util = _pct(r.active_shifts, bench.days_in_month)
+        util = _pct(r.active_shifts, days_in_period)
         for code, actual, desired, ideal in (
             ("machine_output", r.output_units, desired_output and per_shift * r.active_shifts, None),
             ("machine_output_per_shift", avg, per_shift, per_shift),
@@ -284,4 +310,8 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
             )
 
     FactKPI.objects.bulk_create(rows)
+
+    # A week's figures change its month's totals too.
+    if period.parent_id:
+        compute_period_kpis(period.parent, only_approved=only_approved)
     return len(rows)

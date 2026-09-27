@@ -159,6 +159,44 @@ class PeriodReportTests(APITestCase):
         self.client.force_authenticate(ceo)
         self.assertEqual(self.report(4, 6).status_code, 200)
 
+    def test_a_rep_sees_only_their_own_row_and_totals(self):
+        """A کارشناس used to read every colleague's figures from this report."""
+        FactSalesMonthly.objects.create(
+            period=self.months[4], employee=self.other,
+            channel=SalesChannel.B2B, revenue_rial=1000,
+            status=ApprovalStatus.APPROVED,
+        )
+        SalesTarget.objects.create(
+            period=self.months[4], employee=self.other,
+            channel=SalesChannel.B2B, target_rial=900,
+        )
+        User = get_user_model()
+        rep = User.objects.create_user(
+            "b2b_rep_pr", password="Pass-12345!", role="operator",
+            department="sales_b2b",
+        )
+        self.emp.user = rep
+        self.emp.save(update_fields=["user"])
+        self.client.force_authenticate(rep)
+
+        data = self.report(4, 6).data
+        self.assertEqual([r["employee_id"] for r in data["rows"]], [self.emp.id])
+        self.assertEqual(data["totals"]["sales_rial"], "600")
+        self.assertEqual(data["totals"]["target_rial"], "450")
+        self.assertEqual([m["sales_rial"] for m in data["monthly"]], ["200", "200", "200"])
+        # Department-wide cuts would reveal everyone else in aggregate.
+        self.assertEqual(data["customer_groups"], [])
+        self.assertEqual(data["provinces"], [])
+
+    def test_a_rep_without_a_linked_person_is_refused(self):
+        User = get_user_model()
+        rep = User.objects.create_user(
+            "b2b_rep_nolink", password="Pass-12345!", role="operator",
+            department="sales_b2b",
+        )
+        self.client.force_authenticate(rep)
+        self.assertEqual(self.report(4, 6).status_code, 403)
+
     # -- presets ---------------------------------------------------------
     def test_presets_resolve_to_real_period_ids(self):
         response = self.client.get("/api/sales/period-presets/", {"channel": "b2b"})

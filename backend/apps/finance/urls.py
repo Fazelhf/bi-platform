@@ -13,6 +13,7 @@ router.register("budget-lines", views.BudgetLineViewSet, basename="budget-line")
 
 urlpatterns = [
     path("entry/", views.CashEntryView.as_view(), name="cash-entry"),
+    path("approvals/", views.CashApprovalView.as_view(), name="cash-approvals"),
     path("report/", views.CashReportView.as_view(), name="cash-report"),
     path("balance-trend/", views.BalanceTrendView.as_view(), name="balance-trend"),
     path("settings/", views.FinanceSettingView.as_view(), name="finance-settings"),

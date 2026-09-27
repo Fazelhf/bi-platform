@@ -246,7 +246,7 @@ def employee_options(request):
     """
     qs = (
         DimEmployee.objects.select_related("team")
-        .filter(is_active=True)
+        .filter(is_active=True, is_placeholder=False)
         .exclude(full_name_fa__in=["", "0"])
     )
     channels = channels_for(request.user)

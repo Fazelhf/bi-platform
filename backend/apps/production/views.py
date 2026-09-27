@@ -30,6 +30,7 @@ from apps.production.serializers import (
 )
 from apps.core.audit import diff as audit_diff, log as audit_log, snapshot
 from apps.core.models import AuditLog
+from apps.core.approval import submission_status
 from apps.core.notify import notify_decision, notify_submitted
 from apps.core.permissions import ApprovalPermission, DepartmentEntryPermission
 from apps.production.services.kpi import compute_period_kpis
@@ -84,11 +85,18 @@ class ProductionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         fact = self.get_object()
-        fact.status = ApprovalStatus.SUBMITTED
+        fact.status = submission_status(request.user, "production", True)
         fact.submitted_by = request.user
-        fact.save(update_fields=["status", "submitted_by", "updated_at"])
+        fields = ["status", "submitted_by", "updated_at"]
+        if fact.status == ApprovalStatus.APPROVED:
+            fact.approved_by = request.user
+            fields.append("approved_by")
+        fact.save(update_fields=fields)
         audit_log(request.user, fact, AuditLog.Action.SUBMIT)
-        notify_submitted(request.user, fact, "production", self._detail(fact))
+        if fact.status == ApprovalStatus.APPROVED:
+            compute_period_kpis(fact.period)
+        else:
+            notify_submitted(request.user, fact, "production", self._detail(fact))
         return Response(self.get_serializer(fact).data)
 
     @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission])
@@ -174,19 +182,27 @@ class ProductionDashboardView(APIView):
             period=period, scope=KPIScope.MACHINE
         ).select_related("kpi")
 
+        from django.db.models import Avg
+
+        from apps.core.periods import month_of, unit_ids
+
+        # At تولید's own grain: a month recorded week by week is its weeks.
+        units = unit_ids(period, "production")
         machines = (
-            FactProduction.objects.filter(period=period)
-            .select_related("machine")
-            .order_by("machine__sort_order")
-            .values(
-                "machine__name_fa", "machine__kind", "active_shifts", "output_units",
-                "waste_pct", "downtime_breakdown_shifts",
-                "downtime_sizechange_shifts", "downtime_nowork_shifts",
+            FactProduction.objects.filter(period_id__in=units)
+            .values("machine__name_fa", "machine__kind", "machine__sort_order")
+            .annotate(
+                active_shifts=Sum("active_shifts"), output_units=Sum("output_units"),
+                waste_pct=Avg("waste_pct"),
+                downtime_breakdown_shifts=Sum("downtime_breakdown_shifts"),
+                downtime_sizechange_shifts=Sum("downtime_sizechange_shifts"),
+                downtime_nowork_shifts=Sum("downtime_nowork_shifts"),
             )
+            .order_by("machine__sort_order")
         )
 
         costs = (
-            FactProductionCost.objects.filter(period=period)
+            FactProductionCost.objects.filter(period_id__in=units)
             .select_related("category")
             .values("category__name_fa")
             .annotate(amount=Sum("amount_rial"))
@@ -200,17 +216,17 @@ class ProductionDashboardView(APIView):
                 "amount": r.amount_rial,
             }
             for r in FactProductionRevenue.objects.filter(
-                period=period
+                period_id__in=units
             ).select_related("product")
         ]
 
         print_colors = (
-            FactPrintColor.objects.filter(period=period)
-            .values("color_count", "area_sqm")
+            FactPrintColor.objects.filter(period_id__in=units)
+            .values("color_count").annotate(area_sqm=Sum("area_sqm"))
             .order_by("color_count")
         )
 
-        bench, _ = ProductionBenchmark.objects.get_or_create(period=period)
+        bench, _ = ProductionBenchmark.objects.get_or_create(period=month_of(period))
         total_cost = sum((c["amount"] for c in costs), 0)
         total_revenue = sum((r["amount"] for r in revenue), 0)
 
@@ -265,7 +281,11 @@ class ProductionInputView(APIView):
     entry_department = "production"
 
     def _bench(self, period):
-        b, _ = ProductionBenchmark.objects.get_or_create(period=period)
+        # The benchmark (headcount, capacity) is the month's, whatever grain
+        # the lines are recorded at.
+        from apps.core.periods import month_of
+
+        b, _ = ProductionBenchmark.objects.get_or_create(period=month_of(period))
         return b
 
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True)], responses=dict)
@@ -309,8 +329,14 @@ class ProductionInputView(APIView):
             for p in DimProduct.objects.all()
         ]
 
+        from apps.core.periods import grain_of, is_unit
+
         return Response({
             "period": PeriodSerializer(period).data,
+            # تولید records at its own grain (set by the CEO); the page picks a
+            # week or a day when it is finer than the month.
+            "grain": grain_of(period, "production"),
+            "is_unit": is_unit(period, "production"),
             "benchmark": BenchmarkSerializer(bench).data,
             "cutting": cutting,
             "print": print_row,
@@ -320,11 +346,22 @@ class ProductionInputView(APIView):
         })
 
     def post(self, request):
+        from apps.core.periods import grain_of, is_unit
+
         period = DimPeriod.objects.get(pk=request.data.get("period"))
+        if not is_unit(period, "production"):
+            unit = {"month": "ماه", "week": "هفته", "day": "روز"}[grain_of(period, "production")]
+            return Response(
+                {"detail": f"اطلاعات تولید برای هر {unit} جداگانه وارد می‌شود؛ یک {unit} را انتخاب کنید."},
+                status=400,
+            )
         data = request.data
         user = request.user
         submit = bool(data.get("submit"))
-        status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
+        # An operator's submission waits for the production manager; the
+        # manager's own is final as sent (apps.core.approval).
+        status = submission_status(user, "production", submit)
+        approved = status == ApprovalStatus.APPROVED
 
         # 1) Headcount (benchmark)
         bench = self._bench(period)
@@ -339,6 +376,8 @@ class ProductionInputView(APIView):
             defaults["status"] = status
             if submit:
                 defaults["submitted_by"] = user
+            if approved:
+                defaults["approved_by"] = user
             obj, _ = FactProduction.objects.update_or_create(
                 period=period, machine=machine, defaults=defaults
             )
@@ -375,10 +414,12 @@ class ProductionInputView(APIView):
                           "output_weight": data.get("output_weight") or 0},
             )
 
-        if submit:
-            # Notify approvers that production data is pending.
+        if approved:
+            compute_period_kpis(period)
+        elif submit:
+            # Tell the production manager that figures are pending.
             first = FactProduction.objects.filter(period=period).first()
             if first:
                 notify_submitted(user, first, "production", f"اطلاعات تولید · {period.label}")
 
-        return Response({"ok": True, "submitted": submit, "period": period.label})
+        return Response({"ok": True, "submitted": submit, "status": status, "period": period.label})

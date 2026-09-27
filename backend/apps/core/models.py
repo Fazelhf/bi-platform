@@ -347,3 +347,62 @@ class SiteSetting(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"تنظیمات سایت ({self.chart_theme})"
+
+
+#: The sections that record figures against periods, each at its own grain.
+GRAIN_DEPARTMENTS = [
+    ("sales_team", "فروش همکار"),
+    ("sales_org", "فروش بانکی"),
+    ("sales_b2b", "فروش B2B"),
+    ("production", "تولید"),
+    ("finance", "مالی (نقدینگی)"),
+]
+
+GRAINS = [("month", "ماهانه"), ("week", "هفتگی"), ("day", "روزانه")]
+
+#: What a month starts at for a section until the CEO says otherwise.
+#: نقدینگی is recorded day by day.
+DEFAULT_GRAINS = {"finance": "day"}
+
+
+class PeriodGrain(TimeStampedModel):
+    """
+    How one section records one month: once for the month, week by week, or
+    day by day.
+
+    The period tree (month → week → day) is one shared calendar, but it used
+    to be the grain too: splitting a month into weeks for فروش made تولید and
+    مالی weekly as well. Now the tree is only the calendar — as deep as the
+    finest section needs — and each section stores and totals its figures at
+    the level this row names. See apps.core.periods.units_of().
+
+    Set only by the CEO. A section that already holds figures in a month keeps
+    its grain for that month; changing it would strand those figures.
+    """
+
+    month = models.ForeignKey(
+        DimPeriod, on_delete=models.CASCADE, related_name="grains",
+        limit_choices_to={"kind": PeriodKind.MONTH},
+    )
+    department = models.CharField(max_length=20, choices=GRAIN_DEPARTMENTS)
+    grain = models.CharField(max_length=8, choices=GRAINS, default="month")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["month", "department"], name="uniq_month_grain"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.month} · {self.department}: {self.grain}"
+
+
+class GrainDefault(TimeStampedModel):
+    """The grain a section's *new* months start at — history is never re-grained."""
+
+    department = models.CharField(max_length=20, choices=GRAIN_DEPARTMENTS, unique=True)
+    grain = models.CharField(max_length=8, choices=GRAINS, default="month")
+
+    @classmethod
+    def for_department(cls, department: str) -> str:
+        row = cls.objects.filter(department=department).first()
+        return row.grain if row else DEFAULT_GRAINS.get(department, "month")

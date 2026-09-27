@@ -69,3 +69,58 @@ class ProductionKpiTests(TestCase):
             FactKPI.objects.filter(kpi__domain="sales").exists(),
             "production recompute must not delete sales KPI rows",
         )
+
+
+class ProductionApprovalFlowTests(TestCase):
+    """An operator submits, the production manager decides; the manager's own is final."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        self.client = APIClient()
+        self.period = DimPeriod.objects.create(jalali_year=1405, jalali_month=3)
+        self.line = DimMachine.objects.create(code="cut-flow", name_fa="برش آزمایشی", sort_order=1)
+        User = get_user_model()
+        self.manager = User.objects.create_user(
+            "prod_mgr_flow", password="Pass-12345!", role="manager", department="production",
+        )
+        self.operator = User.objects.create_user(
+            "prod_op_flow", password="Pass-12345!", role="operator", department="production",
+        )
+        self.sales_mgr = User.objects.create_user(
+            "sales_mgr_flow", password="Pass-12345!", role="manager", department="sales_team",
+        )
+
+    def submit(self, user):
+        self.client.force_authenticate(user)
+        res = self.client.post("/api/production/input/", {
+            "period": self.period.id, "submit": True,
+            "cutting": [{"machine": self.line.id, "output_units": "100"}],
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        return FactProduction.objects.get(period=self.period, machine=self.line)
+
+    def test_the_managers_own_submission_is_final(self):
+        self.assertEqual(self.submit(self.manager).status, ApprovalStatus.APPROVED)
+
+    def test_an_operators_submission_waits_for_the_production_manager(self):
+        from apps.core.models import Notification
+
+        fact = self.submit(self.operator)
+        self.assertEqual(fact.status, ApprovalStatus.SUBMITTED)
+        self.assertEqual(
+            list(Notification.objects.filter(verb="submitted").values_list("recipient", flat=True)),
+            [self.manager.id],
+        )
+
+        self.client.force_authenticate(self.sales_mgr)
+        self.assertEqual(
+            self.client.post(f"/api/production/production/{fact.id}/approve/").status_code, 403,
+        )
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(
+            self.client.post(f"/api/production/production/{fact.id}/approve/").status_code, 200,
+        )
+        fact.refresh_from_db()
+        self.assertEqual(fact.status, ApprovalStatus.APPROVED)

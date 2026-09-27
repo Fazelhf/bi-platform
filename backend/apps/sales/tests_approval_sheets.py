@@ -52,9 +52,22 @@ class SheetApprovalTests(APITestCase):
 
     # ---- helpers ---------------------------------------------------------
     def enter(self, period, submit=True):
-        """Post a team sheet the way the entry page does."""
+        """
+        Post a team sheet the way the entry page does, and leave it *pending*.
+
+        A manager's own submission is final as sent now, so these tests — about
+        how a pending sheet is shown and decided — hold its status at
+        «submitted»: the shape a کارشناس's sheet, or one sent before the
+        change, has in the کارتابل.
+        """
         self.client.force_authenticate(self.manager)
-        res = self.client.post("/api/sales/input/", {
+        pending = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
+        with mock.patch("apps.sales.views.submission_status", return_value=pending):
+            res = self._post_sheet(period, submit)
+        self.assertEqual(res.status_code, 200, res.data)
+
+    def _post_sheet(self, period, submit):
+        return self.client.post("/api/sales/input/", {
             "period": period.id,
             "channel": "team",
             "submit": submit,
@@ -70,16 +83,15 @@ class SheetApprovalTests(APITestCase):
             ],
             "customer_groups": [],
         }, format="json")
-        self.assertEqual(res.status_code, 200, res.data)
 
     def sheets(self, user=None):
-        self.client.force_authenticate(user or self.ceo)
+        self.client.force_authenticate(user or self.manager)
         res = self.client.get("/api/sales/approvals/")
         self.assertEqual(res.status_code, 200, res.data)
         return res.data["sheets"]
 
     def decide(self, period, action, user=None, note=""):
-        self.client.force_authenticate(user or self.ceo)
+        self.client.force_authenticate(user or self.manager)
         return self.client.post("/api/sales/approvals/decide/", {
             "period": period.id, "channel": "team", "action": action, "note": note,
         }, format="json")
@@ -146,7 +158,7 @@ class SheetApprovalTests(APITestCase):
         url = f"/api/sales/dashboard/detail/?period={self.weeks[1].id}&channel=team"
 
         self.assertEqual(self.client.get(url).data["provinces"], [])
-        self.decide(self.weeks[1], "approve")
+        self.decide(self.weeks[1], "approve")  # by the team manager
         self.client.force_authenticate(self.ceo)
         self.assertEqual(
             sorted(p["name"] for p in self.client.get(url).data["provinces"]),
@@ -155,7 +167,10 @@ class SheetApprovalTests(APITestCase):
 
     def test_a_revision_goes_back_to_the_submitter_once(self):
         self.enter(self.weeks[1])
-        res = self.decide(self.weeks[1], "request-revision", note="استان‌ها را بازبینی کنید")
+        # Decided by someone other than the submitter — nobody is notified of
+        # their own decision.
+        res = self.decide(self.weeks[1], "request-revision", user=self.ceo,
+                          note="استان‌ها را بازبینی کنید")
         self.assertEqual(res.status_code, 200, res.data)
 
         self.assertEqual(
@@ -178,9 +193,61 @@ class SheetApprovalTests(APITestCase):
         self.assertEqual(self.decide(self.month, "approve").status_code, 400)
 
     # ---- who ---------------------------------------------------------------
-    def test_managers_see_only_their_own_channel_and_cannot_decide(self):
+    def test_a_manager_decides_their_own_channel_only(self):
         self.enter(self.weeks[1])
 
         self.assertEqual(len(self.sheets(self.manager)), 1)
         self.assertEqual(self.sheets(self.bank_manager), [])
-        self.assertEqual(self.decide(self.weeks[1], "approve", user=self.manager).status_code, 403)
+        self.assertEqual(
+            self.decide(self.weeks[1], "approve", user=self.bank_manager).status_code, 403,
+        )
+        self.assertEqual(self.decide(self.weeks[1], "approve", user=self.manager).status_code, 200)
+
+    def test_the_ceo_can_still_decide_as_a_fallback(self):
+        self.enter(self.weeks[1])
+        self.assertEqual(self.decide(self.weeks[1], "approve", user=self.ceo).status_code, 200)
+
+    # ---- the flow ----------------------------------------------------------
+    def test_a_managers_own_submission_is_final(self):
+        self.client.force_authenticate(self.manager)
+        res = self._post_sheet(self.weeks[1], submit=True)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["status"], ApprovalStatus.APPROVED)
+        self.assertFalse(
+            FactSalesMonthly.objects.filter(period=self.weeks[1]).exclude(
+                status=ApprovalStatus.APPROVED).exists()
+        )
+        self.assertFalse(
+            FactSalesProvince.objects.filter(period=self.weeks[1]).exclude(
+                status=ApprovalStatus.APPROVED).exists()
+        )
+        self.assertEqual(self.sheets(), [])
+        self.assertFalse(Notification.objects.filter(verb="submitted").exists())
+
+    def test_a_reps_submission_goes_to_their_manager_not_the_ceo(self):
+        User = get_user_model()
+        rep = User.objects.create_user(
+            "sheet_rep", password="Pass-12345!", role="operator", department="sales_team",
+        )
+        self.ali.user = rep
+        self.ali.save(update_fields=["user"])
+        self.client.force_authenticate(rep)
+        res = self.client.post("/api/sales/input/", {
+            "period": self.weeks[1].id, "channel": "team", "submit": True,
+            "columns": [{"employee_id": self.ali.id, "name": self.ali.full_name_fa,
+                         "revenue_rial": "700"}],
+            "provinces": [], "customer_groups": [],
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["status"], ApprovalStatus.SUBMITTED)
+
+        submitted = Notification.objects.filter(verb="submitted")
+        self.assertEqual(list(submitted.values_list("recipient", flat=True)), [self.manager.id])
+
+        self.assertEqual(len(self.sheets(self.manager)), 1)
+        self.assertEqual(self.decide(self.weeks[1], "approve").status_code, 200)
+        self.assertEqual(
+            FactSalesMonthly.objects.get(period=self.weeks[1], employee=self.ali).status,
+            ApprovalStatus.APPROVED,
+        )
+        self.assertTrue(Notification.objects.filter(recipient=rep, verb="approved").exists())

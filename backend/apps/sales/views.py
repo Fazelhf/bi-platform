@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from apps.core.jalali import from_gregorian
 from apps.core.models import DimKPI, DimPeriod, FactKPI, KPIScope, PeriodKind
-from apps.core.periods import leaf_ids_for, month_of
+from apps.core.periods import month_of
 from apps.sales.models import (
     ApprovalStatus,
     DimBank,
@@ -29,6 +29,7 @@ from apps.sales.models import (
 )
 from apps.core.audit import diff as audit_diff, log as audit_log, snapshot
 from apps.core.models import AuditLog
+from apps.core.approval import submission_status
 from apps.core.notify import notify_decision, notify_submitted
 from apps.core.permissions import (
     CHANNEL_DEPARTMENT,
@@ -118,6 +119,16 @@ def assert_channel_visible(user, channel: str) -> None:
     raise PermissionDenied("این بخش فروش متعلق به شما نیست.")
 
 
+def channel_units(period, channel: str) -> list[int]:
+    """
+    Ids of the periods a channel's figures for `period` are stored on — at
+    that channel's own grain (apps.core.periods.units_of), not the raw tree.
+    """
+    from apps.core.periods import channel_department, unit_ids
+
+    return unit_ids(period, channel_department(channel))
+
+
 def current_jalali_year() -> int:
     """The Jalali year we are in right now."""
     return from_gregorian(timezone.localdate())[0]
@@ -167,7 +178,7 @@ def entry_block(user, period, channel: str, employee=None) -> str:
     if period.parent_id is None or not period.start_date:
         return ""
 
-    from apps.core.periods import leaves_of
+    from apps.core.periods import channel_department, units_of
 
     def filled(ids):
         qs = FactSalesMonthly.objects.filter(period_id__in=ids, channel=channel)
@@ -178,7 +189,7 @@ def entry_block(user, period, channel: str, employee=None) -> str:
     if filled([period.id]):
         return ""
     earlier = [
-        p for p in leaves_of(month_of(period))
+        p for p in units_of(month_of(period), channel_department(channel))
         if p.start_date and p.start_date < period.start_date
     ]
     done = filled([p.id for p in earlier])
@@ -230,7 +241,7 @@ def sales_eligible_ids(channel: str) -> set[int]:
     seated = {h for _, h in seats}
     seated_in_sales = {h for u, h in seats if channels.get(u)}
     others = set(
-        DimEmployee.objects.filter(is_active=True)
+        DimEmployee.objects.filter(is_active=True, is_placeholder=False)
         .exclude(id__in=seated - seated_in_sales)
         .exclude(user__department__in=NON_SALES_DEPARTMENTS)
         .values_list("id", flat=True)
@@ -283,166 +294,114 @@ class PeriodViewSet(viewsets.ModelViewSet):
             return qs.filter(jalali_year=int(year))
         return qs.filter(jalali_year=current_jalali_year())
 
+    @staticmethod
+    def _department(request) -> str:
+        """The section a request is about: ?department=, else ?channel='s."""
+        from apps.core.periods import channel_department
+
+        dept = (request.query_params.get("department") or "").strip()
+        if dept:
+            return dept
+        channel = (request.query_params.get("channel") or "").strip()
+        return channel_department(channel) if channel else ""
+
     @action(detail=True, methods=["get"])
     def weeks(self, request, pk=None):
         """
         The month's weeks plus how far through it we are — this is what draws
         the progress dots and the «داده تا …» / «ماه کامل نشده» badge.
-        """
-        from apps.core.periods import progress
 
-        from apps.core.periods import calendar, reconciliation
+        At the grain of the section asked for (?channel= or ?department=):
+        a monthly section sees one «week», the month itself.
+        """
+        from apps.core.periods import calendar, grain_of, progress, reconciliation
 
         month = self.get_object()
-        data = progress(month)
+        dept = self._department(request)
+        data = progress(month, dept)
         data["period"] = self.get_serializer(month).data
+        data["grain"] = grain_of(month, dept) if dept else None
         # The calendar lets the UI show which days each week covers, and the
         # reconciliation proves جمع هفته‌ها == ماه instead of just claiming it.
         data["calendar"] = calendar(month)
-        data["reconciliation"] = reconciliation(month)
+        data["reconciliation"] = reconciliation(month, dept)
         return Response(data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsExecutiveOrAdmin])
-    def split(self, request, pk=None):
-        """
-        Cut a period one level finer: a month into weeks, a week into days.
-        Executive-only, and refused once the period holds figures — see the
-        invariant on DimPeriod.
-        """
-        from apps.core.models import PeriodKind, SiteSetting
-        from apps.core.periods import ensure_days, ensure_weeks
-
-        period = self.get_object()
-        try:
-            if period.kind == PeriodKind.WEEK:
-                children = ensure_days(period)
-            else:
-                children = ensure_weeks(period, min_days=SiteSetting.get().min_week_days)
-        except ValueError as exc:
-            return Response({"detail": str(exc)},
-                            status=http_status.HTTP_400_BAD_REQUEST)
-        return Response(self.get_serializer(children, many=True).data)
-
-    @action(detail=True, methods=["post"], url_path="split-days",
+    @action(detail=False, methods=["get"], url_path="grains",
             permission_classes=[IsExecutiveOrAdmin])
-    def split_days(self, request, pk=None):
+    def grains(self, request):
         """
-        Put a whole month onto daily entry in one action — split it into weeks
-        if needed, then split every week into days. Doing it week by week from
-        the UI would be six clicks for one decision.
+        «دوره‌ها» — every month of a year, and for each section the grain it
+        records at and whether that can still change. The CEO's panel.
         """
-        from django.db import transaction
+        from apps.core.models import GRAIN_DEPARTMENTS, GRAINS, GrainDefault
+        from apps.core.periods import department_has_facts, grain_of
 
-        from apps.core.models import PeriodKind, SiteSetting
-        from apps.core.periods import ensure_days, ensure_weeks, has_facts
-
-        month = self.get_object()
-        if month.kind != PeriodKind.MONTH:
-            return Response({"detail": "فقط یک ماه را می‌توان روزانه کرد."},
-                            status=http_status.HTTP_400_BAD_REQUEST)
-        try:
-            # All or nothing. ensure_days() is atomic per week, but this walks
-            # several of them: without an outer transaction a month whose third
-            # week held figures came back 400 having already converted the
-            # first two — a refusal that half-applied.
-            with transaction.atomic():
-                weeks = list(month.children.order_by("seq")) or ensure_weeks(
-                    month, min_days=SiteSetting.get().min_week_days
-                )
-                # Name every blocking week up front, rather than stopping at the
-                # first: the manager needs to know what to clear, not to
-                # discover it one refusal at a time.
-                blocked = [
-                    w for w in weeks
-                    if w.kind == PeriodKind.WEEK and not w.children.exists() and has_facts(w)
-                ]
-                if blocked:
-                    raise ValueError(
-                        "این هفته‌ها داده‌ی ثبت‌شده دارند و باید اول پاک شوند: "
-                        + "، ".join(f"هفته {w.seq}" for w in blocked)
-                    )
-                days = []
-                for w in weeks:
-                    if w.kind != PeriodKind.WEEK:
-                        continue
-                    days.extend(ensure_days(w) if not w.children.exists()
-                                else list(w.children.order_by("seq")))
-        except ValueError as exc:
-            return Response({"detail": str(exc)},
-                            status=http_status.HTTP_400_BAD_REQUEST)
-        return Response({"weeks": len(weeks), "days": len(days)})
-
-    @action(detail=True, methods=["post"], permission_classes=[IsExecutiveOrAdmin])
-    def unsplit(self, request, pk=None):
-        """Back to monthly entry. Refused while any week still holds data."""
-        from apps.core.periods import unsplit
-
-        try:
-            removed = unsplit(self.get_object())
-        except ValueError as exc:
-            return Response({"detail": str(exc)},
-                            status=http_status.HTTP_400_BAD_REQUEST)
-        return Response({"removed": removed})
-
-    @action(detail=False, methods=["get"], url_path="year-grain")
-    def year_grain(self, request):
-        """
-        Every month of a year with its current grain and whether it can be
-        changed — this is what the CEO's «دوره‌ها» panel renders.
-        """
-        from apps.core.periods import has_any_facts, leaves_of
-
-        year = int(request.query_params.get("year") or 0)
+        year = (request.query_params.get("year") or "").strip()
         months = DimPeriod.objects.filter(kind="month")
-        if year:
-            months = months.filter(jalali_year=year)
+        months = months.filter(jalali_year=int(year) if year.isdigit() else current_jalali_year())
 
         out = []
-        for m in months.order_by("jalali_year", "jalali_month"):
-            weeks = list(m.children.order_by("seq"))
-            day_count = sum(w.children.count() for w in weeks)
-            month_has_facts = has_any_facts(m)
-            # A week counts as filled if anything under it holds figures, so a
-            # week whose days have data still blocks going back to weekly.
-            filled_weeks = [
-                w.seq for w in weeks if any(has_any_facts(l) for l in leaves_of(w))
-            ]
-            filled_days = [
-                w.seq for w in weeks
-                if w.children.exists() and any(has_any_facts(d) for d in w.children.all())
-            ]
-
-            grain = "month"
-            if day_count:
-                grain = "day"
-            elif weeks:
-                grain = "week"
-
+        for m in months.order_by("jalali_month"):
+            sections = []
+            for dept, label in GRAIN_DEPARTMENTS:
+                locked = department_has_facts(m, dept)
+                sections.append({
+                    "department": dept,
+                    "label": label,
+                    "grain": grain_of(m, dept),
+                    "locked": locked,
+                })
             out.append({
-                "id": m.id,
-                "label": m.label,
-                "jalali_year": m.jalali_year,
-                "jalali_month": m.jalali_month,
-                "grain": grain,
-                "week_count": len(weeks),
-                "day_count": day_count,
-                "days": m.days,
-                # Why a switch is unavailable, so the UI can explain itself.
-                "can_go_weekly": (
-                    (not weeks and not month_has_facts)          # from monthly
-                    or (grain == "day" and not filled_days)      # back from daily
-                ),
-                "can_go_monthly": bool(weeks) and not filled_weeks,
-                "can_go_daily": bool(weeks) and grain != "day" and not filled_weeks
-                                or (not weeks and not month_has_facts),
-                "blocked_reason": (
-                    "این ماه داده‌ی ثبت‌شده دارد" if month_has_facts and not weeks
-                    else f"هفته‌های {'، '.join(map(str, filled_weeks))} داده دارند"
-                    if filled_weeks else ""
-                ),
+                "id": m.id, "label": m.label,
+                "jalali_year": m.jalali_year, "jalali_month": m.jalali_month,
+                "days": m.days, "sections": sections,
             })
-        return Response(out)
+        return Response({
+            "months": out,
+            "departments": [{"key": k, "label": v} for k, v in GRAIN_DEPARTMENTS],
+            "grains": [{"key": k, "label": v} for k, v in GRAINS],
+            "defaults": {
+                dept: GrainDefault.for_department(dept) for dept, _ in GRAIN_DEPARTMENTS
+            },
+        })
 
+    @action(detail=True, methods=["post"], permission_classes=[IsExecutiveOrAdmin])
+    def grain(self, request, pk=None):
+        """
+        Set one section's grain for one month — CEO only. Refused once that
+        section has figures in the month; other sections are never affected.
+        """
+        from apps.core.periods import set_grain
+
+        month = self.get_object()
+        dept = (request.data.get("department") or "").strip()
+        grain = (request.data.get("grain") or "").strip()
+        try:
+            set_grain(month, dept, grain)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=http_status.HTTP_400_BAD_REQUEST)
+        audit_log(request.user, month, AuditLog.Action.UPDATE,
+                  {"grain": {"before": None, "after": f"{dept} · {grain}"}})
+        return Response({"month": month.id, "department": dept, "grain": grain})
+
+    @action(detail=False, methods=["post"], url_path="grain-defaults",
+            permission_classes=[IsExecutiveOrAdmin])
+    def grain_defaults(self, request):
+        """
+        The grain each section's *new* months start at. Months already set
+        keep theirs; to change those, set them one by one (or with
+        «از این ماه به بعد» in the panel).
+        """
+        from apps.core.models import GRAIN_DEPARTMENTS, GrainDefault
+        from apps.core.periods import LEVEL
+
+        dept = (request.data.get("department") or "").strip()
+        grain = (request.data.get("grain") or "").strip()
+        if dept not in dict(GRAIN_DEPARTMENTS) or grain not in LEVEL:
+            raise ValidationError({"detail": "بخش یا دانه‌بندی نامعتبر است."})
+        GrainDefault.objects.update_or_create(department=dept, defaults={"grain": grain})
+        return Response({"department": dept, "grain": grain})
 
 class TeamManagePermission(BasePermission):
     """Read for anyone signed in; only the CEO, an admin or a sales department
@@ -560,12 +519,19 @@ class SalesMonthlyViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         fact = self.get_object()
-        fact.status = ApprovalStatus.SUBMITTED
+        dept = CHANNEL_DEPARTMENT.get(fact.channel, "")
+        fact.status = submission_status(request.user, dept, True)
         fact.submitted_by = request.user
-        fact.save(update_fields=["status", "submitted_by", "updated_at"])
+        fields = ["status", "submitted_by", "updated_at"]
+        if fact.status == ApprovalStatus.APPROVED:
+            fact.approved_by = request.user
+            fields.append("approved_by")
+        fact.save(update_fields=fields)
         audit_log(request.user, fact, AuditLog.Action.SUBMIT)
-        notify_submitted(request.user, fact,
-                         CHANNEL_DEPARTMENT.get(fact.channel, ""), self._detail(fact))
+        if fact.status == ApprovalStatus.APPROVED:
+            compute_period_kpis(fact.period)
+        else:
+            notify_submitted(request.user, fact, dept, self._detail(fact))
         return Response(self.get_serializer(fact).data)
 
     @action(detail=True, methods=["post"], permission_classes=[ApprovalPermission])
@@ -700,7 +666,7 @@ class DashboardSummaryView(APIView):
         # own facts.
         province = (
             FactSalesProvince.objects.filter(
-                period_id__in=leaf_ids_for(period), channel=channel,
+                period_id__in=channel_units(period, channel), channel=channel,
                 status=ApprovalStatus.APPROVED,
             )
             .select_related("province")
@@ -710,7 +676,9 @@ class DashboardSummaryView(APIView):
         )
 
         collections = (
-            FactCollection.objects.filter(period_id__in=leaf_ids_for(period))
+            FactCollection.objects.filter(
+                period_id__in=channel_units(period, SalesChannel.ORGANIZATIONAL)
+            )
             .select_related("bank")
             .values("bank__name_fa")
             .annotate(amount=Sum("amount_rial"))
@@ -816,7 +784,7 @@ def metric_fields_for(channel: str) -> list[str]:
     return [f for f, _ in metric_rows_for(channel)]
 
 
-def _breakdown(period, facts, fields, stock_fields) -> list[dict]:
+def _breakdown(period, facts, fields, stock_fields, channel: str = "") -> list[dict]:
     """
     One entry per child of a split period — the weeks of a month, or the days
     of a week — holding that child's sheet totals alone, so the page can put
@@ -827,10 +795,11 @@ def _breakdown(period, facts, fields, stock_fields) -> list[dict]:
     approval sheets use; their weeks are not expected to add up to the month,
     and the page says so rather than showing a false mismatch.
     """
-    from apps.core.periods import leaves_of
+    from apps.core.periods import channel_department, children_for, units_of
 
-    children = list(period.children.order_by("seq"))
-    owner = {leaf.id: child.id for child in children for leaf in leaves_of(child)}
+    dept = channel_department(channel)
+    children = children_for(period, dept)
+    owner = {leaf.id: child.id for child in children for leaf in units_of(child, dept)}
     per_child: dict[int, dict[int, dict]] = {child.id: {} for child in children}
 
     for fact in facts:  # oldest leaf first
@@ -893,11 +862,14 @@ class SalesInputView(APIView):
         # of its own, so reading it used to return an empty sheet. It now
         # returns the roll-up of its leaves, read-only — the manager sees the
         # month as the sum of the weeks without adding four sheets by hand.
-        from apps.core.periods import leaves_of
         from apps.sales.services.approval_sheets import STOCK_FIELDS
 
-        is_rollup = period.children.exists()
-        leaf_ids = [p.id for p in leaves_of(period)] if is_rollup else [period.id]
+        from apps.core.periods import channel_department, is_unit
+
+        # At this channel's own grain: a weekly channel's month rolls up its
+        # weeks, whatever other sections have made of the calendar below.
+        is_rollup = not is_unit(period, channel_department(channel))
+        leaf_ids = channel_units(period, channel)
         facts = FactSalesMonthly.objects.filter(
             period_id__in=leaf_ids, channel=channel,
             **({"employee": own} if own else {}),
@@ -1040,7 +1012,7 @@ class SalesInputView(APIView):
             # with the per-week totals that prove the month is their sum.
             "is_rollup": is_rollup,
             "stock_fields": sorted(STOCK_FIELDS),
-            "breakdown": _breakdown(period, facts, fields, STOCK_FIELDS) if is_rollup else [],
+            "breakdown": _breakdown(period, facts, fields, STOCK_FIELDS, channel) if is_rollup else [],
             # A rep's sheet: one column, no adding or removing people.
             "own_only": own is not None,
             # Why the sheet is closed for entry right now (future week, or an
@@ -1054,27 +1026,38 @@ class SalesInputView(APIView):
         channel = self._channel(request)
         self._assert_owner(request, channel)
 
-        # Hard stop: never write figures to a period that has children. If a
-        # month held its own numbers *and* its weeks held theirs, the two
-        # would drift apart and every total would be ambiguous. Weekly months
-        # are filled in week by week — that is what keeps جمع هفته‌ها == ماه
+        # Hard stop: figures go only on the periods this channel records at.
+        # If a weekly channel's month held its own numbers *and* its weeks
+        # held theirs, the two would drift apart and every total would be
+        # ambiguous — the week-by-week rule is what keeps جمع هفته‌ها == ماه
         # true by construction rather than by hope.
-        if period.children.exists():
+        from apps.core.periods import channel_department, grain_of, is_unit
+
+        dept = channel_department(channel)
+        if not is_unit(period, dept):
+            unit = {"month": "ماه", "week": "هفته", "day": "روز"}[grain_of(period, dept)]
             raise ValidationError(
-                "این ماه به هفته تقسیم شده است؛ اطلاعات باید در هر هفته جداگانه "
-                "وارد شود، نه روی خود ماه."
+                f"اطلاعات این بخش برای هر {unit} جداگانه وارد می‌شود؛ "
+                f"یک {unit} را انتخاب کنید."
             )
         own = own_employee(request.user)
         block = entry_block(request.user, period, channel, own)
         if block:
             raise ValidationError({"detail": block})
         submit = bool(request.data.get("submit"))
-        status = ApprovalStatus.SUBMITTED if submit else ApprovalStatus.DRAFT
         user = request.user
+        # A کارشناس's submission waits for their manager; the manager's own
+        # is final as sent (apps.core.approval).
+        status = submission_status(user, CHANNEL_DEPARTMENT.get(channel, ""), submit)
+        approved = status == ApprovalStatus.APPROVED
         # Provinces and segments are part of the same sheet and carry its
         # status. They used to carry none, which put them on the dashboards
         # the moment they were saved — before anyone had approved them.
-        sheet_state = {"status": status, **({"submitted_by": user} if submit else {})}
+        sheet_state = {
+            "status": status,
+            **({"submitted_by": user} if submit else {}),
+            **({"approved_by": user} if approved else {}),
+        }
 
         # Targets live in SalesTarget at month grain and are set only in the
         # «تارگت» section — never through this sheet, whoever is posting.
@@ -1122,9 +1105,7 @@ class SalesInputView(APIView):
                 if employee.id not in eligible:
                     raise ValidationError({"detail": f"«{name}» کارشناس فروش این بخش نیست."})
             values = {m: _amount(row.get(m), f"{name} · {m}") for m in editable}
-            values["status"] = status
-            if submit:
-                values["submitted_by"] = user
+            values.update(sheet_state)
             obj, _ = FactSalesMonthly.objects.update_or_create(
                 period=period, employee=employee, channel=channel, defaults=values
             )
@@ -1201,7 +1182,10 @@ class SalesInputView(APIView):
         audit_log(user, period, AuditLog.Action.UPDATE,
                   {"sales_input": {"before": None, "after": f"{channel} · {len(kept_employee_ids)} کارشناس"}})
 
-        if submit:
+        if approved:
+            # The manager's own submission is final: onto the dashboards now.
+            compute_period_kpis(period)
+        elif submit:
             # A sheet with only a provincial block is still a submission.
             first = (
                 FactSalesMonthly.objects.filter(period=period, channel=channel).first()
@@ -1211,7 +1195,10 @@ class SalesInputView(APIView):
                 notify_submitted(user, first, CHANNEL_DEPARTMENT.get(channel, ""),
                                  f"فروش {SalesChannel(channel).label} · {period.label}")
 
-        return Response({"ok": True, "submitted": submit, "salespeople": len(kept_employee_ids)})
+        return Response({
+            "ok": True, "submitted": submit, "status": status,
+            "salespeople": len(kept_employee_ids),
+        })
 
     def _post_own(self, request, period, channel, own, editable, submit, status):
         """
@@ -1235,9 +1222,10 @@ class SalesInputView(APIView):
         audit_log(request.user, period, AuditLog.Action.UPDATE,
                   {"sales_input": {"before": None, "after": f"{channel} · {own.full_name_fa}"}})
         if submit:
+            # A کارشناس is never their own approver: this goes to the manager.
             notify_submitted(request.user, fact, CHANNEL_DEPARTMENT.get(channel, ""),
                              f"فروش {SalesChannel(channel).label} · {own.full_name_fa} · {period.label}")
-        return Response({"ok": True, "submitted": submit, "salespeople": 1})
+        return Response({"ok": True, "submitted": submit, "status": status, "salespeople": 1})
 
 
 class SalesApprovalSheetsView(APIView):
@@ -1260,7 +1248,7 @@ class SalesApprovalSheetsView(APIView):
 
 
 class SalesApprovalDecideView(APIView):
-    """Approve, reject or return one whole sheet. The CEO decides."""
+    """Approve, reject or return one whole sheet. The channel's manager decides."""
 
     permission_classes = [ApprovalPermission]
 
@@ -1289,13 +1277,12 @@ class SalesTargetView(APIView):
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True),
                               OpenApiParameter("channel", str)], responses=dict)
     def get(self, request):
-        from apps.core.periods import leaf_ids_for
         from apps.sales.models import SalesTarget
 
         period = _period_param(request.query_params.get("period"))
         month = month_of(period)  # plans are always held on the month
         channel = request.query_params.get("channel", "team")
-        leaves = leaf_ids_for(month)
+        leaves = channel_units(month, channel)
 
         plans = {
             (t.employee_id, t.province_id): t.target_rial
@@ -1322,8 +1309,13 @@ class SalesTargetView(APIView):
         #
         # Union rather than a plain filter: someone deactivated mid-year who
         # still has figures or a plan for this month must not vanish from it.
+        #
+        # Only this channel's salespeople: DimEmployee is the whole company
+        # since منابع انسانی took it over, so the page listed the factory
+        # floor and finance next to the reps — the same leak the entry sheet's
+        # picker had, closed the same way.
         employees = list(
-            DimEmployee.objects.filter(is_active=True)
+            DimEmployee.objects.filter(is_active=True, id__in=sales_eligible_ids(channel))
             .exclude(full_name_fa__in=["", "0"])
             .select_related("team")
         )
@@ -1373,6 +1365,7 @@ class SalesTargetView(APIView):
         channel = _valid_channel(request.data.get("channel", "team"))
         known_people = set(DimEmployee.objects.values_list("id", flat=True))
         known_provinces = set(DimProvince.objects.values_list("id", flat=True))
+        eligible = None  # built on first need
 
         for row in request.data.get("people", []):
             emp_id = row.get("employee_id")
@@ -1382,6 +1375,19 @@ class SalesTargetView(APIView):
             # and counted by nothing; refuse it instead of storing a ghost.
             if emp_id not in known_people:
                 raise ValidationError({"detail": "کارشناس انتخاب‌شده وجود ندارد."})
+            # A new plan only for this channel's salespeople; one already
+            # stored (or someone with figures this month) stays editable even
+            # if they have since moved out of the channel.
+            has_history = SalesTarget.objects.filter(
+                period=month, channel=channel, employee_id=emp_id, province=None
+            ).exists() or FactSalesMonthly.objects.filter(
+                period_id__in=channel_units(month, channel), channel=channel, employee_id=emp_id
+            ).exists()
+            if not has_history:
+                if eligible is None:
+                    eligible = sales_eligible_ids(channel)
+                if emp_id not in eligible:
+                    raise ValidationError({"detail": "این شخص کارشناس فروش این بخش نیست."})
             SalesTarget.objects.update_or_create(
                 period=month, channel=channel, employee_id=emp_id, province=None,
                 defaults={"target_rial": _amount(row.get("target_rial"), "تارگت")},
@@ -1449,7 +1455,7 @@ def _rolled_up_facts(period, channel):
     rows: dict[int, SimpleNamespace] = {}
     facts = (
         FactSalesMonthly.objects.filter(
-            period_id__in=leaf_ids_for(period), channel=channel,
+            period_id__in=channel_units(period, channel), channel=channel,
             status=ApprovalStatus.APPROVED,
         )
         .select_related("employee", "employee__team")
@@ -1561,7 +1567,7 @@ class SalesDashboardDetailView(APIView):
             "sales": float(p["sales"] or 0),
             "target": float(p["target"] or 0),
         } for p in FactSalesProvince.objects.filter(
-            period_id__in=leaf_ids_for(period), channel=channel,
+            period_id__in=channel_units(period, channel), channel=channel,
             status=ApprovalStatus.APPROVED,
         ).values("province__name_fa").annotate(
             sales=Sum("sales_rial"), target=Sum("target_rial"),
@@ -1861,8 +1867,12 @@ class SalesPeriodReportView(APIView):
         # its month so the picker can pass whatever the caller has.
         start, end = month_of(start), month_of(end)
 
+        # A کارشناس gets a report on themselves, never on their colleagues —
+        # the department check above let any rep read every row.
+        own = own_employee(user)
+
         try:
-            return Response(build(start, end, channel))
+            return Response(build(start, end, channel, employee=own))
         except PeriodRangeError as exc:
             raise ValidationError({"detail": str(exc)})
 
@@ -1909,7 +1919,7 @@ class SalesPeriodPresetView(APIView):
         channel = request.query_params.get("channel", SalesChannel.B2B)
         recorded = set()
         for month in in_year.values():
-            leaves = leaf_ids_for(month)
+            leaves = channel_units(month, channel)
             if FactSalesMonthly.objects.filter(
                 period_id__in=leaves, channel=channel
             ).exclude(revenue_rial=0).exists():

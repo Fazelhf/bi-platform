@@ -119,10 +119,13 @@ class User(AbstractUser):
 
     @property
     def can_approve(self) -> bool:
-        # Per the approval workflow, ONLY the CEO (executive) — or a superuser
-        # acting as admin — is the final approver. Department managers submit
-        # data but may not approve/reject it; they only see its status.
-        return self.role == Role.EXECUTIVE or self.is_superuser
+        # A department manager approves their own section's submissions (see
+        # apps.core.approval); the CEO and superusers may decide on anything.
+        # Which records a given manager may decide on is checked per record.
+        return (
+            self.role == Role.EXECUTIVE or self.is_superuser
+            or (self.role == Role.MANAGER and bool(self.department))
+        )
 
     @property
     def can_enter_data(self) -> bool:

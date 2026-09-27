@@ -67,7 +67,7 @@ async function fetchDetail(pid: number): Promise<Detail> {
 async function loadProgress() {
   if (!periodA.value) return;
   try {
-    progress.value = await salesApi.monthProgress(periodA.value);
+    progress.value = await salesApi.monthProgress(periodA.value, { channel: props.channel });
   } catch {
     progress.value = null; // months that were never split have no strip
   }

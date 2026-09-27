@@ -16,7 +16,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from apps.core.models import DimPeriod
-from apps.core.periods import leaves_of
+from apps.core.periods import units_of
 from apps.finance.models import (
     CashCategory,
     CashMovement,
@@ -30,7 +30,8 @@ ZERO = Decimal(0)
 
 def _day_leaves(period: DimPeriod) -> list[DimPeriod]:
     """Every day under a month/week — the grain movements are stored at."""
-    return sorted(leaves_of(period), key=lambda p: (p.start_date or p.id, p.id))
+    # At مالی's own grain (روزانه by default), not the raw calendar.
+    return sorted(units_of(period, "finance"), key=lambda p: (p.start_date or p.id, p.id))
 
 
 def _ordered_days(periods: list[DimPeriod]) -> list[DimPeriod]:

@@ -6,6 +6,7 @@ import type { MonthProgress } from "@/types";
 import { toast, confirm, prompt } from "@/composables/useUi";
 import { num, pct, rial } from "@/utils/format";
 import { selectIfZero } from "@/utils/inputs";
+import { submitHint, submittedMessage } from "@/utils/approval";
 import MoneyInput from "@/components/MoneyInput.vue";
 import ExportActions from "@/components/ExportActions.vue";
 import PeriodCalendar from "@/components/PeriodCalendar.vue";
@@ -130,7 +131,7 @@ function rowTotal(field: string): number {
 async function refreshProgress() {
   if (!selectedMonth.value) return;
   try {
-    progress.value = await salesApi.monthProgress(selectedMonth.value);
+    progress.value = await salesApi.monthProgress(selectedMonth.value, { channel: props.channel });
   } catch {
     progress.value = null;
   }
@@ -412,7 +413,7 @@ async function save(submit: boolean) {
     });
     removedEmployeeIds.value = [];
     saving.value = "";
-    toast.success(submit ? "برای تایید مدیرعامل ارسال شد." : "پیش‌نویس ذخیره شد.");
+    toast.success(submit ? submittedMessage() : "پیش‌نویس ذخیره شد.");
     // Refresh the dots and the sheet, but stay on the week being filled in.
     //
     // This used to call loadMonth(), which does not just re-read the strip —
@@ -937,7 +938,7 @@ watch(selectedDay, load);
       <!-- z-30: the table's frozen first/last columns are z-10/z-20, so without
            this the sheet scrolled over the save buttons. -->
       <div v-if="!frozen" class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
-        <span class="text-sm text-white/70 px-2">پس از تکمیل، برای تایید مدیرعامل ارسال کنید.</span>
+        <span class="text-sm text-white/70 px-2">{{ submitHint() }}</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm transition-colors" @click="save(false)">ذخیره پیش‌نویس</button>
           <button class="px-5 py-2 rounded-xl bg-accent-500 hover:bg-accent-600 text-sm font-medium transition-colors" @click="save(true)">ذخیره و ارسال برای تایید</button>

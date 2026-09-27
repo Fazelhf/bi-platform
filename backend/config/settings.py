@@ -188,6 +188,12 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Attachments (letters, chat, profile) travel as base64 inside JSON: a 5 MB
+# file is ~6.7 MB of body. DRF 3.16+ holds JSON to this limit, whose Django
+# default of 2.5 MB refused such a letter with a bare 400 before the size
+# check could name the file. Matches nginx's client_max_body_size.
+DATA_UPLOAD_MAX_MEMORY_SIZE = env.int("DATA_UPLOAD_MAX_MEMORY_SIZE", default=25 * 1024 * 1024)
+
 # --- Django REST Framework ---
 REST_FRAMEWORK = {
     # Panel-aware JWT auth: honours admin "force logout" and account locks.

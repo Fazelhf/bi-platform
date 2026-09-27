@@ -141,7 +141,8 @@ class WeeklyEntryIsolationTests(APITestCase):
             ).status
             for w in self.weeks
         }
-        self.assertEqual(states[2], ApprovalStatus.SUBMITTED)
+        # The manager posts here, and a manager's own submission is final.
+        self.assertEqual(states[2], ApprovalStatus.APPROVED)
         for seq in (1, 3, 4):
             self.assertEqual(states[seq], ApprovalStatus.DRAFT)
 

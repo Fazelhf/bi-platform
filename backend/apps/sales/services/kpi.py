@@ -209,7 +209,10 @@ def _employee_targets(period, channel) -> dict[int, Decimal]:
     period, so a week inherits the plan set for its month."""
     from apps.sales.models import SalesTarget
 
-    month = period.parent or period
+    from apps.core.periods import month_of
+
+    # month_of, not `parent`: a day's parent is its week.
+    month = month_of(period)
     return {
         t.employee_id: t.target_rial
         for t in SalesTarget.objects.filter(
@@ -288,14 +291,12 @@ def compute_period_kpis(
     With `cascade`, recomputing a week also refreshes the month above it, so
     approving one week updates the monthly dashboard immediately.
     """
-    from apps.core.periods import leaf_ids_for
+    from apps.core.periods import channel_department, unit_ids
     from apps.sales.models import SalesChannel
 
     catalog = ensure_kpi_catalog()
 
-    base = FactSalesMonthly.objects.filter(
-        period_id__in=leaf_ids_for(period)
-    ).select_related("employee", "employee__team")
+    base = FactSalesMonthly.objects.select_related("employee", "employee__team")
     if only_approved:
         base = base.filter(status=ApprovalStatus.APPROVED)
 
@@ -306,7 +307,10 @@ def compute_period_kpis(
     formulas = active_formula_map(DOMAIN)
     rows: list[FactKPI] = []
     for channel in SalesChannel.values:
-        facts = [f for f in base if f.channel == channel]
+        # Each channel at its own grain: a weekly channel's month is its
+        # weeks, a monthly one's the month itself.
+        ids = unit_ids(period, channel_department(channel))
+        facts = list(base.filter(period_id__in=ids, channel=channel)) if ids else []
         if facts:
             _compute_channel(period, catalog, facts, channel, rows, formulas)
 

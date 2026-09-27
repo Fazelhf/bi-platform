@@ -13,15 +13,16 @@ export const salesApi = {
     return data.results ?? data;
   },
 
-  /** A month's weeks plus how much of it has been filled in. */
-  async monthProgress(monthId: number): Promise<MonthProgress> {
-    const { data } = await api.get(`/sales/periods/${monthId}/weeks/`);
-    return data;
-  },
-
-  /** Cut a month into weeks (CEO only; refused once the month has figures). */
-  async splitIntoWeeks(monthId: number): Promise<Period[]> {
-    const { data } = await api.post(`/sales/periods/${monthId}/split/`);
+  /**
+   * A month's weeks plus how much of it has been filled in — at the grain of
+   * one section: pass the sales `channel`, or a `department` (production,
+   * finance). Each section records at its own grain, set by the CEO.
+   */
+  async monthProgress(
+    monthId: number,
+    section: { channel?: string; department?: string } = {},
+  ): Promise<MonthProgress> {
+    const { data } = await api.get(`/sales/periods/${monthId}/weeks/`, { params: section });
     return data;
   },
 
