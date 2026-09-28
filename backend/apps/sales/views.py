@@ -1592,6 +1592,9 @@ class SalesDashboardDetailView(APIView):
                 "receivables": float(f.receivables_rial),
                 # derived (Sheet3 rows 28-30)
                 "volume_share": _ratio(rev, channel_revenue) and _ratio(rev, channel_revenue) * 100,
+                # درصد سود فروش — profit per rial sold; «سود فروش» alone rewards
+                # whoever simply sold the most.
+                "profit_margin": _ratio(f.profit_rial, rev) and _ratio(f.profit_rial, rev) * 100,
                 "target_achievement": _ratio(rev, f.target_rial) and _ratio(rev, f.target_rial) * 100,
                 "call_conversion": _ratio(f.invoice_count, f.calls) and _ratio(f.invoice_count, f.calls) * 100,
                 # derived B2B
@@ -1635,12 +1638,14 @@ class SalesDashboardDetailView(APIView):
             tp = _ratio(a["revenue"], a["target"])            # درصد تحقق تارگت
             share = _ratio(a["revenue"], total_target)        # سهم تیم از فروش به تارگت
             c2s = _ratio(a["cost"], a["revenue"])             # هزینه به فروش
+            margin = _ratio(a["profit"], a["revenue"])        # درصد سود فروش
             teams.append({
                 **a,
                 "success_call_ratio": r,
                 "target_achievement": tp and tp * 100,
                 "share_of_total_target": share and share * 100,
                 "cost_to_sales": c2s and c2s * 100,
+                "profit_margin": margin and margin * 100,
             })
 
         # ---- Provinces (channel-scoped) ----

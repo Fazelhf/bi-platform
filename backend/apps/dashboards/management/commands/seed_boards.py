@@ -51,8 +51,10 @@ def _sales_board(channel: str) -> list[dict]:
             "config": {"dataset": "sales", "metrics": ["revenue", "target"],
                        "time": SELECTED, "filters": only},
         },
+        # Nine rows tall, so it ends where «تحقق تارگت» (3) + the trend (6)
+        # beside it end — six left an empty hole under it.
         chart("bar", "فروش هر کارشناس", "sales", ["revenue", "target"], "employee",
-              6, 3, 6, 6, filters=only, limit=10),
+              6, 3, 6, 9, filters=only, limit=10),
         chart("line", "روند فروش شش ماه", "sales", ["revenue", "target"], "month",
               0, 6, 6, 6, filters=only, time=LAST_6),
         chart("donut", "سهم هر تیم", "sales", ["revenue"], "team",

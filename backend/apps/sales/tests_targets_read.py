@@ -108,3 +108,15 @@ class TargetReadTests(APITestCase):
         }}, format="json")
         by = {r["label"]: r["values"] for r in res.data["rows"]}
         self.assertEqual(by["تهران"], {"sales": 300.0, "target": 600.0})
+
+
+class ProfitMarginTests(TargetReadTests):
+    def test_salesperson_and_team_profit_margin(self):
+        FactSalesMonthly.objects.filter(employee=self.ali).update(profit_rial=Decimal(200))
+        data = self.detail()
+        ali = next(p for p in data["salespeople"] if p["name"] == "علی")
+        self.assertAlmostEqual(ali["profit_margin"], 25.0)   # 200 / 800
+        sara = next(p for p in data["salespeople"] if p["name"] == "سارا")
+        self.assertIsNone(sara["profit_margin"])             # no sales, no margin
+        team = next(t for t in data["teams"] if t["name"] == "تهران")
+        self.assertAlmostEqual(team["profit_margin"], 25.0)

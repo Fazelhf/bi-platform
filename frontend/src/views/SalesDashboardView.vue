@@ -48,6 +48,11 @@ const compare = ref(false);
 const data = ref<Detail | null>(null);
 const dataB = ref<Detail | null>(null);
 const tab = ref<"people" | "teams" | "period">("people");
+/**
+ * «داشبورد تیم» is off for now, at the company's request. Its charts and
+ * data stay in place — set this back to true to bring the tab back.
+ */
+const SHOW_TEAM_DASHBOARD = false;
 const loading = ref(false);
 
 // When a week is picked from the strip the charts show just that week;
@@ -168,6 +173,8 @@ const peopleCharts = computed<ChartDef[]>(() => {
     { title: "فروش ریالی", scope: "people", metrics: [{ key: "revenue", label: "فروش ریالی" }] },
     { title: `تعداد ${buyer.value} جدید`, scope: "people", metrics: [{ key: "new_customers", label: `${buyer.value} جدید` }] },
     { title: "سود فروش", scope: "people", metrics: [{ key: "profit", label: "سود فروش" }] },
+    { title: "درصد سود فروش", scope: "people", percent: true,
+      metrics: [{ key: "profit_margin", label: "درصد سود", percent: true }] },
     { title: "هزینه / سود فروش", scope: "people", metrics: [
       { key: "profit", label: "سود فروش" }, { key: "cost", label: "هزینه فروش" }] },
     { title: `تعداد فروش / تعداد ${buyer.value}`, scope: "people", metrics: [
@@ -202,6 +209,8 @@ const teamCharts = computed<ChartDef[]>(() => [
     { key: "revenue", label: "فروش ریالی" }, { key: "target", label: "تارگت فروش" }] },
   { title: "سود / هزینه فروش", scope: "teams", metrics: [
     { key: "profit", label: "سود فروش" }, { key: "cost", label: "هزینه فروش" }] },
+  { title: "درصد سود فروش", scope: "teams", percent: true,
+    metrics: [{ key: "profit_margin", label: "درصد سود", percent: true }] },
   { title: "نسبت تماس موفق", scope: "teams", metrics: [{ key: "success_call_ratio", label: "نسبت تماس موفق" }] },
   { title: "درصد تحقق تارگت", scope: "teams", percent: true,
     metrics: [{ key: "target_achievement", label: "تحقق تارگت", percent: true }] },
@@ -418,6 +427,7 @@ watch([periodA, () => props.channel], () => {
         @click="tab = 'people'"
       >داشبورد فروشنده</button>
       <button
+        v-if="SHOW_TEAM_DASHBOARD"
         class="px-4 py-1.5 rounded-xl text-sm"
         :class="tab === 'teams' ? 'bg-panel text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50'"
         @click="tab = 'teams'"
@@ -496,7 +506,7 @@ watch([periodA, () => props.channel], () => {
     </template>
 
     <!-- ========== داشبورد تیم ========== -->
-    <template v-else>
+    <template v-else-if="SHOW_TEAM_DASHBOARD && tab === 'teams'">
       <div v-if="!teamNames.length" class="bg-surface rounded-card shadow-soft">
         <EmptyState
           icon="📊"
