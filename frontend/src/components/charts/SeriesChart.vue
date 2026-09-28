@@ -30,7 +30,14 @@ const props = withDefaults(defineProps<{
   height?: number;
   percent?: boolean;
   compare?: CompareSpec | null;
-}>(), { kind: "bar", height: 240, percent: false, compare: null });
+  /**
+   * A second measure drawn as a line on its own axis beside the bars — «سود
+   * فروش» in rial next to «درصد سود فروش» in percent. The bars stay the
+   * emphasis; the line gives the amount behind each percentage.
+   */
+  lines?: { name: string; values: (number | null)[] }[];
+  linePercent?: boolean;
+}>(), { kind: "bar", height: 240, percent: false, compare: null, lines: () => [], linePercent: false });
 
 const emit = defineEmits<{ (e: "compare", spec: CompareSpec, title: string): void }>();
 
@@ -82,27 +89,60 @@ const option = computed<EChartsOption>(() => {
     };
   }
 
-  const multi = props.series.length > 1;
+  const lines = props.lines ?? [];
+  const lineFmt = (v: number) => (props.linePercent ? `${Math.round(v * 10) / 10}٪` : compact(v));
+  const multi = props.series.length + lines.length > 1;
+  const barAxis = { ...AXIS.value, axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => fmt(v) } };
   return {
-    grid: { top: multi ? 34 : 26, right: 14, bottom: 46, left: 46 },
-    tooltip: { ...TOOLTIP, trigger: "axis",
-      valueFormatter: (v) => fmt(Number(v)) },
+    grid: { top: multi ? 34 : 26, right: lines.length ? 50 : 14, bottom: 46, left: 46 },
+    tooltip: {
+      ...TOOLTIP, trigger: "axis",
+      // Bars and line are in different units, so each row is formatted by
+      // which of the two it belongs to.
+      formatter: (items: any) => {
+        const rows = (Array.isArray(items) ? items : [items]);
+        const head = rows[0]?.axisValueLabel ?? "";
+        return [head, ...rows.map((r: any) =>
+          `${r.marker}${r.seriesName}: ${r.seriesIndex < props.series.length ? fmt(Number(r.value ?? 0)) : lineFmt(Number(r.value ?? 0))}`,
+        )].join("<br/>");
+      },
+    },
     legend: multi
       ? { top: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11, color: mutedColor() } }
       : undefined,
     xAxis: { ...AXIS.category, data: props.categories,
       axisLabel: { ...AXIS.category.axisLabel, rotate: 38, fontSize: 10 } },
-    yAxis: { ...AXIS.value, axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => fmt(v) } },
-    series: props.series.map((s, i) => ({
-      name: s.name,
-      type: "bar" as const,
-      data: s.values,
-      barMaxWidth: 30,
-      itemStyle: {
-        color: barGradient(seriesColor(i)),
-        borderRadius: [barRadius(), barRadius(), 0, 0],
-      },
-    })),
+    yAxis: lines.length
+      ? [barAxis, {
+          ...AXIS.value, splitLine: { show: false },
+          axisLabel: { ...AXIS.value.axisLabel, formatter: (v: number) => lineFmt(v) },
+        }]
+      : barAxis,
+    series: [
+      ...props.series.map((s, i) => ({
+        name: s.name,
+        type: "bar" as const,
+        data: s.values,
+        barMaxWidth: 30,
+        itemStyle: {
+          color: barGradient(seriesColor(i)),
+          borderRadius: [barRadius(), barRadius(), 0, 0],
+        },
+      })),
+      ...lines.map((s, i) => ({
+        name: s.name,
+        type: "line" as const,
+        yAxisIndex: 1,
+        data: s.values,
+        // Straight segments: a smoothed curve bulges past the real points
+        // between them, and this line has to read as exact amounts.
+        smooth: false,
+        symbol: "circle",
+        symbolSize: 7,
+        lineStyle: { width: 2 },
+        itemStyle: { color: seriesColor(props.series.length + i) },
+      })),
+    ],
   };
 });
 

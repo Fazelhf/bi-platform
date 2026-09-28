@@ -204,3 +204,99 @@ def build_workbook(period, section: str):
     wb.save(stream)
     stream.seek(0)
     return stream, f"{label} - {period.label}.xlsx"
+
+
+# --------------------------------------------------------------------------
+# One chart, as the compare window shows it
+# --------------------------------------------------------------------------
+def chart_workbook(spec: dict) -> Workbook:
+    """
+    The «مقایسه ماه‌ها» window as a workbook: the same title, the same table
+    — row for row, the same total line — and a native Excel chart of the same
+    series, so the file says exactly what the screen said, no more, no less.
+
+    `spec` is what the window has on screen (the page builds it from the very
+    arrays it draws), so nothing is recomputed here that could disagree:
+        title, subtitle, percent,
+        chart: {categories, series: [{name, values}]}
+        table: {head: [...], rows: [[label, v1, v2…]], foot: [label, v1, v2…]}
+        headline: [{label, value}], change: number | null
+    """
+    from openpyxl.chart import BarChart, Reference
+
+    percent = bool(spec.get("percent"))
+    number_fmt = '0.0"٪"' if percent else RIAL_FMT
+
+    wb = Workbook()
+    ws = _sheet(wb, "نمودار", first=True)
+    ws["A1"] = str(spec.get("title") or "")[:200]
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = str(spec.get("subtitle") or "")[:300]
+    ws["A2"].font = Font(size=10, color="6B7280")
+
+    table = spec.get("table") or {}
+    head = [str(h) for h in (table.get("head") or [])][:40]
+    rows = [list(r)[: len(head)] for r in (table.get("rows") or [])][:500]
+    foot = list(table.get("foot") or [])[: len(head)]
+    start = 4
+    formats = {i: number_fmt for i in range(1, len(head))}
+    end = _write_table(ws, head, rows, formats=formats, start_row=start) if head else start
+    if foot:
+        for c, value in enumerate(foot, 1):
+            cell = ws.cell(row=end, column=c, value=value)
+            cell.font = Font(bold=True)
+            cell.border = BORDER
+            cell.fill = PatternFill("solid", fgColor="F1F0EC")
+            if c > 1:
+                cell.number_format = number_fmt
+                cell.alignment = Alignment(horizontal="left")
+        end += 1
+
+    # Headline boxes: each month's total, and the first-to-last change.
+    headline = spec.get("headline") or []
+    row = end + 1
+    for h in headline[:24]:
+        ws.cell(row=row, column=1, value=str(h.get("label", ""))).font = Font(color="6B7280")
+        cell = ws.cell(row=row, column=2, value=h.get("value"))
+        cell.number_format = number_fmt
+        cell.font = Font(bold=True)
+        row += 1
+    change = spec.get("change")
+    if change is not None:
+        ws.cell(row=row, column=1, value="تغییر اول تا آخر").font = Font(color="6B7280")
+        cell = ws.cell(row=row, column=2, value=float(change) / 100)
+        cell.number_format = "+0.0%;-0.0%"
+        cell.font = Font(bold=True, color="16A34A" if change >= 0 else "DC2626")
+        row += 1
+
+    # The chart, from its own block of data so it draws exactly the series
+    # the window drew (which is not always the table: «روند کل» plots totals).
+    chart = spec.get("chart") or {}
+    cats = [str(x) for x in (chart.get("categories") or [])][:200]
+    series = (chart.get("series") or [])[:24]
+    if cats and series:
+        data_ws = wb.create_sheet("داده‌ی نمودار")
+        data_ws.sheet_view.rightToLeft = True
+        data_ws.cell(row=1, column=1, value="")
+        for j, s in enumerate(series, 2):
+            data_ws.cell(row=1, column=j, value=str(s.get("name", "")))
+        for i, name in enumerate(cats, 2):
+            data_ws.cell(row=i, column=1, value=name)
+            for j, s in enumerate(series, 2):
+                values = s.get("values") or []
+                value = values[i - 2] if i - 2 < len(values) else None
+                cell = data_ws.cell(row=i, column=j, value=value)
+                cell.number_format = number_fmt
+
+        bar = BarChart()
+        bar.type = "col"
+        bar.title = str(spec.get("title") or "")
+        bar.height = 9
+        bar.width = max(18, min(40, 1.2 * len(cats) * max(1, len(series)) / 2 + 12))
+        bar.y_axis.numFmt = number_fmt
+        data = Reference(data_ws, min_col=2, max_col=1 + len(series), min_row=1, max_row=1 + len(cats))
+        labels = Reference(data_ws, min_col=1, min_row=2, max_row=1 + len(cats))
+        bar.add_data(data, titles_from_data=True)
+        bar.set_categories(labels)
+        ws.add_chart(bar, f"A{row + 2}")
+    return wb

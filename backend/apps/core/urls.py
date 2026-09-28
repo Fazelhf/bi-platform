@@ -13,5 +13,6 @@ urlpatterns = [
     path("overview/", views.ExecutiveOverviewView.as_view(), name="executive-overview"),
     path("trend/", views.ExecutiveTrendView.as_view(), name="executive-trend"),
     path("export/", views.DashboardExportView.as_view(), name="dashboard-export"),
+    path("export/chart/", views.ChartExportView.as_view(), name="chart-export"),
     path("", include(router.urls)),
 ]

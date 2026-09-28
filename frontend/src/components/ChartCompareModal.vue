@@ -6,6 +6,7 @@ import type { Period } from "@/types";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import { pct, rial } from "@/utils/format";
+import { toast } from "@/composables/useUi";
 
 /**
  * One chart, opened close-up across several months.
@@ -151,26 +152,84 @@ function rowStats(name: string) {
   return { vals, best: Math.max(...vals), worst: Math.min(...vals) };
 }
 
-function exportCsv() {
-  const head = [props.spec.scope === "teams" ? "تیم" : props.spec.scope === "provinces" ? "استان" : "کارشناس", ...monthLabels.value];
-  const body = entities.value.map((n) => [n, ...rowStats(n).vals]);
-  const foot = ["مجموع", ...trendSeries.value[0].values];
-  const csv = [head, ...body, foot]
-    .map((line) => line.map((c: any) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-  const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${props.title} — ${metric.value.label}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+const dimLabel = computed(() =>
+  props.spec.scope === "teams" ? "تیم" : props.spec.scope === "provinces" ? "استان" : "کارشناس",
+);
+/** The close-up's own title, as drawn above the chart. */
+const chartTitle = computed(() =>
+  view.value === "entity"
+    ? `${metric.value.label} — به تفکیک ${dimLabel.value}`
+    : `${metric.value.label} — ${isRate.value ? "میانگین" : "مجموع"} هر ماه`,
+);
+
+const exporting = ref(false);
+
+/**
+ * Excel: exactly what this window shows — the chart's own series, the table
+ * row for row with its total line, and the headline boxes. Built on the
+ * server (a real .xlsx with a native chart) from these very arrays, so the
+ * file cannot say anything the screen did not.
+ */
+async function exportExcel() {
+  exporting.value = true;
+  try {
+    const spec = {
+      title: `${props.title} — ${chartTitle.value}`,
+      subtitle: `مقایسه‌ی ${monthLabels.value.join("، ")}`,
+      percent: !!metric.value.percent,
+      chart: view.value === "entity"
+        ? { categories: entities.value, series: entitySeries.value }
+        : { categories: monthLabels.value, series: trendSeries.value },
+      table: {
+        head: [dimLabel.value, ...monthLabels.value],
+        rows: entities.value.map((n) => [n, ...rowStats(n).vals]),
+        foot: [isRate.value ? "میانگین" : "مجموع", ...trendSeries.value[0].values],
+      },
+      headline: totals.value,
+      change: change.value,
+    };
+    const res = await api.post("/executive/export/chart/", spec, { responseType: "blob" });
+    const disp = res.headers["content-disposition"] ?? "";
+    const match = /filename\*=UTF-8''([^;]+)/.exec(disp);
+    const url = URL.createObjectURL(res.data as Blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = match ? decodeURIComponent(match[1]) : "نمودار.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    toast.error("خروجی اکسل گرفته نشد.");
+  } finally {
+    exporting.value = false;
+  }
 }
-</script>
+
+/**
+ * Print this window alone — the chart, the headline boxes and the table,
+ * as they are on screen — not the dashboard underneath it.
+ */
+function printChart() {
+  document.body.classList.add("print-compare");
+  const done = () => {
+    document.body.classList.remove("print-compare");
+    window.removeEventListener("afterprint", done);
+  };
+  window.addEventListener("afterprint", done);
+  // Let the chart re-measure for the page before the dialog opens.
+  window.dispatchEvent(new Event("resize"));
+  setTimeout(() => window.print(), 150);
+}</script>
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-[70] bg-black/40 flex items-start justify-center p-3 sm:p-6 overflow-y-auto" dir="rtl">
-      <div class="bg-surface rounded-card shadow-pop w-full max-w-5xl my-auto flex flex-col max-h-[94vh]">
+    <div class="compare-print fixed inset-0 z-[70] bg-black/40 flex items-start justify-center p-3 sm:p-6 overflow-y-auto" dir="rtl">
+      <div class="compare-sheet bg-surface rounded-card shadow-pop w-full max-w-5xl my-auto flex flex-col max-h-[94vh]">
+        <!-- On paper the header (and its buttons) is not printed; this says
+             what the page is instead. -->
+        <div class="hidden print:block px-5 pt-2 pb-3">
+          <p class="text-base font-bold text-ink">{{ title }}</p>
+          <p class="text-xs text-slate-500">مقایسه‌ی {{ monthLabels.join("، ") }}</p>
+        </div>
         <!-- Header -->
         <header class="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
           <div class="min-w-0">
@@ -178,9 +237,14 @@ function exportCsv() {
             <h2 class="font-bold text-ink truncate">{{ title }}</h2>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            <button class="text-xs rounded-lg px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200" @click="exportCsv">
-              خروجی اکسل
-            </button>
+            <button
+              class="text-xs rounded-lg px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+              :disabled="loading || exporting" @click="exportExcel"
+            >{{ exporting ? "…" : "خروجی اکسل" }}</button>
+            <button
+              class="text-xs rounded-lg px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+              :disabled="loading" @click="printChart"
+            >پرینت</button>
             <button class="text-slate-400 hover:text-ink text-2xl leading-none px-1" @click="emit('close')">×</button>
           </div>
         </header>
@@ -232,7 +296,7 @@ function exportCsv() {
             <!-- Close-up chart -->
             <SeriesChart
               v-if="view === 'entity'"
-              :title="`${metric.label} — به تفکیک ${spec.scope === 'teams' ? 'تیم' : spec.scope === 'provinces' ? 'استان' : 'کارشناس'}`"
+              :title="chartTitle"
               :categories="entities"
               :series="entitySeries"
               :percent="metric.percent"
@@ -240,7 +304,7 @@ function exportCsv() {
             />
             <SeriesChart
               v-else
-              :title="`${metric.label} — ${isRate ? 'میانگین' : 'مجموع'} هر ماه`"
+              :title="chartTitle"
               :categories="monthLabels"
               :series="trendSeries"
               :percent="metric.percent"

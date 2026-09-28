@@ -561,6 +561,28 @@ body,
     page-break-inside: avoid;
   }
 
+  /* «پرینت» in the compare window: that window alone, as a page. Everything
+     else under <body> — the dashboard behind it — is left off the paper. */
+  body.print-compare > *:not(.compare-print) {
+    display: none !important;
+  }
+  body.print-compare .compare-print {
+    position: static !important;
+    inset: auto !important;
+    background: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+  body.print-compare .compare-sheet {
+    max-height: none !important;
+    max-width: none !important;
+    border: 0 !important;
+  }
+  body.print-compare .compare-sheet > div {
+    overflow: visible !important;
+  }
+
   /* Tables read better with visible rules on paper. */
   table { width: 100% !important; border-collapse: collapse !important; }
   th, td {

@@ -39,13 +39,18 @@ def chart(kind, title, dataset, metrics, dimension, x, y, w=6, h=6, **cfg):
 
 
 def _sales_board(channel: str) -> list[dict]:
-    """The four figures a sales manager is asked about, then the detail."""
+    """
+    The three figures a sales manager is asked about, then the detail.
+
+    No «وصولی» tile and no «سهم هر تیم» donut: the company asked for both to
+    go. Every block is filtered to this channel, so «فروش هر کارشناس» and
+    «جزئیات کارشناسان» list this department's salespeople only.
+    """
     only = [{"dim": "channel", "op": "eq", "value": channel}]
     return [
-        kpi("فروش ماه", "sales", "revenue", 0, 0, filters=only),
-        kpi("تارگت ماه", "sales", "target", 3, 0, filters=only),
-        kpi("سود", "sales", "profit", 6, 0, filters=only),
-        kpi("وصولی", "sales", "collected", 9, 0, filters=only),
+        kpi("فروش ماه", "sales", "revenue", 0, 0, w=4, filters=only),
+        kpi("تارگت ماه", "sales", "target", 4, 0, w=4, filters=only),
+        kpi("سود", "sales", "profit", 8, 0, w=4, filters=only),
         {
             "kind": "progress", "title": "تحقق تارگت", "x": 0, "y": 3, "w": 6, "h": 3,
             "config": {"dataset": "sales", "metrics": ["revenue", "target"],
@@ -57,11 +62,9 @@ def _sales_board(channel: str) -> list[dict]:
               6, 3, 6, 9, filters=only, limit=10),
         chart("line", "روند فروش شش ماه", "sales", ["revenue", "target"], "month",
               0, 6, 6, 6, filters=only, time=LAST_6),
-        chart("donut", "سهم هر تیم", "sales", ["revenue"], "team",
-              0, 12, 4, 6, filters=only),
         {
-            "kind": "table", "title": "جزئیات کارشناسان", "x": 4, "y": 12,
-            "w": 8, "h": 6,
+            "kind": "table", "title": "جزئیات کارشناسان", "x": 0, "y": 12,
+            "w": 12, "h": 6,
             "config": {
                 "dataset": "sales",
                 "metrics": ["revenue", "target", "profit", "invoice_count",
@@ -71,7 +74,6 @@ def _sales_board(channel: str) -> list[dict]:
             },
         },
     ]
-
 
 BOARDS: dict[str, dict] = {
     "overview": {

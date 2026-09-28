@@ -50,7 +50,14 @@ const showAdd = ref(false);
 const editorFor = ref<DraftWidget | null>(null);
 const drill = ref<{ widget: DraftWidget; key: string; label: string } | null>(null);
 
-const canEdit = computed(() => !!catalog.value?.can_edit);
+/**
+ * «ویرایش چیدمان» is locked for now, at the company's request: the boards
+ * show as laid out, and nobody rearranges them from the section pages. Set
+ * back to true to bring the button (and edit mode) back.
+ */
+const LAYOUT_EDITING = false;
+
+const canEdit = computed(() => LAYOUT_EDITING && !!catalog.value?.can_edit);
 // An empty board still shows for an editor — otherwise the one person who
 // could fill it is the only one who cannot see that it exists.
 const show = computed(

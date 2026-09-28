@@ -460,6 +460,42 @@ class DashboardExportView(APIView):
         return response
 
 
+class ChartExportView(APIView):
+    """
+    One chart as .xlsx — exactly what the «مقایسه ماه‌ها» window shows.
+
+    The page posts the arrays it is drawing (see `export.chart_workbook`), so
+    the file cannot disagree with the screen. Anyone signed in: the numbers
+    are ones this account was already shown.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(request=dict, responses={200: OpenApiTypes.BINARY})
+    def post(self, request):
+        from io import BytesIO
+        from urllib.parse import quote
+
+        from apps.core.export import chart_workbook
+
+        spec = request.data if isinstance(request.data, dict) else {}
+        if not (spec.get("table") or spec.get("chart")):
+            return Response({"detail": "چیزی برای خروجی نیست."}, status=http_status.HTTP_400_BAD_REQUEST)
+        stream = BytesIO()
+        chart_workbook(spec).save(stream)
+        name = (str(spec.get("title") or "نمودار").strip() or "نمودار")[:80]
+        for ch in r'\/:*?"<>|':
+            name = name.replace(ch, "-")
+        response = HttpResponse(
+            stream.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = (
+            f"attachment; filename=chart.xlsx; filename*=UTF-8''{quote(name + '.xlsx')}"
+        )
+        return response
+
+
 # --------------------------------------------------------------------------
 # Site settings — chart theme picker (read: everyone, write: CEO/admin)
 # --------------------------------------------------------------------------

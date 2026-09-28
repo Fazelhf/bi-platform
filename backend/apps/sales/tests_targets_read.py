@@ -120,3 +120,17 @@ class ProfitMarginTests(TargetReadTests):
         self.assertIsNone(sara["profit_margin"])             # no sales, no margin
         team = next(t for t in data["teams"] if t["name"] == "تهران")
         self.assertAlmostEqual(team["profit_margin"], 25.0)
+
+class ZeroTargetTests(TargetReadTests):
+    def test_a_zero_target_does_not_put_someone_on_the_board(self):
+        """The old targets page saved a 0 for the whole company."""
+        clerk = DimEmployee.objects.create(code="tr-clerk", full_name_fa="حسابدار")
+        SalesTarget.objects.create(period=self.month, channel="team", employee=clerk, target_rial=0)
+        res = self.client.post("/api/dashboards/query/", {"config": {
+            "dataset": "sales", "metrics": ["revenue", "target"],
+            "dimension": "employee", "time": {"mode": "all"},
+            "filters": [{"dim": "channel", "op": "eq", "value": "team"}],
+        }}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        names = {r["label"] for r in res.data["rows"]}
+        self.assertEqual(names, {"علی", "سارا"})

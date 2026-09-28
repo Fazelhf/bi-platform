@@ -114,6 +114,8 @@ interface ChartDef {
   metrics: Metric[];
   percent?: boolean;
   height?: number;
+  /** Drawn as a line on a second axis beside the bars (see SeriesChart). */
+  line?: Metric;
 }
 
 function rowsOf(d: Detail | null, scope: Scope): Record<string, any>[] {
@@ -160,7 +162,27 @@ function seriesFor(def: ChartDef) {
 }
 
 function specOf(def: ChartDef): CompareSpec {
-  return { scope: def.scope, metrics: def.metrics };
+  // The line's measure can be compared across months too.
+  return { scope: def.scope, metrics: def.line ? [...def.metrics, def.line] : def.metrics };
+}
+
+/** The line series for a chart that has one — one per month when comparing. */
+function linesFor(def: ChartDef) {
+  if (!def.line) return [];
+  const cats = categoriesFor(def.scope);
+  const at = (d: Detail | null, name: string) =>
+    Number(rowsOf(d, def.scope).find((r) => r.name === name)?.[def.line!.key] ?? 0);
+  const out = [{
+    name: dataB.value ? `${def.line.label} (${data.value?.period.label})` : def.line.label,
+    values: cats.map((n) => at(data.value, n)),
+  }];
+  if (dataB.value) {
+    out.push({
+      name: `${def.line.label} (${dataB.value.period.label})`,
+      values: cats.map((n) => at(dataB.value, n)),
+    });
+  }
+  return out;
 }
 
 // B2B is wholesale on credit: tonnage and collection replace call activity,
@@ -172,11 +194,12 @@ const peopleCharts = computed<ChartDef[]>(() => {
   const base: ChartDef[] = [
     { title: "فروش ریالی", scope: "people", metrics: [{ key: "revenue", label: "فروش ریالی" }] },
     { title: `تعداد ${buyer.value} جدید`, scope: "people", metrics: [{ key: "new_customers", label: `${buyer.value} جدید` }] },
-    { title: "سود فروش", scope: "people", metrics: [{ key: "profit", label: "سود فروش" }] },
+    // One chart for profit, led by the percentage: «سود فروش» alone rewards
+    // whoever sold the most. The rial amount rides along as a line.
     { title: "درصد سود فروش", scope: "people", percent: true,
-      metrics: [{ key: "profit_margin", label: "درصد سود", percent: true }] },
-    { title: "هزینه / سود فروش", scope: "people", metrics: [
-      { key: "profit", label: "سود فروش" }, { key: "cost", label: "هزینه فروش" }] },
+      metrics: [{ key: "profit_margin", label: "درصد سود", percent: true }],
+      line: { key: "profit", label: "سود فروش" } },
+    { title: "سود فروش", scope: "people", metrics: [{ key: "profit", label: "سود فروش" }] },
     { title: `تعداد فروش / تعداد ${buyer.value}`, scope: "people", metrics: [
       { key: "invoices", label: isB2B.value ? "تعداد قرارداد" : "تعداد فاکتور" },
       { key: "active_customers", label: `${buyer.value} فعال` }] },
@@ -439,6 +462,11 @@ watch([periodA, () => props.channel], () => {
       >گزارش دوره‌ای</button>
     </div>
 
+    <!-- The section's board — the month's headline figures — first, above
+         the per-salesperson charts: they are what a manager opens this page
+         to see. Not on «گزارش دوره‌ای», which picks its own range of months. -->
+    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" />
+
     <!-- ========== گزارش دوره‌ای ==========
          A range of months rather than one, so it owns its own period picker
          and ignores the month selector above. -->
@@ -463,6 +491,8 @@ watch([periodA, () => props.channel], () => {
             :categories="names"
             :series="seriesFor(def)"
             :percent="def.percent"
+            :lines="linesFor(def)"
+            :line-percent="!!def.line?.percent"
             :compare="specOf(def)"
             @compare="openCompare"
           />
@@ -526,7 +556,5 @@ watch([periodA, () => props.channel], () => {
         />
       </div>
     </template>
-      <!-- گزارش این بخش، روی همین صفحه: داشبورد و گزارش یک صفحه‌اند. -->
-    <SectionBoard :section="boardSection" :period="periodA" />
 </div>
 </template>

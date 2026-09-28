@@ -171,14 +171,17 @@ CHANNEL_DIM = Dim(
 #: The monthly plans set on «تعیین تارگت». They used to be read off the fact
 #: rows' own `target_rial`, a column nothing has written since the plans
 #: moved to `SalesTarget` — so every «تارگت» and «تحقق تارگت» widget read 0.
+#: Zero plans are left out: the old «تعیین تارگت» page saved a 0 for every
+#: person it listed — the whole company — and each one became a row of
+#: «فروش هر کارشناس» with nothing in it.
 SALES_TARGETS = SideSource(
     model="sales.SalesTarget",
-    base_filter={"employee__isnull": False, "province__isnull": True},
+    base_filter={"employee__isnull": False, "province__isnull": True, "target_rial__gt": 0},
     missing_dims=("status",),
 )
 PROVINCE_TARGETS = SideSource(
     model="sales.SalesTarget",
-    base_filter={"province__isnull": False},
+    base_filter={"province__isnull": False, "target_rial__gt": 0},
 )
 
 
