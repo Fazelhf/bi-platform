@@ -22,6 +22,7 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import PeoplePicker from "@/components/office/PeoplePicker.vue";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -200,7 +201,7 @@ const inp =
             @click="draft.color = c"
           ></button>
           <span class="flex-1"></span>
-          <input v-model="draft.remind_on" type="date" :class="inp" class="w-auto" dir="ltr" />
+          <JalaliDateField v-model="draft.remind_on" class="w-44" placeholder="یادآوری" />
         </div>
 
         <div>
@@ -241,7 +242,7 @@ const inp =
                 @click="draft.color = c"
               ></button>
               <span class="flex-1"></span>
-              <input v-model="draft.remind_on" type="date" :class="inp" class="w-auto" dir="ltr" />
+              <JalaliDateField v-model="draft.remind_on" class="w-44" placeholder="یادآوری" />
             </div>
             <PeoplePicker v-model="draft.people" :people="people" placeholder="افزودن شخص…" />
             <div class="flex gap-2">

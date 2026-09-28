@@ -157,6 +157,13 @@ class Letter(TimeStampedModel):
         if not self.number:
             self.number = next_letter_number(self.sent_at.date())
         self.save(update_fields=["status", "sent_at", "number", "updated_at"])
+        # Here rather than in each view: a letter can be sent from the
+        # composer, from a draft, or by the send action, and all three must
+        # reach the recipients' bell — once, which the early return above
+        # guarantees.
+        from apps.office import notify
+
+        notify.letter_sent(self)
         return self
 
     def __str__(self) -> str:

@@ -16,6 +16,7 @@ import { faDate } from "@/utils/adminFormat";
 import FormModal from "@/components/crm/FormModal.vue";
 import PeoplePicker from "@/components/office/PeoplePicker.vue";
 import PickerField from "@/components/PickerField.vue";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -253,7 +254,7 @@ const inp =
           </div>
           <div>
             <label class="block text-xs text-slate-500 mb-1">مهلت</label>
-            <input v-model="form.due_on" type="date" :class="inp" dir="ltr" />
+            <JalaliDateField v-model="form.due_on" placeholder="بدون مهلت" />
           </div>
         </div>
         <div>

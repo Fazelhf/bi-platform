@@ -20,6 +20,7 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import LetterForm from "@/components/office/LetterForm.vue";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -180,8 +181,8 @@ const inp =
           <option value="0">فقط نخوانده</option>
           <option value="1">فقط خوانده</option>
         </select>
-        <input v-model="filters.from" type="date" :class="inp" dir="ltr" />
-        <input v-model="filters.to" type="date" :class="inp" dir="ltr" />
+        <JalaliDateField v-model="filters.from" class="w-40" placeholder="از تاریخ" />
+        <JalaliDateField v-model="filters.to" class="w-40" placeholder="تا تاریخ" />
         <button
           class="office-btn rounded-xl px-4 py-2 text-sm"
           @click="load"

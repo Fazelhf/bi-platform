@@ -136,7 +136,8 @@ export type Department =
 export interface AppNotification {
   id: number;
   actor_name: string;
-  verb: "submitted" | "approved" | "rejected" | "revision";
+  /** submitted / approved / rejected / revision, or an اتوماسیون event (apps/office/notify.py). */
+  verb: string;
   message: string;
   target_label: string;
   target_id: string;
@@ -145,7 +146,11 @@ export interface AppNotification {
    * depends on the reader's role — null when the notice has no page of its own
    * (an announcement), and the bell then shows the message itself.
    */
-  link: { name: string; params?: Record<string, string | number> } | null;
+  link: {
+    name: string;
+    params?: Record<string, string | number>;
+    query?: Record<string, string>;
+  } | null;
   is_read: boolean;
   created_at: string;
 }

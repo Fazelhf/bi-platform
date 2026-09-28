@@ -82,6 +82,14 @@ def link_for(notification, user) -> dict | None:
 
     label = notification.target_label or ""
 
+    # اتوماسیون اداری: straight to the letter, or to the task opened in place.
+    # Only ever sent to people on the letter or the task, so the page will
+    # open for them.
+    if label == "office.Letter" and notification.target_id:
+        return {"name": "office-letter", "params": {"id": notification.target_id}}
+    if label == "office.Task" and notification.target_id:
+        return {"name": "office-tasks", "query": {"task": notification.target_id}}
+
     # Waiting on you: the کارتابل is where the decision is actually made, so a
     # "submitted" notice goes there rather than to a read-only dashboard.
     if notification.verb == "submitted" and (

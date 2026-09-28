@@ -17,6 +17,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import notify
 from .models import Project, Task, TaskComment, TaskGroup, TaskTag
 from .serializers_work import (
     ProjectSerializer,
@@ -110,7 +111,15 @@ class TaskViewSet(viewsets.ModelViewSet):
         # Unassigned means mine. A task nobody owns is a task nobody does, and
         # the most common case by far is writing down your own work.
         assignee = serializer.validated_data.get("assignee") or self.request.user
-        serializer.save(creator=self.request.user, assignee=assignee)
+        task = serializer.save(creator=self.request.user, assignee=assignee)
+        notify.task_assigned(task, self.request.user)
+
+    def perform_update(self, serializer):
+        # Handing an existing task to someone new is the same news as a new one.
+        before = serializer.instance.assignee_id
+        task = serializer.save()
+        if task.assignee_id != before:
+            notify.task_assigned(task, self.request.user)
 
     @action(detail=True, methods=["post"])
     def toggle(self, request, pk=None):
@@ -128,6 +137,8 @@ class TaskViewSet(viewsets.ModelViewSet):
             task.done_at = timezone.now()
             task.done_by = request.user
         task.save(update_fields=["done_at", "done_by", "updated_at"])
+        if task.done_at:
+            notify.task_done(task, request.user)
         return Response(TaskSerializer(task, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])
@@ -140,6 +151,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         row = TaskComment.objects.create(task=task, author=request.user, body=body)
+        notify.task_commented(task, request.user, body)
         return Response(
             TaskCommentSerializer(row).data, status=status.HTTP_201_CREATED
         )

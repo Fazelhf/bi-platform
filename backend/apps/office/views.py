@@ -16,6 +16,7 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import notify
 from .models import Letter, LetterAction, LetterRecipient, LetterTag
 from .serializers import (
     LetterActionSerializer,
@@ -187,6 +188,7 @@ class LetterViewSet(viewsets.ModelViewSet):
                 else LetterAction.Visibility.ALL
             ),
         )
+        notify.letter_referred(letter, request.user, to_id, act.note)
         return Response(
             LetterActionSerializer(act).data, status=status.HTTP_201_CREATED
         )
@@ -217,6 +219,7 @@ class LetterViewSet(viewsets.ModelViewSet):
                 else LetterAction.Visibility.ALL
             ),
         )
+        notify.letter_paraphed(letter, request.user, to_id if private else None, act.note)
         return Response(
             LetterActionSerializer(act).data, status=status.HTTP_201_CREATED
         )
@@ -245,6 +248,8 @@ class LetterViewSet(viewsets.ModelViewSet):
                 else LetterAction.Visibility.ALL
             ),
         )
+        if private:
+            notify.letter_private_note(letter, request.user, to_id, text)
         return Response(
             LetterActionSerializer(act).data, status=status.HTTP_201_CREATED
         )

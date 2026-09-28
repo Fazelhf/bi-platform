@@ -20,10 +20,15 @@
  * is next», and only a grid answers «which week is overloaded».
  */
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { workApi, type Task, type TaskBox } from "@/api/officeWork";
 import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
+import {
+  MONTH_NAMES, WEEKDAY_NAMES, addMonths, faDigits, firstWeekdayColumn,
+  isoToJalali, monthLength, toGregorian, toJalali, todayIso,
+} from "@/utils/jalali";
 import TaskForm from "@/components/office/TaskForm.vue";
 import QuickTaskForm from "@/components/office/QuickTaskForm.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
@@ -62,8 +67,34 @@ async function load() {
   }
 }
 
-onMounted(load);
+const route = useRoute();
+const router = useRouter();
+
+/**
+ * `?task=<id>` — a notification about one task opens it here, in its own
+ * form, rather than leaving the reader to find it in the list. The query is
+ * dropped once used, so a refresh does not reopen it.
+ */
+async function openFromQuery() {
+  const id = Number(route.query.task);
+  if (!id) return;
+  try {
+    editing.value = await workApi.task(id);
+  } catch (e: any) {
+    // 404 is also what a task you are not on returns — say both plainly.
+    error.value = e?.response?.status === 404
+      ? "این کار پیدا نشد یا به آن دسترسی ندارید."
+      : apiError(e);
+  }
+  router.replace({ query: { ...route.query, task: undefined } });
+}
+
+onMounted(() => {
+  load();
+  openFromQuery();
+});
 watch(box, load);
+watch(() => route.query.task, (v) => { if (v) openFromQuery(); });
 
 async function toggle(task: Task) {
   const was = task.done_at;
@@ -135,48 +166,54 @@ const doneByDay = computed(() => {
 
 // -- calendar ----------------------------------------------------------
 /**
- * A month of due dates. Built from the Gregorian dates the API returns and
- * labelled with the Jalali day, so the grid lines up with the week while the
- * numbers read the way everyone here reads dates.
+ * A Jalali month of due dates — فروردین to اسفند, weeks starting Saturday.
+ *
+ * It used to be a Gregorian month with Jalali day numbers painted on, so its
+ * edges fell mid-month: «مهر» began on the 9th and ended on the 8th of the
+ * next. The grid is now built from the Jalali month itself; cells are keyed
+ * by the ISO date the API returns, so nothing is converted twice.
  */
 const monthOffset = ref(0);
 
-const calendar = computed(() => {
-  const base = new Date();
-  base.setMonth(base.getMonth() + monthOffset.value);
-  base.setDate(1);
-  const first = new Date(base);
-  // Persian week starts on Saturday; JS getDay() has Sunday at 0.
-  const lead = (first.getDay() + 1) % 7;
-  const start = new Date(first);
-  start.setDate(start.getDate() - lead);
+function isoOf(d: Date): string {
+  // `toGregorian` returns UTC midnight; read it back in UTC.
+  return d.toISOString().slice(0, 10);
+}
 
-  const byDay = new Map<number, Task[]>();
+const calendar = computed(() => {
+  const now = isoToJalali(todayIso())!;
+  const { jy, jm } = addMonths({ ...now, jd: 1 }, monthOffset.value);
+  const first = toGregorian({ jy, jm, jd: 1 });
+  const lead = firstWeekdayColumn(jy, jm);
+  const start = new Date(first.getTime() - lead * DAY);
+  // Enough whole weeks to hold the month — five or six, never a blank row.
+  const weeks = Math.ceil((lead + monthLength(jy, jm)) / 7);
+
+  const byDay = new Map<string, Task[]>();
   for (const t of rows.value) {
     if (!t.due_on) continue;
-    const k = startOfDay(t.due_on);
+    const k = t.due_on.slice(0, 10);
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k)!.push(t);
   }
 
-  const today = startOfDay(new Date());
+  const today = todayIso();
   const cells = [];
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
-    const key = startOfDay(d);
+  for (let i = 0; i < weeks * 7; i++) {
+    const d = new Date(start.getTime() + i * DAY);
+    const key = isoOf(d);
+    const j = toJalali(d);
     cells.push({
       key,
-      label: faDate(d.toISOString()).split("/").pop() ?? "",
-      inMonth: d.getMonth() === base.getMonth(),
+      label: faDigits(j.jd),
+      inMonth: j.jy === jy && j.jm === jm,
       isToday: key === today,
       tasks: byDay.get(key) ?? [],
     });
   }
-  return { cells, title: faDate(base.toISOString()).split("/").slice(0, 2).join("/") };
+  return { cells, title: `${MONTH_NAMES[jm - 1]} ${faDigits(jy)}` };
 });
-
-const WEEKDAYS = ["ش", "ی", "د", "س", "چ", "پ", "ج"];
+const WEEKDAYS = WEEKDAY_NAMES;
 
 /** Priority as a left edge, seen without being read. */
 const EDGE: Record<string, string> = {
@@ -233,7 +270,7 @@ const EDGE: Record<string, string> = {
         <button class="text-slate-400 hover:text-ink px-2 py-1" @click="monthOffset--">
           ‹ ماه قبل
         </button>
-        <span class="text-sm font-bold text-ink ltr-nums">{{ calendar.title }}</span>
+        <span class="text-sm font-bold text-ink">{{ calendar.title }}</span>
         <button class="text-slate-400 hover:text-ink px-2 py-1" @click="monthOffset++">
           ماه بعد ›
         </button>

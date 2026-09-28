@@ -20,6 +20,14 @@ const VERB_ICON: Record<string, string> = {
   approved: "✅",
   rejected: "❌",
   revision: "✏️",
+  // اتوماسیون اداری (apps/office/notify.py)
+  letter: "✉️",
+  refer: "↪️",
+  paraph: "✍️",
+  letter_note: "🔒",
+  task: "📋",
+  task_done: "✅",
+  task_comment: "💬",
 };
 
 async function refreshCount() {
@@ -84,7 +92,7 @@ async function openNotification(n: AppNotification) {
     return;
   }
   open.value = false;
-  router.push({ name: n.link.name, params: n.link.params ?? {} });
+  router.push({ name: n.link.name, params: n.link.params ?? {}, query: n.link.query ?? {} });
 }
 
 /** Remove one notification. Optimistic — the list is cheap to re-fetch. */
