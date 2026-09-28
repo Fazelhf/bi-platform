@@ -40,31 +40,36 @@ def chart(kind, title, dataset, metrics, dimension, x, y, w=6, h=6, **cfg):
 
 def _sales_board(channel: str) -> list[dict]:
     """
-    The three figures a sales manager is asked about, then the detail.
+    The headline tiles and «فروش هر کارشناس» open the page; the six-month
+    trend and «جزئیات کارشناسان» (`placement: bottom`) sit under its charts.
 
     No «وصولی» tile and no «سهم هر تیم» donut: the company asked for both to
     go. Every block is filtered to this channel, so «فروش هر کارشناس» and
     «جزئیات کارشناسان» list this department's salespeople only.
     """
     only = [{"dim": "channel", "op": "eq", "value": channel}]
+    # «bottom» widgets are drawn under the page's own salesperson charts
+    # (SectionBoard part="bottom"); the rest open the page.
+    bottom = {"placement": "bottom"}
     return [
-        kpi("فروش ماه", "sales", "revenue", 0, 0, w=4, filters=only),
-        kpi("تارگت ماه", "sales", "target", 4, 0, w=4, filters=only),
-        kpi("سود", "sales", "profit", 8, 0, w=4, filters=only),
+        kpi("فروش ماه", "sales", "revenue", 0, 0, filters=only),
+        kpi("تارگت ماه", "sales", "target", 3, 0, filters=only),
+        kpi("سود", "sales", "profit", 6, 0, filters=only),
         {
-            "kind": "progress", "title": "تحقق تارگت", "x": 0, "y": 3, "w": 6, "h": 3,
+            "kind": "progress", "title": "تحقق تارگت", "x": 9, "y": 0, "w": 3, "h": 3,
             "config": {"dataset": "sales", "metrics": ["revenue", "target"],
                        "time": SELECTED, "filters": only},
         },
-        # Nine rows tall, so it ends where «تحقق تارگت» (3) + the trend (6)
-        # beside it end — six left an empty hole under it.
         chart("bar", "فروش هر کارشناس", "sales", ["revenue", "target"], "employee",
-              6, 3, 6, 9, filters=only, limit=10),
-        chart("line", "روند فروش شش ماه", "sales", ["revenue", "target"], "month",
-              0, 6, 6, 6, filters=only, time=LAST_6),
+              0, 3, 12, 7, filters=only, limit=10),
         {
-            "kind": "table", "title": "جزئیات کارشناسان", "x": 0, "y": 12,
-            "w": 12, "h": 6,
+            **chart("line", "روند فروش شش ماه", "sales", ["revenue", "target"], "month",
+                    0, 10, 12, 6, filters=only, time=LAST_6),
+            "options": bottom,
+        },
+        {
+            "kind": "table", "title": "جزئیات کارشناسان", "x": 0, "y": 16,
+            "w": 12, "h": 6, "options": bottom,
             "config": {
                 "dataset": "sales",
                 "metrics": ["revenue", "target", "profit", "invoice_count",

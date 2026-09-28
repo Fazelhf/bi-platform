@@ -465,7 +465,7 @@ watch([periodA, () => props.channel], () => {
     <!-- The section's board — the month's headline figures — first, above
          the per-salesperson charts: they are what a manager opens this page
          to see. Not on «گزارش دوره‌ای», which picks its own range of months. -->
-    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" />
+    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" part="top" />
 
     <!-- ========== گزارش دوره‌ای ==========
          A range of months rather than one, so it owns its own period picker
@@ -556,5 +556,8 @@ watch([periodA, () => props.channel], () => {
         />
       </div>
     </template>
+
+    <!-- The board's trend and detail table, under the charts. -->
+    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" part="bottom" />
 </div>
 </template>

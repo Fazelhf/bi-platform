@@ -37,6 +37,13 @@ const props = defineProps<{
   section: string;
   /** The host page's own month selector, so both halves show one period. */
   period?: number | null;
+  /**
+   * Which part of the board to draw, when the page splits it around its own
+   * content: "top" is every widget not marked otherwise, "bottom" the ones
+   * whose `options.placement` is "bottom" (the sales page puts the trend and
+   * the detail table under its charts). Omitted, the whole board.
+   */
+  part?: "top" | "bottom";
 }>();
 
 const catalog = ref<Catalog | null>(null);
@@ -57,7 +64,23 @@ const drill = ref<{ widget: DraftWidget; key: string; label: string } | null>(nu
  */
 const LAYOUT_EDITING = false;
 
-const canEdit = computed(() => LAYOUT_EDITING && !!catalog.value?.can_edit);
+// A part is a view of the board, renumbered — saving it would scramble the
+// rest, so arranging is only ever offered on the whole board.
+const canEdit = computed(() => LAYOUT_EDITING && !props.part && !!catalog.value?.can_edit);
+
+/**
+ * This part's widgets, moved up so the part starts at its own first row —
+ * the canvas places a widget on row `y + 1`, and the rows another part
+ * occupies would otherwise be blank space above it.
+ */
+function partOf(all: DraftWidget[]): DraftWidget[] {
+  if (!props.part) return all;
+  const inPart = all.filter((w) =>
+    ((w.options as Record<string, unknown> | undefined)?.placement === "bottom") === (props.part === "bottom"),
+  );
+  const top = Math.min(...inPart.map((w) => w.y));
+  return inPart.map((w) => ({ ...w, y: w.y - (Number.isFinite(top) ? top : 0) }));
+}
 // An empty board still shows for an editor — otherwise the one person who
 // could fill it is the only one who cannot see that it exists.
 const show = computed(
@@ -80,7 +103,7 @@ async function load() {
     }
     const full = await dashboardsApi.board(pick.id);
     board.value = full;
-    widgets.value = toDraft(full.widgets);
+    widgets.value = partOf(toDraft(full.widgets));
     await refresh();
   } catch {
     // A section whose board cannot be read is a section that simply shows its
@@ -195,7 +218,7 @@ const kindGroups = computed(() => [
 
 <template>
   <section v-if="show" class="space-y-3 pt-2">
-    <div class="flex items-center justify-between gap-2 flex-wrap">
+    <div v-if="part !== 'bottom'" class="flex items-center justify-between gap-2 flex-wrap">
       <div class="min-w-0">
         <h3 class="text-sm font-bold text-ink">{{ board!.title }}</h3>
         <p v-if="board!.subtitle" class="text-xs text-slate-400">{{ board!.subtitle }}</p>
