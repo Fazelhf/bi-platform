@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useUiStore } from "@/stores/ui";
 import { usePresence } from "@/composables/usePresence";
 import { useClickOutside } from "@/composables/useClickOutside";
 import { usePwa } from "@/composables/usePwa";
@@ -15,6 +16,7 @@ import ThemePicker from "@/components/ThemePicker.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
 
 const auth = useAuthStore();
+const ui = useUiStore(); // the live version, shown in the footer
 const route = useRoute();
 const router = useRouter();
 
@@ -690,6 +692,7 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
       <!-- Footer -->
       <footer class="text-center text-xs text-slate-400 py-3">
         شرکت کاغذ حساس نمابر مهر · طراحی و توسعه: <span class="font-medium text-slate-500">فاضل حافظی</span>
+        <template v-if="ui.version"> · <span class="ltr-nums" title="نسخه‌ی در حال اجرا روی سرور">نسخه {{ ui.version }}</span></template>
       </footer>
     </div>
   </div>

@@ -4,6 +4,7 @@ import App from "./App.vue";
 import router from "./router";
 import { useUiStore } from "./stores/ui";
 import { useAuthStore } from "./stores/auth";
+import { reloadIfStale } from "./composables/usePwa";
 import "./style.css";
 
 const app = createApp(App);
@@ -37,6 +38,14 @@ router.onError((error) => {
   if (/dynamically imported module|Importing a module script failed/i.test(String(error?.message))) {
     reloadOnceForStaleChunks();
   }
+});
+
+// A browser tab takes a new release quietly (usePwa): nothing interrupts the
+// page being worked on, and the next page change is a full load instead of an
+// in-app one — the moment a normal website would pick the release up too.
+// Not on the first navigation, which is already a fresh load.
+router.beforeEach((to, from) => {
+  if (from.matched.length && reloadIfStale(router.resolve(to).href)) return false;
 });
 
 // `me` is cached in localStorage so the first paint knows who you are without

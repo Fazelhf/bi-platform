@@ -1,0 +1,1 @@
+import{u}from"./index-BKmBBT0I.js";function n(){var t;return!!((t=u().me)!=null&&t.can_approve)}function r(){return n()?"با ارسال، اطلاعات تأیید و مستقیم وارد داشبورد می‌شود.":"پس از تکمیل، برای تأیید مدیر بخش ارسال کنید."}function s(){return n()?"ثبت و تأیید شد.":"برای تأیید مدیر بخش ارسال شد."}export{s as a,r as s};

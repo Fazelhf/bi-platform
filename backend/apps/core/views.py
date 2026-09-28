@@ -36,6 +36,7 @@ from apps.core.models import (
     PeriodKind,
 )
 from apps.core.permissions import IsExecutiveOrAdmin
+from apps.core.version import app_version
 from apps.core.serializers import (
     AuditLogSerializer,
     FormulaSerializer,
@@ -480,6 +481,7 @@ class SiteSettingView(APIView):
             "sales_grain": s.sales_grain,
             "sales_grains": [{"key": k, "label": v} for k, v in SiteSetting.SALES_GRAINS],
             "min_week_days": s.min_week_days,
+            "version": app_version(),
         })
 
     def patch(self, request):

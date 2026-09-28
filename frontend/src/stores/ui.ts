@@ -40,6 +40,8 @@ export const useUiStore = defineStore("ui", {
     dark: initialDark(),
     skin: initialSkin(),
     companyName: "شرکت کاغذ حساس نمابر مهر",
+    /** «1.<last merged PR>» — what is live on the server, not in this bundle. */
+    version: "",
     loaded: false,
   }),
   getters: {
@@ -78,6 +80,7 @@ export const useUiStore = defineStore("ui", {
         const { data } = await api.get("/executive/site-settings/");
         this.chartTheme = data.chart_theme;
         this.companyName = data.company_name;
+        this.version = data.version ?? "";
         store.set("chartTheme", data.chart_theme);
       } catch {
         /* not signed in yet — keep the cached value */

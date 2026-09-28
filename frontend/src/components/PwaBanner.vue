@@ -10,7 +10,9 @@
  *              small bar at the bottom that could be ignored forever, and
  *              people did: they kept working on an old bundle against a new
  *              server and met bugs that were already fixed. It is now a
- *              full-screen dialog with one way out — updating.
+ *              full-screen dialog with one way out — updating. Installed app
+ *              only: a browser tab takes a release quietly, like any website
+ *              (usePwa never raises `needsUpdate` there).
  *
  * The offline bar sits at the bottom, above the home bar, under the page's
  * own toasts (z-100). The update dialog covers everything, toasts included.

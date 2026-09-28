@@ -6,7 +6,8 @@
  * here, as a module-level singleton, and shared. A component that calls this
  * twice gets the same state, not a second `beforeinstallprompt` listener.
  *
- *   needsUpdate — a new bundle is sitting in a waiting service worker
+ *   needsUpdate — a new bundle is waiting and this is the installed app, which
+ *                 asks first (a browser tab takes it quietly — see below)
  *   canInstall  — the browser has offered us the install prompt to fire
  *   online      — whether the numbers on screen can still be refreshed
  */
@@ -39,6 +40,52 @@ let doUpdate: (reload?: boolean) => Promise<void> = async () => {};
 let waiting: ServiceWorker | null = null;
 let registered: ServiceWorkerRegistration | null = null;
 
+/**
+ * Opened from the home screen / as a desktop app, rather than in a browser tab.
+ *
+ * Only the installed app asks before updating. A browser tab behaves like any
+ * website: a new release is taken quietly and the next page change loads it
+ * (see activateQuietly / reloadIfStale). The installed app has no address bar
+ * and is resumed for days without ever loading a page, so there the release
+ * has to be announced — the full-screen dialog in PwaBanner.
+ */
+const standalone =
+  window.matchMedia("(display-mode: standalone)").matches ||
+  // iOS Safari's own flag, which predates the standard and is still the only
+  // way to tell there.
+  (navigator as unknown as { standalone?: boolean }).standalone === true;
+
+/** This tab has switched to a new release; its next page change must load it. */
+let staleTab = false;
+/** «به‌روزرسانی» was pressed: reload the moment the new worker takes over. */
+let reloadWhenActive = false;
+
+/**
+ * A browser tab: let the new worker take over now, without a word and without
+ * reloading — the page being worked on stays exactly as it is. The reload
+ * happens on the next navigation instead, when nothing typed can be lost.
+ */
+function activateQuietly() {
+  const fresh = waiting ?? registered?.waiting ?? null;
+  needsUpdate.value = false;
+  waiting = null;
+  if (!fresh) return;
+  staleTab = true;
+  fresh.postMessage({ type: "SKIP_WAITING" });
+}
+
+/**
+ * Called by the router before every page change. When this tab is running an
+ * old release, the change becomes a full load of `href` — which fetches the
+ * new release — instead of an in-app navigation. Returns true when it did so.
+ */
+export function reloadIfStale(href: string): boolean {
+  if (!staleTab) return false;
+  staleTab = false;
+  window.location.assign(href);
+  return true;
+}
+
 /** Ask the server whether a newer bundle exists. Never throws. */
 function checkNow(): Promise<void> {
   return registered ? registered.update().then(() => {}, () => {}) : Promise.resolve();
@@ -49,6 +96,13 @@ function start() {
   started = true;
 
   const { needRefresh, offlineReady: ready, updateServiceWorker } = useRegisterSW({
+    // The plugin reloads the page itself the moment a new worker takes over,
+    // unless told otherwise. That reload is wanted only after «به‌روزرسانی»;
+    // a browser tab updated quietly keeps its page until the next navigation.
+    onNeedReload() {
+      if (reloadWhenActive) window.location.reload();
+      else staleTab = true;
+    },
     onRegisteredSW(_url, registration) {
       if (!registration) return;
       registered = registration;
@@ -73,7 +127,8 @@ function start() {
       const promote = () => {
         if (registration.waiting && navigator.serviceWorker.controller) {
           waiting = registration.waiting;
-          needsUpdate.value = true;
+          if (standalone) needsUpdate.value = true;
+          else activateQuietly();
         }
       };
       promote();
@@ -88,7 +143,14 @@ function start() {
 
   // Mirrored rather than re-exported: callers get stable readonly refs whose
   // identity does not depend on when the worker happened to register.
-  watch(needRefresh, (v) => (needsUpdate.value = v), { immediate: true });
+  watch(
+    needRefresh,
+    (v) => {
+      if (v && !standalone) activateQuietly();
+      else needsUpdate.value = v;
+    },
+    { immediate: true },
+  );
   watch(ready, (v) => (offlineReady.value = v), { immediate: true });
   doUpdate = updateServiceWorker;
 
@@ -137,6 +199,9 @@ export function usePwa() {
    */
   async function update() {
     needsUpdate.value = false;
+    // The plugin's path reloads through onNeedReload; the direct one below
+    // through controllerchange.
+    reloadWhenActive = !waiting;
     if (waiting) {
       navigator.serviceWorker.addEventListener(
         "controllerchange",
@@ -166,11 +231,7 @@ export function usePwa() {
   }
 
   /** Already installed? Then «نصب برنامه» would be a button to nowhere. */
-  const isInstalled =
-    window.matchMedia("(display-mode: standalone)").matches ||
-    // iOS Safari's own flag, which predates the standard and is still the
-    // only way to tell there.
-    (navigator as unknown as { standalone?: boolean }).standalone === true;
+  const isInstalled = standalone;
 
   return {
     needsUpdate: readonly(needsUpdate),
