@@ -21,6 +21,7 @@ import api from "@/api/client";
 import { apiError } from "@/components/crm/formError";
 import { faDate } from "@/utils/adminFormat";
 import PickerField from "@/components/PickerField.vue";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 
 const props = defineProps<{
   /** Pre-selected when adding from inside a project. */
@@ -185,7 +186,7 @@ const inp =
       v-model="form.description" :class="inp" rows="2" placeholder="توضیح بیشتر…"
     ></textarea>
 
-    <input v-if="open.due" v-model="form.due_on" type="date" :class="inp" dir="ltr" />
+    <JalaliDateField v-if="open.due" v-model="form.due_on" placeholder="مهلت" />
 
     <PickerField
       v-if="open.who"

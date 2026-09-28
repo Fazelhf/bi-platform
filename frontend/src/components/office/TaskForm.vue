@@ -13,6 +13,7 @@ import api from "@/api/client";
 import { apiError } from "@/components/crm/formError";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 
 const props = defineProps<{
   task?: Task | null;
@@ -191,7 +192,7 @@ const inp =
       <div class="grid sm:grid-cols-2 gap-3">
         <div>
           <label class="block text-xs text-slate-500 mb-1">مهلت</label>
-          <input v-model="form.due_on" type="date" :class="inp" dir="ltr" />
+          <JalaliDateField v-model="form.due_on" placeholder="بدون مهلت" />
         </div>
         <div>
           <label class="block text-xs text-slate-500 mb-1">اولویت</label>
