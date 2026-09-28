@@ -270,10 +270,20 @@ def _provinces(months, prior, channel) -> list[dict]:
                 {"name": row.province.name_fa, "sales": ZERO, "target": ZERO},
             )
             bucket["sales"] += row.sales_rial
-            bucket["target"] += row.target_rial
         return out
 
     now = totals(_leaves(months, channel))
+    # The provincial plan is set per month in SalesTarget; the fact rows'
+    # own `target_rial` is a column nothing writes any more.
+    for plan in SalesTarget.objects.filter(
+        period_id__in=[m.id for m in months], channel=channel, province__isnull=False,
+        employee__isnull=True,
+    ).select_related("province"):
+        bucket = now.setdefault(
+            plan.province_id,
+            {"name": plan.province.name_fa, "sales": ZERO, "target": ZERO},
+        )
+        bucket["target"] += plan.target_rial
     was = totals(_leaves(prior, channel)) if prior else {}
 
     rows = [

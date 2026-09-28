@@ -664,16 +664,10 @@ class DashboardSummaryView(APIView):
         # Province + collections belong to the organizational channel's detail,
         # but province sales are merged, so we scope province to the channel's
         # own facts.
-        province = (
-            FactSalesProvince.objects.filter(
-                period_id__in=channel_units(period, channel), channel=channel,
-                status=ApprovalStatus.APPROVED,
-            )
-            .select_related("province")
-            .values("province__name_fa")
-            .annotate(sales=Sum("sales_rial"), target=Sum("target_rial"))
-            .order_by("-sales")
-        )
+        province = [
+            {"province__name_fa": r["name"], "sales": r["sales"], "target": r["target"]}
+            for r in _province_rows(period, channel, month_plans(period, channel)[1])
+        ]
 
         collections = (
             FactCollection.objects.filter(
@@ -1489,6 +1483,55 @@ def _rolled_up_facts(period, channel):
     return sorted(rows.values(), key=lambda r: r.employee.id)
 
 
+def _province_rows(
+    period, channel: str, plans: dict[int, Decimal], include_all: bool = False,
+) -> list[dict]:
+    """
+    Approved sales per province beside the month's provincial plan — and the
+    provinces that have a plan but no sales yet, which are the ones to chase.
+    With `include_all`, every province: a province that sold nothing is a
+    finding the chart has to show, not leave out.
+    """
+    rows: dict[int, dict] = {}
+    for p in (
+        FactSalesProvince.objects.filter(
+            period_id__in=channel_units(period, channel), channel=channel,
+            status=ApprovalStatus.APPROVED,
+        ).values("province_id", "province__name_fa").annotate(sales=Sum("sales_rial"))
+    ):
+        rows[p["province_id"]] = {"name": p["province__name_fa"],
+                                  "sales": float(p["sales"] or 0), "target": 0.0}
+    planned = [pid for pid, t in plans.items() if t]
+    others = DimProvince.objects.all() if include_all else DimProvince.objects.filter(id__in=planned)
+    for prov in others:
+        rows.setdefault(prov.id, {"name": prov.name_fa, "sales": 0.0, "target": 0.0})
+    for pid, row in rows.items():
+        row["target"] = float(plans.get(pid, 0))
+    # Biggest sellers first; among the ones that sold nothing, the biggest plans.
+    return sorted(rows.values(), key=lambda r: (-r["sales"], -r["target"], r["name"]))
+
+
+def month_plans(period, channel: str) -> tuple[dict[int, Decimal], dict[int, Decimal]]:
+    """
+    The month's تارگت for a channel: ({employee_id: plan}, {province_id: plan}).
+
+    Plans live in SalesTarget, set on «تعیین تارگت», at month grain — a week
+    or a day reads its month's. The fact rows still carry a `target_rial`
+    column from before the plans moved, but nothing writes it any more; every
+    chart that read it showed «تحقق تارگت» as nothing at all.
+    """
+    from apps.sales.models import SalesTarget
+
+    people: dict[int, Decimal] = {}
+    provinces: dict[int, Decimal] = {}
+    for t in SalesTarget.objects.filter(period=month_of(period), channel=channel):
+        if t.employee_id and t.province_id is None:
+            people[t.employee_id] = people.get(t.employee_id, Decimal(0)) + t.target_rial
+        elif t.province_id and t.employee_id is None:
+            provinces[t.province_id] = provinces.get(t.province_id, Decimal(0)) + t.target_rial
+    return people, provinces
+
+
 class SalesDashboardDetailView(APIView):
     """Per-salesperson and per-team series for the sales chart dashboards."""
 
@@ -1501,6 +1544,29 @@ class SalesDashboardDetailView(APIView):
 
         # ---- Salesperson block (channel-scoped) — Sheet3 rows 18-30 ----
         facts = _rolled_up_facts(period, channel)
+        plans, province_plans = month_plans(period, channel)
+
+        # Someone with a plan and no approved sales yet is 0% of target, not
+        # absent from the chart — that is the bar a manager is looking for.
+        from types import SimpleNamespace
+
+        seen = {f.employee.id for f in facts}
+        missing = [e for e, t in plans.items() if t and e not in seen]
+        if missing:
+            template = {
+                f.name: 0 for f in FactSalesMonthly._meta.concrete_fields
+                if f.get_internal_type() in {
+                    "DecimalField", "IntegerField", "PositiveIntegerField",
+                    "PositiveSmallIntegerField", "BigIntegerField", "SmallIntegerField",
+                }
+            }
+            for emp in DimEmployee.objects.filter(id__in=missing).select_related("team"):
+                facts.append(SimpleNamespace(employee=emp, **template))
+        # The plan, not the fact rows' stale column.
+        for f in facts:
+            f.target_rial = plans.get(f.employee.id, Decimal(0))
+        facts.sort(key=lambda f: f.employee.id)
+
         # A کارشناس sees their own figures, not their colleagues'.
         own = own_employee(request.user)
         if own is not None:
@@ -1578,16 +1644,9 @@ class SalesDashboardDetailView(APIView):
             })
 
         # ---- Provinces (channel-scoped) ----
-        provinces = [] if own is not None else [{
-            "name": p["province__name_fa"],
-            "sales": float(p["sales"] or 0),
-            "target": float(p["target"] or 0),
-        } for p in FactSalesProvince.objects.filter(
-            period_id__in=channel_units(period, channel), channel=channel,
-            status=ApprovalStatus.APPROVED,
-        ).values("province__name_fa").annotate(
-            sales=Sum("sales_rial"), target=Sum("target_rial"),
-        ).order_by("-sales")]
+        provinces = [] if own is not None else _province_rows(
+            period, channel, province_plans, include_all=True,
+        )
 
         return Response({
             "period": PeriodSerializer(period).data,

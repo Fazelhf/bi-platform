@@ -215,20 +215,24 @@ const teamCharts = computed<ChartDef[]>(() => [
 const names = computed(() => categoriesFor("people"));
 const teamNames = computed(() => categoriesFor("teams"));
 
-/** Top provinces by this month's sales; the same list is used for the
- *  comparison month so the bars line up rather than shifting under each other. */
-const provinceCategories = computed(() => {
-  const rows = [...(data.value?.provinces ?? [])].filter((p) => p.sales > 0);
-  rows.sort((a, b) => b.sales - a.sales);
-  return rows.slice(0, 12).map((p) => p.name);
-});
+/**
+ * Every province except تهران, which has its own chart: beside it the other
+ * provinces' bars were slivers. Provinces that sold nothing stay on the
+ * chart — «کجا فروش نداشتیم» is as much the question as «کجا داشتیم». The
+ * server sends them ordered by sales, then by plan; the comparison month
+ * reuses the same list so the bars line up.
+ */
+const isTehran = (name: string) => name.trim() === "تهران";
+const provinceCategories = computed(() =>
+  (data.value?.provinces ?? []).filter((p) => !isTehran(p.name)).map((p) => p.name),
+);
 const provinceChart: ChartDef = {
-  title: "فروش و تارگت به تفکیک استان", scope: "provinces", height: 300,
+  title: "فروش و تارگت استان‌ها (بدون تهران)", scope: "provinces", height: 340,
   metrics: [{ key: "sales", label: "فروش" }, { key: "target", label: "تارگت" }],
 };
 
-const tehran = computed(() => (data.value?.provinces ?? []).find((p) => p.name.trim() === "تهران"));
-const tehranB = computed(() => (dataB.value?.provinces ?? []).find((p) => p.name.trim() === "تهران"));
+const tehran = computed(() => (data.value?.provinces ?? []).find((p) => isTehran(p.name)));
+const tehranB = computed(() => (dataB.value?.provinces ?? []).find((p) => isTehran(p.name)));
 const tehranSeries = computed(() => {
   const a = data.value?.period.label;
   const out = [
@@ -472,8 +476,10 @@ watch([periodA, () => props.channel], () => {
           />
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- The other provinces get the room; تهران is one bar pair. -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <SeriesChart
+            class="lg:col-span-3"
             :title="provinceChart.title" :height="provinceChart.height"
             :categories="provinceCategories"
             :series="seriesFor(provinceChart)"
@@ -482,7 +488,7 @@ watch([periodA, () => props.channel], () => {
           />
           <SeriesChart
             v-if="tehran"
-            title="تهران — فروش در برابر تارگت" :height="300"
+            title="تهران" :height="provinceChart.height"
             :categories="['تهران']" :series="tehranSeries"
           />
         </div>

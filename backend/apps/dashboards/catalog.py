@@ -57,6 +57,32 @@ class Dim:
 
 
 @dataclass(frozen=True)
+class SideSource:
+    """
+    Where a metric is read from when it does not live on the dataset's own
+    table — the monthly تارگت, which is kept in `sales.SalesTarget` and not on
+    the fact rows beside the sales it is a plan for.
+
+    The engine runs a second aggregation on this model with the same time
+    window, filters and grouping, and adds it into the same rows. That only
+    works because the paths line up: `employee__full_name_fa`,
+    `employee__team__name_fa`, `channel`, `province__name_fa` and
+    `period__jalali_*` mean the same thing on both tables.
+    """
+
+    model: str
+    base_filter: dict = field(default_factory=dict)
+    period_path: str = "period"
+    #: Dimensions the side table does not have (a plan has no approval status).
+    #: Grouping by one of them leaves the metric out of the groups — its total
+    #: still counts; filtering by one is simply not applied to the plan.
+    missing_dims: tuple[str, ...] = ()
+
+    def get_model(self) -> type[Model]:
+        return django_apps.get_model(self.model)
+
+
+@dataclass(frozen=True)
 class Metric:
     """A number to plot. ``agg`` is applied to ``path`` (or to ``expression``)."""
 
@@ -72,6 +98,8 @@ class Metric:
     #: Count only the rows matching this filter (won deals, cash in, …).
     condition: Callable[[], Q] | None = None
     description: str = ""
+    #: Read from another table instead of the dataset's own (see SideSource).
+    side: SideSource | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +168,19 @@ CHANNEL_DIM = Dim(
     key="channel", label="کانال فروش", path="channel", choices=CHANNEL_CHOICES
 )
 
+#: The monthly plans set on «تعیین تارگت». They used to be read off the fact
+#: rows' own `target_rial`, a column nothing has written since the plans
+#: moved to `SalesTarget` — so every «تارگت» and «تحقق تارگت» widget read 0.
+SALES_TARGETS = SideSource(
+    model="sales.SalesTarget",
+    base_filter={"employee__isnull": False, "province__isnull": True},
+    missing_dims=("status",),
+)
+PROVINCE_TARGETS = SideSource(
+    model="sales.SalesTarget",
+    base_filter={"province__isnull": False},
+)
+
 
 # ---------------------------------------------------------------------------
 # The catalog
@@ -165,7 +206,7 @@ DATASETS: tuple[Dataset, ...] = (
         ),
         metrics=(
             Metric("revenue", "فروش ریالی", "sum", "revenue_rial", "rial"),
-            Metric("target", "تارگت", "sum", "target_rial", "rial"),
+            Metric("target", "تارگت", "sum", "target_rial", "rial", side=SALES_TARGETS),
             Metric("profit", "سود", "sum", "profit_rial", "rial"),
             Metric("cost", "بهای تمام‌شده", "sum", "cost_rial", "rial"),
             Metric("collected", "وصولی", "sum", "collected_rial", "rial"),
@@ -196,7 +237,7 @@ DATASETS: tuple[Dataset, ...] = (
         ),
         metrics=(
             Metric("sales", "فروش", "sum", "sales_rial", "rial"),
-            Metric("target", "تارگت", "sum", "target_rial", "rial"),
+            Metric("target", "تارگت", "sum", "target_rial", "rial", side=PROVINCE_TARGETS),
         ),
     ),
     Dataset(

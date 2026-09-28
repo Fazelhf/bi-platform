@@ -157,13 +157,15 @@ class SheetApprovalTests(APITestCase):
         self.client.force_authenticate(self.ceo)
         url = f"/api/sales/dashboard/detail/?period={self.weeks[1].id}&channel=team"
 
-        self.assertEqual(self.client.get(url).data["provinces"], [])
+        # Every province is listed (a province with no sales is a finding),
+        # but unapproved figures count as none.
+        def sales():
+            return {p["name"]: p["sales"] for p in self.client.get(url).data["provinces"]}
+
+        self.assertEqual((sales()["تهران"], sales()["فارس"]), (0.0, 0.0))
         self.decide(self.weeks[1], "approve")  # by the team manager
         self.client.force_authenticate(self.ceo)
-        self.assertEqual(
-            sorted(p["name"] for p in self.client.get(url).data["provinces"]),
-            ["تهران", "فارس"],
-        )
+        self.assertEqual((sales()["تهران"], sales()["فارس"]), (600.0, 400.0))
 
     def test_a_revision_goes_back_to_the_submitter_once(self):
         self.enter(self.weeks[1])

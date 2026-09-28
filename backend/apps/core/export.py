@@ -17,12 +17,7 @@ from apps.production.models import (
     FactProduction,
     FactProductionCost,
 )
-from apps.sales.models import (
-    ApprovalStatus,
-    FactSalesMonthly,
-    FactSalesProvince,
-    SalesChannel,
-)
+from apps.sales.models import ApprovalStatus, SalesChannel
 
 # --- shared styling -------------------------------------------------------
 HEADER_FILL = PatternFill("solid", fgColor="1C1C1E")   # design-system ink
@@ -109,10 +104,16 @@ def _sales_workbook(period, channel):
     wb = Workbook()
     _kpi_sheet(wb, period, "sales", channel, label, first=True)
 
+    # The same figures the dashboard shows: approved, rolled up over the
+    # weeks or days the channel records at, with the targets from the month's
+    # plan rather than the fact rows' stale `target_rial`.
+    from apps.sales.views import _province_rows, _rolled_up_facts, month_plans
+
     is_b2b = channel == SalesChannel.B2B
-    facts = FactSalesMonthly.objects.filter(
-        period=period, channel=channel, status=ApprovalStatus.APPROVED
-    ).select_related("employee", "employee__team").order_by("employee__id")
+    plans, province_plans = month_plans(period, channel)
+    facts = _rolled_up_facts(period, channel)
+    for f in facts:
+        f.target_rial = plans.get(f.employee.id, 0)
 
     ws = _sheet(wb, "شرکت‌ها" if is_b2b else "فروشندگان")
     if is_b2b:
@@ -146,15 +147,13 @@ def _sales_workbook(period, channel):
     _write_table(ws, headers, rows, formats=fmts)
 
     ws = _sheet(wb, "استان‌ها")
-    provinces = FactSalesProvince.objects.filter(
-        period=period, channel=channel, status=ApprovalStatus.APPROVED
-    ).select_related("province").order_by("-sales_rial")
+    provinces = _province_rows(period, channel, province_plans)
     _write_table(
         ws,
         ["استان", "فروش (ریال)", "تارگت (ریال)", "تحقق (٪)"],
         [[
-            p.province.name_fa, float(p.sales_rial), float(p.target_rial),
-            round(float(p.sales_rial) / float(p.target_rial) * 100, 1) if p.target_rial else None,
+            p["name"], p["sales"], p["target"],
+            round(p["sales"] / p["target"] * 100, 1) if p["target"] else None,
         ] for p in provinces],
         formats={1: RIAL_FMT, 2: RIAL_FMT, 3: PCT_FMT},
     )

@@ -190,11 +190,7 @@ def _time_filter(dataset: Dataset, spec: dict, period_id: int | None) -> Q:
         return Q(pk__in=[])
 
     if dataset.period_path:
-        p = dataset.period_path
-        q = Q()
-        for year, month in months:
-            q |= Q(**{f"{p}__jalali_year": year, f"{p}__jalali_month": month})
-        return q
+        return _period_q(dataset.period_path, months)
 
     # Date-based: one range per month, so a gap in the calendar stays a gap
     # rather than being papered over by a single min..max span.
@@ -203,6 +199,14 @@ def _time_filter(dataset: Dataset, spec: dict, period_id: int | None) -> Q:
         if row.start_date and row.end_date:
             q |= Q(**{f"{dataset.date_path}__range": (row.start_date, row.end_date)})
     return q if q else Q(pk__in=[])
+
+
+def _period_q(path: str, months: list[tuple[int, int]]) -> Q:
+    """Rows whose period (at any grain) falls in one of these Jalali months."""
+    q = Q()
+    for year, month in months:
+        q |= Q(**{f"{path}__jalali_year": year, f"{path}__jalali_month": month})
+    return q
 
 
 def _date_month_bucket(dataset: Dataset, months: list[tuple[int, int]]):
@@ -424,11 +428,17 @@ def run_query(spec: dict, *, user, period_id: int | None = None, request=None) -
     if exclude:
         qs = qs.exclude(exclude)
 
-    annotations = {f"m_{m.key}": _annotation(m) for m in metrics}
+    # Metrics kept on another table (the monthly تارگت) are aggregated there
+    # and added into the same rows — see _side.
+    own = [m for m in metrics if m.side is None]
+    annotations = {f"m_{m.key}": _annotation(m) for m in own}
 
     try:
         if dim is None:
-            totals = qs.aggregate(**annotations)
+            totals = qs.aggregate(**annotations) if annotations else {}
+            for m in metrics:
+                if m.side is not None:
+                    _, totals[f"m_{m.key}"] = _side(dataset, m, spec, period_id, [])
             return _shape_total(dataset, metrics, totals, spec, period_id)
 
         paths = _group_paths(dataset, dim)
@@ -444,14 +454,56 @@ def run_query(spec: dict, *, user, period_id: int | None = None, request=None) -
                 window = [(p.jalali_year, p.jalali_month) for p in month_periods()]
             qs = qs.annotate(**{DATE_MONTH_ALIAS: _date_month_bucket(dataset, window)})
 
-        rows = list(qs.values(*paths).annotate(**annotations))
-        totals = qs.aggregate(**annotations)
+        if annotations:
+            rows = list(qs.values(*paths).annotate(**annotations))
+            totals = qs.aggregate(**annotations)
+        else:
+            rows, totals = [], {}
+        for m in metrics:
+            if m.side is not None:
+                side_rows, totals[f"m_{m.key}"] = _side(
+                    dataset, m, spec, period_id, [d for d in (dim, split) if d],
+                )
+                rows.extend(side_rows)
     except FieldError as exc:  # a catalog path that no longer matches the model
         raise QueryError(f"این منبع داده قابل محاسبه نیست: {exc}") from exc
 
     if split:
         return _shape_split(dataset, dim, split, metrics, rows, totals, spec, period_id)
     return _shape_grouped(dataset, dim, metrics, rows, totals, spec, period_id)
+
+
+def _side(dataset: Dataset, metric: Metric, spec: dict, period_id, groups: list[Dim]):
+    """
+    One metric aggregated on its own table: (rows grouped like the main
+    query, total).
+
+    Same time window and the same filters — except a filter on a dimension
+    the side table does not have, which cannot narrow it (a plan has no
+    approval status). Grouping by such a dimension leaves the metric out of
+    the groups: there is no honest way to say which status a plan belongs to.
+    """
+    side = metric.side
+    filters = [
+        f for f in (spec.get("filters") or [])
+        if not (isinstance(f, dict) and f.get("dim") in side.missing_dims)
+    ]
+    include, exclude = _user_filters(dataset, filters)
+    qs = side.get_model().objects.filter(**side.base_filter).filter(include)
+    if exclude:
+        qs = qs.exclude(exclude)
+    months = _months_for(spec.get("time") or {}, period_id)
+    if months is not None:
+        qs = qs.filter(_period_q(side.period_path, months) if months else Q(pk__in=[]))
+
+    annotation = {f"m_{metric.key}": _annotation(metric)}
+    total = qs.aggregate(**annotation)[f"m_{metric.key}"]
+    if not groups or any(g.key in side.missing_dims for g in groups):
+        return [], total
+    paths: list[str] = []
+    for g in groups:
+        paths += _group_paths(dataset, g)
+    return list(qs.values(*paths).annotate(**annotation)), total
 
 
 # ---------------------------------------------------------------------------
@@ -633,8 +685,10 @@ def _detail_columns(dataset: Dataset) -> list[dict]:
         })
     for metric in dataset.metrics:
         # Counts have no column of their own to show, and an expression is not
-        # a field — neither can be read off a single row.
-        if metric.agg == "count" or metric.expression is not None or not metric.path:
+        # a field — neither can be read off a single row. A metric kept on
+        # another table is not on these rows either.
+        if (metric.agg == "count" or metric.expression is not None or not metric.path
+                or metric.side is not None):
             continue
         columns.append({"label": metric.label, "key": metric.path,
                         "unit": metric.unit})
