@@ -28,6 +28,7 @@ from apps.commercial.models import (
     PurchaseRequest,
     Quote,
     QuoteReason,
+    Sample,
     Supplier,
 )
 from apps.commercial.services import consumption, forecast, price_history, supplier_stats
@@ -42,6 +43,11 @@ def _user(username, role, department=""):
 
 class CommercialTestCase(APITestCase):
     def setUp(self):
+        # Migration 0012 loads the company's real 1405 purchases into every
+        # database, the test one included. These tests count from zero, so
+        # they start without it (rolled back after each test like the rest).
+        for model in (PurchaseOrder, Sample, PurchaseRequest):
+            model.objects.all().delete()
         self.packaging = MaterialCategory.objects.get(code="packaging")
         self.shrink = Material.objects.create(
             code="shrink-tape", name_fa="نوار شیرینگ",
