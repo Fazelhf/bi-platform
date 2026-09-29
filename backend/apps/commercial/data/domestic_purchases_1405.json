@@ -1,0 +1,2751 @@
+{
+ "tag": "[ورود از پوشه خرید داخلی ۱۴۰۵]",
+ "materials": [
+  {
+   "code": "jumbo-48-1035",
+   "name_fa": "جامبو رول حرارتی ۴۸ گرم عرض ۱۰۳۵",
+   "category": "raw-material",
+   "unit": "kg"
+  },
+  {
+   "code": "jumbo-48-735",
+   "name_fa": "جامبو رول حرارتی ۴۸ گرم عرض ۷۳۵",
+   "category": "raw-material",
+   "unit": "kg"
+  },
+  {
+   "code": "shrink-20",
+   "name_fa": "فیلم شیرینک عرض ۲۰",
+   "category": "packaging",
+   "unit": "kg"
+  },
+  {
+   "code": "opp-40-23",
+   "name_fa": "فیلم OPP ۴۰ میکرون عرض ۲۳",
+   "category": "packaging",
+   "unit": "kg"
+  },
+  {
+   "code": "core-79x18",
+   "name_fa": "لوله (بوبین) ۷۹×۱۸",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "core-57x13",
+   "name_fa": "لوله (بوبین) ۵۷×۱۳",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "core-54x13",
+   "name_fa": "لوله (بوبین) ۵۴×۱۳",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "core-57x40",
+   "name_fa": "لوله (بوبین) ۵۷×۴۰",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "tape-38",
+   "name_fa": "چسب شفاف ۵ سانت ۳۸ میکرون ۹۰ یارد",
+   "category": "packaging",
+   "unit": "roll"
+  },
+  {
+   "code": "tape-40",
+   "name_fa": "چسب شفاف ۵ سانت ۴۰ میکرون ۹۰ یارد",
+   "category": "packaging",
+   "unit": "roll"
+  },
+  {
+   "code": "tape-42",
+   "name_fa": "چسب شفاف ۵ سانت ۴۲ میکرون ۹۰ یارد",
+   "category": "packaging",
+   "unit": "roll"
+  },
+  {
+   "code": "tape-43",
+   "name_fa": "چسب شفاف ۵ سانت ۴۳ میکرون ۹۰ یارد",
+   "category": "packaging",
+   "unit": "roll"
+  },
+  {
+   "code": "tape-45",
+   "name_fa": "چسب شفاف ۵ سانت ۴۵ میکرون ۹۰ یارد",
+   "category": "packaging",
+   "unit": "roll"
+  },
+  {
+   "code": "tape-48",
+   "name_fa": "چسب شفاف ۵ سانت ۴۸ میکرون ۹۰ یارد",
+   "category": "packaging",
+   "unit": "roll"
+  },
+  {
+   "code": "carton-385",
+   "name_fa": "کارتن سفید ۳۸۵×۳۴۵×۱۷۰",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-385-printed",
+   "name_fa": "کارتن چاپ‌دار ۳۸۵×۳۴۵×۱۷۰",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-425",
+   "name_fa": "کارتن سفید عمومی ۴۲۵×۲۴۰×۱۲۸",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-54",
+   "name_fa": "کارتن سفید عمومی کد ۵۴",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-57",
+   "name_fa": "کارتن سفید عمومی کد ۵۷",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-79",
+   "name_fa": "کارتن سفید مات کد ۷۹",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-hansol",
+   "name_fa": "کارتن چاپی هانسول",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-navy",
+   "name_fa": "کارتن چاپی سرمه‌ای",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-kplus",
+   "name_fa": "کارتن کی‌پلاس رایان",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-telescope-top",
+   "name_fa": "نیم‌کارتن تلسکوپی لیبل — رویه",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "carton-telescope-base",
+   "name_fa": "نیم‌کارتن تلسکوپی لیبل — زیره",
+   "category": "packaging",
+   "unit": "pcs"
+  },
+  {
+   "code": "ink-nc-901",
+   "name_fa": "مرکب مشکی 901 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-nc-637",
+   "name_fa": "مرکب سبز 637 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-nc-3785",
+   "name_fa": "مرکب قرمز 3785 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-nc-3635",
+   "name_fa": "مرکب قرمز 3635 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-nc-591",
+   "name_fa": "مرکب آبی 591 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-nc-580",
+   "name_fa": "مرکب سرمه‌ای 580 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-nc-1754",
+   "name_fa": "مرکب طلایی 1754 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-nc-758",
+   "name_fa": "مرکب نقره‌ای 758 NC",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-cyan",
+   "name_fa": "مرکب سایان",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-magenta",
+   "name_fa": "مرکب مجنتا",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-black",
+   "name_fa": "مرکب مشکی",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-white",
+   "name_fa": "مرکب سفید",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-red-light",
+   "name_fa": "مرکب قرمز روشن",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "ink-yellow",
+   "name_fa": "مرکب زرد",
+   "category": "consumables",
+   "unit": "kg"
+  },
+  {
+   "code": "antifoam",
+   "name_fa": "محلول ضد کف",
+   "category": "consumables",
+   "unit": "kg"
+  }
+ ],
+ "suppliers": [
+  {
+   "code": "faradid",
+   "name_fa": "صنایع کاغذ و بسته‌بندی فرادید",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "021-21008728",
+   "email": "",
+   "address": "تهران، خیابان شهید باهنر، مجتمع تجاری اداری نیاوران، پلاک ۵۲۷، طبقه ۷، واحد ۷۰۳",
+   "activity": "جامبو رول کاغذ حرارتی",
+   "note": ""
+  },
+  {
+   "code": "almas-film",
+   "name_fa": "الماس فیلم آذربایجان",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "ارومیه، کیلومتر ۱۵ جاده مهاباد، جنب کارخانه درخشنده شوی",
+   "activity": "فیلم شیرینک",
+   "note": ""
+  },
+  {
+   "code": "nadi-plastic",
+   "name_fa": "نادی پلاستیک آریا",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "تهران",
+   "activity": "فیلم شیرینک",
+   "note": ""
+  },
+  {
+   "code": "sadaf-plast",
+   "name_fa": "صدف پلاست اطلس",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "فیلم شیرینک",
+   "note": ""
+  },
+  {
+   "code": "biabangard",
+   "name_fa": "صنایع پلاستیک بیابانگرد",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "فیلم OPP",
+   "note": ""
+  },
+  {
+   "code": "pourshikh",
+   "name_fa": "گروه تولیدی صنعتی پورشیخ",
+   "contact_name": "محمدرضا پورشیخ",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "پردیس، بومهن",
+   "activity": "لوله (بوبین) پلاستیکی",
+   "note": ""
+  },
+  {
+   "code": "farnak-teb",
+   "name_fa": "فرناک طب افق",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "صفادشت",
+   "activity": "لوله (بوبین) پلاستیکی",
+   "note": "در فایل اکسل با نام «آرمان - سامان» آمده است."
+  },
+  {
+   "code": "tabatabaei",
+   "name_fa": "آقای طباطبایی",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "لوله (بوبین) پلاستیکی — واسطه",
+   "note": ""
+  },
+  {
+   "code": "khorshid-rang",
+   "name_fa": "خورشید رنگ پارس (سان کالر)",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "جاده شهریار به ملارد، شهرک صنعتی صفادشت، بلوار خرداد، دهم غربی، پلاک ۱۴۱",
+   "activity": "مرکب چاپ",
+   "note": ""
+  },
+  {
+   "code": "farkoush",
+   "name_fa": "تولیدی شیمیایی فرکوش رنگ پارس",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "شمس‌آباد",
+   "activity": "مرکب چاپ",
+   "note": ""
+  },
+  {
+   "code": "iran-chasb",
+   "name_fa": "ایران چسب",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "چسب نواری",
+   "note": ""
+  },
+  {
+   "code": "ani-chasb",
+   "name_fa": "آنی چسب",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "چسب نواری",
+   "note": ""
+  },
+  {
+   "code": "sina-chasb",
+   "name_fa": "چسب شیشه‌ای سینا",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "چسب نواری",
+   "note": ""
+  },
+  {
+   "code": "armaghan",
+   "name_fa": "ارمغان نگین آریا",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "کارتن",
+   "note": ""
+  },
+  {
+   "code": "mihan",
+   "name_fa": "کارتن‌سازی میهن",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "021-66426630",
+   "email": "info@mihancarton.com",
+   "address": "تهران، خیابان آزادی، نبش اسکندری شمالی، پلاک ۱۵۳، ساختمان ۲۴۱، طبقه ۹",
+   "activity": "کارتن",
+   "note": ""
+  },
+  {
+   "code": "karimi",
+   "name_fa": "چاپ و بسته‌بندی کریمی",
+   "contact_name": "",
+   "mobile": "09121509831",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "کارتن",
+   "note": ""
+  },
+  {
+   "code": "tamadon",
+   "name_fa": "کارتن‌سازی تمدن کرج",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "کارتن",
+   "note": ""
+  },
+  {
+   "code": "negar-javid",
+   "name_fa": "کارتن نگار جاوید",
+   "contact_name": "",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "کارتن",
+   "note": ""
+  },
+  {
+   "code": "parand",
+   "name_fa": "کارتن پرند پیشتاز",
+   "contact_name": "آقای فرخی",
+   "mobile": "",
+   "phone": "",
+   "email": "",
+   "address": "",
+   "activity": "کارتن",
+   "note": ""
+  }
+ ],
+ "payment_terms": [
+  {
+   "code": "net-20",
+   "name_fa": "چک ۲۰ روزه",
+   "advance_pct": "0.00",
+   "days": 20
+  },
+  {
+   "code": "net-45",
+   "name_fa": "چک ۴۵ روزه",
+   "advance_pct": "0.00",
+   "days": 45
+  },
+  {
+   "code": "advance-15-net-40",
+   "name_fa": "۱۵٪ نقد، مابقی چک ۴۰ روزه",
+   "advance_pct": "15.00",
+   "days": 40
+  },
+  {
+   "code": "advance-40-net-30",
+   "name_fa": "۴۰٪ پیش‌پرداخت، مابقی ۳۰ روزه",
+   "advance_pct": "40.00",
+   "days": 30
+  }
+ ],
+ "requests": [
+  {
+   "key": 1,
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "almas-film",
+     "unit_price_rial": "8900000",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30 هر رول سایز 20 سانت معادل 8 کیلو و هر رول سایز 30 سانت معادل 11 کیلو — قیمت قبلی (۱۴۰۴): 1,987,000"
+    },
+    {
+     "supplier": "nadi-plastic",
+     "unit_price_rial": "5950000",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30 هر رول سایز 20 سانت معادل 7/5 کیلو و هر رول سایز 30 سانت معادل 11 کیلو — قیمت قبلی (۱۴۰۴): 2,970,000"
+    }
+   ]
+  },
+  {
+   "key": 2,
+   "material": "core-79x18",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "5500",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18 هر گونی معادل 2800 عدد لوله — قیمت قبلی (۱۴۰۴): 4,500"
+    }
+   ]
+  },
+  {
+   "key": 3,
+   "material": "core-57x13",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "2980",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 57*13 هر گونی معادل 7000 عدد لوله — قیمت قبلی (۱۴۰۴): 2,250"
+    }
+   ]
+  },
+  {
+   "key": 4,
+   "material": "ink-nc-901",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "ordered",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "7225000",
+     "quoted_on": "2026-04-16",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب مشکی گالن 18 کیلو — قیمت قبلی (۱۴۰۴): 3,450,000"
+    }
+   ]
+  },
+  {
+   "key": 5,
+   "material": "ink-cyan",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "10967000",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب سایان گالن 18 کیلو — قیمت قبلی (۱۴۰۴): 5,290,000"
+    }
+   ]
+  },
+  {
+   "key": 6,
+   "material": "ink-magenta",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "10349000",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب مجنتا گالن 18 کیلو — قیمت قبلی (۱۴۰۴): 4,865,000"
+    }
+   ]
+  },
+  {
+   "key": 7,
+   "material": "carton-385",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "armaghan",
+     "unit_price_rial": "418000",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 کارتن بدون چاپ - سفید مات — قیمت قبلی (۱۴۰۴): 402,500"
+    }
+   ]
+  },
+  {
+   "key": 8,
+   "material": "carton-hansol",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "armaghan",
+     "unit_price_rial": "445500",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 کارتن چاپ هانسول — قیمت قبلی (۱۴۰۴): 307,000"
+    }
+   ]
+  },
+  {
+   "key": 9,
+   "material": "carton-385-printed",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "armaghan",
+     "unit_price_rial": "473000",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 کارتن چاپ دار (هنوز تائید نشده )"
+    }
+   ]
+  },
+  {
+   "key": 10,
+   "material": "carton-425",
+   "quantity": "0.00",
+   "requested_on": "2026-04-16",
+   "status": "quoting",
+   "note": "از شیت استعلام 27 فروردین 1405",
+   "quotes": [
+    {
+     "supplier": "armaghan",
+     "unit_price_rial": "251000",
+     "quoted_on": "2026-04-16",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 425*240*128 کارتن بدون چاپ - سفید عمومی — قیمت قبلی (۱۴۰۴): 240,000"
+    }
+   ]
+  },
+  {
+   "key": 11,
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "requested_on": "2026-04-21",
+   "status": "quoting",
+   "note": "از شیت استعلام 1 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "almas-film",
+     "unit_price_rial": "6800000",
+     "quoted_on": "2026-04-21",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30 در صورت سفارش بیش از یک تن | قیمت دیگر همین فروشنده: 7,000,000"
+    },
+    {
+     "supplier": "nadi-plastic",
+     "unit_price_rial": "7740000",
+     "quoted_on": "2026-04-21",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30"
+    }
+   ]
+  },
+  {
+   "key": 12,
+   "material": "carton-385",
+   "quantity": "0.00",
+   "requested_on": "2026-04-21",
+   "status": "quoting",
+   "note": "از شیت استعلام 1 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "karimi",
+     "unit_price_rial": "844500",
+     "quoted_on": "2026-04-21",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 لمینتی رول بدون چاپ | قیمت دیگر همین فروشنده: 978,900"
+    }
+   ]
+  },
+  {
+   "key": 13,
+   "material": "carton-425",
+   "quantity": "0.00",
+   "requested_on": "2026-04-21",
+   "status": "quoting",
+   "note": "از شیت استعلام 1 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "karimi",
+     "unit_price_rial": "488100",
+     "quoted_on": "2026-04-21",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 425*240*128 لمینتی رول بدون چاپ | قیمت دیگر همین فروشنده: 555,300"
+    }
+   ]
+  },
+  {
+   "key": 14,
+   "material": "tape-38",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "quoting",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "ani-chasb",
+     "unit_price_rial": "1300000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب پهن 5 سانت شیشه ای - 38 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 15,
+   "material": "tape-42",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "quoting",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "ani-chasb",
+     "unit_price_rial": "1600000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب پهن 5 سانت شیشه ای - 42 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 16,
+   "material": "tape-40",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "quoting",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "iran-chasb",
+     "unit_price_rial": "1378000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب پهن 5 سانت شیشه ای -40 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 17,
+   "material": "carton-385",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "ordered",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "karimi",
+     "unit_price_rial": "572400",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": "high-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 معمولی - کرافت - فلوت C"
+    },
+    {
+     "supplier": "mihan",
+     "unit_price_rial": "522000",
+     "quoted_on": "2026-04-22",
+     "is_selected": true,
+     "reason": "win-other",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 معمولی - سفید - فلوت C"
+    },
+    {
+     "supplier": "tamadon",
+     "unit_price_rial": "438500",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": "lose-other",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 معمولی - سفید - فلوت C"
+    }
+   ]
+  },
+  {
+   "key": 18,
+   "material": "carton-425",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "quoting",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "karimi",
+     "unit_price_rial": "349100",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 425*240*128 معمولی - کرافت - فلوت C"
+    },
+    {
+     "supplier": "mihan",
+     "unit_price_rial": "304000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 425*240*128 معمولی - سفید - فلوت C"
+    },
+    {
+     "supplier": "tamadon",
+     "unit_price_rial": "248000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 425*240*128 معمولی - سفید - فلوت C"
+    }
+   ]
+  },
+  {
+   "key": 19,
+   "material": "carton-hansol",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "quoting",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "negar-javid",
+     "unit_price_rial": "511000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 360*300*180 هانسول سفید رایان | قیمت دیگر: 567,500 (کارتن 350*300*180 هانسول قهوه ای رایان)"
+    }
+   ]
+  },
+  {
+   "key": 20,
+   "material": "carton-kplus",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "quoting",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "negar-javid",
+     "unit_price_rial": "511000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 360*300*180 کی پلاس سفید رایان | قیمت دیگر: 567,500 (کارتن 355*300*180 کی پلاس قهوه ای رایان)"
+    }
+   ]
+  },
+  {
+   "key": 21,
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "requested_on": "2026-04-22",
+   "status": "quoting",
+   "note": "از شیت استعلام 2 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "sadaf-plast",
+     "unit_price_rial": "8200000",
+     "quoted_on": "2026-04-22",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30"
+    }
+   ]
+  },
+  {
+   "key": 22,
+   "material": "tape-45",
+   "quantity": "0.00",
+   "requested_on": "2026-04-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 5 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "sina-chasb",
+     "unit_price_rial": "1500000",
+     "quoted_on": "2026-04-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب پهن 5 سانت شیشه ای -45 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 23,
+   "material": "carton-hansol",
+   "quantity": "0.00",
+   "requested_on": "2026-04-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 5 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "negar-javid",
+     "unit_price_rial": "511000",
+     "quoted_on": "2026-04-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 360*300*180 هانسول سفید رایان | قیمت دیگر: 567,500 (کارتن 350*300*180 هانسول قهوه ای رایان)"
+    }
+   ]
+  },
+  {
+   "key": 24,
+   "material": "carton-kplus",
+   "quantity": "0.00",
+   "requested_on": "2026-04-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 5 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "negar-javid",
+     "unit_price_rial": "511000",
+     "quoted_on": "2026-04-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 360*300*180 کی پلاس سفید رایان | قیمت دیگر: 567,500 (کارتن 355*300*180 کی پلاس قهوه ای رایان)"
+    }
+   ]
+  },
+  {
+   "key": 25,
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "requested_on": "2026-04-25",
+   "status": "ordered",
+   "note": "از شیت استعلام 5 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "almas-film",
+     "unit_price_rial": "6800000",
+     "quoted_on": "2026-04-25",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30 در صورت سفارش بیش از یک تن | قیمت دیگر همین فروشنده: 7,000,000"
+    }
+   ]
+  },
+  {
+   "key": 26,
+   "material": "core-79x18",
+   "quantity": "0.00",
+   "requested_on": "2026-04-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 5 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "5980",
+     "quoted_on": "2026-04-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18 هر گونی معادل 2800 عدد لوله"
+    }
+   ]
+  },
+  {
+   "key": 27,
+   "material": "core-54x13",
+   "quantity": "0.00",
+   "requested_on": "2026-04-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 5 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "2980",
+     "quoted_on": "2026-04-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 54*13 هر گونی معادل 7000 عدد لوله"
+    }
+   ]
+  },
+  {
+   "key": 28,
+   "material": "core-79x18",
+   "quantity": "280000.00",
+   "requested_on": "2026-04-26",
+   "status": "ordered",
+   "note": "از شیت استعلام 6 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "5980",
+     "quoted_on": "2026-04-26",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18 در اسرع وقت سفارش گذاری انجام شود"
+    }
+   ]
+  },
+  {
+   "key": 29,
+   "material": "core-57x13",
+   "quantity": "770000.00",
+   "requested_on": "2026-04-26",
+   "status": "ordered",
+   "note": "از شیت استعلام 6 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "2980",
+     "quoted_on": "2026-04-26",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 57*13 در اسرع وقت سفارش گذاری انجام شود"
+    }
+   ]
+  },
+  {
+   "key": 30,
+   "material": "core-54x13",
+   "quantity": "315000.00",
+   "requested_on": "2026-04-26",
+   "status": "ordered",
+   "note": "از شیت استعلام 6 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "2980",
+     "quoted_on": "2026-04-26",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 54*13 تا 10 روز آینده سفارش گذاری انجام گردد"
+    }
+   ]
+  },
+  {
+   "key": 31,
+   "material": "shrink-20",
+   "quantity": "1000.00",
+   "requested_on": "2026-04-26",
+   "status": "quoting",
+   "note": "از شیت استعلام 6 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "nadi-plastic",
+     "unit_price_rial": "7740000",
+     "quoted_on": "2026-04-26",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 در اسرع وقت سفارش گذاری انجام شود | قیمت دیگر: 7,740,000 (شیرینک سایز 20 تا 10 روز آینده سفارش گذاری انجام گردد)"
+    }
+   ]
+  },
+  {
+   "key": 32,
+   "material": "carton-385",
+   "quantity": "4000.00",
+   "requested_on": "2026-04-26",
+   "status": "quoting",
+   "note": "از شیت استعلام 6 اردیبهشت 1405",
+   "quotes": [
+    {
+     "supplier": "armaghan",
+     "unit_price_rial": "418000",
+     "quoted_on": "2026-04-26",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن 385*345*170 در اسرع وقت سفارش گذاری انجام شود"
+    }
+   ]
+  },
+  {
+   "key": 33,
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "ordered",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "nadi-plastic",
+     "unit_price_rial": "7040000",
+     "quoted_on": "2026-05-25",
+     "is_selected": true,
+     "reason": "win-other",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30"
+    },
+    {
+     "supplier": "almas-film",
+     "unit_price_rial": "6901000",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": "lose-other",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک سایز 20 و 30"
+    }
+   ]
+  },
+  {
+   "key": 34,
+   "material": "core-79x18",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "7800",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18 هر گونی معادل 2800 عدد لوله"
+    },
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "7150",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18"
+    }
+   ]
+  },
+  {
+   "key": 35,
+   "material": "core-57x13",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "3800",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 57*13 هر گونی معادل 7000 عدد لوله"
+    }
+   ]
+  },
+  {
+   "key": 36,
+   "material": "core-54x13",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "pourshikh",
+     "unit_price_rial": "3800",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 54*13 هر گونی معادل 7000 عدد لوله"
+    },
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "3150",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 54*13"
+    }
+   ]
+  },
+  {
+   "key": 37,
+   "material": "ink-nc-637",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "9085000",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب سبز 637 NC گالن 18 کیلو"
+    }
+   ]
+  },
+  {
+   "key": 38,
+   "material": "ink-nc-3785",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "9731000",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب قرمز 3785 NC گالن 18 کیلو"
+    }
+   ]
+  },
+  {
+   "key": 39,
+   "material": "ink-nc-591",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "9247000",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب آبی 591 NC گالن 18 کیلو"
+    }
+   ]
+  },
+  {
+   "key": 40,
+   "material": "ink-nc-1754",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "9569000",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب طلایی 1754 NC گالن 18 کیلو"
+    }
+   ]
+  },
+  {
+   "key": 41,
+   "material": "ink-nc-758",
+   "quantity": "0.00",
+   "requested_on": "2026-05-25",
+   "status": "quoting",
+   "note": "از شیت استعلام 4 خرداد 1405",
+   "quotes": [
+    {
+     "supplier": "khorshid-rang",
+     "unit_price_rial": "9596000",
+     "quoted_on": "2026-05-25",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب نقره ای 758 NC گالن 18 کیلو"
+    }
+   ]
+  },
+  {
+   "key": 42,
+   "material": "tape-40",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "ordered",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "iran-chasb",
+     "unit_price_rial": "1675000",
+     "quoted_on": "2026-07-15",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب شفاف 40 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 43,
+   "material": "tape-43",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "quoting",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "iran-chasb",
+     "unit_price_rial": "1801000",
+     "quoted_on": "2026-07-15",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب شفاف 43 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 44,
+   "material": "tape-45",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "quoting",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "iran-chasb",
+     "unit_price_rial": "1885000",
+     "quoted_on": "2026-07-15",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب شفاف 45 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 45,
+   "material": "tape-48",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "quoting",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "iran-chasb",
+     "unit_price_rial": "1925000",
+     "quoted_on": "2026-07-15",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "چسب شفاف 48 میکرون 90 یارد"
+    }
+   ]
+  },
+  {
+   "key": 46,
+   "material": "core-79x18",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "ordered",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "7250",
+     "quoted_on": "2026-07-15",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18"
+    }
+   ]
+  },
+  {
+   "key": 47,
+   "material": "core-54x13",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "quoting",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "3450",
+     "quoted_on": "2026-07-15",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 54*13"
+    }
+   ]
+  },
+  {
+   "key": 48,
+   "material": "core-57x13",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "ordered",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "3650",
+     "quoted_on": "2026-07-15",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 57*13"
+    }
+   ]
+  },
+  {
+   "key": 49,
+   "material": "opp-40-23",
+   "quantity": "0.00",
+   "requested_on": "2026-07-15",
+   "status": "quoting",
+   "note": "از شیت استعلام 24 تیر 1405",
+   "quotes": [
+    {
+     "supplier": "biabangard",
+     "unit_price_rial": "6500000",
+     "quoted_on": "2026-07-15",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "OPP 40 میکرون عرض 23"
+    }
+   ]
+  },
+  {
+   "key": 50,
+   "material": "carton-54",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "mihan",
+     "unit_price_rial": "293000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن کد 54"
+    }
+   ]
+  },
+  {
+   "key": 51,
+   "material": "carton-79",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "ordered",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "mihan",
+     "unit_price_rial": "479000",
+     "quoted_on": "2026-09-02",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن کد 79"
+    }
+   ]
+  },
+  {
+   "key": 52,
+   "material": "carton-57",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "mihan",
+     "unit_price_rial": "296000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن کد 57"
+    }
+   ]
+  },
+  {
+   "key": 53,
+   "material": "carton-hansol",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "mihan",
+     "unit_price_rial": "447000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن هانسول"
+    }
+   ]
+  },
+  {
+   "key": 54,
+   "material": "ink-black",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farkoush",
+     "unit_price_rial": "6300000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب مشکی"
+    }
+   ]
+  },
+  {
+   "key": 55,
+   "material": "ink-white",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farkoush",
+     "unit_price_rial": "6195000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب سفید"
+    }
+   ]
+  },
+  {
+   "key": 56,
+   "material": "ink-red-light",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farkoush",
+     "unit_price_rial": "6720000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب قرمز"
+    }
+   ]
+  },
+  {
+   "key": 57,
+   "material": "ink-yellow",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farkoush",
+     "unit_price_rial": "6510000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "مرکب زرد"
+    }
+   ]
+  },
+  {
+   "key": 58,
+   "material": "antifoam",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farkoush",
+     "unit_price_rial": "9450000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کف"
+    }
+   ]
+  },
+  {
+   "key": 59,
+   "material": "core-79x18",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "7150",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18"
+    }
+   ]
+  },
+  {
+   "key": 60,
+   "material": "core-54x13",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "3500",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 54*13"
+    }
+   ]
+  },
+  {
+   "key": 61,
+   "material": "core-57x13",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "3500",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 57*13"
+    }
+   ]
+  },
+  {
+   "key": 62,
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "requested_on": "2026-09-02",
+   "status": "quoting",
+   "note": "از شیت استعلام 11 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "almas-film",
+     "unit_price_rial": "5900000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک عرض 20"
+    },
+    {
+     "supplier": "nadi-plastic",
+     "unit_price_rial": "6800000",
+     "quoted_on": "2026-09-02",
+     "is_selected": false,
+     "reason": null,
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک عرض 20"
+    }
+   ]
+  },
+  {
+   "key": 63,
+   "material": "carton-hansol",
+   "quantity": "0.00",
+   "requested_on": "2026-09-09",
+   "status": "ordered",
+   "note": "از شیت استعلام 18 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "mihan",
+     "unit_price_rial": "498000",
+     "quoted_on": "2026-09-09",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "کارتن هانسول"
+    }
+   ]
+  },
+  {
+   "key": 64,
+   "material": "core-79x18",
+   "quantity": "0.00",
+   "requested_on": "2026-09-14",
+   "status": "ordered",
+   "note": "از شیت استعلام 23 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "farnak-teb",
+     "unit_price_rial": "7600",
+     "quoted_on": "2026-09-14",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "لوله 79*18"
+    }
+   ]
+  },
+  {
+   "key": 65,
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "requested_on": "2026-09-15",
+   "status": "ordered",
+   "note": "از شیت استعلام 24 شهریور 1405",
+   "quotes": [
+    {
+     "supplier": "almas-film",
+     "unit_price_rial": "6630000",
+     "quoted_on": "2026-09-15",
+     "is_selected": true,
+     "reason": "good-price",
+     "is_official": false,
+     "vat_pct": "10.00",
+     "note": "شیرینک عرض 20"
+    }
+   ]
+  }
+ ],
+ "orders": [
+  {
+   "supplier": "almas-film",
+   "material": "shrink-20",
+   "quantity": "1000.00",
+   "unit_price_rial": "6181818",
+   "ordered_on": "2026-04-27",
+   "delivered_on": "2026-05-09",
+   "status": "delivered",
+   "payment_term": "advance-full",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۱۸۵ مورخ ۱۴۰۵/۰۲/۰۷ (۶٬۷۹۹٬۹۹۹٬۸۰۰ ریال با ارزش افزوده)؛ ارسال در دو پارت ۱۴۰۵/۰۲/۱۳ و ۱۴۰۵/۰۲/۱۹. [Final ردیف 43]",
+   "request": 25
+  },
+  {
+   "supplier": "armaghan",
+   "material": "carton-navy",
+   "quantity": "10074.00",
+   "unit_price_rial": "424668",
+   "ordered_on": "2026-04-29",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": false,
+   "vat_pct": "10.00",
+   "note": "تاریخ تحویل در مدارک نبود. [Final ردیف 5]",
+   "request": null
+  },
+  {
+   "supplier": "pourshikh",
+   "material": "core-57x13",
+   "quantity": "364000.00",
+   "unit_price_rial": "2980",
+   "ordered_on": "2026-05-06",
+   "delivered_on": "2026-05-06",
+   "status": "delivered",
+   "payment_term": "advance-50-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۱۱۶۰؛ ۵۰٪ پیش‌پرداخت ۲٬۶۹۹٬۲۳۵٬۰۰۰ ریال در ۱۴۰۵/۰۲/۰۸، مابقی چک یک‌ماهه. تنها تامین‌کننده‌ی تاییدشده‌ای که رسمی می‌فروشد. [Final ردیف 31]",
+   "request": 29
+  },
+  {
+   "supplier": "pourshikh",
+   "material": "core-54x13",
+   "quantity": "382500.00",
+   "unit_price_rial": "2980",
+   "ordered_on": "2026-05-06",
+   "delivered_on": "2026-05-06",
+   "status": "delivered",
+   "payment_term": "advance-50-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۱۱۶۰؛ ۵۰٪ پیش‌پرداخت ۲٬۶۹۹٬۲۳۵٬۰۰۰ ریال در ۱۴۰۵/۰۲/۰۸، مابقی چک یک‌ماهه. تنها تامین‌کننده‌ی تاییدشده‌ای که رسمی می‌فروشد. [Final ردیف 32]",
+   "request": 30
+  },
+  {
+   "supplier": "pourshikh",
+   "material": "core-79x18",
+   "quantity": "269442.00",
+   "unit_price_rial": "5980",
+   "ordered_on": "2026-05-09",
+   "delivered_on": "2026-05-09",
+   "status": "delivered",
+   "payment_term": "advance-50-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "با وزن‌کشی ۲۱۵۸ عدد کسری نسبت به فاکتور داشت. [Final ردیف 33]",
+   "request": 28
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-385",
+   "quantity": "5000.00",
+   "unit_price_rial": "522000",
+   "ordered_on": "2026-05-13",
+   "delivered_on": "2026-05-13",
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "transfer",
+   "payment_note": "۳۰٪ پیش‌پرداخت ۷۸۳٬۰۰۰٬۰۰۰ ریال (۱۴۰۵/۰۲/۲۱)",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "رسید انبار شماره ۲۰ مورخ ۱۴۰۵/۰۲/۲۳ (کارتن سفید مات). [Final ردیف 6]",
+   "request": 17
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-637",
+   "quantity": "18.00",
+   "unit_price_rial": "9085000",
+   "ordered_on": "2026-05-20",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور با ارزش افزوده ۱٬۷۹۳٬۴۴۴٬۴۰۰ ریال؛ بار با وانت از صفادشت تحویل گرفته شد. تاریخ تحویل در مدارک نبود. [Final ردیف 17]",
+   "request": null
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-3785",
+   "quantity": "18.00",
+   "unit_price_rial": "9731000",
+   "ordered_on": "2026-05-20",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور با ارزش افزوده ۱٬۷۹۳٬۴۴۴٬۴۰۰ ریال؛ بار با وانت از صفادشت تحویل گرفته شد. تاریخ تحویل در مدارک نبود. [Final ردیف 18]",
+   "request": null
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-591",
+   "quantity": "18.00",
+   "unit_price_rial": "9247000",
+   "ordered_on": "2026-05-20",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور با ارزش افزوده ۱٬۷۹۳٬۴۴۴٬۴۰۰ ریال؛ بار با وانت از صفادشت تحویل گرفته شد. تاریخ تحویل در مدارک نبود. [Final ردیف 19]",
+   "request": null
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-1754",
+   "quantity": "18.00",
+   "unit_price_rial": "9569000",
+   "ordered_on": "2026-05-20",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور با ارزش افزوده ۱٬۷۹۳٬۴۴۴٬۴۰۰ ریال؛ بار با وانت از صفادشت تحویل گرفته شد. تاریخ تحویل در مدارک نبود. [Final ردیف 20]",
+   "request": null
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-758",
+   "quantity": "18.00",
+   "unit_price_rial": "9596000",
+   "ordered_on": "2026-05-20",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور با ارزش افزوده ۱٬۷۹۳٬۴۴۴٬۴۰۰ ریال؛ بار با وانت از صفادشت تحویل گرفته شد. تاریخ تحویل در مدارک نبود. [Final ردیف 21]",
+   "request": null
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-901",
+   "quantity": "108.00",
+   "unit_price_rial": "7225000",
+   "ordered_on": "2026-05-20",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور با ارزش افزوده ۱٬۷۹۳٬۴۴۴٬۴۰۰ ریال؛ بار با وانت از صفادشت تحویل گرفته شد. تاریخ تحویل در مدارک نبود. [Final ردیف 22]",
+   "request": 4
+  },
+  {
+   "supplier": "farnak-teb",
+   "material": "core-79x18",
+   "quantity": "500000.00",
+   "unit_price_rial": "7150",
+   "ordered_on": "2026-05-24",
+   "delivered_on": "2026-07-11",
+   "status": "delivered",
+   "payment_term": "advance-40-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۸۰۰٬۰۰۰ بوبین ۴٬۹۷۲٬۰۰۰٬۰۰۰ ریال با ارزش افزوده؛ ۴۰٪ نقد، مابقی چک یک‌ماهه. تحویل در سه پارت: ۱۴۰۵/۰۳/۲۴، ۱۴۰۵/۰۴/۰۲، ۱۴۰۵/۰۴/۲۰. [Final ردیف 38]",
+   "request": null
+  },
+  {
+   "supplier": "farnak-teb",
+   "material": "core-54x13",
+   "quantity": "300000.00",
+   "unit_price_rial": "3150",
+   "ordered_on": "2026-05-24",
+   "delivered_on": "2026-07-11",
+   "status": "delivered",
+   "payment_term": "advance-40-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۸۰۰٬۰۰۰ بوبین ۴٬۹۷۲٬۰۰۰٬۰۰۰ ریال با ارزش افزوده؛ ۴۰٪ نقد، مابقی چک یک‌ماهه. تحویل در سه پارت: ۱۴۰۵/۰۳/۲۴، ۱۴۰۵/۰۴/۰۲، ۱۴۰۵/۰۴/۲۰. [Final ردیف 39]",
+   "request": null
+  },
+  {
+   "supplier": "pourshikh",
+   "material": "core-57x40",
+   "quantity": "6650.00",
+   "unit_price_rial": "15000",
+   "ordered_on": "2026-05-25",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": false,
+   "vat_pct": "10.00",
+   "note": "تاریخ تحویل در مدارک نبود. [Final ردیف 34]",
+   "request": null
+  },
+  {
+   "supplier": "tabatabaei",
+   "material": "core-79x18",
+   "quantity": "100000.00",
+   "unit_price_rial": "7500",
+   "ordered_on": "2026-05-26",
+   "delivered_on": "2026-05-26",
+   "status": "delivered",
+   "payment_term": "term-other",
+   "payment_method": "other",
+   "payment_note": "چک ۴۳۰٬۰۰۰٬۰۰۰ ریال (سررسید ۱۴۰۵/۰۴/۰۵) + ۶۵۱٬۱۰۹٬۴۰۰ ریال نقد",
+   "is_official": false,
+   "vat_pct": "10.00",
+   "note": "مبلغ قابل پرداخت بر اساس بوبین‌های تاییدشده ۱٬۰۸۱٬۱۰۹٬۴۰۰ ریال؛ کارخانه کیفیت بوبین‌ها را تایید نکرد. [Final ردیف 36]",
+   "request": null
+  },
+  {
+   "supplier": "tabatabaei",
+   "material": "core-57x13",
+   "quantity": "100000.00",
+   "unit_price_rial": "3300",
+   "ordered_on": "2026-05-26",
+   "delivered_on": "2026-05-26",
+   "status": "delivered",
+   "payment_term": "term-other",
+   "payment_method": "other",
+   "payment_note": "چک ۴۳۰٬۰۰۰٬۰۰۰ ریال (سررسید ۱۴۰۵/۰۴/۰۵) + ۶۵۱٬۱۰۹٬۴۰۰ ریال نقد",
+   "is_official": false,
+   "vat_pct": "10.00",
+   "note": "مبلغ قابل پرداخت بر اساس بوبین‌های تاییدشده ۱٬۰۸۱٬۱۰۹٬۴۰۰ ریال؛ کارخانه کیفیت بوبین‌ها را تایید نکرد. [Final ردیف 37]",
+   "request": null
+  },
+  {
+   "supplier": "biabangard",
+   "material": "opp-40-23",
+   "quantity": "5.00",
+   "unit_price_rial": "6500000",
+   "ordered_on": "2026-07-14",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": false,
+   "vat_pct": "10.00",
+   "note": "خرید آزمایشی. تاریخ تحویل در مدارک نبود. [Final ردیف 44]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-54",
+   "quantity": "5000.00",
+   "unit_price_rial": "293000",
+   "ordered_on": "2026-07-18",
+   "delivered_on": "2026-07-18",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "رسید انبار شماره ۲۵: کد ۵۴ ۴۹۶۷ عدد، کد ۵۷ ۴۹۲۵ عدد، کد ۷۹ ۴۸۰۸ عدد. [Final ردیف 7]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-79",
+   "quantity": "5000.00",
+   "unit_price_rial": "479000",
+   "ordered_on": "2026-07-18",
+   "delivered_on": "2026-07-18",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "رسید انبار شماره ۲۵: کد ۵۴ ۴۹۶۷ عدد، کد ۵۷ ۴۹۲۵ عدد، کد ۷۹ ۴۸۰۸ عدد. [Final ردیف 8]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-57",
+   "quantity": "5000.00",
+   "unit_price_rial": "296000",
+   "ordered_on": "2026-07-18",
+   "delivered_on": "2026-07-18",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "رسید انبار شماره ۲۵: کد ۵۴ ۴۹۶۷ عدد، کد ۵۷ ۴۹۲۵ عدد، کد ۷۹ ۴۸۰۸ عدد. [Final ردیف 9]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-hansol",
+   "quantity": "5000.00",
+   "unit_price_rial": "447000",
+   "ordered_on": "2026-07-26",
+   "delivered_on": "2026-08-03",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "۴۹۶۰ عدد تحویل شد. [Final ردیف 10]",
+   "request": null
+  },
+  {
+   "supplier": "iran-chasb",
+   "material": "tape-40",
+   "quantity": "720.00",
+   "unit_price_rial": "1675000",
+   "ordered_on": "2026-08-01",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": "cash-on-delivery",
+   "payment_method": "cash",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "خرید نقدی و رسمی؛ پس از تایید نمونه‌ی ۴۰ میکرون. تاریخ تحویل در مدارک نبود. [Final ردیف 3]",
+   "request": 42
+  },
+  {
+   "supplier": "nadi-plastic",
+   "material": "shrink-20",
+   "quantity": "1000.00",
+   "unit_price_rial": "5900000",
+   "ordered_on": "2026-08-01",
+   "delivered_on": null,
+   "status": "delivered",
+   "payment_term": null,
+   "payment_method": "",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۳۹۴ مورخ ۱۴۰۵/۰۵/۱۰ (۶٬۴۹۰٬۰۰۰٬۰۰۰ ریال با ارزش افزوده)؛ ارسال یک تن اعلام شد، تاریخ رسید در پوشه نبود. تاریخ تحویل در مدارک نبود. [Final ردیف 45]",
+   "request": 33
+  },
+  {
+   "supplier": "farnak-teb",
+   "material": "core-57x13",
+   "quantity": "860000.00",
+   "unit_price_rial": "3350",
+   "ordered_on": "2026-08-11",
+   "delivered_on": "2026-09-09",
+   "status": "delivered",
+   "payment_term": "advance-40-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "۴۰٪ پیش‌پرداخت ۱٬۱۵۲٬۴۰۰٬۰۰۰ ریال (۱۴۰۵/۰۵/۲۷)، مابقی چک ۲٬۰۱۶٬۷۰۰٬۰۰۰ ریال. پارت‌ها: ۳۴۸٬۰۰۰ عدد ۱۴۰۵/۰۵/۲۴، ۵۱۱٬۹۰۰ عدد ۱۴۰۵/۰۶/۰۲، کسری ۱۰۰ عدد ۱۴۰۵/۰۶/۱۸. [Final ردیف 40]",
+   "request": 48
+  },
+  {
+   "supplier": "farkoush",
+   "material": "ink-black",
+   "quantity": "300.00",
+   "unit_price_rial": "6000000",
+   "ordered_on": "2026-08-15",
+   "delivered_on": "2026-08-16",
+   "status": "delivered",
+   "payment_term": "net-60",
+   "payment_method": "cheque",
+   "payment_note": "دو چک: ۵٬۰۰۰٬۰۰۰٬۰۰۰ ریال ۱۴۰۵/۰۷/۲۵ و ۴٬۳۱۳٬۱۵۰٬۰۰۰ ریال ۱۴۰۵/۰۸/۰۲",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "مقدار در اکسل 5 بود؛ طبق رسید انبار اصلاح شد. جمع با ۱۰٪ مالیات ۹٬۳۱۳٬۱۵۰٬۰۰۰ ریال. [Final ردیف 26]",
+   "request": null
+  },
+  {
+   "supplier": "farkoush",
+   "material": "ink-white",
+   "quantity": "75.00",
+   "unit_price_rial": "5900000",
+   "ordered_on": "2026-08-15",
+   "delivered_on": "2026-08-16",
+   "status": "delivered",
+   "payment_term": "net-60",
+   "payment_method": "cheque",
+   "payment_note": "دو چک: ۵٬۰۰۰٬۰۰۰٬۰۰۰ ریال ۱۴۰۵/۰۷/۲۵ و ۴٬۳۱۳٬۱۵۰٬۰۰۰ ریال ۱۴۰۵/۰۸/۰۲",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "جمع با ۱۰٪ مالیات ۹٬۳۱۳٬۱۵۰٬۰۰۰ ریال. [Final ردیف 27]",
+   "request": null
+  },
+  {
+   "supplier": "farkoush",
+   "material": "ink-red-light",
+   "quantity": "380.00",
+   "unit_price_rial": "6400000",
+   "ordered_on": "2026-08-15",
+   "delivered_on": "2026-08-16",
+   "status": "delivered",
+   "payment_term": "net-60",
+   "payment_method": "cheque",
+   "payment_note": "دو چک: ۵٬۰۰۰٬۰۰۰٬۰۰۰ ریال ۱۴۰۵/۰۷/۲۵ و ۴٬۳۱۳٬۱۵۰٬۰۰۰ ریال ۱۴۰۵/۰۸/۰۲",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "جمع با ۱۰٪ مالیات ۹٬۳۱۳٬۱۵۰٬۰۰۰ ریال. [Final ردیف 28]",
+   "request": null
+  },
+  {
+   "supplier": "farkoush",
+   "material": "ink-yellow",
+   "quantity": "600.00",
+   "unit_price_rial": "6200000",
+   "ordered_on": "2026-08-15",
+   "delivered_on": "2026-08-16",
+   "status": "delivered",
+   "payment_term": "net-60",
+   "payment_method": "cheque",
+   "payment_note": "دو چک: ۵٬۰۰۰٬۰۰۰٬۰۰۰ ریال ۱۴۰۵/۰۷/۲۵ و ۴٬۳۱۳٬۱۵۰٬۰۰۰ ریال ۱۴۰۵/۰۸/۰۲",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "جمع با ۱۰٪ مالیات ۹٬۳۱۳٬۱۵۰٬۰۰۰ ریال. [Final ردیف 29]",
+   "request": null
+  },
+  {
+   "supplier": "farkoush",
+   "material": "antifoam",
+   "quantity": "8.00",
+   "unit_price_rial": "9000000",
+   "ordered_on": "2026-08-15",
+   "delivered_on": "2026-08-16",
+   "status": "delivered",
+   "payment_term": "net-60",
+   "payment_method": "cheque",
+   "payment_note": "دو چک: ۵٬۰۰۰٬۰۰۰٬۰۰۰ ریال ۱۴۰۵/۰۷/۲۵ و ۴٬۳۱۳٬۱۵۰٬۰۰۰ ریال ۱۴۰۵/۰۸/۰۲",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "جمع با ۱۰٪ مالیات ۹٬۳۱۳٬۱۵۰٬۰۰۰ ریال. [Final ردیف 30]",
+   "request": null
+  },
+  {
+   "supplier": "faradid",
+   "material": "jumbo-48-1035",
+   "quantity": "59620.00",
+   "unit_price_rial": "3950000",
+   "ordered_on": "2026-08-24",
+   "delivered_on": null,
+   "status": "shipped",
+   "payment_term": "advance-15-net-40",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۳۸۳ مورخ ۱۴۰۵/۰۶/۰۲ (۴۴۳٬۰۱۶٬۲۰۰٬۰۰۰ ریال با ارزش افزوده). دریافتی تا کنون: ۱۴۰۵/۰۶/۱۵ و ۱۴۰۵/۰۶/۱۸، جمعاً ۴۸٬۱۱۷ کیلو از هر دو عرض. [از روی پیش‌فاکتور (در اکسل نیست)]",
+   "request": null
+  },
+  {
+   "supplier": "faradid",
+   "material": "jumbo-48-735",
+   "quantity": "42340.00",
+   "unit_price_rial": "3950000",
+   "ordered_on": "2026-08-24",
+   "delivered_on": null,
+   "status": "shipped",
+   "payment_term": "advance-15-net-40",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۳۸۳ مورخ ۱۴۰۵/۰۶/۰۲ (۴۴۳٬۰۱۶٬۲۰۰٬۰۰۰ ریال با ارزش افزوده). دریافتی تا کنون: ۱۴۰۵/۰۶/۱۵ و ۱۴۰۵/۰۶/۱۸، جمعاً ۴۸٬۱۱۷ کیلو از هر دو عرض. [از روی پیش‌فاکتور (در اکسل نیست)]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-54",
+   "quantity": "5000.00",
+   "unit_price_rial": "293000",
+   "ordered_on": "2026-08-31",
+   "delivered_on": "2026-09-05",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "صورتحساب ۴۰۵۳۰۰۱: ۴۹۱۸ عدد. [Final ردیف 11]",
+   "request": null
+  },
+  {
+   "supplier": "farnak-teb",
+   "material": "core-79x18",
+   "quantity": "546000.00",
+   "unit_price_rial": "7300",
+   "ordered_on": "2026-08-31",
+   "delivered_on": null,
+   "status": "shipped",
+   "payment_term": "advance-40-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "قرارداد ۴٬۳۸۴٬۳۸۰٬۰۰۰ ریال؛ ۴۰٪ پیش‌پرداخت ۱٬۷۵۳٬۷۵۲٬۰۰۰ ریال (۱۴۰۵/۰۶/۱۷). دریافتی تا کنون: ۹۴٬۵۰۰ عدد ۱۴۰۵/۰۶/۱۴ و ۱۰۱٬۲۰۰ عدد ۱۴۰۵/۰۶/۱۸. [Final ردیف 41]",
+   "request": 46
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-navy",
+   "quantity": "5000.00",
+   "unit_price_rial": "498000",
+   "ordered_on": "2026-09-08",
+   "delivered_on": "2026-09-21",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "طرح جدید سرمه‌ای؛ ۴۹۹۳ عدد تحویل شد. [Final ردیف 12]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-hansol",
+   "quantity": "5000.00",
+   "unit_price_rial": "498000",
+   "ordered_on": "2026-09-12",
+   "delivered_on": "2026-09-21",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "۴۹۸۰ عدد تحویل شد. [Final ردیف 13]",
+   "request": 63
+  },
+  {
+   "supplier": "farnak-teb",
+   "material": "core-79x18",
+   "quantity": "800000.00",
+   "unit_price_rial": "7600",
+   "ordered_on": "2026-09-14",
+   "delivered_on": null,
+   "status": "buying",
+   "payment_term": "advance-40-net-30",
+   "payment_method": "transfer",
+   "payment_note": "",
+   "is_official": false,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۱۶۱۶ مورخ ۱۴۰۵/۰۶/۲۳ (۶٬۰۸۰٬۰۰۰٬۰۰۰ ریال، بدون ارزش افزوده)؛ ۴۰٪ پیش‌پرداخت ۲٬۴۳۲٬۰۰۰٬۰۰۰ ریال (۱۴۰۵/۰۶/۲۸). [Final ردیف 42]",
+   "request": 64
+  },
+  {
+   "supplier": "almas-film",
+   "material": "shrink-20",
+   "quantity": "2000.00",
+   "unit_price_rial": "6636363",
+   "ordered_on": "2026-09-15",
+   "delivered_on": null,
+   "status": "buying",
+   "payment_term": null,
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۱۲۱۰ مورخ ۱۴۰۵/۰۶/۲۳ (۱۴٬۵۹۹٬۹۹۸٬۶۰۰ ریال با ارزش افزوده)؛ سند تحویل در پوشه نبود. [Final ردیف 46]",
+   "request": 65
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-3635",
+   "quantity": "180.00",
+   "unit_price_rial": "11954000",
+   "ordered_on": "2026-09-20",
+   "delivered_on": "2026-09-26",
+   "status": "delivered",
+   "payment_term": "net-20",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۵٬۷۶۸٬۵۳۲٬۰۰۰ ریال با ارزش افزوده؛ چک به همین مبلغ. [Final ردیف 23]",
+   "request": null
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-580",
+   "quantity": "144.00",
+   "unit_price_rial": "12668000",
+   "ordered_on": "2026-09-20",
+   "delivered_on": "2026-09-26",
+   "status": "delivered",
+   "payment_term": "net-20",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۵٬۷۶۸٬۵۳۲٬۰۰۰ ریال با ارزش افزوده؛ چک به همین مبلغ. [Final ردیف 24]",
+   "request": null
+  },
+  {
+   "supplier": "khorshid-rang",
+   "material": "ink-nc-901",
+   "quantity": "144.00",
+   "unit_price_rial": "8807000",
+   "ordered_on": "2026-09-20",
+   "delivered_on": "2026-09-26",
+   "status": "delivered",
+   "payment_term": "net-20",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۵٬۷۶۸٬۵۳۲٬۰۰۰ ریال با ارزش افزوده؛ چک به همین مبلغ. [Final ردیف 25]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-79",
+   "quantity": "5000.00",
+   "unit_price_rial": "530000",
+   "ordered_on": "2026-09-21",
+   "delivered_on": "2026-09-27",
+   "status": "delivered",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "۴۹۹۷ عدد تحویل شد. [Final ردیف 14]",
+   "request": 51
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-telescope-base",
+   "quantity": "3000.00",
+   "unit_price_rial": "388000",
+   "ordered_on": "2026-09-21",
+   "delivered_on": null,
+   "status": "buying",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۴۰۵۱۶۶۴؛ تحویل بین ۱۴۰۵/۰۷/۰۷ و ۱۴۰۵/۰۷/۱۴. [Final ردیف 15]",
+   "request": null
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-telescope-top",
+   "quantity": "3000.00",
+   "unit_price_rial": "437000",
+   "ordered_on": "2026-09-21",
+   "delivered_on": null,
+   "status": "buying",
+   "payment_term": "net-45",
+   "payment_method": "cheque",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "پیش‌فاکتور ۴۰۵۱۶۶۳؛ تحویل بین ۱۴۰۵/۰۷/۰۷ و ۱۴۰۵/۰۷/۱۴. [Final ردیف 16]",
+   "request": null
+  },
+  {
+   "supplier": "iran-chasb",
+   "material": "tape-40",
+   "quantity": "1440.00",
+   "unit_price_rial": "2125500",
+   "ordered_on": "2026-09-23",
+   "delivered_on": null,
+   "status": "buying",
+   "payment_term": "cash-on-delivery",
+   "payment_method": "cash",
+   "payment_note": "",
+   "is_official": true,
+   "vat_pct": "10.00",
+   "note": "[Final ردیف 4]",
+   "request": 42
+  }
+ ],
+ "samples": [
+  {
+   "supplier": "iran-chasb",
+   "material": "tape-40",
+   "quantity": "0.00",
+   "spec": "۴۰ میکرون ۹۰ یارد",
+   "requested_on": "2026-06-14",
+   "received_on": "2026-06-23",
+   "decided_on": "2026-06-23",
+   "status": "rejected",
+   "reason": "sample-quality",
+   "lab_note": "چسبندگی کافی نداشت و یارد نمونه با اعلام فروشنده نمی‌خواند.",
+   "note": ""
+  },
+  {
+   "supplier": "iran-chasb",
+   "material": "tape-40",
+   "quantity": "0.00",
+   "spec": "۴۰، ۴۳، ۴۵ و ۴۸ میکرون",
+   "requested_on": "2026-06-23",
+   "received_on": "2026-07-01",
+   "decided_on": null,
+   "status": "approved",
+   "reason": null,
+   "lab_note": "نمونه‌ی ۴۰ میکرون تایید شد و خرید بر همان اساس انجام شد.",
+   "note": ""
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-54",
+   "quantity": "0.00",
+   "spec": "سایزبندی جدید کارتن‌ها",
+   "requested_on": "2026-05-11",
+   "received_on": "2026-06-22",
+   "decided_on": "2026-06-22",
+   "status": "approved",
+   "reason": null,
+   "lab_note": "سه سری نمونه‌ی قبلی مغایرت ابعاد داشت؛ در جلسه‌ی ۱۴۰۵/۰۴/۰۱ در کارخانه‌ی میهن نمونه‌ها بررسی و تایید شد.",
+   "note": ""
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-57",
+   "quantity": "0.00",
+   "spec": "سایزبندی جدید کارتن‌ها",
+   "requested_on": "2026-05-11",
+   "received_on": "2026-06-22",
+   "decided_on": "2026-06-22",
+   "status": "approved",
+   "reason": null,
+   "lab_note": "سه سری نمونه‌ی قبلی مغایرت ابعاد داشت؛ در جلسه‌ی ۱۴۰۵/۰۴/۰۱ در کارخانه‌ی میهن نمونه‌ها بررسی و تایید شد.",
+   "note": ""
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-79",
+   "quantity": "0.00",
+   "spec": "سایزبندی جدید کارتن‌ها",
+   "requested_on": "2026-05-11",
+   "received_on": "2026-06-22",
+   "decided_on": "2026-06-22",
+   "status": "approved",
+   "reason": null,
+   "lab_note": "سه سری نمونه‌ی قبلی مغایرت ابعاد داشت؛ در جلسه‌ی ۱۴۰۵/۰۴/۰۱ در کارخانه‌ی میهن نمونه‌ها بررسی و تایید شد.",
+   "note": ""
+  },
+  {
+   "supplier": "parand",
+   "material": "carton-54",
+   "quantity": "0.00",
+   "spec": "۳۸۰×۱۹۵×۱۱۴",
+   "requested_on": "2026-06-20",
+   "received_on": "2026-06-20",
+   "decided_on": null,
+   "status": "received",
+   "reason": null,
+   "lab_note": "",
+   "note": "قیمت با حمل؛ ۳۰٪ پیش‌پرداخت و ۷۰٪ یک ماه پس از تحویل."
+  },
+  {
+   "supplier": "parand",
+   "material": "carton-57",
+   "quantity": "0.00",
+   "spec": "۳۸۰×۱۹۵×۱۲۰",
+   "requested_on": "2026-06-20",
+   "received_on": "2026-06-20",
+   "decided_on": null,
+   "status": "received",
+   "reason": null,
+   "lab_note": "",
+   "note": "قیمت با حمل؛ ۳۰٪ پیش‌پرداخت و ۷۰٪ یک ماه پس از تحویل."
+  },
+  {
+   "supplier": "parand",
+   "material": "carton-79",
+   "quantity": "0.00",
+   "spec": "۴۰۵×۲۸۲×۱۶۲",
+   "requested_on": "2026-06-20",
+   "received_on": "2026-06-20",
+   "decided_on": null,
+   "status": "received",
+   "reason": null,
+   "lab_note": "",
+   "note": "قیمت با حمل؛ ۳۰٪ پیش‌پرداخت و ۷۰٪ یک ماه پس از تحویل."
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-navy",
+   "quantity": "0.00",
+   "spec": "طرح شماره ۳ سرمه‌ای، ۴۰۵×۲۸۲×۱۶۳",
+   "requested_on": "2026-08-05",
+   "received_on": null,
+   "decided_on": "2026-09-13",
+   "status": "approved",
+   "reason": null,
+   "lab_note": "طرح نهایی پس از چند اصلاحیه تایید شد.",
+   "note": ""
+  },
+  {
+   "supplier": "mihan",
+   "material": "carton-telescope-top",
+   "quantity": "0.00",
+   "spec": "داخلی ۲۲٫۵×۴۴٫۵×۱۵ سانتیمتر، سه‌لایه",
+   "requested_on": "2026-08-03",
+   "received_on": null,
+   "decided_on": null,
+   "status": "approved",
+   "reason": null,
+   "lab_note": "حکم نمونه در پوشه نبود؛ از ثبت سفارش ۱۴۰۵/۰۶/۳۰ برداشت شده است.",
+   "note": ""
+  },
+  {
+   "supplier": "nadi-plastic",
+   "material": "shrink-20",
+   "quantity": "0.00",
+   "spec": "۳۰ و ۴۰ میکرون",
+   "requested_on": "2026-08-02",
+   "received_on": null,
+   "decided_on": null,
+   "status": "requested",
+   "reason": null,
+   "lab_note": "",
+   "note": "فروشنده گفته درباره‌ی نمونه‌ی ۴۰ میکرون دوباره خبر می‌دهد."
+  }
+ ]
+}

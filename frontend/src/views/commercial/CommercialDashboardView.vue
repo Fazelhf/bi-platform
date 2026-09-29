@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import api from "@/api/client";
 import { useMoney, loadMoneySettings } from "@/composables/useMoney";
@@ -35,15 +35,34 @@ const bySupplier = ref<Group[]>([]);
 const monthly = ref<any[]>([]);
 const forecastRows = ref<any[]>([]);
 const monthLabel = ref("");
+interface MonthOption { key: string; label: string; on: string; has_data: boolean }
+const months = ref<MonthOption[]>([]);
+/** Opens on the newest month with purchases, as the sales dashboard does. */
+const selectedMonth = ref<string>("");
 const loading = ref(true);
 const error = ref("");
 
 const FA = new Intl.NumberFormat("fa-IR");
 
-onMounted(async () => {
-  await loadMoneySettings();
+async function load() {
+  loading.value = true;
+  error.value = "";
+  const month = months.value.find((m) => m.key === selectedMonth.value);
   try {
-    const { data } = await api.get("/commercial/cards/");
+    const { data } = await api.get("/commercial/cards/", {
+      params: month ? { on: month.on } : {},
+    });
+    months.value = data.months ?? [];
+    if (!selectedMonth.value) {
+      const withData = months.value.filter((m) => m.has_data);
+      const pick = (withData.length ? withData : months.value).at(-1);
+      if (pick) {
+        selectedMonth.value = pick.key;
+        // The first answer is for today's month. If we open on another one,
+        // the watch below fetches it; this answer is thrown away.
+        if (pick.label !== data.month.label) return;
+      }
+    }
     cards.value = data.cards;
     byMaterial.value = data.by_material;
     bySupplier.value = data.by_supplier;
@@ -55,7 +74,14 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+}
+
+onMounted(async () => {
+  await loadMoneySettings();
+  await load();
 });
+
+watch(selectedMonth, (now, before) => { if (now && now !== before) load(); });
 
 function display(c: Card): string {
   return c.unit === "rial" ? exact(c.value, true) : num(c.value);
@@ -118,7 +144,15 @@ const widest = computed(() => Math.max(
 
     <template v-else>
       <div class="flex items-baseline justify-between px-1">
-        <h2 class="text-sm text-slate-500">{{ monthLabel }}</h2>
+        <select
+          v-model="selectedMonth"
+          class="border border-slate-200 rounded-xl px-3 py-1.5 bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition"
+          :aria-label="`ماه: ${monthLabel}`"
+        >
+          <option v-for="m in [...months].reverse()" :key="m.key" :value="m.key">
+            {{ m.label }}{{ m.has_data ? "" : " (بدون خرید)" }}
+          </option>
+        </select>
         <span class="text-xs text-slate-400">
           مبالغ به {{ unitLabel }} · روی هر عدد بزنید
         </span>
@@ -150,7 +184,7 @@ const widest = computed(() => Math.max(
 
       <div class="grid md:grid-cols-2 gap-3">
         <div class="bg-surface rounded-card shadow-soft p-4">
-          <p class="text-sm text-slate-500 mb-3">خرید به تفکیک کالا</p>
+          <p class="text-sm text-slate-500 mb-3">خرید به تفکیک کالا — {{ monthLabel }}</p>
           <div class="space-y-1.5">
             <button
               v-for="m in byMaterial.slice(0, 8)" :key="m.id"
@@ -174,7 +208,7 @@ const widest = computed(() => Math.max(
         </div>
 
         <div class="bg-surface rounded-card shadow-soft p-4">
-          <p class="text-sm text-slate-500 mb-3">خرید به تفکیک تامین‌کننده</p>
+          <p class="text-sm text-slate-500 mb-3">خرید به تفکیک تامین‌کننده — {{ monthLabel }}</p>
           <table class="w-full text-sm">
             <tbody>
               <tr

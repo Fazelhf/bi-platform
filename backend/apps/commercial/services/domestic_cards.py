@@ -17,7 +17,8 @@ from decimal import Decimal
 from apps.commercial.models import Material, PurchaseOrder, PurchaseRequest, Supplier
 from apps.commercial.services import forecast, price_history, purchase_report
 from apps.commercial.services import supplier_stats
-from apps.commercial.services.base import ZERO, as_str, month_key
+from apps.commercial.services.base import ZERO, as_str, month_key, month_label, month_span
+from apps.core import jalali
 
 ORDER_COLS = [
     {"key": "order_no", "label": "شماره"},
@@ -36,7 +37,14 @@ def _card(key, label, value, hint, rows, columns, *, unit="", tone="") -> dict:
     }
 
 
-def build(today: date | None = None) -> dict:
+def build(today: date | None = None, *, scope_month: bool = False) -> dict:
+    """
+    The dashboard as of `today`'s month.
+
+    `scope_month` narrows the by-material and by-supplier breakdowns to that
+    month too — what the dashboard's month picker means. The full report
+    leaves it off and keeps them all-time.
+    """
     today = today or date.today()
     this_month = month_key(today)
 
@@ -63,7 +71,7 @@ def build(today: date | None = None) -> dict:
     # -- مبلغ خرید این ماه -------------------------------------------------
     spend = sum((o.total_rial for o in month_orders), ZERO)
     cards.append(_card(
-        "spend", "مبلغ خرید این ماه", as_str(spend),
+        "spend", "مبلغ خرید ماه", as_str(spend),
         f"{len(month_orders)} سفارش",
         order_rows(month_orders),
         ORDER_COLS + [{"key": "ordered_on", "label": "تاریخ", "type": "date"}],
@@ -146,14 +154,36 @@ def build(today: date | None = None) -> dict:
         tone="warn" if risers else "",
     ))
 
+    scoped = month_orders if scope_month else orders
     return {
         "cards": cards,
         "month": {"label": purchase_report.dashboard(today)["month"]["label"]},
+        "months": _months(orders, date.today()),
         "monthly_spend": purchase_report.monthly_spend(months=12),
-        "by_material": _breakdown(orders, "material"),
-        "by_supplier": _breakdown(orders, "supplier"),
+        "by_material": _breakdown(scoped, "material"),
+        "by_supplier": _breakdown(scoped, "supplier"),
         "forecast": forecast.overview(),
     }
+
+
+def _months(orders, today: date) -> list[dict]:
+    """
+    The months the picker offers: from the first purchase to the current
+    month, oldest first, each saying whether anything was bought in it so the
+    page can open on the newest month that has figures — as فروش does.
+    """
+    current = month_key(today)
+    keys = {month_key(o.ordered_on) for o in orders if o.ordered_on}
+    first = min(keys | {current})
+    return [
+        {
+            "key": f"{k[0]}-{k[1]:02d}",
+            "label": month_label(k),
+            "on": jalali.to_gregorian(k[0], k[1], 1).isoformat(),
+            "has_data": k in keys,
+        }
+        for k in month_span(first, max(keys | {current}))
+    ]
 
 
 def _breakdown(orders, by: str) -> list[dict]:

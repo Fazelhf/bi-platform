@@ -386,7 +386,7 @@ class DomesticCardsView(APIView):
     def get(self, request):
         assert_commercial_visible(request.user)
         today = _as_date(request.query_params.get("on")) or date.today()
-        return Response(domestic_cards.build(today))
+        return Response(domestic_cards.build(today, scope_month=True))
 
 
 class FullReportView(APIView):
