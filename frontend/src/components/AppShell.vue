@@ -271,6 +271,9 @@ const primary = computed<Item[]>(() => {
       },
     );
   }
+  if (auth.isExecutive || auth.isAdminPanelUser) {
+    items.push({ name: "teamyar", label: "استقرار تیمیار", icon: "clipboard" });
+  }
   // The CEO has it at the top of the menu; a department manager gets it here,
   // reading only their own section.
   if (!auth.isExecutive && ["admin", "manager"].includes(auth.me?.role ?? "")) {
@@ -335,7 +338,7 @@ const pageTitle = computed(() => {
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
     inbox: "کارتابل تایید", "office-letters": "مکاتبات", "office-letter": "نامه",
-    "office-tasks": "وظایف", "office-projects": "پروژه‌ها", "office-project": "پروژه", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
+    "office-tasks": "وظایف", "office-projects": "پروژه‌ها", "office-project": "پروژه", teamyar: "استقرار تیمیار", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
     "crm-dashboard": "داشبورد CRM", "crm-pipeline": "مراحل فروش",
     "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
