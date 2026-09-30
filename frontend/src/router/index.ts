@@ -240,6 +240,15 @@ const router = createRouter({
           meta: { executive: true },
         },
 
+        // استقرار تیمیار — management's dossier on the rollout. The API
+        // (apps.teamyar.views.TeamyarAccess) applies the same rule.
+        {
+          path: "teamyar",
+          name: "teamyar",
+          component: () => import("@/views/TeamyarView.vue"),
+          meta: { teamyar: true },
+        },
+
         // --- Manager-composed reports, one per section ---
         ...boardRoutes,
 
@@ -666,6 +675,10 @@ router.beforeEach(async (to) => {
   }
   // Site settings: executives/superusers only.
   if (to.meta.executive && !auth.isExecutive) {
+    return sentHome(to);
+  }
+  // استقرار تیمیار: the CEO and administrators.
+  if (to.meta.teamyar && !auth.isExecutive && !auth.isAdminPanelUser) {
     return sentHome(to);
   }
   // Admin Panel: administrators only. The CEO has their own dashboards and

@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "apps.sales2",
     "apps.hr",
     "apps.office",
+    "apps.teamyar",
     "apps.dashboards",
     "apps.adminpanel",
 ]

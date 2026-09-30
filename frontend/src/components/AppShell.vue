@@ -270,6 +270,9 @@ const primary = computed<Item[]>(() => {
       },
     );
   }
+  if (auth.isExecutive || auth.isAdminPanelUser) {
+    items.push({ name: "teamyar", label: "استقرار تیمیار", icon: "clipboard" });
+  }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
   }
@@ -329,7 +332,7 @@ const pageTitle = computed(() => {
     "sales-org-dashboard": "داشبورد فروش بانکی", "production-dashboard": "داشبورد تولید",
     "sales-b2b-dashboard": "داشبورد فروش B2B",
     inbox: "کارتابل تایید", "office-letters": "مکاتبات", "office-letter": "نامه",
-    "office-tasks": "وظایف", "office-projects": "پروژه‌ها", "office-project": "پروژه", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
+    "office-tasks": "وظایف", "office-projects": "پروژه‌ها", "office-project": "پروژه", teamyar: "استقرار تیمیار", chat: "پیام‌ها", notes: "یادداشت‌ها", team: "همکاران",
     "crm-dashboard": "داشبورد CRM", "crm-pipeline": "مراحل فروش",
     "crm-deals": "فرصت‌های فروش", "crm-deal": "پرونده فرصت فروش",
     "crm-customers": "مشتریان", "crm-customer": "پرونده مشتری",
