@@ -337,14 +337,22 @@ def answer(user, question: str, period_id: int | None = None, request=None) -> d
             if ranks_target and has_target and p.group != "month":
                 pass
             elif p.group == "month":
-                first, last = rows[0]["values"][metric], rows[-1]["values"][metric]
-                peak = max(rows, key=lambda r: r["values"][metric])
+                # The running month is half a month: it must not be the end
+                # point of «از … به …», or every trend ends in a collapse.
+                running = rows[-1] if (len(rows) > 2 and period == ctx.period
+                                       and insights._progress(period)) else None
+                done = rows[:-1] if running else rows
+                first, last = done[0]["values"][metric], done[-1]["values"][metric]
+                peak = max(done, key=lambda r: r["values"][metric])
                 pct = change(last, first)
-                text = (f"{noun}{' ' + scope if scope else ''} از {{a}} در {rows[0]['label']} به {{b}} در "
-                        f"{rows[-1]['label']} رسید" + (f" ({{p}} {trend_word(pct)})" if pct is not None else "")
+                text = (f"{noun}{' ' + scope if scope else ''} از {{a}} در {done[0]['label']} به {{b}} در "
+                        f"{done[-1]['label']} رسید" + (f" ({{p}} {trend_word(pct)})" if pct is not None else "")
                         + f"؛ بیشترین مقدار در {peak['label']} ({{c}}) بود.")
                 values = {"a": V(first, unit), "b": V(last, unit), "p": V(abs(pct or 0), "percent"),
                           "c": V(peak["values"][metric], unit)}
+                if running:
+                    text += f" {running['label']} هنوز تمام نشده و تا امروز {{r}} ثبت شده است."
+                    values["r"] = V(running["values"][metric], unit)
             else:
                 word = "کمترین" if p.order == "metric_asc" else "بیشترین"
                 lead = rows[0]
