@@ -297,6 +297,7 @@ DATASETS: tuple[Dataset, ...] = (
                    "downtime_sizechange_shifts"),
             Metric("down_nowork", "توقف بی‌کاری (شیفت)", "sum",
                    "downtime_nowork_shifts"),
+            Metric("rows", "تعداد ردیف", "count"),
         ),
     ),
     Dataset(

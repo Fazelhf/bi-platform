@@ -143,6 +143,7 @@ const primary = computed<Item[]>(() => {
   if (auth.isExecutive) {
     items.push(
       { name: "overview", label: "نمای کلی", icon: "grid" },
+      { name: "insights", label: "تحلیل هوشمند", icon: "sparkles" },
       {
         // The three channels are one decision — "which part of sales?" — so
         // they live under one heading instead of three top-level rows.
@@ -272,6 +273,11 @@ const primary = computed<Item[]>(() => {
   }
   if (auth.isExecutive || auth.isAdminPanelUser) {
     items.push({ name: "teamyar", label: "استقرار تیمیار", icon: "clipboard" });
+  }
+  // The CEO has it at the top of the menu; a department manager gets it here,
+  // reading only their own section.
+  if (!auth.isExecutive && ["admin", "manager"].includes(auth.me?.role ?? "")) {
+    items.push({ name: "insights", label: "تحلیل هوشمند", icon: "sparkles" });
   }
   if (auth.me?.can_approve || auth.me?.is_superuser) {
     items.push({ name: "inbox", label: "کارتابل", icon: "inbox", badge: () => inboxCount.value });
