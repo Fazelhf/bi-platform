@@ -379,3 +379,48 @@ class BatchQueryView(APIView):
             except Exception as exc:  # a catalog path that no longer resolves
                 out.append({"key": key, "error": f"خطا در محاسبه: {exc}"})
         return Response({"results": out})
+
+
+class AnalystAccess(IsAuthenticated):
+    """تحلیل خودکار is for the CEO, administrators and department managers."""
+
+    message = "تحلیل خودکار فقط برای مدیرعامل و مدیران فعال است."
+
+    def has_permission(self, request, view):
+        from apps.dashboards.insights import can_use
+
+        return super().has_permission(request, view) and can_use(request.user)
+
+
+def _period_id(raw) -> int | None:
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+class InsightsView(APIView):
+    """``GET /api/dashboards/insights/?period=<month id>`` — the written reading of a month."""
+
+    permission_classes = [AnalystAccess]
+
+    def get(self, request):
+        from apps.dashboards.insights import analyse
+
+        return Response(analyse(request.user, _period_id(request.query_params.get("period")),
+                                request))
+
+
+class AskView(APIView):
+    """``POST /api/dashboards/ask/ {question, period}`` — one question, one answer."""
+
+    permission_classes = [AnalystAccess]
+
+    def post(self, request):
+        from apps.dashboards.ask import answer
+
+        question = str(request.data.get("question") or "").strip()[:300]
+        if not question:
+            return Response({"detail": "سؤال خالی است."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(answer(request.user, question,
+                               _period_id(request.data.get("period")), request))

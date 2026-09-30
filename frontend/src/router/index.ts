@@ -207,6 +207,14 @@ const router = createRouter({
           meta: { executive: true }, // company-wide view — CEO/admin only
         },
         {
+          // تحلیل هوشمند — the CEO and department managers; each reads only the
+          // sections they already may (the API scopes it the same way).
+          path: "insights",
+          name: "insights",
+          component: () => import("@/views/InsightsView.vue"),
+          meta: { analyst: true },
+        },
+        {
           path: "sales",
           name: "sales-dashboard",
           component: () => import("@/views/SalesDashboardView.vue"),
@@ -666,6 +674,11 @@ router.beforeEach(async (to) => {
   }
   // Site settings: executives/superusers only.
   if (to.meta.executive && !auth.isExecutive) {
+    return sentHome(to);
+  }
+  // تحلیل هوشمند: CEO, administrators and managers — see apps.dashboards.insights.can_use.
+  if (to.meta.analyst && !auth.isExecutive
+      && !["admin", "manager"].includes(auth.me?.role ?? "")) {
     return sentHome(to);
   }
   // Admin Panel: administrators only. The CEO has their own dashboards and

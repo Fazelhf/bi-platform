@@ -12,5 +12,7 @@ urlpatterns = [
     path("query/", views.QueryView.as_view(), name="dashboards-query"),
     path("query/batch/", views.BatchQueryView.as_view(), name="dashboards-query-batch"),
     path("drill/", views.DrillView.as_view(), name="dashboards-drill"),
+    path("insights/", views.InsightsView.as_view(), name="dashboards-insights"),
+    path("ask/", views.AskView.as_view(), name="dashboards-ask"),
     path("", include(router.urls)),
 ]
