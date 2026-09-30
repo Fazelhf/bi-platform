@@ -87,15 +87,20 @@ async function addPhase() {
 }
 async function renamePhase(p: Phase) {
   const title = prompt("نام فاز", p.title);
-  if (title === null) return;
-  if (!title.trim()) {
-    if (confirm(`فاز «${p.title}» حذف شود؟ فعالیت‌هایش بدون فاز می‌مانند.`)) {
-      await teamyarApi.phases.remove(p.id);
-      load();
-    }
-    return;
-  }
+  if (title === null || !title.trim() || title.trim() === p.title) return;
   await teamyarApi.phases.update(p.id, { title: title.trim() });
+  load();
+}
+async function deletePhase(p: Phase) {
+  const n = tasks.value.filter((t) => t.phase === p.id).length;
+  const note = n ? `
+${faDigits(n)} فعالیتِ این فاز حذف نمی‌شوند و «بدون فاز» می‌مانند.` : "";
+  if (!confirm(`فاز «${p.title}» حذف شود؟${note}`)) return;
+  try {
+    await teamyarApi.phases.remove(p.id);
+  } catch (e) {
+    alert(apiError(e));
+  }
   load();
 }
 
@@ -195,6 +200,32 @@ const STATUS_CHIP: Record<string, string> = {
   blocked: "bg-red-500/15 text-red-600",
   done: "bg-emerald-500/15 text-emerald-600",
 };
+
+const STATUS_BAR: Record<string, string> = {
+  todo: "bg-slate-400", doing: "bg-blue-500", blocked: "bg-red-500", done: "bg-emerald-500",
+};
+
+// -- «فعالیت‌ها» box: every task, in plan order, filterable by status --
+const taskFilter = ref<"" | TeamyarTask["status"]>("");
+const TASK_FILTERS = [
+  { key: "", label: "همه" },
+  { key: "todo", label: "شروع نشده" },
+  { key: "doing", label: "در حال انجام" },
+  { key: "blocked", label: "متوقف" },
+  { key: "done", label: "انجام شده" },
+] as const;
+const phaseOrder = computed(() => new Map(phases.value.map((p) => [p.id, p.order])));
+const allTasks = computed(() =>
+  tasks.value
+    .filter((t) => !taskFilter.value || t.status === taskFilter.value)
+    .sort((a, b) =>
+      (phaseOrder.value.get(a.phase ?? -1) ?? 999) - (phaseOrder.value.get(b.phase ?? -1) ?? 999)
+      || a.start_on.localeCompare(b.start_on)
+      || a.id - b.id),
+);
+function countOf(key: string) {
+  return key ? tasks.value.filter((t) => t.status === key).length : tasks.value.length;
+}
 </script>
 
 <template>
@@ -280,7 +311,51 @@ const STATUS_CHIP: Record<string, string> = {
           </div>
         </div>
 
-        <div class="grid lg:grid-cols-3 gap-4">
+        <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <section class="bg-surface rounded-card shadow-soft p-4 flex flex-col">
+            <div class="flex items-center gap-2 mb-2">
+              <h3 class="font-bold text-ink text-sm flex-1">📋 فعالیت‌ها</h3>
+              <button class="text-xs text-slate-500 hover:text-ink" @click="editingTask = null">+ فعالیت</button>
+            </div>
+            <div class="flex flex-wrap gap-1 mb-2">
+              <button
+                v-for="f in TASK_FILTERS" :key="f.key"
+                class="text-[11px] rounded-full px-2 py-0.5"
+                :class="taskFilter === f.key ? 'bg-panel text-white' : 'bg-slate-100 text-slate-500 hover:text-ink'"
+                @click="taskFilter = f.key"
+              >{{ f.label }} {{ fa(countOf(f.key)) }}</button>
+            </div>
+            <p v-if="!allTasks.length" class="text-sm text-slate-400">
+              {{ tasks.length ? "فعالیتی با این وضعیت نیست." : "هنوز فعالیتی تعریف نشده." }}
+            </p>
+            <div class="max-h-[420px] overflow-y-auto -mx-1 px-1">
+              <button
+                v-for="t in allTasks" :key="t.id"
+                class="w-full text-right py-2 border-b border-slate-50 last:border-0"
+                @click="editingTask = t"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="flex-1 text-sm text-ink truncate" :class="t.status === 'done' ? 'line-through text-slate-400' : ''">
+                    {{ t.is_milestone ? "◆ " : "" }}{{ t.title }}
+                  </span>
+                  <span class="text-[10px] rounded px-1.5 shrink-0" :class="STATUS_CHIP[t.status]">{{ t.status_label }}</span>
+                </div>
+                <div class="flex items-center gap-2 mt-1">
+                  <div class="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div class="h-full" :class="STATUS_BAR[t.status]" :style="{ width: `${t.progress}%` }"></div>
+                  </div>
+                  <span class="text-[11px] text-slate-400">{{ fa(t.progress) }}٪</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-0.5 truncate">
+                  <span v-if="t.phase_title">{{ t.phase_title }} · </span>
+                  {{ jalaliLabel(t.start_on) }} تا {{ jalaliLabel(t.end_on) }}
+                  <span v-if="t.is_overdue" class="text-red-500"> · عقب</span>
+                </p>
+              </button>
+            </div>
+            <button class="text-xs text-slate-500 hover:text-ink mt-2 self-start" @click="setTab('gantt')">نمای گانت ←</button>
+          </section>
+
           <section class="bg-surface rounded-card shadow-soft p-4">
             <h3 class="font-bold text-ink text-sm mb-2">🔄 در حال انجام</h3>
             <p v-if="!overview.in_progress.length" class="text-sm text-slate-400">کاری در جریان نیست.</p>
@@ -355,13 +430,18 @@ const STATUS_CHIP: Record<string, string> = {
       <template v-else-if="tab === 'gantt'">
         <div class="bg-surface rounded-card shadow-soft p-4 flex flex-wrap items-center gap-2">
           <span class="text-sm text-slate-500">فازها:</span>
-          <button
+          <span
             v-for="p in phases" :key="p.id"
-            class="text-xs rounded-full px-3 py-1 text-white"
+            class="inline-flex items-center text-xs rounded-full text-white overflow-hidden"
             :style="{ background: p.color || '#6366f1' }"
-            title="برای تغییر نام یا حذف کلیک کنید"
-            @click="renamePhase(p)"
-          >{{ p.title }}</button>
+          >
+            <button class="pr-3 pl-1.5 py-1 hover:bg-black/10" title="تغییر نام" @click="renamePhase(p)">{{ p.title }}</button>
+            <button
+              class="px-2 py-1 border-r border-white/30 hover:bg-black/20 leading-none"
+              :title="`حذف فاز «${p.title}»`" :aria-label="`حذف فاز ${p.title}`"
+              @click="deletePhase(p)"
+            >×</button>
+          </span>
           <input
             v-model="newPhase"
             class="bg-slate-100 rounded-xl px-3 py-1.5 text-sm text-ink outline-none w-40"
