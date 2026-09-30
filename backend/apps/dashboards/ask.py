@@ -443,6 +443,38 @@ def _allowed(user, section: str, request) -> bool:
     return can_read_section(user, section, request)
 
 
+#: The management's own decision: a question that swears gets sworn back at.
+#: Matched as whole words (after stripping a trailing «م/ت/ش/ی/ه/ها»), never
+#: as substrings — «کس» is inside «کسی»، «کسب»، «کسر» and those are not insults.
+KIR_WORDS = {"کیر", "کیری", "کیرم", "کیرت", "کیرش", "کیرمو", "کیرتو"}
+SWEARS = KIR_WORDS | {
+    "کس", "کص", "کوس", "کسکش", "کصکش", "کسکیر", "کسخل", "کصخل", "کسخول", "کسشر", "کصشر",
+    "کسده", "کسننه", "کسنن", "کون", "کونی", "کونده", "کونکش", "جنده", "جندگی", "مادرجنده",
+    "جاکش", "جاکشی", "حرومزاده", "حرامزاده", "ولدزنا", "بیناموس", "بی ناموس", "لاشی",
+    "لاشخور", "گوه", "گوز", "ریدم", "ریدی", "بریدی", "سیکتیر", "سیکتر", "پفیوز",
+    "دیوث", "زنجنده", "خارکسده", "خارکصده", "مادرقحبه", "قحبه", "تخمی", "تخمم",
+}
+
+
+def _swear_reply(text: str) -> str | None:
+    """«تو دهنت» for «کیر», «خودتی کصکش» for any other swear word, else None."""
+    words = re.findall(r"\w+", text.replace("\u200c", ""))
+    joined = " ".join(words)
+    found = set(words) | {w for w in SWEARS if " " in w and w in joined}
+    # «کیرتون»، «کسشرا» — the common endings on a known swear.
+    for w in words:
+        for end in ("ها", "هات", "ت", "م", "ش", "ی", "ه", "و", "تون", "شون", "ا"):
+            stem = w[: -len(end)]
+            # Two-letter stems are left alone: «کسی» is «someone», not «کس».
+            if w.endswith(end) and len(stem) >= 3 and stem in SWEARS:
+                found.add(stem)
+    if found & KIR_WORDS:
+        return "تو دهنت"
+    if found & SWEARS:
+        return "خودتی کصکش"
+    return None
+
+
 def answer(user, question: str, period_id: int | None = None, request=None,
            context: dict | None = None) -> dict:
     """
@@ -452,6 +484,10 @@ def answer(user, question: str, period_id: int | None = None, request=None,
     """
     examples = examples_for(user, request)
     context = context if isinstance(context, dict) else None
+
+    retort = _swear_reply(_norm(question))
+    if retort:
+        return {"ok": False, "answer": retort, "values": {}, "suggestions": examples}
 
     def _not_understood(reason: str) -> dict:
         return {"ok": False, "answer": reason, "values": {}, "suggestions": examples}

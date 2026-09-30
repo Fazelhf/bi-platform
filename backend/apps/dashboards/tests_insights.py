@@ -225,3 +225,18 @@ class LooseQuestionTests(InsightsTests):
         self.assertIn("چرا؟", a["suggestions"])
         follow = answer(self.team_mgr, a["suggestions"][0], self.m2.id, context=a["context"])
         self.assertTrue(follow["ok"], follow["answer"])
+
+
+class SwearReplyTests(InsightsTests):
+    """Management's call: swearing at the box gets sworn back at."""
+
+    def test_kir_gets_to_dahanet(self):
+        self.assertEqual(answer(self.team_mgr, "کیرم تو این سیستم")["answer"], "تو دهنت")
+
+    def test_other_swears(self):
+        self.assertEqual(answer(self.team_mgr, "جاکش")["answer"], "خودتی کصکش")
+
+    def test_ordinary_words_that_contain_a_swear_are_not_swears(self):
+        for q in ("فروش کسی بالا رفت؟", "کسب و کار", "گه گاهی فروش"):
+            self.assertNotIn(answer(self.team_mgr, q, self.m2.id)["answer"],
+                             ("تو دهنت", "خودتی کصکش"), q)
