@@ -32,16 +32,31 @@ from apps.dashboards.query import QueryError
 
 _FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
-EXAMPLES = [
-    "فروش این ماه نسبت به ماه قبل؟",
-    "۵ استان با بیشترین فروش",
-    "کدام کارشناس کمترین تحقق تارگت را دارد؟",
-    "روند فروش ۶ ماه اخیر",
-    "مقایسه فروش مرداد و شهریور",
-    "سود امسال",
-    "ضایعات هر خط تولید",
-    "بیشترین پرداخت‌ها به تفکیک سرفصل",
-]
+#: Offered per section, so nobody is invited to ask about figures they
+#: cannot open — a production manager was being shown sales questions.
+EXAMPLES = {
+    "sales": ["فروش این ماه نسبت به ماه قبل؟", "۵ استان با بیشترین فروش",
+              "کدام کارشناس کمترین تحقق تارگت را دارد؟", "روند فروش ۶ ماه اخیر", "سود امسال"],
+    "production": ["تولید این ماه نسبت به ماه قبل؟", "ضایعات هر خط تولید",
+                   "روند تولید ۶ ماه اخیر", "بیشترین هزینه‌ها به تفکیک سرفصل"],
+    "finance": ["دریافت و پرداخت این ماه", "بیشترین پرداخت‌ها به تفکیک سرفصل",
+                "روند دریافت‌ها ۶ ماه اخیر"],
+}
+#: What each section can be asked about, for the «متوجه نشدم» reply.
+SUBJECTS = {"sales": "فروش، سود، وصولی، مطالبات، تارگت",
+            "production": "تولید، ضایعات، هزینه‌ی تولید",
+            "finance": "دریافت و پرداخت"}
+
+
+def sections_for(user, request=None) -> list[str]:
+    return [s for s in ("sales", "production", "finance") if _allowed(user, s, request)]
+
+
+def examples_for(user, request=None) -> list[str]:
+    """Example questions from the sections this user may read, a few from each."""
+    sections = sections_for(user, request)
+    per = 6 // max(len(sections), 1)
+    return [q for s in sections for q in EXAMPLES[s][:max(per, 2)]]
 
 
 def _has(text: str, word: str) -> bool:
@@ -265,19 +280,20 @@ def _allowed(user, section: str, request) -> bool:
     return can_read_section(user, section, request)
 
 
-def _not_understood(reason: str) -> dict:
-    return {"ok": False, "answer": reason, "values": {}, "suggestions": EXAMPLES}
-
-
 def answer(user, question: str, period_id: int | None = None, request=None) -> dict:
+    examples = examples_for(user, request)
+
+    def _not_understood(reason: str) -> dict:
+        return {"ok": False, "answer": reason, "values": {}, "suggestions": examples}
+
     ctx = insights.context(user, period_id, request)
     if ctx is None:
         return _not_understood("هنوز هیچ دوره‌ای در سامانه تعریف نشده است.")
     p = parse(question, ctx.period, ctx.prev)
     if p.topic is None:
+        subjects = "؛ ".join(SUBJECTS[s] for s in sections_for(user, request))
         return _not_understood(
-            "متوجه نشدم درباره‌ی کدام عدد می‌پرسید. می‌توانید درباره‌ی فروش، سود، وصولی، "
-            "مطالبات، تارگت، تولید، ضایعات، هزینه یا دریافت و پرداخت بپرسید.")
+            f"متوجه نشدم درباره‌ی کدام عدد می‌پرسید. می‌توانید درباره‌ی {subjects} بپرسید.")
     if not _allowed(user, p.topic.section, request):
         return _not_understood("به داده‌های این بخش دسترسی ندارید.")
     if p.group == "__missing__":

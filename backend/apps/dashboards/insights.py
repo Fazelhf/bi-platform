@@ -577,6 +577,12 @@ def context(user, period_id: int | None, request=None) -> Ctx | None:
                channels=channels if channels is not False else [])
 
 
+def _examples(user, request) -> list[str]:
+    from apps.dashboards.ask import examples_for  # ask imports this module
+
+    return examples_for(user, request)
+
+
 def analyse(user, period_id: int | None = None, request=None) -> dict:
     ctx = context(user, period_id, request)
     if ctx is None:
@@ -609,6 +615,7 @@ def analyse(user, period_id: int | None = None, request=None) -> dict:
         "periods": [{"id": p.id, "label": p.label} for p in month_periods()
                     if (p.jalali_year, p.jalali_month) <= today],
         "compared_to": ctx.prev.label if ctx.prev else None,
+        "examples": _examples(user, request),
         "sections": sections,
         "summary": [f.as_dict() for f in ranked[:5]],
     }

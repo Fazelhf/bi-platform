@@ -149,3 +149,19 @@ class InsightsTests(APITestCase):
         a = answer(self.team_mgr, "هوا چطوره؟", self.m2.id)
         self.assertFalse(a["ok"])
         self.assertTrue(a["suggestions"])
+
+
+class ExamplesFollowAccessTests(APITestCase):
+    """A production manager was offered sales questions they could not ask."""
+
+    def test_production_manager_gets_no_sales_examples(self):
+        from apps.dashboards.ask import examples_for
+
+        DimPeriod.objects.create(jalali_year=1403, jalali_month=5, kind=PeriodKind.MONTH)
+        prod = _user("pm", Role.MANAGER, "production")
+        examples = examples_for(prod)
+        self.assertTrue(examples)
+        self.assertFalse(any("فروش" in q or "تارگت" in q or "پرداخت" in q for q in examples), examples)
+        a = answer(prod, "هوا چطوره؟")
+        self.assertNotIn("فروش", a["answer"])
+        self.assertEqual(a["suggestions"], examples)

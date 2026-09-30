@@ -43,14 +43,8 @@ const question = ref("");
 const asking = ref(false);
 const thread = ref<{ q: string; a: Answer }[]>([]);
 
-const EXAMPLES = [
-  "۵ استان با بیشترین فروش",
-  "کدام کارشناس کمترین تحقق تارگت را دارد؟",
-  "روند فروش ۶ ماه اخیر",
-  "سود امسال",
-  "ضایعات هر خط تولید",
-  "بیشترین پرداخت‌ها به تفکیک سرفصل",
-];
+/** Sent by the server, from the sections this viewer may read. */
+const examples = ref<string[]>([]);
 
 function fmt(n: Num | null | undefined): string {
   if (!n || n.v === null || n.v === undefined) return "—";
@@ -96,6 +90,7 @@ async function load() {
     sections.value = data.sections ?? [];
     summary.value = data.summary ?? [];
     comparedTo.value = data.compared_to;
+    examples.value = data.examples ?? [];
     periodLabel.value = data.period?.label ?? "";
     if (data.period && period.value !== data.period.id) period.value = data.period.id;
   } catch (e) {
@@ -167,7 +162,7 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
       </form>
       <div v-if="!thread.length" class="flex flex-wrap gap-1.5">
         <button
-          v-for="ex in EXAMPLES" :key="ex"
+          v-for="ex in examples" :key="ex"
           class="text-xs rounded-full border border-slate-200 px-2.5 py-1 text-slate-500 hover:bg-slate-50"
           @click="ask(ex)"
         >{{ ex }}</button>
