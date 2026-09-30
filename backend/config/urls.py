@@ -38,6 +38,7 @@ urlpatterns = [
     path("api/imports/<slug:key>/run/", ImportRunView.as_view(), name="import-run"),
     path("api/hr/", include("apps.hr.urls")),
     path("api/office/", include("apps.office.urls")),
+    path("api/teamyar/", include("apps.teamyar.urls")),
     path("api/executive/", include("apps.core.urls")),
     # Manager-composed boards: the layout the CEO builds for each section.
     path("api/dashboards/", include("apps.dashboards.urls")),
