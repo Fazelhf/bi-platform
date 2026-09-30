@@ -4,6 +4,7 @@ defineProps<{ name: string; size?: number }>();
 // Lucide-style 24x24 stroke paths.
 const PATHS: Record<string, string> = {
   grid: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+  sparkles: "M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2zM19 3v4M17 5h4M5 17v4M3 19h4",
   chart: "M3 3v18h18M7 15l4-4 3 3 5-6",
   box: "M21 8l-9-5-9 5v8l9 5 9-5V8zM3 8l9 5 9-5M12 22V13",
   inbox: "M22 12h-6l-2 3h-4l-2-3H2M5.5 5h13l3.5 7v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z",
