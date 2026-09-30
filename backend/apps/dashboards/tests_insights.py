@@ -165,3 +165,63 @@ class ExamplesFollowAccessTests(APITestCase):
         a = answer(prod, "هوا چطوره؟")
         self.assertNotIn("فروش", a["answer"])
         self.assertEqual(a["suggestions"], examples)
+
+
+class WhyAndFollowUpTests(InsightsTests):
+    """«چرا؟» splits a change into who made it; a follow-up keeps what it omits."""
+
+    def test_why_names_who_the_fall_came_from(self):
+        a = answer(self.team_mgr, "چرا فروش شهریور ۱۴۰۳ افت کرد؟", self.m2.id)
+        text = _fill(a)
+        # 2000 → 1200: Sara's 700 of the 800 fall is 87.5٪ of it.
+        self.assertIn("کاهش", text)
+        self.assertIn("«سارا کریمی» (700", text)
+        self.assertEqual(a["table"]["columns"][0], "کارشناس")
+
+    def test_follow_up_keeps_measure_and_month(self):
+        first = answer(self.team_mgr, "فروش تهران در شهریور ۱۴۰۳", self.m2.id)
+        self.assertEqual(first["values"]["a"]["v"], 600)
+        second = answer(self.team_mgr, "فارس چطور؟", self.m2.id, context=first["context"])
+        self.assertIn("«فارس»", second["answer"])
+        self.assertEqual(second["values"]["a"]["v"], 600)
+        third = answer(self.team_mgr, "تهران ماه قبلش؟", self.m2.id, context=second["context"])
+        self.assertEqual(third["values"]["a"]["v"], 1500)
+
+    def test_province_named_after_a_month_is_not_a_month(self):
+        DimProvince.objects.create(code="az", name_fa="آذربایجان غربی")
+        p = parse("فروش آذربایجان غربی", self.m2, self.m1)
+        self.assertEqual(p.months, [])
+
+    def test_inherited_breakdown_dropped_when_it_does_not_fit(self):
+        first = answer(self.team_mgr, "فروش به تفکیک استان در شهریور ۱۴۰۳", self.m2.id)
+        second = answer(self.team_mgr, "سود چی؟", self.m2.id, context=first["context"])
+        self.assertTrue(second["ok"], second["answer"])
+        self.assertEqual(second["values"]["a"]["v"], 240)  # 180 + 60
+
+
+class LooseQuestionTests(InsightsTests):
+    """Typos, seasons and a bare year — the way questions are actually typed."""
+
+    def test_typo_in_a_province_is_read_and_said(self):
+        a = answer(self.team_mgr, "هران شهریور ۱۴۰۳", self.m2.id)
+        self.assertEqual(a["values"]["a"]["v"], 600)
+        self.assertIn("«هران» را «تهران» خواندم", a["understood"])
+
+    def test_digits_are_never_guessed(self):
+        from apps.dashboards.ask import _near
+        self.assertIsNone(_near("برش ۱", "برش ۲"))
+
+    def test_season_adds_its_months(self):
+        # تابستان ۱۴۰۳ = تیر..شهریور; only مرداد and شهریور exist here.
+        a = answer(self.team_mgr, "فروش تهران تابستان ۱۴۰۳", self.m2.id)
+        self.assertEqual(a["values"]["a"]["v"], 2100)
+
+    def test_bare_year(self):
+        a = answer(self.team_mgr, "فروش ۱۴۰۳", self.m2.id)
+        self.assertEqual(a["values"]["a"]["v"], 3200)  # 2000 + 1200
+
+    def test_every_answer_offers_what_to_ask_next(self):
+        a = answer(self.team_mgr, "فروش شهریور ۱۴۰۳", self.m2.id)
+        self.assertIn("چرا؟", a["suggestions"])
+        follow = answer(self.team_mgr, a["suggestions"][0], self.m2.id, context=a["context"])
+        self.assertTrue(follow["ok"], follow["answer"])

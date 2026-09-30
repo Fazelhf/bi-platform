@@ -386,6 +386,17 @@ def analyse_sales(ctx: Ctx) -> dict | None:
     return _section("sales", "فروش", findings, stats)
 
 
+def _rolls(ctx: Ctx, period: DimPeriod) -> float:
+    """Rolls made on the cutting lines — the print unit counts m², not rolls."""
+    from apps.production.models import DimMachine
+
+    cutting = list(DimMachine.objects.filter(kind="cutting").values_list("id", flat=True))
+    if not cutting:
+        return 0
+    return ctx.totals("production", ["output"], period=period,
+                      filters=[{"dim": "machine", "op": "in", "value": cutting}]).get("output", 0)
+
+
 def analyse_production(ctx: Ctx) -> dict | None:
     metrics = ["output", "waste_pct", "shifts", "down_breakdown", "down_sizechange", "down_nowork"]
     now = ctx.totals("production", metrics)
@@ -446,19 +457,29 @@ def analyse_production(ctx: Ctx) -> dict | None:
             findings += _movers(lines, ctx.by("production", ["output"], "machine", period=ctx.prev),
                                 "output", "خط", "number")
 
+    # «هزینه‌ی هر رول». Output is kept in rolls on the cutting lines but in m²
+    # on the print unit, so adding the two up divides money by a mixture of
+    # units. Costs are not kept per line, so the whole month's cost — print
+    # included — goes over the rolls cut, and the label says so.
     cost_now = ctx.totals("production_cost", ["amount"]).get("amount", 0)
-    if cost_now:
-        cost_prev = ctx.totals("production_cost", ["amount"], period=ctx.prev).get("amount", 0) \
-            if ctx.prev else 0
-        unit_cost = cost_now / out
-        stats.append({"label": "هزینه هر واحد", "value": V(unit_cost, "rial")})
-        if cost_prev and prev_out:
-            uc_pct = change(unit_cost, cost_prev / prev_out)
-            findings.append(Finding(
-                INFO if abs(uc_pct) < 3 else BAD if uc_pct > 0 else GOOD,
-                f"هزینه‌ی تولید {{a}} و هزینه‌ی هر واحد {{u}} بود؛ {{p}} {trend_word(uc_pct)} نسبت به ماه قبل.",
-                {"a": V(cost_now, "rial"), "u": V(unit_cost, "rial"), "p": V(abs(uc_pct), "percent")},
-                weight=26 + min(abs(uc_pct) / 3, 20)))
+    rolls_now = _rolls(ctx, ctx.period)
+    if cost_now and rolls_now:
+        cost_prev = ctx.totals("production_cost", ["amount"], period=ctx.prev).get("amount", 0)             if ctx.prev else 0
+        rolls_prev = _rolls(ctx, ctx.prev) if ctx.prev else 0
+        per_roll = cost_now / rolls_now
+        stats.append({"label": "هزینه هر رول", "value": V(per_roll, "rial")})
+        text = ("هزینه‌ی تولید {a} بود؛ تقسیم بر {r} رول خط‌های برش، هر رول حدود {u} "
+                "(هزینه‌های چاپ هم در آن است)")
+        vals = {"a": V(cost_now, "rial"), "r": V(rolls_now), "u": V(per_roll, "rial")}
+        uc_pct = change(per_roll, cost_prev / rolls_prev) if cost_prev and rolls_prev else None
+        if uc_pct is not None and not prog:
+            text += f"؛ {{p}} {trend_word(uc_pct)} نسبت به ماه قبل."
+            vals["p"] = V(abs(uc_pct), "percent")
+        else:
+            text += "."
+        tone = INFO if uc_pct is None or prog or abs(uc_pct) < 3 else BAD if uc_pct > 0 else GOOD
+        findings.append(Finding(tone, text, vals, weight=26 + min(abs(uc_pct or 0) / 3, 20)))
+        if cost_prev and not prog:
             findings += _grown_costs(
                 ctx.by("production_cost", ["amount"], "category"),
                 ctx.by("production_cost", ["amount"], "category", period=ctx.prev),

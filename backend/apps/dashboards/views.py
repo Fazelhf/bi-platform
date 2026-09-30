@@ -422,5 +422,7 @@ class AskView(APIView):
         question = str(request.data.get("question") or "").strip()[:300]
         if not question:
             return Response({"detail": "سؤال خالی است."}, status=status.HTTP_400_BAD_REQUEST)
+        context = request.data.get("context")
         return Response(answer(request.user, question,
-                               _period_id(request.data.get("period")), request))
+                               _period_id(request.data.get("period")), request,
+                               context if isinstance(context, dict) else None))

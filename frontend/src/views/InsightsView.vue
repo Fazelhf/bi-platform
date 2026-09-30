@@ -25,6 +25,8 @@ interface Answer {
   ok: boolean; understood?: string; answer: string; values: Record<string, Num>;
   table?: { columns: string[]; rows: (string | Num)[][] };
   suggestions?: string[];
+  /** Sent back with the next question, so «ماه قبلش؟» is read against this one. */
+  context?: Record<string, unknown>;
 }
 
 const { money, unitLabel } = useMoney();
@@ -42,6 +44,8 @@ const error = ref("");
 const question = ref("");
 const asking = ref(false);
 const thread = ref<{ q: string; a: Answer }[]>([]);
+/** The last answered question's context — null starts a fresh conversation. */
+const conversation = ref<Record<string, unknown> | null>(null);
 
 /** Sent by the server, from the sections this viewer may read. */
 const examples = ref<string[]>([]);
@@ -105,8 +109,11 @@ async function ask(text?: string) {
   if (!q || asking.value) return;
   asking.value = true;
   try {
-    const { data } = await api.post("/dashboards/ask/", { question: q, period: period.value });
+    const { data } = await api.post("/dashboards/ask/", {
+      question: q, period: period.value, context: conversation.value,
+    });
     thread.value.unshift({ q, a: data });
+    if (data.context) conversation.value = data.context;
     question.value = "";
   } catch (e) {
     thread.value.unshift({ q, a: { ok: false, answer: apiError(e), values: {} } });
@@ -115,13 +122,29 @@ async function ask(text?: string) {
   }
 }
 
+const chips = computed(() => {
+  const last = thread.value[0]?.a.suggestions;
+  return last?.length ? last : examples.value;
+});
+
 const periodsNewestFirst = computed(() => [...periods.value].reverse());
 
 onMounted(async () => {
   await loadMoneySettings();
   await load();
 });
-watch(period, (now, before) => { if (before !== null && now !== before) load(); });
+watch(period, (now, before) => {
+  if (before !== null && now !== before) {
+    // Another month on the picker is another conversation.
+    conversation.value = null;
+    load();
+  }
+});
+
+function restart() {
+  conversation.value = null;
+  thread.value = [];
+}
 </script>
 
 <template>
@@ -149,7 +172,9 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
           v-model="question"
           type="text"
           maxlength="300"
-          :placeholder="`بپرسید… مثلاً «فروش تهران در ${periodLabel || 'این ماه'}»`"
+          :placeholder="conversation
+            ? 'ادامه بدهید… مثلاً «ماه قبلش؟»، «اصفهان چطور؟» یا «به تفکیک کارشناس»'
+            : `بپرسید… مثلاً «فروش تهران در ${periodLabel || 'این ماه'}»`"
           class="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/30"
         />
         <button
@@ -160,9 +185,15 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
           {{ asking ? "…" : "بپرس" }}
         </button>
       </form>
-      <div v-if="!thread.length" class="flex flex-wrap gap-1.5">
+      <p v-if="conversation" class="flex items-center justify-between text-[11px] text-slate-400">
+        <span>سؤال بعدی در ادامه‌ی همین گفتگو خوانده می‌شود.</span>
+        <button class="text-brand-600 hover:underline" @click="restart">گفتگوی تازه</button>
+      </p>
+      <!-- Always right under the box: the last answer's follow-ups, or the
+           starting questions before anything has been asked. -->
+      <div v-if="chips.length" class="flex flex-wrap gap-1.5">
         <button
-          v-for="ex in examples" :key="ex"
+          v-for="ex in chips" :key="ex"
           class="text-xs rounded-full border border-slate-200 px-2.5 py-1 text-slate-500 hover:bg-slate-50"
           @click="ask(ex)"
         >{{ ex }}</button>
@@ -192,13 +223,6 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
               </tr>
             </tbody>
           </table>
-        </div>
-        <div v-if="item.a.suggestions?.length" class="flex flex-wrap gap-1.5">
-          <button
-            v-for="ex in item.a.suggestions" :key="ex"
-            class="text-xs rounded-full border border-slate-200 px-2.5 py-1 text-slate-500 hover:bg-slate-50"
-            @click="ask(ex)"
-          >{{ ex }}</button>
         </div>
       </div>
     </div>
