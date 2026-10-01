@@ -17,24 +17,30 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import LogEntry, Meeting, Phase, Task
+from . import progress
+from .models import LogEntry, Meeting, Module, Phase, Task
+from .modules import TEAMYAR_TEAM
 from .serializers import (
     LogEntrySerializer,
     MeetingSerializer,
+    ModuleSerializer,
     PhaseSerializer,
     TaskSerializer,
 )
+
+
+def can_use_teamyar(u) -> bool:
+    return bool(
+        u and u.is_authenticated
+        and (u.is_superuser or u.role == "executive" or u.is_admin_panel_user)
+    )
 
 
 class TeamyarAccess(BasePermission):
     message = "صفحه‌ی تیمیار فقط برای مدیریت در دسترس است."
 
     def has_permission(self, request, view) -> bool:
-        u = request.user
-        return bool(
-            u and u.is_authenticated
-            and (u.is_superuser or u.role == "executive" or u.is_admin_panel_user)
-        )
+        return can_use_teamyar(request.user)
 
 
 class _Base(viewsets.ModelViewSet):
@@ -46,6 +52,67 @@ class _Base(viewsets.ModelViewSet):
 class PhaseViewSet(_Base):
     queryset = Phase.objects.all()
     serializer_class = PhaseSerializer
+
+
+class ModuleViewSet(_Base):
+    queryset = Module.objects.all()
+    serializer_class = ModuleSerializer
+
+    def perform_create(self, serializer):
+        module = serializer.save(order=Module.objects.count())
+        # A new module collects what was already typed about it and is
+        # still filed nowhere — «پست و پیامک» added today picks up the
+        # meeting held last week.
+        from .modules import guess
+
+        for t in Task.objects.filter(module__isnull=True):
+            if guess([module], t.title):
+                Task.objects.filter(pk=t.pk).update(module=module)
+        for m in Meeting.objects.filter(module__isnull=True):
+            if guess([module], m.title):
+                Meeting.objects.filter(pk=m.pk).update(module=module)
+
+
+class PeopleView(APIView):
+    """
+    Names for the attendee picker: our staff from منابع انسانی, Teamyar's
+    team from the charter, and anyone already written into a meeting —
+    Teamyar's consultants who are in neither list still come back.
+    """
+
+    permission_classes = [TeamyarAccess]
+
+    def get(self, request):
+        from apps.core.excel_import import fold
+        from apps.sales.models import DimEmployee
+
+        seen: set[str] = set()
+        out: list[dict] = []
+
+        def add(name: str, group: str, note: str = ""):
+            name = (name or "").strip()
+            key = fold(name).replace(" ", "")
+            if name and key not in seen:
+                seen.add(key)
+                out.append({"name": name, "group": group, "note": note})
+
+        staff = (DimEmployee.objects.filter(is_active=True, is_placeholder=False)
+                 .prefetch_related("positions__unit").order_by("full_name_fa"))
+        for e in staff:
+            pos = next(iter(e.positions.all()), None)
+            add(e.full_name_fa, "ours", f"{pos.title_fa} · {pos.unit.name_fa}" if pos else "")
+        for name, role in TEAMYAR_TEAM:
+            add(name, "teamyar", role)
+        for text in Meeting.objects.values_list("attendees", flat=True):
+            for name in split_names(text):
+                add(name, "past")
+        return Response(out)
+
+
+def split_names(text: str) -> list[str]:
+    import re
+
+    return [n.strip() for n in re.split(r"[،,;؛\n]+", text or "") if n.strip()]
 
 
 class TaskViewSet(_Base):
@@ -129,22 +196,10 @@ class OverviewView(APIView):
         today = date.today()
         tasks = list(Task.objects.all())
 
-        # Overall progress weighted by duration: a two-month build and a
-        # one-day sign-off must not count the same.
-        weight = sum(max((t.end_on - t.start_on).days, 1) for t in tasks)
-        progress = (
-            round(sum(max((t.end_on - t.start_on).days, 1) * t.progress for t in tasks) / weight, 1)
-            if weight else 0.0
-        )
-        # Where the plan says we should be by today, same weighting.
-        planned = 0.0
-        if weight:
-            acc = 0.0
-            for t in tasks:
-                span = max((t.end_on - t.start_on).days, 1)
-                elapsed = min(max((today - t.start_on).days, 0), span)
-                acc += span * (elapsed / span * 100)
-            planned = round(acc / weight, 1)
+        # Counted per module, then averaged — see `progress`. The old
+        # duration weighting let one five-week prerequisite outweigh three
+        # modules that were nearly finished.
+        modules_report = progress.report(today)
 
         by_status = defaultdict(int)
         for t in tasks:
@@ -170,8 +225,13 @@ class OverviewView(APIView):
         ctx = {"request": request}
         return Response({
             "today": today.isoformat(),
-            "progress": progress,
-            "planned_progress": planned,
+            "progress": modules_report["progress"],
+            "planned_progress": modules_report["planned_progress"],
+            "modules": modules_report["modules"],
+            "general": modules_report["general"],
+            "modules_in_scope": modules_report["in_scope"],
+            "modules_live": modules_report["live"],
+            "modules_started": modules_report["started"],
             "task_count": len(tasks),
             "by_status": dict(by_status),
             "overdue": TaskSerializer(sorted(overdue, key=lambda t: t.end_on), many=True, context=ctx).data,
@@ -192,3 +252,4 @@ class OverviewView(APIView):
             "open_issues": LogEntry.objects.filter(kind=LogEntry.Kind.ISSUE, resolved=False).count(),
             "log_count": LogEntry.objects.count(),
         })
+

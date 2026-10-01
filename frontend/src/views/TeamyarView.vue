@@ -7,19 +7,23 @@
 import { computed, onMounted, ref } from "vue";
 import {
   LOG_KINDS, localDay, teamyarApi,
-  type LogEntry, type LogKind, type Meeting, type Overview, type Phase, type TeamyarTask,
+  type LogEntry, type LogKind, type Meeting, type Module, type Overview, type Phase, type TeamyarTask,
 } from "@/api/teamyar";
 import { apiError } from "@/components/crm/formError";
+import ExcelImport from "@/components/ExcelImport.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import GanttChart from "@/components/teamyar/GanttChart.vue";
 import TeamyarCalendar from "@/components/teamyar/TeamyarCalendar.vue";
 import TaskForm from "@/components/teamyar/TaskForm.vue";
 import MeetingForm from "@/components/teamyar/MeetingForm.vue";
 import LogForm from "@/components/teamyar/LogForm.vue";
+import ModuleBoard from "@/components/teamyar/ModuleBoard.vue";
+import ModuleForm from "@/components/teamyar/ModuleForm.vue";
 import { MONTH_NAMES, faDigits, isoToJalali, jalaliLabel } from "@/utils/jalali";
 
 const TABS = [
   { key: "overview", label: "نمای کلی" },
+  { key: "modules", label: "ماژول‌ها" },
   { key: "gantt", label: "گانت چارت" },
   { key: "calendar", label: "تقویم و ددلاین‌ها" },
   { key: "meetings", label: "جلسات" },
@@ -47,15 +51,17 @@ const phases = ref<Phase[]>([]);
 const tasks = ref<TeamyarTask[]>([]);
 const meetings = ref<Meeting[]>([]);
 const logs = ref<LogEntry[]>([]);
+const modules = ref<Module[]>([]);
 
 async function load() {
   error.value = "";
   try {
-    const [o, p, t, m, l] = await Promise.all([
+    const [o, p, t, m, l, mods] = await Promise.all([
       teamyarApi.overview(), teamyarApi.phases.list(), teamyarApi.tasks.list(),
-      teamyarApi.meetings.list(), teamyarApi.logs.list(),
+      teamyarApi.meetings.list(), teamyarApi.logs.list(), teamyarApi.modules.list(),
     ]);
     overview.value = o; phases.value = p; tasks.value = t; meetings.value = m; logs.value = l;
+    modules.value = mods;
   } catch (e) {
     error.value = apiError(e);
   } finally {
@@ -68,8 +74,12 @@ onMounted(load);
 const editingTask = ref<TeamyarTask | null | undefined>(undefined);
 const editingMeeting = ref<Meeting | null | undefined>(undefined);
 const editingLog = ref<LogEntry | null | undefined>(undefined);
+const editingModule = ref<Module | null | undefined>(undefined);
+function editModule(id: number | null) {
+  editingModule.value = id === null ? null : modules.value.find((x) => x.id === id);
+}
 function saved() {
-  editingTask.value = editingMeeting.value = editingLog.value = undefined;
+  editingTask.value = editingMeeting.value = editingLog.value = editingModule.value = undefined;
   load();
 }
 
@@ -238,6 +248,7 @@ function countOf(key: string) {
           <p class="text-sm text-slate-500 mt-1">برنامه، ددلاین‌ها، جلسات و تمام رویدادهای پروژه — از صفر تا صد</p>
         </div>
         <div class="flex flex-wrap gap-2">
+          <ExcelImport import-key="teamyar-tasks" label="ورود فعالیت‌ها از اکسل" @done="load" />
           <button class="rounded-xl px-3 py-2 text-sm bg-slate-100 text-ink hover:bg-slate-200" @click="editingLog = null">+ رویداد / مکالمه</button>
           <button class="rounded-xl px-3 py-2 text-sm bg-slate-100 text-ink hover:bg-slate-200" @click="editingMeeting = null">+ جلسه</button>
           <button class="rounded-xl px-4 py-2 text-sm bg-panel text-white" @click="editingTask = null">+ فعالیت</button>
@@ -246,7 +257,10 @@ function countOf(key: string) {
 
       <div v-if="overview" class="mt-4">
         <div class="flex items-baseline justify-between text-xs mb-1">
-          <span class="text-slate-500">پیشرفت کل (وزن‌دهی بر اساس مدت)</span>
+          <span class="text-slate-500" title="هر ماژول یک سهم برابر؛ ماژولی که شروع نشده صفر حساب می‌شود">
+            پیشرفت کل — میانگین {{ fa(overview.modules_in_scope) }} ماژول
+            · {{ fa(overview.modules_started) }} شروع شده<template v-if="overview.modules_live"> · {{ fa(overview.modules_live) }} تمام شده</template>
+          </span>
           <span class="text-ink">
             واقعی {{ fa(overview.progress) }}٪ · طبق برنامه {{ fa(overview.planned_progress) }}٪
             <span :class="gap < 0 ? 'text-red-500' : 'text-emerald-600'" class="font-bold">
@@ -310,6 +324,29 @@ function countOf(key: string) {
             <p class="text-[11px] text-slate-400 mt-1">{{ fa(overview.log_count) }} رویداد ثبت شده</p>
           </div>
         </div>
+
+        <section class="bg-surface rounded-card shadow-soft p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <h3 class="font-bold text-ink text-sm flex-1">🧩 ماژول‌ها</h3>
+            <button class="text-xs text-slate-500 hover:text-ink" @click="setTab('modules')">جزئیات هر ماژول ←</button>
+          </div>
+          <div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-2.5">
+            <button
+              v-for="m in overview.modules" :key="m.key"
+              class="text-right group" @click="setTab('modules')"
+            >
+              <div class="flex items-baseline gap-2 text-xs">
+                <span class="flex-1 min-w-0 truncate text-ink group-hover:underline">{{ m.label }}</span>
+                <span v-if="m.overdue_count || m.blocked_count" class="text-red-500" title="عقب‌افتاده یا متوقف">●</span>
+                <span class="text-slate-500">{{ fa(m.progress) }}٪</span>
+              </div>
+              <div class="relative h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
+                <div class="h-full rounded-full" :class="STATUS_BAR[m.status]" :style="{ width: `${m.progress}%` }"></div>
+                <div class="absolute top-0 bottom-0 w-0.5 bg-ink/50" :style="{ right: `${m.planned}%` }"></div>
+              </div>
+            </button>
+          </div>
+        </section>
 
         <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
           <section class="bg-surface rounded-card shadow-soft p-4 flex flex-col">
@@ -427,6 +464,13 @@ function countOf(key: string) {
       </template>
 
       <!-- ============ GANTT ============ -->
+      <!-- ============ MODULES ============ -->
+      <ModuleBoard
+        v-else-if="tab === 'modules'"
+        :modules="overview.modules" :general="overview.general" :tasks="tasks" :meetings="meetings"
+        @task="(t) => (editingTask = t)" @meeting="(m) => (editingMeeting = m)" @edit="editModule"
+      />
+
       <template v-else-if="tab === 'gantt'">
         <div class="bg-surface rounded-card shadow-soft p-4 flex flex-wrap items-center gap-2">
           <span class="text-sm text-slate-500">فازها:</span>
@@ -594,12 +638,17 @@ function countOf(key: string) {
 
     <TaskForm
       v-if="editingTask !== undefined"
-      :task="editingTask" :phases="phases" :tasks="tasks"
+      :task="editingTask" :phases="phases" :tasks="tasks" :modules="modules"
       @close="editingTask = undefined" @saved="saved"
+    />
+    <ModuleForm
+      v-if="editingModule !== undefined"
+      :module="editingModule"
+      @close="editingModule = undefined" @saved="saved"
     />
     <MeetingForm
       v-if="editingMeeting !== undefined"
-      :meeting="editingMeeting" :tasks="tasks"
+      :meeting="editingMeeting" :tasks="tasks" :modules="modules"
       @close="editingMeeting = undefined" @saved="saved"
     />
     <LogForm

@@ -4,6 +4,7 @@ import api from "@/api/client";
 import { useMoney, loadMoneySettings } from "@/composables/useMoney";
 import { apiError } from "@/components/crm/formError";
 import Skeleton from "@/components/Skeleton.vue";
+import { useAuthStore } from "@/stores/auth";
 
 /**
  * تحلیل هوشمند — a written reading of the month, and a box to ask questions.
@@ -122,6 +123,40 @@ async function ask(text?: string) {
   }
 }
 
+/**
+ * A small bar per row when an answer is a trend over months — the shape is
+ * read faster than the column of figures under it.
+ */
+function bars(a: Answer): { label: string; pct: number; text: string }[] {
+  const t = a.table;
+  if (!t || t.columns[0] !== "ماه" || t.rows.length < 3) return [];
+  const nums = t.rows.map((r) => (typeof r[1] === "string" ? null : r[1]?.v ?? null));
+  const max = Math.max(...nums.map((n) => Math.abs(n ?? 0)));
+  if (!max) return [];
+  return t.rows.map((r, i) => ({
+    label: String(r[0]),
+    pct: (Math.abs(nums[i] ?? 0) / max) * 100,
+    text: typeof r[1] === "string" ? r[1] : fmt(r[1]),
+  }));
+}
+
+// -- for administrators: the questions «بپرس» did not understand ---------
+const auth = useAuthStore();
+const isAdmin = computed(() => !!auth.me && (auth.me.is_superuser || auth.me.role === "admin"));
+interface Missed { question: string; times: number; last: string }
+const log = ref<{ total: number; understood: number; missed: Missed[] } | null>(null);
+const logOpen = ref(false);
+async function loadLog() {
+  logOpen.value = !logOpen.value;
+  if (!logOpen.value || log.value) return;
+  try {
+    const { data } = await api.get("/dashboards/ask/log/", { params: { days: 30 } });
+    log.value = data;
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
+
 const chips = computed(() => {
   const last = thread.value[0]?.a.suggestions;
   return last?.length ? last : examples.value;
@@ -208,6 +243,16 @@ function restart() {
             <template v-else>{{ pc.t }}</template>
           </template>
         </p>
+        <div v-if="bars(item.a).length" class="flex items-end gap-1 h-24 pt-2" aria-hidden="true">
+          <div
+            v-for="b in bars(item.a)" :key="b.label"
+            class="flex-1 min-w-0 flex flex-col items-center justify-end h-full"
+            :title="`${b.label}: ${b.text}`"
+          >
+            <div class="w-full max-w-8 rounded-t bg-brand-500/70" :style="{ height: `${Math.max(b.pct, 2)}%` }" />
+            <span class="mt-1 text-[10px] text-slate-400 truncate w-full text-center">{{ b.label.split(" ")[0] }}</span>
+          </div>
+        </div>
         <div v-if="item.a.table?.rows.length" class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
@@ -287,6 +332,31 @@ function restart() {
             </span>
           </li>
         </ul>
+      </div>
+
+      <!-- مدیر سامانه: سؤال‌هایی که «بپرس» نفهمید -->
+      <div v-if="isAdmin" class="bg-surface rounded-card shadow-soft p-4 space-y-3">
+        <button class="flex w-full items-center justify-between text-sm text-slate-500" @click="loadLog">
+          <span>سؤال‌هایی که «بپرس» متوجه نشد (۳۰ روز اخیر)</span>
+          <span>{{ logOpen ? "▲" : "▼" }}</span>
+        </button>
+        <template v-if="logOpen && log">
+          <p class="text-xs text-slate-400">
+            {{ FA.format(log.total) }} سؤال پرسیده شد؛
+            {{ FA.format(log.understood) }} سؤال
+            ({{ FA.format(log.total ? (log.understood / log.total) * 100 : 0) }}٪) جواب گرفت.
+          </p>
+          <p v-if="!log.missed.length" class="text-sm text-slate-500">سؤال بی‌جوابی ثبت نشده است.</p>
+          <ul v-else class="divide-y divide-slate-100 text-sm">
+            <li v-for="m in log.missed" :key="m.question" class="flex items-center justify-between gap-3 py-1.5">
+              <span class="text-ink">{{ m.question }}</span>
+              <span class="shrink-0 text-xs text-slate-400">{{ FA.format(m.times) }} بار</span>
+            </li>
+          </ul>
+          <p class="text-[11px] text-slate-400">
+            کلمه‌های پرتکرار این فهرست را می‌شود به واژه‌نامه‌ی «بپرس» اضافه کرد.
+          </p>
+        </template>
       </div>
 
       <p class="text-[11px] text-slate-400 px-1">

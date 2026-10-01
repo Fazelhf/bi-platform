@@ -39,6 +39,7 @@ const NAV = [
   { name: "sales2-receipts", label: "دریافت و چک", icon: "banknote" },
   { name: "sales2-receivables", label: "مطالبات", icon: "wallet" },
   { name: "sales2-customers", label: "مشتریان و اعتبار", icon: "contact" },
+  { name: "sales2-grades", label: "گرید مشتریان", icon: "target" },
   { name: "sales2-price-list", label: "لیست قیمت", icon: "tag" },
   { name: "sales2-products", label: "کالاها و فی حسابداری", icon: "box" },
   { name: "sales2-sales-list", label: "لیست فروش", icon: "layers" },

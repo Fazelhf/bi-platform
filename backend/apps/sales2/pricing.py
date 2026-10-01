@@ -52,11 +52,12 @@ def roll_size(product) -> RollSize | None:
 
 
 def _upto(qs, on):
-    """Rows of the month `on` falls in or earlier, latest first."""
+    """Rows in force on `on` — started on that day or earlier — latest first."""
     if on is not None:
-        jy, jm, _ = jalali.from_gregorian(on)
-        qs = qs.filter(Q(jalali_year__lt=jy) | Q(jalali_year=jy, jalali_month__lte=jm))
-    return qs.order_by("-jalali_year", "-jalali_month")
+        jy, jm, jd = jalali.from_gregorian(on)
+        qs = qs.filter(Q(jalali_year__lt=jy) | Q(jalali_year=jy, jalali_month__lt=jm)
+                       | Q(jalali_year=jy, jalali_month=jm, jalali_day__lte=jd))
+    return qs.order_by("-jalali_year", "-jalali_month", "-jalali_day")
 
 
 def sheet_for(grammage: int | None, official: bool, on=None) -> PriceSheet | None:
@@ -121,7 +122,7 @@ class Quote:
 
 
 def _month_label(obj) -> str:
-    return f"{obj.jalali_year}/{obj.jalali_month:02d}"
+    return f"{obj.jalali_year}/{obj.jalali_month:02d}/{obj.jalali_day:02d}"
 
 
 def list_price(product, grammage: int | None, official: bool, quantity=None, on=None):

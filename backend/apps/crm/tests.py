@@ -1379,6 +1379,7 @@ class ChannelTests(APITestCase):
             "customer": self.books["b2b"].id,
             "title": "معامله جدید",
             "stage": self.stage.id,
+            "next_action_title": "تماس پیگیری", "next_action_due": str(timezone.localdate()),
         }, format="json")
         self.assertEqual(res.status_code, 201, res.data)
         self.assertEqual(Deal.objects.get(title="معامله جدید").channel, SalesChannel.B2B)
@@ -2000,6 +2001,37 @@ class WorkScreensTests(APITestCase):
             title=title, customer=customer, owner=owner, dataset=Dataset.REAL,
             due_at=timezone.now() - timedelta(days=days_ago),
         )
+
+    # ---- اقدام بعدی + تاریخ -------------------------------------------------
+    def test_open_deal_without_next_action_is_flagged_until_it_has_one(self):
+        from apps.crm.models import Task
+        self.client.force_authenticate(self.rep)
+        data = self.client.get("/api/crm/today/").data
+        self.assertIn(self.my_deal.id, [d["id"] for d in data["no_next_action"]])
+        row = next(d for d in self.client.get("/api/crm/deals/", {"status": "open"}).data["results"]
+                   if d["id"] == self.my_deal.id)
+        self.assertTrue(row["next_action"]["missing"])
+        Task.objects.create(title="تماس", deal=self.my_deal, customer=self.my_customer,
+                            owner=self.mine, dataset=Dataset.REAL,
+                            due_at=timezone.now() + timedelta(days=1))
+        data = self.client.get("/api/crm/today/").data
+        self.assertNotIn(self.my_deal.id, [d["id"] for d in data["no_next_action"]])
+        missing = self.client.get("/api/crm/deals/", {"status": "open", "next_action": "missing"}).data
+        self.assertNotIn(self.my_deal.id, [d["id"] for d in missing["results"]])
+
+    def test_new_open_deal_needs_a_next_action(self):
+        self.client.force_authenticate(self.rep)
+        body = {"customer": self.my_customer.id, "title": "تازه"}
+        res = self.client.post("/api/crm/deals/", body, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("next_action_title", res.data)
+        res = self.client.post("/api/crm/deals/", {
+            **body, "next_action_title": "ارسال نمونه",
+            "next_action_due": str(timezone.localdate() + timedelta(days=2)),
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        deal = Deal.objects.get(title="تازه")
+        self.assertEqual(deal.tasks.get().title, "ارسال نمونه")
 
     # ---- کارتابل امروز ----------------------------------------------------
     def test_today_lists_only_the_reps_own_work(self):

@@ -1,5 +1,8 @@
 """CRM serializers. Read paths are denormalised (labels inlined) so list and
 drill-down screens never need a second lookup round-trip."""
+from datetime import datetime, time
+
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.crm.jalali import jalali_str
@@ -168,6 +171,9 @@ class DealListSerializer(serializers.ModelSerializer):
     age_days = serializers.IntegerField(read_only=True)
     opened_jalali = serializers.SerializerMethodField()
     closed_jalali = serializers.SerializerMethodField()
+    #: «اقدام بعدی + تاریخ» — the earliest open کار on the deal. An open deal
+    #: without one has, in practice, left the salesperson's hands.
+    next_action = serializers.SerializerMethodField()
 
     class Meta:
         model = Deal
@@ -180,7 +186,21 @@ class DealListSerializer(serializers.ModelSerializer):
             "discount_rial", "shipping_cost_rial", "other_cost_rial",
             "margin_pct", "age_days", "opened_at", "opened_jalali",
             "closed_at", "closed_jalali", "expected_close_date", "channel",
+            "next_action",
         )
+
+    def get_next_action(self, obj):
+        if obj.status != Deal.Status.OPEN:
+            return None
+        if hasattr(obj, "next_task_at"):  # annotated by the list query
+            at, title, tid = obj.next_task_at, obj.next_task_title, obj.next_task_id
+        else:
+            t = obj.tasks.filter(done_at__isnull=True).order_by("due_at").first()
+            at, title, tid = (t.due_at, t.title, t.id) if t else (None, None, None)
+        if at is None:
+            return {"missing": True}
+        return {"missing": False, "id": tid, "title": title, "due_at": at,
+                "due_jalali": jalali_str(at), "overdue": at < timezone.now()}
 
     def get_opened_jalali(self, obj):
         return jalali_str(obj.opened_at) if obj.opened_at else ""
@@ -214,6 +234,10 @@ class DealWriteSerializer(serializers.ModelSerializer):
     """
 
     items = DealItemWriteSerializer(many=True, required=False)
+    #: A new open deal is created with its first «اقدام بعدی» — a کار with a
+    #: date — so no deal starts life outside anybody's follow-up.
+    next_action_title = serializers.CharField(max_length=250, required=False, write_only=True, allow_blank=True)
+    next_action_due = serializers.DateField(required=False, write_only=True, allow_null=True)
 
     class Meta:
         model = Deal
@@ -226,6 +250,7 @@ class DealWriteSerializer(serializers.ModelSerializer):
             "lead_source", "lost_reason", "lost_note", "tags", "items",
             "discount_rial", "shipping_cost_rial", "other_cost_rial",
             "opened_at", "expected_close_date", "closed_at", "channel",
+            "next_action_title", "next_action_due",
         )
         read_only_fields = ("id",)
         extra_kwargs = {
@@ -244,7 +269,28 @@ class DealWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"lost_reason": "برای ثبت فرصت از دست رفته، انتخاب دلیل الزامی است."}
             )
+        title = (attrs.get("next_action_title") or "").strip()
+        due = attrs.get("next_action_due")
+        if bool(title) != bool(due):
+            raise serializers.ValidationError(
+                {"next_action_due": "اقدام بعدی هم شرح می‌خواهد و هم تاریخ."})
+        if due and due < timezone.localdate():
+            raise serializers.ValidationError({"next_action_due": "تاریخ اقدام بعدی گذشته است."})
+        is_open = stage is None or stage.kind == PipelineStage.Kind.OPEN
+        if self.instance is None and is_open and not title:
+            raise serializers.ValidationError(
+                {"next_action_title": "فرصت باز بدون «اقدام بعدی + تاریخ» ثبت نمی‌شود."})
         return attrs
+
+    @staticmethod
+    def _next_action(deal, title, due):
+        if not (title and due):
+            return
+        Task.objects.create(
+            dataset=deal.dataset, title=title.strip(), customer=deal.customer, deal=deal,
+            owner=deal.owner,
+            due_at=timezone.make_aware(datetime.combine(due, time(10))),
+        )
 
     def _write_items(self, deal, items):
         deal.items.all().delete()
@@ -264,7 +310,10 @@ class DealWriteSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items = validated_data.pop("items", [])
         tags = validated_data.pop("tags", [])
+        title = validated_data.pop("next_action_title", "")
+        due = validated_data.pop("next_action_due", None)
         deal = Deal.objects.create(**validated_data)
+        self._next_action(deal, title, due)
         if tags:
             deal.tags.set(tags)
         self._write_items(deal, items)
@@ -274,6 +323,8 @@ class DealWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         items = validated_data.pop("items", None)
         tags = validated_data.pop("tags", None)
+        self._next_action(instance, validated_data.pop("next_action_title", ""),
+                          validated_data.pop("next_action_due", None))
         for k, v in validated_data.items():
             setattr(instance, k, v)
         instance.save()

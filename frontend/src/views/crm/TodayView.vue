@@ -54,6 +54,7 @@ const tiles = computed(() => {
     { key: "due_today", label: "کار امروز", value: num(c.due_today), tone: c.due_today ? "warn" : "good" },
     { key: "pending_follow_up", label: "پیگیری معلق", value: num(c.pending_follow_up), tone: c.pending_follow_up ? "warn" : "good" },
     { key: "stale_deals", label: `معامله راکد (${num(t.value?.stale_days ?? 0)} روز)`, value: num(c.stale_deals), tone: c.stale_deals ? "warn" : "good" },
+    { key: "no_next_action", label: "فرصت بدون اقدام بعدی", value: num(c.no_next_action), tone: c.no_next_action ? "bad" : "good" },
     { key: "activities_today", label: "فعالیت ثبت‌شده امروز", value: num(c.activities_today), tone: "none" },
     { key: "open", label: "معاملات باز", value: rial(c.open_amount), sub: `${num(c.open_count)} معامله · وزنی ${rial(c.open_weighted)}`, tone: "none" },
   ];
@@ -265,6 +266,32 @@ const card = "bg-surface rounded-card shadow-soft";
                 <p class="text-sm font-semibold text-ink ltr-nums">{{ rial(d.amount_rial) }}</p>
                 <p class="text-[11px] text-amber-600 ltr-nums">{{ num(d.age_days) }} روز از ایجاد</p>
               </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ===== بدون اقدام بعدی ===== -->
+        <section v-if="data.no_next_action.length" :class="card" class="overflow-hidden xl:col-span-2">
+          <header class="px-5 py-3.5 border-b border-slate-100">
+            <h3 class="font-bold text-ink text-sm">فرصت‌های بدون «اقدام بعدی + تاریخ»</h3>
+            <p class="text-[11px] text-slate-400 mt-0.5">
+              فرصت بدون اقدام بعدی عملاً از کنترل فروشنده خارج شده — برای هر کدام یک کار با تاریخ ثبت کنید
+            </p>
+          </header>
+          <ul class="divide-y divide-slate-100 max-h-[360px] overflow-y-auto">
+            <li
+              v-for="d in data.no_next_action" :key="d.id"
+              class="px-5 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer"
+              @click="goDeal(d.id)"
+            >
+              <div class="min-w-0 flex-1">
+                <p class="text-sm text-ink truncate">{{ d.title }}</p>
+                <p class="text-xs text-slate-400 truncate">
+                  {{ d.customer_name }} · {{ d.stage_name }}
+                  <template v-if="crm.seesAll && d.owner_name"> · {{ d.owner_name }}</template>
+                </p>
+              </div>
+              <p class="text-sm font-semibold text-ink ltr-nums shrink-0">{{ rial(d.amount_rial) }}</p>
             </li>
           </ul>
         </section>

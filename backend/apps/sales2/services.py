@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -471,6 +471,8 @@ def run_checks(doc: SalesDocument) -> CheckResult:
         result.add("owner_mismatch", "warn",
                    f"فروشنده‌ی سند با کارشناس مشتری در CRM ({customer.owner.full_name_fa}) یکی نیست؛ "
                    "پورسانت به فروشنده‌ی سند می‌رسد.")
+    if doc.kind != Kind.RETURN:
+        _decision_checks(doc, lines, result)
     if doc.kind == Kind.INVOICE:
         _credit_checks(doc, result)
         if doc.is_official:
@@ -487,6 +489,47 @@ def run_checks(doc: SalesDocument) -> CheckResult:
     if doc.kind == Kind.RETURN:
         _return_checks(doc, lines, result)
     return result
+
+
+def _decision_checks(doc: SalesDocument, lines, result: CheckResult) -> None:
+    """
+    کارت تصمیم فروشنده (کتاب فروش، فصل ۱۶ و ۲۰): the customer's grade, a
+    margin near the approved floor, an order out of the customer's pattern,
+    and credit to a low-grade customer — each needs a written reason.
+    """
+    setting = Sales2Setting.load()
+    acc = CustomerAccount.objects.filter(customer=doc.customer).first()
+    grade = acc.grade if acc else ""
+    if not grade:
+        from apps.sales2 import grading
+
+        s = grading.score_of(doc.customer)
+        hint = f" (پیشنهاد سیستم: {s.suggested} · امتیاز {s.total:g})" if s else ""
+        result.add("grade", "warn", f"گرید مشتری هنوز تأیید نشده{hint}.")
+    elif grade == "C" and doc.settlement in (SalesDocument.Settlement.CREDIT, SalesDocument.Settlement.MIXED):
+        result.add("grade_credit", "block",
+                   "مشتری گرید C است؛ طبق سیاست فروش، نقدی یا با تضمین کافی — فروش اعتباری دلیل می‌خواهد.")
+
+    # Margin over the lines that carry a cost (a missing cost is flagged above).
+    priced = [ln for ln in lines if ln.unit_cost_rial]
+    net = sum((ln.net_rial for ln in priced), ZERO)
+    cost = sum((ln.unit_cost_rial * ln.quantity for ln in priced), ZERO)
+    if net > 0 and cost <= net:
+        pct = (net - cost) / net * 100
+        if pct < setting.margin_floor_pct:
+            result.add("margin_floor", "block",
+                       f"حاشیه‌ی سود سند {pct:.1f}٪ است، زیر کف مصوب {setting.margin_floor_pct:g}٪.")
+
+    past = SalesDocument.objects.filter(
+        customer=doc.customer, kind=Kind.INVOICE, status=Status.ISSUED,
+        doc_date__gte=doc.doc_date - timedelta(days=365),
+    ).exclude(pk=doc.pk).aggregate(n=Count("id"), s=Sum("net_rial"))
+    if past["n"] and past["n"] >= 3 and doc.net_rial:
+        avg = past["s"] / past["n"]
+        if avg and doc.net_rial > avg * setting.big_order_factor:
+            result.add("big_order", "block",
+                       f"این سفارش {doc.net_rial / avg:.1f} برابر میانگین خرید این مشتری "
+                       f"({_money(avg)} ریال) است؛ موجودی و تعهد به مشتریان مهم‌تر را بررسی کنید.")
 
 
 def _credit_checks(doc: SalesDocument, result: CheckResult) -> None:

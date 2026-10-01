@@ -154,15 +154,16 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
 
     def list(self, request, *args, **kwargs):
         from apps.sales2 import catalog
-        from apps.sales2.views_pricing import _month
+        from apps.sales2.views_pricing import _day, _month
 
         jy, jm = _month(request)
-        rows = catalog.product_rows(list(self.get_queryset()), jy, jm)
+        jd = _day(request)
+        rows = catalog.product_rows(list(self.get_queryset()), jy, jm, jd)
         if request.query_params.get("missing") == "cost":
             rows = [r for r in rows if any(v["cost_rial"] is None for v in r["costs"].values())]
         if request.query_params.get("missing") == "price":
             rows = [r for r in rows if not any(p for v in r["prices"].values() for p in v.values())]
-        return Response({"jalali_year": jy, "jalali_month": jm, "rows": rows})
+        return Response({"jalali_year": jy, "jalali_month": jm, "day": jd, "rows": rows})
 
     @action(detail=True, methods=["put"])
     def profile(self, request, pk=None):

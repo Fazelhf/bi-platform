@@ -21,7 +21,7 @@ from django.db import transaction
 
 from apps.crm.models import Product
 from apps.sales2 import pricing
-from apps.sales2.models import AccountingCost
+from apps.sales2.models import AccountingCost, version_key
 
 _NORM = str.maketrans({"ي": "ی", "ك": "ک", "‌": " "})
 
@@ -73,7 +73,7 @@ def read_workbook(fileobj) -> list[Entry]:
     return out
 
 
-def preview(entries: list[Entry], jy: int, jm: int) -> dict:
+def preview(entries: list[Entry], jy: int, jm: int, jd: int = 1) -> dict:
     """What confirming would do — per product/grammage — and what it cannot place."""
     products = {product_key(p.name_fa): p for p in Product.objects.all()}
     latest: dict[tuple[int, int], tuple[Decimal, str]] = {}
@@ -89,10 +89,10 @@ def preview(entries: list[Entry], jy: int, jm: int) -> dict:
             continue
         latest[(prod.id, e.grammage if is_roll else 0)] = (e.cost, e.where)  # later rows win
 
-    key = jy * 100 + jm
+    key = version_key(jy, jm, jd)
     before: dict[tuple[int, int], AccountingCost] = {}
-    for c in AccountingCost.objects.select_related("product").order_by("jalali_year", "jalali_month"):
-        if c.month_key <= key:
+    for c in AccountingCost.objects.select_related("product").order_by("jalali_year", "jalali_month", "jalali_day"):
+        if c.version_key <= key:
             before[(c.product_id, c.grammage)] = c  # ascending: the last one kept is in force
 
     names = {p.id: p.name_fa for p in products.values()}
@@ -119,7 +119,7 @@ def preview(entries: list[Entry], jy: int, jm: int) -> dict:
 
 @transaction.atomic
 def apply(entries: list[Entry], jy: int, jm: int, create_missing: bool = False,
-          source: str = "") -> dict:
+          source: str = "", jd: int = 1) -> dict:
     """Write the month's costs. Earlier months are never touched."""
     created = 0
     if create_missing:
@@ -132,12 +132,13 @@ def apply(entries: list[Entry], jy: int, jm: int, create_missing: bool = False,
                 Product.objects.create(code=f"s2-{n}", name_fa=e.name, unit=Product.Unit.ROLL)
                 known.add(e.name)
                 created += 1
-    result = preview(entries, jy, jm)
+    result = preview(entries, jy, jm, jd)
     written = 0
     for r in result["rows"]:
         if r["status"] in ("new", "changed", "same") and r["cost_rial"] is not None:
             AccountingCost.objects.update_or_create(
                 product_id=r["product"], grammage=r["grammage"], jalali_year=jy, jalali_month=jm,
+                jalali_day=jd,
                 defaults={"cost_rial": Decimal(r["cost_rial"]),
                           "source": (source or "اکسل حسابداری")[:80] + f" ({r['where']})"[:40]},
             )

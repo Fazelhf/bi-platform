@@ -15,6 +15,8 @@ const props = withDefaults(defineProps<{
   label?: string;
   year?: number;
   month?: number;
+  /** The day the imported version starts on — a month may carry several price lists. */
+  day?: number;
   params?: Record<string, string | number>;
 }>(), { label: "ورود از اکسل" });
 const emit = defineEmits<{ done: [written: number] }>();
@@ -38,7 +40,7 @@ async function show() {
     catch (e) { error.value = apiError(e); }
   }
   values.value = {
-    year: props.year ?? now.jy, month: props.month ?? now.jm, ...(props.params ?? {}),
+    year: props.year ?? now.jy, month: props.month ?? now.jm, day: props.day ?? 1, ...(props.params ?? {}),
   };
 }
 function close() {
@@ -69,6 +71,8 @@ const STATUS: Record<ImportStatus, { label: string; cls: string }> = {
   same: { label: "بدون تغییر", cls: "bg-slate-100 text-slate-500" },
   error: { label: "خطا", cls: "bg-red-100 text-red-700" },
 };
+/** Price lists and costs start on a day; budget actuals are whole months. */
+const dayMatters = computed(() => props.importKey.startsWith("sales2-"));
 const writable = computed(() => (result.value ? result.value.counts.new + result.value.counts.changed : 0));
 const shown = computed(() => (result.value?.rows ?? []).filter((r) => !onlyProblems.value || r.status === "error"));
 const years = [now.jy - 1, now.jy, now.jy + 1];
@@ -110,6 +114,12 @@ function cell(v: unknown) {
               <select v-model.number="values.year" class="bg-slate-100 rounded-xl px-3 py-2 text-sm outline-none" @change="result = null">
                 <option v-for="y in years" :key="y" :value="y">{{ FA.format(y).replace(/٬/g, "") }}</option>
               </select>
+              <label v-if="dayMatters" class="flex items-center gap-1 text-xs text-slate-500">
+                معتبر از روز
+                <select v-model.number="values.day" class="bg-slate-100 rounded-xl px-2 py-2 text-sm outline-none" @change="result = null">
+                  <option v-for="d in (Number(values.month) <= 6 ? 31 : 30)" :key="d" :value="d">{{ FA.format(d) }}</option>
+                </select>
+              </label>
             </template>
             <select v-else v-model="values[p.name]" class="bg-slate-100 rounded-xl px-3 py-2 text-sm outline-none" @change="result = null">
               <option value="" disabled>{{ p.label }}…</option>

@@ -199,16 +199,23 @@ def _grown_costs(now: dict, before: dict, metric: str, noun: str) -> list[Findin
 
 def _trend(ctx: Ctx, dataset: str, metric: str, noun: str, unit: str,
            *, higher_is_good: bool = True) -> list[Finding]:
-    """Where this month sits in its own last six, and how long a run it is on."""
-    rows = ctx.q(dataset, [metric], dim="month", time={"mode": "last_n", "n": 6})["rows"]
-    series = [r["values"][metric] for r in rows]
+    """
+    Where this month sits in its own last six, how long a run it is on, and —
+    over a whole year — whether it is a record or simply outside its usual
+    swing. One bad month in a noisy series is not news; one that the past
+    twelve never came near is.
+    """
+    rows = ctx.q(dataset, [metric], dim="month", time={"mode": "last_n", "n": 13})["rows"]
+    year = [r["values"][metric] for r in rows]
+    series = year[-6:]
     if len(series) < 3 or not series[-1]:
         return []
-    out: list[Finding] = []
+    out: list[Finding] = _unusual(year, noun, unit, higher_is_good=higher_is_good)
     history = series[:-1]
     avg = sum(history) / len(history)
     pct = change(series[-1], avg)
-    if pct is not None and abs(pct) >= 10:
+    # A record already says more than «above the six-month average».
+    if pct is not None and abs(pct) >= 10 and not out:
         good = (pct > 0) == higher_is_good
         out.append(Finding(
             GOOD if good else BAD,
@@ -230,6 +237,106 @@ def _trend(ctx: Ctx, dataset: str, metric: str, noun: str, unit: str,
             f"{noun} {{n}} ماه پشت سر هم {'بالا رفته' if direction > 0 else 'پایین آمده'} است.",
             {"n": V(run - 1)}, weight=25))
     return out
+
+
+def _unusual(series: list[float], noun: str, unit: str, *,
+             higher_is_good: bool = True) -> list[Finding]:
+    """
+    The last value against up to twelve before it: a record high or low, or
+    else — when it lies more than two standard deviations from their mean —
+    outside the usual range, which is given so the reader can see how far.
+    """
+    now, history = series[-1], series[:-1]
+    if len(history) < 5 or not now:
+        return []
+    n = len(history)
+    if now > max(history) or now < min(history):
+        high = now > max(history)
+        good = high == higher_is_good
+        return [Finding(
+            GOOD if good else BAD,
+            f"{noun} این ماه {'بالاترین' if high else 'پایین‌ترین'} مقدار در {{n}} ماه اخیر است "
+            f"(رکورد قبلی {{a}}).",
+            {"n": V(n + 1), "a": V(max(history) if high else min(history), unit)},
+            weight=38)]
+    mean = sum(history) / n
+    sd = (sum((x - mean) ** 2 for x in history) / (n - 1)) ** 0.5
+    if not sd or abs(now - mean) < 2 * sd:
+        return []
+    good = (now > mean) == higher_is_good
+    return [Finding(
+        GOOD if good else BAD,
+        f"{noun} این ماه خارج از نوسان معمول {{n}} ماه قبل است؛ معمولاً بین {{lo}} و {{hi}} بود.",
+        {"n": V(n), "lo": V(max(mean - sd, 0), unit), "hi": V(mean + sd, unit)}, weight=34)]
+
+
+def _yoy(ctx: Ctx, dataset: str, metric: str, noun: str, unit: str, now: float,
+         mom: float | None, *, higher_is_good: bool = True,
+         filters: list | None = None) -> list[Finding]:
+    """
+    The same month a year ago — and whether this month's move against the
+    one before is the season's own. Most months rise or fall the same way
+    every year (نوروز، پایان سال); saying so stops a seasonal dip from being
+    read as a collapse, and flags the move that last year did not make.
+    """
+    if not ctx.last_year:
+        return []
+    ly = ctx.totals(dataset, [metric], period=ctx.last_year, filters=filters).get(metric, 0)
+    yoy = change(now, ly)
+    if yoy is None:
+        return []
+    out = [Finding(
+        GOOD if (yoy >= 0) == higher_is_good else BAD,
+        f"{noun} نسبت به همین ماه سال قبل ({{b}}) {{p}} {trend_word(yoy)} دارد.",
+        {"b": V(ly, unit), "p": V(abs(yoy), "percent")}, weight=20 + min(abs(yoy) / 5, 10))]
+    ly_prev = _neighbours(ctx.last_year)[0]
+    if mom is None or ly_prev is None or abs(mom) < 5:
+        return out
+    before = ctx.totals(dataset, [metric], period=ly_prev, filters=filters).get(metric, 0)
+    ly_mom = change(ly, before)
+    if ly_mom is None:
+        return out
+    if (mom > 0) == (ly_mom > 0) and abs(mom - ly_mom) <= max(10, abs(ly_mom) / 2):
+        out.append(Finding(
+            INFO, f"این {trend_word(mom)} نسبت به ماه قبل احتمالاً فصلی است: پارسال هم در همین ماه "
+                  f"{noun} {{q}} {trend_word(ly_mom)} داشت.",
+            {"q": V(abs(ly_mom), "percent")}, weight=32))
+    elif (mom > 0) != (ly_mom > 0) and abs(ly_mom) >= 5:
+        good = (mom > 0) == higher_is_good
+        out.append(Finding(
+            GOOD if good else WARN,
+            f"این {trend_word(mom)} فصلی نیست: پارسال در همین ماه {noun} {{q}} "
+            f"{trend_word(ly_mom)} داشت.",
+            {"q": V(abs(ly_mom), "percent")}, weight=36))
+    return out
+
+
+def _pace(prog: tuple[int, int], now: float, noun: str, unit: str, *,
+          before: float = 0, target: float = 0) -> Finding | None:
+    """
+    Mid-month: where the month ends if the rest of it runs like the days so
+    far — against the plan, or else against last month. Too early in the
+    month the guess is noise, so nothing is said before the fifth day.
+    """
+    gone, days = prog
+    if gone < 5 or not now:
+        return None
+    projected = now * days / gone
+    if target:
+        ach = projected / target * 100
+        return Finding(
+            GOOD if ach >= 100 else WARN if ach >= 85 else BAD,
+            f"اگر بقیه‌ی ماه با همین سرعت پیش برود، {noun} ماه حدود {{a}} می‌شود — "
+            "تحقق تارگت حدود {p}.",
+            {"a": V(projected, unit), "p": V(ach, "percent")}, weight=42)
+    if before:
+        pct = change(projected, before)
+        return Finding(
+            INFO if abs(pct) < 5 else GOOD if pct > 0 else WARN,
+            f"اگر بقیه‌ی ماه با همین سرعت پیش برود، {noun} ماه حدود {{a}} می‌شود؛ "
+            f"{{p}} {trend_word(pct)} نسبت به ماه قبل.",
+            {"a": V(projected, unit), "p": V(abs(pct), "percent")}, weight=30)
+    return None
 
 
 def analyse_sales(ctx: Ctx) -> dict | None:
@@ -268,16 +375,14 @@ def analyse_sales(ctx: Ctx) -> dict | None:
     else:
         findings.append(Finding(INFO, "فروش {a} بود.", {"a": V(rev, "rial")}, weight=30))
 
-    if ctx.last_year and not prog:
-        ly = ctx.totals("sales", ["revenue"], period=ctx.last_year).get("revenue", 0)
-        yoy = change(rev, ly)
-        if yoy is not None:
-            findings.append(Finding(
-                GOOD if yoy >= 0 else BAD,
-                f"نسبت به همین ماه سال قبل ({{b}}) {{p}} {trend_word(yoy)} دارد.",
-                {"b": V(ly, "rial"), "p": V(abs(yoy), "percent")}, weight=20))
+    if not prog:
+        findings += _yoy(ctx, "sales", "revenue", "فروش", "rial", rev, pct)
 
     target = now.get("target", 0)
+    if prog:
+        pace = _pace(prog, rev, "فروش", "rial", before=prev_rev, target=target)
+        if pace:
+            findings.append(pace)
     if target:
         ach = rev / target * 100
         stats.append({"label": "تحقق تارگت", "value": V(ach, "percent")})
@@ -326,6 +431,12 @@ def analyse_sales(ctx: Ctx) -> dict | None:
             BAD if rec_pct > 0 else GOOD,
             f"مطالبات به {{a}} رسید؛ {{p}} {trend_word(rec_pct)} نسبت به ماه قبل.",
             {"a": V(rec, "rial"), "p": V(abs(rec_pct), "percent")}, weight=25))
+        # Receivables outrunning sales: what is sold is not coming in.
+        if pct is not None and rec_pct > 0 and rec_pct - pct >= 10:
+            findings.append(Finding(
+                WARN, "مطالبات سریع‌تر از فروش رشد کرده ({p} در برابر {q})؛ بخشی از فروش "
+                      "این ماه هنوز وصول نشده است.",
+                {"p": V(rec_pct, "percent"), "q": V(pct, "percent")}, weight=37))
 
     if not prog:
         findings += _trend(ctx, "sales", "revenue", "فروش", "rial")
@@ -418,6 +529,12 @@ def analyse_production(ctx: Ctx) -> dict | None:
         INFO if pct is None else GOOD if pct >= 0 else BAD,
         "تولید {a} واحد بود" + (f"؛ {{p}} {trend_word(pct)} نسبت به ماه قبل." if pct is not None else "."),
         {"a": V(out), "p": V(abs(pct or 0), "percent")}, weight=35 + min(abs(pct or 0) / 3, 25)))
+    if prog:
+        pace = _pace(prog, out, "تولید", "number", before=prev_out)
+        if pace:
+            findings.append(pace)
+    else:
+        findings += _yoy(ctx, "production", "output", "تولید", "number", out, pct)
 
     waste, prev_waste = now.get("waste_pct", 0), before.get("waste_pct", 0)
     if waste:
@@ -533,10 +650,67 @@ def analyse_finance(ctx: Ctx) -> dict | None:
                                      "cash_out", "سرفصل پرداختِ")
 
     if not prog:
+        findings += _yoy(ctx, "cash", "cash_out", "پرداخت‌ها", "rial", cout,
+                         change(cout, before.get("cash_out", 0)), higher_is_good=False)
         findings += _trend(ctx, "cash", "cash_in", "دریافت‌ها", "rial")
+        findings += _negative_run(ctx)
     if pending:
         findings.append(pending)
     return _section("finance", "مالی", findings, stats)
+
+
+def _negative_run(ctx: Ctx) -> list[Finding]:
+    """Months in a row that paid out more than came in, ending at this one."""
+    rows = ctx.q("cash", ["cash_in", "cash_out"], dim="month",
+                 time={"mode": "last_n", "n": 12})["rows"]
+    run = 0
+    for r in reversed(rows):
+        if r["values"].get("cash_in", 0) - r["values"].get("cash_out", 0) >= 0:
+            break
+        run += 1
+    if run < 2:
+        return []
+    return [Finding(BAD, "خالص نقدینگی {n} ماه پشت سر هم منفی بوده است.", {"n": V(run)},
+                    weight=40 + min(run * 2, 10))]
+
+
+def analyse_cross(ctx: Ctx, keys: set[str]) -> dict | None:
+    """
+    What only shows when two sections are read side by side. Only offered to
+    someone who may read both — a production manager is not told about sales.
+    """
+    # One channel's sales against the whole factory or the whole till would
+    # compare a part with a total, so this is for whoever reads every channel.
+    if ctx.prev is None or _progress(ctx.period) or ctx.channels is not None:
+        return None
+    findings: list[Finding] = []
+    if {"sales", "production"} <= keys:
+        s_now = ctx.totals("sales", ["quantity_ton"]).get("quantity_ton", 0)
+        s_before = ctx.totals("sales", ["quantity_ton"], period=ctx.prev).get("quantity_ton", 0)
+        p_now = ctx.totals("production", ["output"]).get("output", 0)
+        p_before = ctx.totals("production", ["output"], period=ctx.prev).get("output", 0)
+        s_pct, p_pct = change(s_now, s_before), change(p_now, p_before)
+        if s_pct is not None and p_pct is not None and abs(s_pct - p_pct) >= 20:
+            if p_pct > s_pct:
+                text = ("تولید {p} {pw} داشت ولی تناژ فروش {s} {sw}؛ احتمالاً موجودی انبار "
+                        "در حال زیاد شدن است.")
+            else:
+                text = ("تناژ فروش {s} {sw} داشت ولی تولید {p} {pw}؛ احتمالاً فروش از "
+                        "موجودی انبار تأمین شده و موجودی کم می‌شود.")
+            text = text.replace("{pw}", trend_word(p_pct)).replace("{sw}", trend_word(s_pct))
+            findings.append(Finding(WARN, text, {"p": V(abs(p_pct), "percent"),
+                                                 "s": V(abs(s_pct), "percent")}, weight=36))
+    if {"sales", "finance"} <= keys:
+        rev = ctx.totals("sales", ["revenue"])
+        cash_in = ctx.totals("cash", ["cash_in"]).get("cash_in", 0)
+        if rev.get("revenue") and cash_in and cash_in < rev["revenue"] * 0.5:
+            findings.append(Finding(
+                WARN, "دریافت‌های نقدی ماه ({a}) کمتر از نصف فروش ({b}) است؛ "
+                      "فروش بیشتر نسیه بوده یا وصولش عقب افتاده.",
+                {"a": V(cash_in, "rial"), "b": V(rev["revenue"], "rial")}, weight=30))
+    if not findings:
+        return None
+    return _section("cross", "نگاه ترکیبی", findings, [])
 
 
 def _section(key: str, label: str, findings: list[Finding], stats: list[dict]) -> dict:
@@ -625,6 +799,12 @@ def analyse(user, period_id: int | None = None, request=None) -> dict:
             continue
         if section:
             sections.append(section)
+    try:
+        cross = analyse_cross(ctx, {s["key"] for s in sections if s["stats"]})
+    except QueryError:
+        cross = None
+    if cross:
+        sections.append(cross)
 
     ranked = [f for s in sections for f in s.pop("_ranked")]
     ranked = [f for f in ranked if f.tone in (BAD, GOOD, WARN)]

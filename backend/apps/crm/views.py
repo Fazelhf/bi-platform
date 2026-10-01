@@ -17,7 +17,7 @@ sales_team department owns the data, the CEO reads everything.
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, F, Max, Q, Sum, Value
+from django.db.models import Count, DecimalField, F, Max, OuterRef, Q, Subquery, Sum, Value
 from django.http import HttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -1028,6 +1028,9 @@ class DealViewSet(_Base):
             "customer", "customer__province", "customer__group", "owner",
             "stage", "lead_source", "lost_reason",
         ).distinct()
+        qs = with_next_action(qs)
+        if q.get("next_action") == "missing":
+            qs = qs.filter(status=Deal.Status.OPEN, next_task_at__isnull=True)
         return apply_ordering(qs, self.request, self.ORDERING)
 
     #: Sortable columns of the معامله‌ها table → the lookup behind each.
@@ -1554,6 +1557,16 @@ def self_scope_deals(request):
     return vs.scoped(Deal.objects.filter(dataset=active_dataset(request)))
 
 
+def with_next_action(qs):
+    """Each deal's «اقدام بعدی»: its earliest open کار, in one query."""
+    first = Task.objects.filter(deal=OuterRef("pk"), done_at__isnull=True).order_by("due_at")
+    return qs.annotate(
+        next_task_at=Subquery(first.values("due_at")[:1]),
+        next_task_title=Subquery(first.values("title")[:1]),
+        next_task_id=Subquery(first.values("id")[:1]),
+    )
+
+
 class CrmTodayView(GatedAPIView):
     """
     کارتابل امروز — the working screen, as opposed to the reporting ones.
@@ -1664,6 +1677,13 @@ class CrmTodayView(GatedAPIView):
             | Q(last_touch__isnull=True, opened_at__lt=stale_cut)
         ).select_related("customer", "owner", "stage")
 
+        # ---- بدون اقدام بعدی -----------------------------------------------
+        # An open deal with no dated next step: nobody owes it anything, so it
+        # will not surface anywhere else — the book's «هشدار مستقیم ضعف پیگیری».
+        no_next = with_next_action(in_book(
+            mine(Deal.objects.filter(dataset=ds, status=Deal.Status.OPEN))
+        )).filter(next_task_at__isnull=True).select_related("customer", "owner", "stage")
+
         # ---- نزدیک به بسته‌شدن ----------------------------------------------
         closing = in_book(mine(Deal.objects.filter(
             dataset=ds, status=Deal.Status.OPEN,
@@ -1702,6 +1722,7 @@ class CrmTodayView(GatedAPIView):
                 "due_today": today_qs.count(),
                 "pending_follow_up": len(pending),
                 "stale_deals": stale_qs.count(),
+                "no_next_action": no_next.count(),
                 "quiet_customers": quiet.count(),
                 "activities_today": mine(
                     Activity.objects.filter(dataset=ds, at__gte=day_start)
@@ -1718,6 +1739,9 @@ class CrmTodayView(GatedAPIView):
                 stale_qs.order_by("-amount_rial")[: self.LIMIT], many=True
             ).data,
             "closing_soon": DealListSerializer(closing[: self.LIMIT], many=True).data,
+            "no_next_action": DealListSerializer(
+                no_next.order_by("-amount_rial")[: self.LIMIT], many=True
+            ).data,
             "quiet_customers": CustomerListSerializer(quiet[: self.LIMIT], many=True).data,
             "thresholds": {
                 "stale_days": self.STALE_DEAL_DAYS,
@@ -1733,12 +1757,12 @@ class CrmTodayView(GatedAPIView):
         return {
             "as_of": jalali_str(timezone.now()), "owner": None,
             "counters": {k: 0 for k in (
-                "overdue", "backlog", "due_today", "pending_follow_up", "stale_deals",
+                "overdue", "backlog", "due_today", "pending_follow_up", "stale_deals", "no_next_action",
                 "quiet_customers", "activities_today", "open_count",
                 "open_amount", "open_weighted",
             )},
             "overdue": [], "due_today": [], "upcoming": [],
-            "pending_follow_up": [], "stale_deals": [], "closing_soon": [],
+            "pending_follow_up": [], "stale_deals": [], "closing_soon": [], "no_next_action": [],
             "quiet_customers": [],
             "thresholds": {
                 "stale_days": self.STALE_DEAL_DAYS,
