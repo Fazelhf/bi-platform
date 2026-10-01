@@ -22,6 +22,9 @@ export interface TeamyarTask {
   status: TaskStatus;
   status_label: string;
   is_milestone: boolean;
+  /** null on save = read from the title. */
+  module: number | null;
+  module_title: string;
   depends_on: number | null;
   done_on: string | null;
   order: number;
@@ -48,6 +51,8 @@ export interface Meeting {
   decisions: string;
   rating: number | null;
   task: number | null;
+  module: number | null;
+  module_title: string;
 }
 
 export type LogKind =
@@ -68,10 +73,55 @@ export interface LogEntry {
   author_name: string;
 }
 
+/** A module row — the charter's twelve are seeded, more can be added. */
+export interface Module {
+  id: number;
+  title: string;
+  owner: string;
+  specialist: string;
+  keywords: string;
+  starts_on: string | null;
+  ends_on: string | null;
+  in_scope: boolean;
+  order: number;
+}
+
+/** A module as the overview reports it; key "general" = filed under none. */
+export interface ModuleCard {
+  key: number | "general";
+  label: string;
+  in_scope: boolean;
+  keywords: string;
+  owner: string;
+  specialist: string;
+  progress: number;
+  planned: number;
+  status: TaskStatus;
+  status_label: string;
+  start_on: string | null;
+  end_on: string | null;
+  task_count: number;
+  done_count: number;
+  blocked_count: number;
+  overdue_count: number;
+  next_deadline: { id: number; title: string; end_on: string } | null;
+  meetings_held: number;
+  meeting_minutes: number;
+  avg_rating: number | null;
+  open_issues: number;
+  last_activity: string | null;
+}
+
 export interface Overview {
   today: string;
+  /** Average of the in-scope modules — see apps/teamyar/progress.py. */
   progress: number;
   planned_progress: number;
+  modules: ModuleCard[];
+  general: ModuleCard | null;
+  modules_in_scope: number;
+  modules_live: number;
+  modules_started: number;
   task_count: number;
   by_status: Partial<Record<TaskStatus, number>>;
   overdue: TeamyarTask[];
@@ -132,8 +182,17 @@ function crud<T extends { id: number }>(path: string) {
   };
 }
 
+export interface Person {
+  name: string;
+  group: "ours" | "teamyar" | "past";
+  note: string;
+}
+
 export const teamyarApi = {
   overview: () => api.get<Overview>("/teamyar/overview/").then((r) => r.data),
+  /** Attendee picker: our staff (HR), Teamyar's team, and names used before. */
+  people: () => api.get<Person[]>("/teamyar/people/").then((r) => r.data),
+  modules: crud<Module>("modules"),
   phases: crud<Phase>("phases"),
   tasks: crud<TeamyarTask>("tasks"),
   meetings: crud<Meeting>("meetings"),
