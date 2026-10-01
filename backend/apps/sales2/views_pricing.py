@@ -26,6 +26,7 @@ from apps.sales2.models import (
     PriceSheetRow,
     PriceListItem,
     SalesDocumentLine,
+    version_key,
 )
 from apps.sales2.permissions import Sales2Access
 
@@ -58,8 +59,8 @@ class PriceSheetSerializer(serializers.ModelSerializer):
     class Meta:
         model = PriceSheet
         fields = ("id", "name", "grammage", "grammage_label", "is_official", "base_fi_rial",
-                  "waste_pct", "qty_tiers", "jalali_year", "jalali_month", "rows", "prices")
-        read_only_fields = ("jalali_year", "jalali_month")
+                  "waste_pct", "qty_tiers", "jalali_year", "jalali_month", "jalali_day", "rows", "prices")
+        read_only_fields = ("jalali_year", "jalali_month", "jalali_day")
 
     def get_prices(self, sheet):
         """Each row priced at every quantity tier, the way the workbook shows it."""
@@ -115,38 +116,72 @@ class PriceSheetViewSet(viewsets.ModelViewSet):
 
 class PriceMonthView(APIView):
     """
-    The price list of a month: the sheets in force, each marked with the month
-    it belongs to. POST copies the sheets in force into the month so they can
-    be edited without touching the earlier month's list.
+    The price lists of a month. With inflation a month can carry several —
+    «لیست ۱ از ۱ شهریور، لیست ۲ از ۶ شهریور» — each in force from its day
+    until the next; a document is priced from the one in force on its date.
+
+    GET `day` picks a version (default: the month's latest; with none of its
+    own, what was carried in). POST `day` starts a new version on that day,
+    copied from the list in force the day before, ready to edit. DELETE `day`
+    removes that day's version.
     """
 
     permission_classes = [Sales2Access]
 
     def get(self, request):
+        jy, jm = _month(request)
+        return Response(self._payload(jy, jm, _day(request)))
+
+    @staticmethod
+    def _payload(jy: int, jm: int, day: int | None) -> dict:
         from apps.sales2 import catalog
 
-        jy, jm = _month(request)
-        sheets = catalog.sheets_in_force(jy, jm)
-        data = PriceSheetSerializer(
-            sorted(sheets.values(), key=lambda x: (x.grammage, not x.is_official)), many=True
-        ).data
-        key = jy * 100 + jm
-        for d, sh in zip(data, sorted(sheets.values(), key=lambda x: (x.grammage, not x.is_official))):
-            d["is_own_month"] = sh.month_key == key
-        return Response({"jalali_year": jy, "jalali_month": jm, "sheets": data})
+        days = catalog.versions(jy, jm)
+        day = day or (days[-1] if days else None)
+        sheets = sorted(catalog.sheets_in_force(jy, jm, day).values(),
+                        key=lambda x: (x.grammage, not x.is_official))
+        data = PriceSheetSerializer(sheets, many=True).data
+        own = version_key(jy, jm, day) if day in days else None
+        for d, sh in zip(data, sheets):
+            d["is_own_month"] = sh.version_key == own
+        return {"jalali_year": jy, "jalali_month": jm, "day": day if day in days else None,
+                "versions": [{"day": d, "n": i + 1} for i, d in enumerate(days)],
+                "sheets": data}
 
     def post(self, request):
         from apps.sales2 import catalog, price_list_io
 
         jy, jm = _month(request)
-        key = jy * 100 + jm
-        carried = [s for s in catalog.sheets_in_force(jy, jm).values() if s.month_key != key]
+        day = _day(request) or 1
+        if not 1 <= day <= jalali.month_days(jy, jm):
+            raise ValidationError({"day": "روز نامعتبر است."})
+        if day in catalog.versions(jy, jm):
+            raise ValidationError(f"از {day} ام این ماه لیست قیمت وجود دارد.")
+        # The list in force on the day before — the one this version replaces.
+        before = version_key(jy, jm, day) - 1
+        carried = [s for s in catalog._in_force(
+            PriceSheet.objects.prefetch_related("rows").order_by(*catalog.ORDER),
+            lambda s: (s.grammage, s.is_official), before).values()]
         if not carried:
-            raise ValidationError("لیست قیمت این ماه از قبل وجود دارد یا لیستی برای کپی نیست.")
-        price_list_io.copy_to_month(carried, jy, jm)
+            raise ValidationError("لیستی برای کپی پیش از این روز نیست.")
+        price_list_io.copy_to_month(carried, jy, jm, day)
         audit_log(request.user, carried[0], AuditLog.Action.CREATE,
-                  {"copied_to": {"before": None, "after": f"{jy}/{jm}"}})
-        return self.get(request)
+                  {"copied_to": {"before": None, "after": f"{jy}/{jm}/{day}"}})
+        return Response(self._payload(jy, jm, day))
+
+    def delete(self, request):
+        jy, jm = _month(request)
+        day = _day(request)
+        qs = PriceSheet.objects.filter(jalali_year=jy, jalali_month=jm, jalali_day=day)
+        first = qs.first()
+        if first is None:
+            raise ValidationError("این نسخه‌ی لیست قیمت پیدا نشد.")
+        # Issued lines keep the prices and costs they were written with;
+        # removing a list never reprices a document.
+        audit_log(request.user, first, AuditLog.Action.DELETE,
+                  {"version": {"before": f"{jy}/{jm}/{day}", "after": None}})
+        qs.delete()
+        return Response(self._payload(jy, jm, None))
 
 
 class PriceImportView(APIView):
@@ -161,15 +196,16 @@ class PriceImportView(APIView):
         if not upload:
             raise ValidationError({"file": "فایل اکسل را انتخاب کنید."})
         jy, jm = _month(request)
+        jd = _day(request) or 1
         try:
             sheets = price_list_io.read_workbook(upload)
         except Exception:
             raise ValidationError({"file": "فایل اکسل خوانده نشد."})
         if not sheets:
             raise ValidationError({"file": "برگه‌ای با ۴۸ یا ۵۵ در نامش و ستون «سایز» پیدا نشد."})
-        saved = price_list_io.save_month(sheets, jy, jm)
+        saved = price_list_io.save_month(sheets, jy, jm, jd)
         audit_log(request.user, saved[0], AuditLog.Action.CREATE,
-                  {"import": {"before": None, "after": f"{jy}/{jm}: {len(saved)} sheets"}})
+                  {"import": {"before": None, "after": f"{jy}/{jm}/{jd}: {len(saved)} sheets"}})
         return Response({"sheets": [{"name": s.name, "rows": s.rows.count(),
                                      "base_fi_rial": str(s.base_fi_rial)} for s in saved]})
 
@@ -183,12 +219,14 @@ class PriceExportView(APIView):
         from apps.sales2 import catalog, price_list_io
 
         jy, jm = _month(request)
-        sheets = list(catalog.sheets_in_force(jy, jm).values())
+        jd = _day(request)
+        sheets = list(catalog.sheets_in_force(jy, jm, jd).values())
         if not sheets:
             raise ValidationError("برای این ماه لیست قیمتی نیست.")
-        resp = HttpResponse(price_list_io.export_workbook(sheets, jy, jm),
+        day = jd or max(s.jalali_day if s.month_key == jy * 100 + jm else 1 for s in sheets)
+        resp = HttpResponse(price_list_io.export_workbook(sheets, jy, jm, day),
                             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        resp["Content-Disposition"] = f'attachment; filename="price-list-{jy}-{jm:02d}.xlsx"'
+        resp["Content-Disposition"] = f'attachment; filename="price-list-{jy}-{jm:02d}-{day:02d}.xlsx"'
         return resp
 
 
@@ -204,6 +242,7 @@ class PriceItemView(APIView):
         price = _dec(request.data.get("price_rial"), "price_rial")
         obj, _ = PriceListItem.objects.update_or_create(
             product=product, is_official=official, jalali_year=jy, jalali_month=jm,
+            jalali_day=_day(request) or 1,
             defaults={"price_rial": price},
         )
         audit_log(request.user, obj, AuditLog.Action.UPDATE,
@@ -261,15 +300,17 @@ class AccountingCostView(APIView):
     permission_classes = [Sales2Access]
 
     def get(self, request):
+        from apps.sales2 import catalog
+
         jy, jm = _month(request)
-        key = jy * 100 + jm
+        key = catalog.key_of(jy, jm, _day(request))
         q = request.query_params.get("q", "").strip()
         products = Product.objects.filter(is_active=True).order_by("name_fa")
         if q:
             products = products.filter(name_fa__icontains=q)
         in_force: dict = {}
-        for c in AccountingCost.objects.order_by("jalali_year", "jalali_month"):
-            if c.month_key <= key:
+        for c in AccountingCost.objects.order_by("jalali_year", "jalali_month", "jalali_day"):
+            if c.version_key <= key:
                 in_force.setdefault(c.product_id, {})[c.grammage] = c
         rows = []
         for prod in products:
@@ -293,6 +334,7 @@ class AccountingCostView(APIView):
         cost = _dec(request.data.get("cost_rial"), "cost_rial")
         obj, _ = AccountingCost.objects.update_or_create(
             product=product, grammage=grammage, jalali_year=jy, jalali_month=jm,
+            jalali_day=_day(request) or 1,
             defaults={"cost_rial": cost, "source": "ویرایش دستی"},
         )
         audit_log(request.user, obj, AuditLog.Action.UPDATE,
@@ -328,21 +370,28 @@ class AccountingCostImportView(APIView):
             result = cost_import.apply(
                 entries, jy, jm,
                 create_missing=request.data.get("create_missing") in ("1", "true", True),
-                source=f"اکسل {upload.name}",
+                source=f"اکسل {upload.name}", jd=_day(request) or 1,
             )
             anchor = AccountingCost.objects.filter(jalali_year=jy, jalali_month=jm).first()
             if anchor:
                 audit_log(request.user, anchor, AuditLog.Action.UPDATE,
                           {"import": {"before": None, "after": f"{jy}/{jm}: {result['written']} rows"}})
             return Response(result)
-        return Response(cost_import.preview(entries, jy, jm))
+        return Response(cost_import.preview(entries, jy, jm, _day(request) or 1))
 
 
 # ---------------------------------------------------------------------------
 # پورسانت
 # ---------------------------------------------------------------------------
+def _day(request) -> int | None:
+    """The day a price/cost version starts on (لیست ۲ از ۶ شهریور), if given."""
+    p = request.query_params if request.method in ("GET", "DELETE") else request.data
+    v = p.get("day") or (request.query_params.get("day") if request.method not in ("GET", "DELETE") else None)
+    return int(v) if v and str(v).isdigit() else None
+
+
 def _month(request) -> tuple[int, int]:
-    p = request.query_params if request.method == "GET" else request.data
+    p = request.query_params if request.method in ("GET", "DELETE") else request.data
     if p.get("year") and p.get("month"):
         return int(p["year"]), int(p["month"])
     jy, jm, _ = jalali.from_gregorian(timezone.localdate())

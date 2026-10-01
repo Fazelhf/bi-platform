@@ -65,6 +65,8 @@ const form = reactive({
   shipping_cost_rial: "0",
   other_cost_rial: "0",
   expected_close_date: "",
+  next_action_title: "",
+  next_action_due: "",
   items: [] as Line[],
 });
 
@@ -80,6 +82,8 @@ const stages = computed(() => crm.options?.stages ?? []);
 const selectedStage = computed(() => stages.value.find((s) => s.id === form.stage));
 const isLostStage = computed(() => selectedStage.value?.kind === "lost");
 const isEdit = computed(() => !!props.deal);
+/** A new open deal starts with its first dated next step (کتاب فروش، فصل ۱۲). */
+const needsNextAction = computed(() => !isEdit.value && (!selectedStage.value || selectedStage.value.kind === "open"));
 
 const sourceOptions = computed(() =>
   (crm.options?.sources ?? []).map((s) => ({ value: s.id, label: s.name_fa })),
@@ -207,6 +211,11 @@ async function save() {
     bad.value = "lost_reason";
     return;
   }
+  if (needsNextAction.value && (!form.next_action_title.trim() || !form.next_action_due)) {
+    error.value = "فرصت باز بدون «اقدام بعدی + تاریخ» ثبت نمی‌شود.";
+    bad.value = "next_action";
+    return;
+  }
   saving.value = true;
   error.value = "";
   try {
@@ -222,6 +231,7 @@ async function save() {
       shipping_cost_rial: n(form.shipping_cost_rial),
       other_cost_rial: n(form.other_cost_rial),
       expected_close_date: form.expected_close_date || null,
+      ...(needsNextAction.value ? { next_action_title: form.next_action_title.trim(), next_action_due: form.next_action_due } : {}),
       items: lines.map((l) => ({
         product: l.product,
         quantity: n(l.quantity),
@@ -407,6 +417,17 @@ const chipOff = "bg-slate-100 text-slate-600 hover:bg-slate-200";
         <div>
           <label :class="lbl">تاریخ پیش‌بینی بسته شدن</label>
           <JalaliDateField v-model="form.expected_close_date" placeholder="انتخاب تاریخ" />
+        </div>
+      </div>
+
+      <div v-if="needsNextAction" class="grid sm:grid-cols-3 gap-3 rounded-xl p-3" :class="bad === 'next_action' ? 'bg-red-50 ring-1 ring-red-300' : 'bg-amber-50/60'">
+        <div class="sm:col-span-2">
+          <label :class="lbl">اقدام بعدی <span class="text-red-500">*</span></label>
+          <input v-model="form.next_action_title" :class="inp" placeholder="مثلاً تماس برای کشف نیاز، ارسال نمونه، جلسه با تصمیم‌گیرنده" />
+        </div>
+        <div>
+          <label :class="lbl">تاریخ اقدام <span class="text-red-500">*</span></label>
+          <JalaliDateField v-model="form.next_action_due" placeholder="انتخاب تاریخ" />
         </div>
       </div>
 

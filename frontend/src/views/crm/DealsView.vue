@@ -323,6 +323,10 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
               <td class="px-3 py-2.5">
                 <p class="text-ink font-medium truncate max-w-[280px]">{{ d.title }}</p>
                 <p class="text-xs text-slate-400">{{ d.customer_name }}<template v-if="!col('province') && d.province_name"> · {{ d.province_name }}</template></p>
+                <p v-if="d.next_action?.missing" class="text-[11px] text-red-500 mt-0.5">⚠ بدون اقدام بعدی</p>
+                <p v-else-if="d.next_action && !d.next_action.missing" class="text-[11px] mt-0.5 truncate max-w-[280px]" :class="d.next_action.overdue ? 'text-amber-600' : 'text-slate-500'">
+                  ← {{ d.next_action.title }} · {{ d.next_action.due_jalali }}
+                </p>
               </td>
               <td v-if="col('owner')" class="px-3 text-slate-500">{{ d.owner_name || "—" }}</td>
               <td v-if="col('stage')" class="px-3 text-slate-500 text-xs">{{ d.stage_name }}</td>

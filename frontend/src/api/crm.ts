@@ -108,6 +108,8 @@ export interface Deal {
   closed_at: string | null;
   closed_jalali: string;
   expected_close_date: string | null;
+  /** «اقدام بعدی + تاریخ» — the earliest open کار; null on a closed deal. */
+  next_action?: { missing: true } | { missing: false; id: number; title: string; due_at: string; due_jalali: string; overdue: boolean } | null;
   items?: DealItem[];
 }
 
@@ -370,6 +372,7 @@ export interface CrmToday {
     due_today: number;
     pending_follow_up: number;
     stale_deals: number;
+    no_next_action: number;
     quiet_customers: number;
     activities_today: number;
     open_count: number;
@@ -382,6 +385,7 @@ export interface CrmToday {
   pending_follow_up: CrmActivity[];
   stale_deals: Deal[];
   closing_soon: Deal[];
+  no_next_action: Deal[];
   quiet_customers: CrmCustomer[];
   thresholds: { stale_days: number; dormant_days: number; horizon_days: number; backlog_days: number };
 }

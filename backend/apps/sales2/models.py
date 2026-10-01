@@ -48,6 +48,23 @@ DEFAULT_VAT_PCT = Decimal(10)
 SAYAD_GRACE = timedelta(hours=48)
 
 
+class Grade(models.TextChoices):
+    SP = "SP", "SP · استراتژیک"
+    A = "A", "A · ممتاز"
+    B = "B", "B · خوب"
+    C = "C", "C · پرریسک/کم‌اولویت"
+
+
+#: Weights of the customer score — the book's proposal, to be approved by
+#: sales management and finance (editable in تنظیمات).
+DEFAULT_GRADE_WEIGHTS = {"profit": 25, "collection": 25, "volume": 20,
+                         "strategic": 15, "service": 10, "growth": 5}
+
+
+def default_grade_weights():
+    return dict(DEFAULT_GRADE_WEIGHTS)
+
+
 class Sales2Setting(TimeStampedModel):
     """
     One row: the company's letterhead and the module's policies.
@@ -79,6 +96,13 @@ class Sales2Setting(TimeStampedModel):
     default_warehouse = models.ForeignKey(
         "Warehouse", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
+    # ---- کارت تصمیم پیش از صدور (کتاب فروش، فصل ۱۶ و ۲۰) ----------------
+    #: کف حاشیه‌ی سود مصوب (٪). A document below it needs a written reason.
+    margin_floor_pct = models.DecimalField(max_digits=5, decimal_places=2, default=5)
+    #: «سفارش بزرگ‌تر از الگوی معمول»: this many times the customer's
+    #: average invoice needs a written reason.
+    big_order_factor = models.DecimalField(max_digits=4, decimal_places=1, default=2)
+    grade_weights = models.JSONField(default=default_grade_weights)
 
     class Meta:
         verbose_name = "تنظیمات فروش ۲"
@@ -185,6 +209,21 @@ class CustomerAccount(TimeStampedModel):
     #: that day are not brought over one by one.
     opening_balance_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     opening_as_of = models.DateField(null=True, blank=True)
+
+    # ---- گرید مشتری (کتاب فروش، فصل ۱۷) --------------------------------
+    #: The approved grade. The system only *suggests* A/B/C from the score
+    #: (`apps.sales2.grading`); SP is never suggested — strategic importance
+    #: is a management call. Approved by management, not by the salesperson.
+    grade = models.CharField(max_length=2, choices=Grade.choices, blank=True)
+    #: «ارزش استراتژیک» (0–100) — the one part of the score the data cannot
+    #: tell: brand, market access, future development.
+    strategic_score = models.PositiveSmallIntegerField(default=50)
+    grade_score = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
+    grade_note = models.CharField(max_length=300, blank=True)
+    grade_set_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+    )
+    grade_set_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "حساب اعتباری مشتری"
@@ -607,6 +646,11 @@ class ReceiptAllocation(models.Model):
 # the base fi changes week to week; every size follows from it. So the base
 # and the per-size fees are stored, the prices are computed, and changing one
 # number reprices a sheet — which is what the workbook already did.
+def version_key(jy: int, jm: int, jd: int = 1) -> int:
+    """1405/06/06 → 14050606: price lists and costs compare by this."""
+    return jy * 10000 + jm * 100 + jd
+
+
 class Grammage(models.IntegerChoices):
     G48 = 48, "۴۸ گرم"
     G55 = 55, "۵۵ گرم"
@@ -632,15 +676,17 @@ class PriceSheet(TimeStampedModel):
     #: list of the month it was written in.
     jalali_year = models.PositiveSmallIntegerField()
     jalali_month = models.PositiveSmallIntegerField()
+    #: With inflation a month may carry several lists — «لیست ۱ از ۱ شهریور،
+    #: لیست ۲ از ۶ شهریور». A list holds from its day until the next one.
+    jalali_day = models.PositiveSmallIntegerField(default=1)
 
     class Meta:
-        ordering = ("-jalali_year", "-jalali_month", "grammage", "-is_official")
+        ordering = ("-jalali_year", "-jalali_month", "-jalali_day", "grammage", "-is_official")
         verbose_name = "برگه لیست قیمت"
-        unique_together = ("grammage", "is_official", "jalali_year", "jalali_month")
+        unique_together = ("grammage", "is_official", "jalali_year", "jalali_month", "jalali_day")
 
-    @property
-    def month_key(self) -> int:
-        return self.jalali_year * 100 + self.jalali_month
+    month_key = property(lambda self: self.jalali_year * 100 + self.jalali_month)
+    version_key = property(lambda self: version_key(self.jalali_year, self.jalali_month, self.jalali_day))
 
     def __str__(self) -> str:
         return self.name
@@ -676,17 +722,17 @@ class PriceListItem(TimeStampedModel):
     )
     jalali_year = models.PositiveSmallIntegerField()
     jalali_month = models.PositiveSmallIntegerField()
+    jalali_day = models.PositiveSmallIntegerField(default=1)
     price_rial = models.DecimalField(max_digits=18, decimal_places=0, default=0)
     is_official = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ("product", "is_official", "jalali_year", "jalali_month")
-        ordering = ("-jalali_year", "-jalali_month")
+        unique_together = ("product", "is_official", "jalali_year", "jalali_month", "jalali_day")
+        ordering = ("-jalali_year", "-jalali_month", "-jalali_day")
         verbose_name = "قیمت ثابت لیست"
 
-    @property
-    def month_key(self) -> int:
-        return self.jalali_year * 100 + self.jalali_month
+    month_key = property(lambda self: self.jalali_year * 100 + self.jalali_month)
+    version_key = property(lambda self: version_key(self.jalali_year, self.jalali_month, self.jalali_day))
 
 
 class AccountingCost(TimeStampedModel):
@@ -708,17 +754,18 @@ class AccountingCost(TimeStampedModel):
     grammage = models.PositiveSmallIntegerField(default=0)
     jalali_year = models.PositiveSmallIntegerField()
     jalali_month = models.PositiveSmallIntegerField()
+    #: A cost may change mid-month with the price list; it holds from its day.
+    jalali_day = models.PositiveSmallIntegerField(default=1)
     cost_rial = models.DecimalField(max_digits=18, decimal_places=0, default=0)
     source = models.CharField(max_length=120, blank=True)
 
     class Meta:
-        unique_together = ("product", "grammage", "jalali_year", "jalali_month")
-        ordering = ("-jalali_year", "-jalali_month")
+        unique_together = ("product", "grammage", "jalali_year", "jalali_month", "jalali_day")
+        ordering = ("-jalali_year", "-jalali_month", "-jalali_day")
         verbose_name = "فی حسابداری"
 
-    @property
-    def month_key(self) -> int:
-        return self.jalali_year * 100 + self.jalali_month
+    month_key = property(lambda self: self.jalali_year * 100 + self.jalali_month)
+    version_key = property(lambda self: version_key(self.jalali_year, self.jalali_month, self.jalali_day))
 
 
 # ===========================================================================

@@ -175,7 +175,8 @@ export interface ProductRow {
   is_printed: boolean;
   is_roll: boolean;
   prices: Record<string, PriceCell>;
-  costs: Record<string, { cost_rial: string | null; month: number | null }>;
+  /** `since`: the day (YYYYMMDD) the cost in force started — costs may change mid-month. */
+  costs: Record<string, { cost_rial: string | null; month: number | null; since?: number | null }>;
 }
 
 export interface DeliveryLine {
@@ -282,6 +283,47 @@ export interface Settings {
   credit_policy: "block" | "warn" | "off";
   print_terms: string;
   default_warehouse: number | null;
+  margin_floor_pct: string;
+  big_order_factor: string;
+  grade_weights: Record<GradePart, number>;
+}
+
+export type Grade = "SP" | "A" | "B" | "C";
+export type GradePart = "profit" | "collection" | "volume" | "strategic" | "service" | "growth";
+
+export interface GradeRow {
+  customer: number;
+  name: string;
+  code: string;
+  owner_name: string;
+  score: number;
+  suggested: Grade;
+  parts: Record<GradePart, number>;
+  facts: Record<GradePart, string>;
+  grade: Grade | "";
+  strategic_score: number;
+  grade_score: string | null;
+  grade_note: string;
+  grade_set_at: string | null;
+  grade_set_by: string;
+}
+
+export interface KpiMonth {
+  jalali_year: number;
+  jalali_month: number;
+  net_rial: string;
+  margin_pct: number | null;
+  active_customers: number;
+  new_customers: number;
+  profitable_customers: number;
+  proformas: number;
+  converted: number;
+  conversion_pct: number | null;
+  avg_conversion_days: number | null;
+  due_rial: string;
+  on_time_rial: string;
+  on_time_pct: number | null;
+  repeat_pct: number | null;
 }
 
 export interface Summary {
@@ -346,6 +388,16 @@ export interface PriceSheetRow {
 
 export interface QtyTier { min_qty: number; pct: number }
 
+/** A month's price lists: «لیست ۱ از ۱ شهریور، لیست ۲ از ۶ شهریور». */
+export interface PriceMonth {
+  jalali_year: number;
+  jalali_month: number;
+  /** The version shown; null when the month has none of its own. */
+  day: number | null;
+  versions: { day: number; n: number }[];
+  sheets: PriceSheet[];
+}
+
 export interface PriceSheet {
   id: number;
   name: string;
@@ -357,7 +409,9 @@ export interface PriceSheet {
   qty_tiers: QtyTier[];
   jalali_year: number;
   jalali_month: number;
-  /** False: carried from an earlier month; copy it to edit this month's list. */
+  /** The day this version starts on — a month may carry several lists. */
+  jalali_day: number;
+  /** False: carried from an earlier version; start a version to edit it. */
   is_own_month?: boolean;
   rows: PriceSheetRow[];
   prices: Record<number, Record<string, string>>;
@@ -484,6 +538,15 @@ const B = "/sales2";
 export const sales2Api = {
   options: () => api.get<Options>(`${B}/options/`).then((r) => r.data),
   summary: () => api.get<Summary>(`${B}/summary/`).then((r) => r.data),
+  kpis: (year?: number, month?: number) =>
+    api.get<{ current: KpiMonth; previous: KpiMonth; deals_without_next_action: number }>(
+      `${B}/kpis/`, { params: year ? { year, month } : {} }).then((r) => r.data),
+  grades: (q = "") =>
+    api.get<{ weights: Record<GradePart, number>; parts: Record<GradePart, string>; rows: GradeRow[] }>(
+      `${B}/grades/`, { params: q ? { q } : {} }).then((r) => r.data),
+  setGrade: (customer: number, body: { grade: Grade | ""; strategic_score?: number; note?: string }) =>
+    api.post<{ grade: Grade | ""; strategic_score: number; score: number | null; suggested: Grade | null }>(
+      `${B}/grades/${customer}/`, body).then((r) => r.data),
   settings: () => api.get<Settings>(`${B}/settings/`).then((r) => r.data),
   saveSettings: (data: Partial<Settings>) => api.put<Settings>(`${B}/settings/`, data).then((r) => r.data),
 
@@ -494,12 +557,15 @@ export const sales2Api = {
   products: (p: Params = {}) =>
     api.get<{ jalali_year: number; jalali_month: number; rows: ProductRow[] }>(`${B}/products/`, { params: clean(p) }).then((r) => r.data),
   saveProfile: (id: number, data: Partial<ProductRow>) => api.put(`${B}/products/${id}/profile/`, data).then((r) => r.data),
-  savePriceItem: (product: number, is_official: boolean, price_rial: string, year: number, month: number) =>
-    api.put(`${B}/price-items/`, { product, is_official, price_rial, year, month }).then((r) => r.data),
-  priceMonth: (year: number, month: number) =>
-    api.get<{ jalali_year: number; jalali_month: number; sheets: PriceSheet[] }>(`${B}/price-sheets/month/`, { params: { year, month } }).then((r) => r.data),
-  copyPriceMonth: (year: number, month: number) =>
-    api.post<{ jalali_year: number; jalali_month: number; sheets: PriceSheet[] }>(`${B}/price-sheets/month/`, { year, month }).then((r) => r.data),
+  savePriceItem: (product: number, is_official: boolean, price_rial: string, year: number, month: number, day = 1) =>
+    api.put(`${B}/price-items/`, { product, is_official, price_rial, year, month, day }).then((r) => r.data),
+  priceMonth: (year: number, month: number, day?: number | null) =>
+    api.get<PriceMonth>(`${B}/price-sheets/month/`, { params: day ? { year, month, day } : { year, month } }).then((r) => r.data),
+  /** Start a new version of the list on `day`, copied from the one in force the day before. */
+  copyPriceMonth: (year: number, month: number, day = 1) =>
+    api.post<PriceMonth>(`${B}/price-sheets/month/`, { year, month, day }).then((r) => r.data),
+  deletePriceVersion: (year: number, month: number, day: number) =>
+    api.delete<PriceMonth>(`${B}/price-sheets/month/`, { params: { year, month, day } }).then((r) => r.data),
   importPrices: (file: File, year: number, month: number) => {
     const fd = new FormData();
     fd.append("file", file);
@@ -507,8 +573,8 @@ export const sales2Api = {
     fd.append("month", String(month));
     return api.post<{ sheets: { name: string; rows: number; base_fi_rial: string }[] }>(`${B}/price-sheets/import/`, fd).then((r) => r.data);
   },
-  exportPrices: (year: number, month: number) =>
-    api.get(`${B}/price-sheets/export/`, { params: { year, month }, responseType: "blob" }).then((r) => r.data as Blob),
+  exportPrices: (year: number, month: number, day?: number | null) =>
+    api.get(`${B}/price-sheets/export/`, { params: day ? { year, month, day } : { year, month }, responseType: "blob" }).then((r) => r.data as Blob),
   financeReceipts: (status = "pending") =>
     api.get<Receipt[]>(`${B}/finance/receipts/`, { params: { status } }).then((r) => r.data),
   reviewReceipt: (id: number, confirm: boolean, note = "") =>
@@ -569,8 +635,8 @@ export const sales2Api = {
     api.patch<PriceSheet>(`${B}/price-sheets/${id}/`, data).then((r) => r.data),
   costs: (p: Params = {}) =>
     api.get<{ jalali_year: number; jalali_month: number; rows: CostRow[] }>(`${B}/accounting-costs/`, { params: clean(p) }).then((r) => r.data),
-  saveCost: (product: number, grammage: number, cost_rial: string, year: number, month: number) =>
-    api.put(`${B}/accounting-costs/`, { product, grammage, cost_rial, year, month }).then((r) => r.data),
+  saveCost: (product: number, grammage: number, cost_rial: string, year: number, month: number, day = 1) =>
+    api.put(`${B}/accounting-costs/`, { product, grammage, cost_rial, year, month, day }).then((r) => r.data),
   importCosts: (file: File, year: number, month: number, confirm = false, createMissing = false) => {
     const fd = new FormData();
     fd.append("file", file);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { sales2Api, type Settings, type Warehouse } from "@/api/sales2";
+import { computed, onMounted, ref } from "vue";
+import { sales2Api, type GradePart, type Settings, type Warehouse } from "@/api/sales2";
 import Skeleton from "@/components/Skeleton.vue";
 import { apiError } from "@/components/crm/formError";
 import { toast } from "@/composables/useUi";
@@ -12,6 +12,12 @@ const s = ref<Settings | null>(null);
 const warehouses = ref<Warehouse[]>([]);
 const error = ref("");
 const newWh = ref({ code: "", name_fa: "", address: "" });
+const GRADE_PARTS: Record<GradePart, string> = {
+  profit: "سودآوری", collection: "وصول و اعتبار", volume: "حجم و تداوم",
+  strategic: "ارزش استراتژیک", service: "هزینه خدمت", growth: "پتانسیل رشد",
+};
+const weightSum = computed(() =>
+  Object.values(s.value?.grade_weights ?? {}).reduce((a, b) => a + (Number(b) || 0), 0));
 
 async function load() {
   [s.value, warehouses.value] = await Promise.all([sales2Api.settings(), sales2Api.warehouses()]);
@@ -84,6 +90,23 @@ async function toggleWarehouse(w: Warehouse) {
           </select>
         </div>
       </div>
+      <h2 class="text-sm font-bold text-ink pt-2">کارت تصمیم پیش از صدور</h2>
+      <div class="grid sm:grid-cols-3 gap-3">
+        <div><label class="text-xs text-slate-500 mb-1 block">کف حاشیه‌ی سود مصوب (٪)</label><input v-model="s.margin_floor_pct" :class="inp" inputmode="decimal" /></div>
+        <div><label class="text-xs text-slate-500 mb-1 block">سفارش بزرگ: چند برابر میانگین مشتری</label><input v-model="s.big_order_factor" :class="inp" inputmode="decimal" /></div>
+      </div>
+      <p class="text-xs text-slate-400">زیر کف حاشیه، سفارش بزرگ‌تر از الگوی مشتری و فروش اعتباری به گرید C فقط با نوشتن دلیل صادر می‌شود.</p>
+
+      <h2 class="text-sm font-bold text-ink pt-2">وزن امتیاز گرید مشتری (٪)</h2>
+      <div v-if="s.grade_weights" class="grid grid-cols-2 sm:grid-cols-6 gap-3">
+        <div v-for="(label, k) in GRADE_PARTS" :key="k">
+          <label class="text-xs text-slate-500 mb-1 block">{{ label }}</label>
+          <input v-model.number="s.grade_weights[k]" :class="inp" inputmode="numeric" />
+        </div>
+      </div>
+      <p class="text-xs" :class="weightSum === 100 ? 'text-slate-400' : 'text-amber-600'">
+        جمع وزن‌ها: {{ weightSum }}٪ — وزن‌ها را مدیریت فروش و مالی تصویب می‌کنند.
+      </p>
       <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
       <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="save">ذخیره تنظیمات</button>
     </div>
