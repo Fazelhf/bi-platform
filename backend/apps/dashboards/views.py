@@ -27,7 +27,7 @@ from apps.dashboards.catalog import (
     WIDGET_KINDS,
     get_section,
 )
-from apps.dashboards.models import GRID_COLUMNS, Dashboard, Widget
+from apps.dashboards.models import GRID_COLUMNS, AskLog, Dashboard, Widget
 from apps.dashboards.permissions import (
     BoardPermission,
     can_edit_boards,
@@ -423,6 +423,41 @@ class AskView(APIView):
         if not question:
             return Response({"detail": "سؤال خالی است."}, status=status.HTTP_400_BAD_REQUEST)
         context = request.data.get("context")
-        return Response(answer(request.user, question,
-                               _period_id(request.data.get("period")), request,
-                               context if isinstance(context, dict) else None))
+        result = answer(request.user, question, _period_id(request.data.get("period")), request,
+                        context if isinstance(context, dict) else None)
+        AskLog.objects.create(user=request.user, question=question, ok=bool(result.get("ok")),
+                              understood=str(result.get("understood") or "")[:300],
+                              answer=str(result.get("answer") or ""))
+        return Response(result)
+
+
+class AskLogView(APIView):
+    """
+    ``GET /api/dashboards/ask/log/?days=30`` — for administrators: how often
+    «بپرس» understood, and the questions it did not, most-asked first.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Count, Max
+        from django.utils import timezone
+
+        user = request.user
+        if not (user.is_superuser or getattr(user, "role", "") == "admin"):
+            return Response({"detail": "فقط مدیر سامانه."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            days = max(1, min(int(request.query_params.get("days") or 30), 365))
+        except ValueError:
+            days = 30
+        recent = AskLog.objects.filter(created_at__gte=timezone.now() - timezone.timedelta(days=days))
+        total = recent.count()
+        understood = recent.filter(ok=True).count()
+        missed = (recent.filter(ok=False).values("question")
+                  .annotate(times=Count("id"), last=Max("created_at"))
+                  .order_by("-times", "-last")[:50])
+        return Response({
+            "days": days, "total": total, "understood": understood,
+            "missed": [{"question": m["question"], "times": m["times"], "last": m["last"]}
+                       for m in missed],
+        })

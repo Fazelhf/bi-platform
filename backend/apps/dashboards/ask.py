@@ -20,6 +20,7 @@ at: the reply says what was understood and offers questions that work.
 """
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass, field
 
@@ -36,14 +37,15 @@ _FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567
 #: cannot open — a production manager was being shown sales questions.
 EXAMPLES = {
     "sales": ["چرا فروش نسبت به ماه قبل تغییر کرد؟", "۵ استان با بیشترین فروش",
-              "کدام کارشناس کمترین تحقق تارگت را دارد؟", "روند فروش ۶ ماه اخیر", "سود امسال"],
+              "کدام کارشناس کمترین تحقق تارگت را دارد؟", "روند فروش ۶ ماه اخیر", "حاشیه‌ی سود به تفکیک کارشناس",
+              "فروش این ماه نسبت به پارسال", "سود امسال"],
     "production": ["چرا تولید نسبت به ماه قبل تغییر کرد؟", "ضایعات هر خط تولید",
                    "روند تولید ۶ ماه اخیر", "بیشترین هزینه‌ها به تفکیک سرفصل"],
     "finance": ["چرا پرداخت‌ها نسبت به ماه قبل تغییر کرد؟", "بیشترین پرداخت‌ها به تفکیک سرفصل",
                 "روند دریافت‌ها ۶ ماه اخیر"],
 }
 #: What each section can be asked about, for the «متوجه نشدم» reply.
-SUBJECTS = {"sales": "فروش، سود، وصولی، مطالبات، تارگت",
+SUBJECTS = {"sales": "فروش، سود، حاشیه‌ی سود، وصولی، مطالبات، تارگت",
             "production": "تولید، ضایعات، هزینه‌ی تولید",
             "finance": "دریافت و پرداخت"}
 
@@ -83,6 +85,8 @@ class Topic:
     #: Shown beside the main metric (تارگت beside فروش).
     extra: tuple[str, ...] = ()
     lower_is_better: bool = False
+    #: A ratio, not a sum: the answer is metric ÷ this metric, in percent.
+    ratio_of: str = ""
 
 
 #: First match wins, so the specific words come before «فروش».
@@ -99,6 +103,8 @@ TOPICS = (
     Topic(("وصول",), "sales", "collected", "rial", "وصولی", "sales"),
     Topic(("مطالبات", "طلب"), "sales", "receivables", "rial", "مطالبات", "sales",
           lower_is_better=True),
+    Topic(("حاشیه",), "sales", "profit", "percent", "حاشیه‌ی سود", "sales",
+          extra=("revenue",), ratio_of="revenue"),
     Topic(("سود",), "sales", "profit", "rial", "سود", "sales"),
     Topic(("تناژ", "تن"), "sales", "quantity_ton", "ton", "تناژ فروش", "sales"),
     Topic(("تارگت", "هدف", "تحقق"), "sales", "revenue", "rial", "فروش", "sales",
@@ -146,6 +152,10 @@ class Parsed:
     why: bool = False
     #: Names found, as (dim, dataset hint, id, name) — carried into a follow-up.
     entities: list = field(default_factory=list)
+    #: Two or more names of one kind («تهران و فارس») — set side by side.
+    versus: bool = False
+    #: (typed, [full names]) for a first name or surname several people share.
+    ambiguous: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +221,37 @@ def _near(name: str, text: str) -> str | None:
     return None
 
 
-def _entities(text: str, guesses: list | None = None) -> list[tuple[str, str, int, str]]:
+#: The sales departments by the words people use for them. Matched before
+#: the breakdown words, so «فروش بانکی» is the channel, not «به تفکیک بانک».
+CHANNELS = (
+    ("team", "فروش همکار", ("فروش همکار", "همکار", "فروش تیمی", "تیم فروش")),
+    ("organizational", "فروش بانکی", ("فروش بانکی", "بانکی", "فروش سازمانی", "سازمانی")),
+    ("b2b", "فروش B2B", ("b2b", "بی تو بی", "بیتوبی")),
+)
+
+
+def _channels(text: str) -> tuple[list[tuple[str, str, str, str]], str]:
+    """The sales departments named, and the text with their words taken out."""
+    hits = []
+    low = text.lower()
+    for key, label, words in CHANNELS:
+        for w in words:
+            if _has(low, w):
+                hits.append(("channel", "sales", key, label))
+                low = re.sub(rf"(^|\s){re.escape(w)}(?=$|\s|[؟?،,.])", " ", low)
+                break
+    return hits, low
+
+
+def _vocabulary() -> set[str]:
+    """Every word the parser already reads as something — never a person's name."""
+    words = {w for t in TOPICS for w in t.words} | {w for ws, _k in GROUPS for w in ws}
+    words |= {w for _k, _l, ws in CHANNELS for w in ws} | set(WHY_WORDS) | set(JALALI_MONTHS[1:])
+    return {x for w in words for x in w.split(" ")} | {"بدون", "سایر", "متفرقه", "کل"}
+
+
+def _entities(text: str, guesses: list | None = None,
+              ambiguous: list | None = None) -> list[tuple[str, str, int, str]]:
     """
     (dimension, dataset hint, id, name) for every known name in the question.
 
@@ -240,7 +280,8 @@ def _entities(text: str, guesses: list | None = None) -> list[tuple[str, str, in
                     guesses.append((typed, name))
                     break
         hits += exact
-    surnames: dict[str, list] = {}
+    # A salesperson by full name, or by first name or surname alone.
+    parts_of: dict[str, list] = {}
     for pk, name in DimEmployee.objects.values_list("id", "full_name_fa"):
         n = _norm(name or "")
         if not n:
@@ -249,13 +290,24 @@ def _entities(text: str, guesses: list | None = None) -> list[tuple[str, str, in
             hits.append(("employee", "sales", pk, name))
             continue
         parts = n.split(" ")
-        if len(parts) > 1 and len(parts[-1]) >= 3:
-            surnames.setdefault(parts[-1], []).append((pk, name))
-    for surname, people in surnames.items():
-        # A surname only counts when it names exactly one person.
-        if len(people) == 1 and re.search(rf"(^|\s){re.escape(surname)}($|\s|[؟?،,.])", text):
+        if len(parts) > 1:
+            for part in {parts[0], parts[-1]}:
+                # «فروش بدون بازاریاب» is a row, not a person called «فروش».
+                if len(part) >= 3 and part not in _vocabulary():
+                    parts_of.setdefault(part, []).append((pk, name))
+    for part, people in parts_of.items():
+        if not re.search(rf"(^|\s){re.escape(part)}($|\s|[؟?،,.])", text):
+            continue
+        if any(h[0] == "employee" and _norm(h[3]) in text and part in _norm(h[3]).split(" ")
+               for h in hits):
+            continue  # part of a name already written in full
+        people = list(dict.fromkeys(people))
+        if len(people) == 1:
             if not any(h[2] == people[0][0] and h[0] == "employee" for h in hits):
                 hits.append(("employee", "sales", people[0][0], people[0][1]))
+        elif ambiguous is not None:
+            # «علی» when there are two: ask which, never pick one.
+            ambiguous.append((part, [name for _pk, name in people]))
     if guesses is not None and not any(h[0] == "employee" for h in hits):
         for pk, name in DimEmployee.objects.values_list("id", "full_name_fa"):
             typed = _near(name or "", text)
@@ -325,6 +377,10 @@ def _season_or_year(text: str, current: DimPeriod, months: list) -> tuple | None
     return None
 
 
+#: «پارسال»، «سال قبل»، «همین ماه سال گذشته» — read against the month in hand.
+LAST_YEAR_RE = re.compile(r"پارسال|سال (قبل|گذشته|پیش)")
+
+
 def names_a_month(text: str) -> bool:
     """A month by name, or «این ماه» — either one resets the conversation's month."""
     return bool(MONTH_RE.search(text)) or bool(YEAR_RE.search(text)) or _has(text, "فصل") \
@@ -345,12 +401,15 @@ def parse(question: str, current: DimPeriod, prev: DimPeriod | None,
     inherited_group = False
     p.topic = next((t for t in TOPICS if any(_has(text, w) for w in t.words)), None)
 
+    channel_hits, rest = _channels(text)
     for words, key in GROUPS:
-        if any(_has(text, w) for w in words):
+        if any(_has(rest, w) for w in words):
             p.group = key
             break
 
-    ents = _entities(text, p.guesses)
+    # Names are looked up in what the department's name leaves: «فروش بانکی»
+    # is not also a team or bank called «بانکی».
+    ents = channel_hits + _entities(rest if channel_hits else text, p.guesses, p.ambiguous)
     if context:
         if p.topic is None and isinstance(context.get("topic"), int)                 and 0 <= context["topic"] < len(TOPICS):
             p.topic = TOPICS[context["topic"]]
@@ -366,7 +425,7 @@ def parse(question: str, current: DimPeriod, prev: DimPeriod | None,
     p.entities = [list(e) for e in ents]
     # Topic from the entity when the question names no measure («تهران در مرداد»).
     if p.topic is None and ents:
-        section = {"machine": "production"}.get(ents[0][0], "sales")
+        section = {"machine": "production"}.get(ents[0][0], "sales")  # channel → sales
         p.topic = next(t for t in TOPICS if t.section == section and t.metric in ("revenue", "output"))
     if p.topic is None and p.group in ("province", "employee", "team", "channel", "group", "bank"):
         p.topic = TOPICS[-1]
@@ -388,12 +447,20 @@ def parse(question: str, current: DimPeriod, prev: DimPeriod | None,
         p.dataset, p.metrics = "production_cost", ["amount"]
 
     dataset = get_dataset(p.dataset)
+    by_dim: dict[str, list] = {}
     for dim, _ds, pk, name in ents:
-        d = dataset.dim(dim)
-        if d is None:
+        if dataset.dim(dim) is not None and pk not in [x[0] for x in by_dim.get(dim, [])]:
+            by_dim.setdefault(dim, []).append((pk, name))
+    for dim, named in by_dim.items():
+        p.filter_names += [name for _pk, name in named]
+        if len(named) == 1:
+            p.filters.append({"dim": dim, "op": "eq", "value": named[0][0]})
             continue
-        p.filters.append({"dim": dim, "op": "eq", "value": pk})
-        p.filter_names.append(name)
+        # «فروش تهران و فارس»: either one, side by side — not both at once,
+        # which no single row can be.
+        p.filters.append({"dim": dim, "op": "in", "value": [pk for pk, _ in named]})
+        if p.group in (None, dim) and not p.why:
+            p.group, p.versus, p.limit = dim, True, len(named)
 
     if p.group and dataset.dim(p.group) is None:
         # A breakdown carried over from the last question that this measure
@@ -415,8 +482,23 @@ def parse(question: str, current: DimPeriod, prev: DimPeriod | None,
     p.months = _months(text, current)
     last_n = re.search(r"(\d+)\s*ماه", text)
     span = _season_or_year(text, current, p.months)
+    last_year = LAST_YEAR_RE.search(text) if not p.months and not span else None
     if span:
         p.months, p.time, p.time_label = span
+    elif last_year:
+        same = DimPeriod.objects.filter(kind="month", jalali_year=current.jalali_year - 1,
+                                        jalali_month=current.jalali_month).first()
+        versus = any(w in text for w in ("نسبت به", "مقایسه", "با پارسال", "با سال"))
+        if versus and same:
+            p.months = [same, current]   # this month against the same one a year ago
+        elif ("همین ماه" in text or "همین موقع" in text) and same:
+            p.months = [same]
+        else:
+            found = _span(current.jalali_year - 1, 1, 12)
+            if found:
+                anchor, n = found
+                p.months, p.time = [anchor], {"mode": "last_n", "n": n}
+                p.time_label = f"سال {current.jalali_year - 1}"
     elif len(p.months) >= 2:
         pass  # compared below
     elif "روند" in text or (last_n and "اخیر" in text) or (last_n and "گذشته" in text and int(last_n[1]) > 1):
@@ -510,11 +592,24 @@ def answer(user, question: str, period_id: int | None = None, request=None,
         return _not_understood("به داده‌های این بخش دسترسی ندارید.")
     if p.group == "__missing__":
         return _not_understood(f"«{p.topic.noun}» را نمی‌شود به این شکل تفکیک کرد.")
+    if p.ambiguous:  # even beside another name: «مهسا و یاسر» must not lose «مهسا»
+        typed, names = p.ambiguous[0]
+        return {"ok": False, "values": {},
+                "answer": f"چند نفر «{typed}» هستند؛ منظورتان کدام است؟ "
+                          + "، ".join(f"«{n}»" for n in names),
+                "suggestions": [_norm(question).replace(typed, _norm(n), 1) for n in names[:5]]}
+    if ctx.channels is not None:
+        foreign = [e[3] for e in p.entities if e[0] == "channel" and e[2] not in ctx.channels]
+        if foreign:
+            return _not_understood(f"به داده‌های «{foreign[0]}» دسترسی ندارید.")
 
     period = p.months[0] if p.months else ctx.period
     metric = p.metrics[0]
     ds = get_dataset(p.dataset)
     unit = ds.metric(metric).unit if ds.metric(metric) else p.topic.unit
+    if p.topic.ratio_of:
+        ctx = _Ratio(ctx, metric, p.topic.ratio_of)
+        unit = "percent"
     noun = p.topic.noun
     scope = " · ".join(f"«{n}»" for n in p.filter_names)
     understood = " · ".join(x for x in (noun, scope, p.time_label or period.label) if x)
@@ -548,7 +643,7 @@ NEXT_BREAKDOWN = {
     "sales_customer_group": "به تفکیک گروه مشتری",
 }
 #: A neighbouring measure worth asking about next.
-NEXT_TOPIC = {"revenue": "سود چی؟", "profit": "وصولی چی؟", "output": "ضایعات چی؟",
+NEXT_TOPIC = {"revenue": "سود چی؟", "profit": "حاشیه‌ی سود چی؟", "output": "ضایعات چی؟",
               "waste_pct": "هزینه‌ی تولید چی؟", "cash_in": "پرداخت‌ها چی؟",
               "cash_out": "دریافت‌ها چی؟"}
 
@@ -568,10 +663,63 @@ def _follow_ups(p: Parsed) -> list[str]:
         out += ["کمترین‌ها؟" if p.order != "metric_asc" else "بیشترین‌ها؟", "ماه قبلش؟",
                 f"چرا {noun} تغییر کرد؟"]
     else:
-        out += ["چرا؟", "ماه قبلش؟", NEXT_BREAKDOWN.get(p.dataset, ""),
-                f"روند {noun} ۶ ماه اخیر", "این فصل؟"]
+        out += ["چرا؟", "ماه قبلش؟", "همین ماه پارسال؟", NEXT_BREAKDOWN.get(p.dataset, ""),
+                f"روند {noun} ۶ ماه اخیر"]
     out.append(NEXT_TOPIC.get(p.topic.metric, ""))
     return [q for q in dict.fromkeys(out) if q][:5]
+
+
+class _Ratio:
+    """
+    The analysis context, answering metric ÷ `den` (in percent) wherever the
+    plain metric would be — so «حاشیه‌ی سود» goes through every branch below
+    (one number, trend, ranking, «چرا») without each one knowing about it.
+    """
+
+    def __init__(self, ctx, num: str, den: str):
+        self._ctx, self.num, self.den = ctx, num, den
+
+    def __getattr__(self, name):
+        return getattr(self._ctx, name)
+
+    def _fix(self, values: dict) -> None:
+        d = values.get(self.den) or 0
+        values[self.num] = values.get(self.num, 0) / d * 100 if d else 0
+
+    def q(self, dataset, metrics, **kwargs):
+        sort = kwargs.get("sort", "metric_desc")
+        limit = kwargs.get("limit", 200)
+        if sort.startswith("metric"):
+            kwargs["limit"] = 200  # the engine ranks by the sum; rank the ratio here
+        # The engine may hand back a cached answer: never edit it in place.
+        res = copy.deepcopy(self._ctx.q(dataset, list(dict.fromkeys([*metrics, self.den])),
+                                        **kwargs))
+        # A row's values may be the very dict that is the totals: divide once.
+        for values in {id(v): v for v in [*(r["values"] for r in res["rows"]), res["totals"]]}.values():
+            self._fix(values)
+        if sort.startswith("metric") and kwargs.get("dim") != "month":
+            res["rows"] = sorted(res["rows"], key=lambda r: r["values"][self.num],
+                                 reverse=sort == "metric_desc")[:limit]
+        return res
+
+    def totals(self, *args, **kwargs):
+        return self.q(*args, **kwargs)["totals"]
+
+    def by(self, dataset, metrics, dim, **kwargs):
+        return {r["label"]: r["values"] for r in self.q(dataset, metrics, dim=dim, **kwargs)["rows"]}
+
+
+def _vs(now: float, before: float, unit: str, key: str, values: dict) -> str:
+    """«۱۲٪ افزایش» — or, for a figure already in percent, «۲ واحد درصد کاهش»."""
+    if unit == "percent":
+        diff = now - before
+        values[key] = V(abs(diff), "pp")
+        return f"{{{key}}} واحد درصد {trend_word(diff)}"
+    pct = change(now, before)
+    if pct is None:
+        return ""
+    values[key] = V(abs(pct), "percent")
+    return f"{{{key}}} {trend_word(pct)}"
 
 
 def _answer(ctx, p, question, period, metric, ds, unit, noun, scope, understood, when,
@@ -586,12 +734,16 @@ def _answer(ctx, p, question, period, metric, ds, unit, noun, scope, understood,
             return _not_understood("ماه قبل از این دوره در سامانه نیست.")
         va = ctx.totals(p.dataset, p.metrics, period=a, filters=p.filters).get(metric, 0)
         vb = ctx.totals(p.dataset, p.metrics, period=b, filters=p.filters).get(metric, 0)
-        pct = change(vb, va)
+        if not va and not vb:
+            return {"ok": True, "understood": understood, "values": {},
+                    "answer": f"برای {noun}{' ' + scope if scope else ''} در {a.label} و {b.label} عددی ثبت نشده است."}
+        values = {"a": V(va, unit), "b": V(vb, unit)}
+        moved = _vs(vb, va, unit, "p", values)
         text = f"{noun}{' ' + scope if scope else ''} در {b.label} {{b}} و در {a.label} {{a}} بود"
-        text += f"؛ یعنی {{p}} {trend_word(pct)}." if pct is not None else "."
+        text += f"؛ یعنی {moved}." if moved else "."
         return {"ok": True, "understood": f"مقایسه · {noun} {scope} · {a.label} و {b.label}".replace("  ", " "),
                 "answer": text,
-                "values": {"a": V(va, unit), "b": V(vb, unit), "p": V(abs(pct or 0), "percent")},
+                "values": values,
                 "table": _table(["ماه", noun], [[a.label, V(va, unit)], [b.label, V(vb, unit)]])}
 
     # -- a breakdown (or a trend, which is a breakdown by month) ------
@@ -620,6 +772,18 @@ def _answer(ctx, p, question, period, metric, ds, unit, noun, scope, understood,
                       "b": V(lead["values"]["target"], "rial")}
         if ranks_target and has_target and p.group != "month":
             pass
+        elif p.versus and len(rows) >= 2:
+            values = {}
+            parts = []
+            for i, r in enumerate(rows):
+                values[f"v{i}"] = V(r["values"][metric], unit)
+                parts.append(f"«{r['label']}» {{v{i}}}")
+            first, second = rows[0], rows[1]
+            gap = _vs(first["values"][metric], second["values"][metric], unit, "g", values)
+            text = f"{noun} {when}: " + "، ".join(parts) + "."
+            if gap and first["values"][metric] != second["values"][metric]:
+                text += (f" «{first['label']}» {gap.replace('افزایش', 'بیشتر').replace('کاهش', 'کمتر')}"
+                         f" از «{second['label']}» است.")
         elif p.group == "month":
             # The running month is half a month: it must not be the end
             # point of «از … به …», or every trend ends in a collapse.
@@ -675,12 +839,20 @@ def _answer(ctx, p, question, period, metric, ds, unit, noun, scope, understood,
         text = (f"{when} دریافت‌ها {{a}} و پرداخت‌ها {{b}} بود؛ "
                 "خالص {c}.")
         values |= {"b": V(out, "rial"), "c": V(value - out, "rial")}
-    if p.time.get("mode") == "selected" and ctx.prev and period == ctx.period:
-        before = ctx.totals(p.dataset, p.metrics, period=ctx.prev, filters=p.filters).get(metric, 0)
-        pct = change(value, before)
-        if pct is not None:
-            text += f" نسبت به ماه قبل {{d}} {trend_word(pct)} دارد."
-            values["d"] = V(abs(pct), "percent")
+    if p.time.get("mode") == "selected" and value:
+        prev_p, year_ago = insights._neighbours(period)
+        running = insights._progress(period)
+        if prev_p and not running:
+            before = ctx.totals(p.dataset, p.metrics, period=prev_p, filters=p.filters).get(metric, 0)
+            moved = _vs(value, before, unit, "d", values) if before else ""
+            if moved:
+                text += f" نسبت به ماه قبل {moved} دارد."
+        if year_ago and not running:
+            ago = ctx.totals(p.dataset, p.metrics, period=year_ago, filters=p.filters).get(metric, 0)
+            moved = _vs(value, ago, unit, "y", values) if ago else ""
+            if moved:
+                text += f" نسبت به همین ماه پارسال ({{ya}}) {moved}."
+                values["ya"] = V(ago, unit)
     if not value:
         text = nothing
     return {"ok": True, "understood": understood, "answer": text, "values": values}
@@ -730,7 +902,7 @@ def _why(ctx, p, period, metric, ds, unit, noun, scope, nothing) -> dict:
 
     delta = now_t - before_t
     pct = change(now_t, before_t)
-    additive = ds.metric(metric).agg in ("sum", "count")
+    additive = ds.metric(metric).agg in ("sum", "count") and not p.topic.ratio_of
     du = "pp" if unit == "percent" else unit
     word = trend_word(delta if pct is None else pct)
     other = trend_word(-(delta or 1))
