@@ -4,6 +4,7 @@ import api from "@/api/client";
 import { useMoney, loadMoneySettings } from "@/composables/useMoney";
 import { apiError } from "@/components/crm/formError";
 import Skeleton from "@/components/Skeleton.vue";
+import { useAuthStore } from "@/stores/auth";
 
 /**
  * تحلیل هوشمند — a written reading of the month, and a box to ask questions.
@@ -25,6 +26,8 @@ interface Answer {
   ok: boolean; understood?: string; answer: string; values: Record<string, Num>;
   table?: { columns: string[]; rows: (string | Num)[][] };
   suggestions?: string[];
+  /** Sent back with the next question, so «ماه قبلش؟» is read against this one. */
+  context?: Record<string, unknown>;
 }
 
 const { money, unitLabel } = useMoney();
@@ -42,15 +45,11 @@ const error = ref("");
 const question = ref("");
 const asking = ref(false);
 const thread = ref<{ q: string; a: Answer }[]>([]);
+/** The last answered question's context — null starts a fresh conversation. */
+const conversation = ref<Record<string, unknown> | null>(null);
 
-const EXAMPLES = [
-  "۵ استان با بیشترین فروش",
-  "کدام کارشناس کمترین تحقق تارگت را دارد؟",
-  "روند فروش ۶ ماه اخیر",
-  "سود امسال",
-  "ضایعات هر خط تولید",
-  "بیشترین پرداخت‌ها به تفکیک سرفصل",
-];
+/** Sent by the server, from the sections this viewer may read. */
+const examples = ref<string[]>([]);
 
 function fmt(n: Num | null | undefined): string {
   if (!n || n.v === null || n.v === undefined) return "—";
@@ -96,6 +95,7 @@ async function load() {
     sections.value = data.sections ?? [];
     summary.value = data.summary ?? [];
     comparedTo.value = data.compared_to;
+    examples.value = data.examples ?? [];
     periodLabel.value = data.period?.label ?? "";
     if (data.period && period.value !== data.period.id) period.value = data.period.id;
   } catch (e) {
@@ -110,8 +110,11 @@ async function ask(text?: string) {
   if (!q || asking.value) return;
   asking.value = true;
   try {
-    const { data } = await api.post("/dashboards/ask/", { question: q, period: period.value });
+    const { data } = await api.post("/dashboards/ask/", {
+      question: q, period: period.value, context: conversation.value,
+    });
     thread.value.unshift({ q, a: data });
+    if (data.context) conversation.value = data.context;
     question.value = "";
   } catch (e) {
     thread.value.unshift({ q, a: { ok: false, answer: apiError(e), values: {} } });
@@ -120,13 +123,63 @@ async function ask(text?: string) {
   }
 }
 
+/**
+ * A small bar per row when an answer is a trend over months — the shape is
+ * read faster than the column of figures under it.
+ */
+function bars(a: Answer): { label: string; pct: number; text: string }[] {
+  const t = a.table;
+  if (!t || t.columns[0] !== "ماه" || t.rows.length < 3) return [];
+  const nums = t.rows.map((r) => (typeof r[1] === "string" ? null : r[1]?.v ?? null));
+  const max = Math.max(...nums.map((n) => Math.abs(n ?? 0)));
+  if (!max) return [];
+  return t.rows.map((r, i) => ({
+    label: String(r[0]),
+    pct: (Math.abs(nums[i] ?? 0) / max) * 100,
+    text: typeof r[1] === "string" ? r[1] : fmt(r[1]),
+  }));
+}
+
+// -- for administrators: the questions «بپرس» did not understand ---------
+const auth = useAuthStore();
+const isAdmin = computed(() => !!auth.me && (auth.me.is_superuser || auth.me.role === "admin"));
+interface Missed { question: string; times: number; last: string }
+const log = ref<{ total: number; understood: number; missed: Missed[] } | null>(null);
+const logOpen = ref(false);
+async function loadLog() {
+  logOpen.value = !logOpen.value;
+  if (!logOpen.value || log.value) return;
+  try {
+    const { data } = await api.get("/dashboards/ask/log/", { params: { days: 30 } });
+    log.value = data;
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
+
+const chips = computed(() => {
+  const last = thread.value[0]?.a.suggestions;
+  return last?.length ? last : examples.value;
+});
+
 const periodsNewestFirst = computed(() => [...periods.value].reverse());
 
 onMounted(async () => {
   await loadMoneySettings();
   await load();
 });
-watch(period, (now, before) => { if (before !== null && now !== before) load(); });
+watch(period, (now, before) => {
+  if (before !== null && now !== before) {
+    // Another month on the picker is another conversation.
+    conversation.value = null;
+    load();
+  }
+});
+
+function restart() {
+  conversation.value = null;
+  thread.value = [];
+}
 </script>
 
 <template>
@@ -154,7 +207,9 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
           v-model="question"
           type="text"
           maxlength="300"
-          :placeholder="`بپرسید… مثلاً «فروش تهران در ${periodLabel || 'این ماه'}»`"
+          :placeholder="conversation
+            ? 'ادامه بدهید… مثلاً «ماه قبلش؟»، «اصفهان چطور؟» یا «به تفکیک کارشناس»'
+            : `بپرسید… مثلاً «فروش تهران در ${periodLabel || 'این ماه'}»`"
           class="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/30"
         />
         <button
@@ -165,9 +220,15 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
           {{ asking ? "…" : "بپرس" }}
         </button>
       </form>
-      <div v-if="!thread.length" class="flex flex-wrap gap-1.5">
+      <p v-if="conversation" class="flex items-center justify-between text-[11px] text-slate-400">
+        <span>سؤال بعدی در ادامه‌ی همین گفتگو خوانده می‌شود.</span>
+        <button class="text-brand-600 hover:underline" @click="restart">گفتگوی تازه</button>
+      </p>
+      <!-- Always right under the box: the last answer's follow-ups, or the
+           starting questions before anything has been asked. -->
+      <div v-if="chips.length" class="flex flex-wrap gap-1.5">
         <button
-          v-for="ex in EXAMPLES" :key="ex"
+          v-for="ex in chips" :key="ex"
           class="text-xs rounded-full border border-slate-200 px-2.5 py-1 text-slate-500 hover:bg-slate-50"
           @click="ask(ex)"
         >{{ ex }}</button>
@@ -182,6 +243,16 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
             <template v-else>{{ pc.t }}</template>
           </template>
         </p>
+        <div v-if="bars(item.a).length" class="flex items-end gap-1 h-24 pt-2" aria-hidden="true">
+          <div
+            v-for="b in bars(item.a)" :key="b.label"
+            class="flex-1 min-w-0 flex flex-col items-center justify-end h-full"
+            :title="`${b.label}: ${b.text}`"
+          >
+            <div class="w-full max-w-8 rounded-t bg-brand-500/70" :style="{ height: `${Math.max(b.pct, 2)}%` }" />
+            <span class="mt-1 text-[10px] text-slate-400 truncate w-full text-center">{{ b.label.split(" ")[0] }}</span>
+          </div>
+        </div>
         <div v-if="item.a.table?.rows.length" class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
@@ -197,13 +268,6 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
               </tr>
             </tbody>
           </table>
-        </div>
-        <div v-if="item.a.suggestions?.length" class="flex flex-wrap gap-1.5">
-          <button
-            v-for="ex in item.a.suggestions" :key="ex"
-            class="text-xs rounded-full border border-slate-200 px-2.5 py-1 text-slate-500 hover:bg-slate-50"
-            @click="ask(ex)"
-          >{{ ex }}</button>
         </div>
       </div>
     </div>
@@ -268,6 +332,31 @@ watch(period, (now, before) => { if (before !== null && now !== before) load(); 
             </span>
           </li>
         </ul>
+      </div>
+
+      <!-- مدیر سامانه: سؤال‌هایی که «بپرس» نفهمید -->
+      <div v-if="isAdmin" class="bg-surface rounded-card shadow-soft p-4 space-y-3">
+        <button class="flex w-full items-center justify-between text-sm text-slate-500" @click="loadLog">
+          <span>سؤال‌هایی که «بپرس» متوجه نشد (۳۰ روز اخیر)</span>
+          <span>{{ logOpen ? "▲" : "▼" }}</span>
+        </button>
+        <template v-if="logOpen && log">
+          <p class="text-xs text-slate-400">
+            {{ FA.format(log.total) }} سؤال پرسیده شد؛
+            {{ FA.format(log.understood) }} سؤال
+            ({{ FA.format(log.total ? (log.understood / log.total) * 100 : 0) }}٪) جواب گرفت.
+          </p>
+          <p v-if="!log.missed.length" class="text-sm text-slate-500">سؤال بی‌جوابی ثبت نشده است.</p>
+          <ul v-else class="divide-y divide-slate-100 text-sm">
+            <li v-for="m in log.missed" :key="m.question" class="flex items-center justify-between gap-3 py-1.5">
+              <span class="text-ink">{{ m.question }}</span>
+              <span class="shrink-0 text-xs text-slate-400">{{ FA.format(m.times) }} بار</span>
+            </li>
+          </ul>
+          <p class="text-[11px] text-slate-400">
+            کلمه‌های پرتکرار این فهرست را می‌شود به واژه‌نامه‌ی «بپرس» اضافه کرد.
+          </p>
+        </template>
       </div>
 
       <p class="text-[11px] text-slate-400 px-1">

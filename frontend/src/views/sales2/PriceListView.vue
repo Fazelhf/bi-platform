@@ -1,24 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { sales2Api, type PriceSheet } from "@/api/sales2";
+import { sales2Api, type PriceMonth, type PriceSheet } from "@/api/sales2";
 import ExcelImport from "@/components/ExcelImport.vue";
 import MoneyInput from "@/components/MoneyInput.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import { apiError } from "@/components/crm/formError";
-import { toast } from "@/composables/useUi";
+import { confirm, toast } from "@/composables/useUi";
 import { MONTH_NAMES, toJalali } from "@/utils/jalali";
 
 /**
- * لیست قیمت — one list per Jalali month, the company workbook's four sheets
- * and its formula:
+ * لیست قیمت — the company workbook's four sheets and its formula:
  *
  *   قیمت هر رول = عرض × متراژ × فی ۰۲ × ضریب ÷ ۱۰۰۰ + اجرت برش
  *
- * A document is priced from the list of the month it is dated in. A month
- * without its own list uses the latest earlier one; to change prices for the
- * month, copy that list into it (or import the month's workbook) and edit.
- * Export writes the same workbook back, formulas included.
+ * With inflation a month can carry several lists — «لیست ۱ از ۱ شهریور، لیست
+ * ۲ از ۶ شهریور». Each holds from its day until the next, and a document is
+ * priced (and costed, so its commission) from the one in force on its date.
+ * A new list starts as a copy of the one before it; edit, or import the
+ * workbook for that day. Export writes the same workbook back, formulas included.
  */
 const FA = new Intl.NumberFormat("fa-IR");
 const fa = (v: number | string | null | undefined) => FA.format(Math.round(Number(v ?? 0)));
@@ -30,6 +30,19 @@ const month = ref(now.jm);
 const monthLabel = (y: number, m: number) => `${MONTH_NAMES[m - 1]} ${FA.format(y).replace(/٬/g, "")}`;
 
 const sheets = ref<PriceSheet[]>([]);
+/** The version shown (its start day); null: the month has no list of its own. */
+const day = ref<number | null>(null);
+const versions = ref<PriceMonth["versions"]>([]);
+const newDay = ref(now.jy === year.value && now.jm === month.value ? now.jd : 1);
+const dayLabel = (d: number) => `${FA.format(d)} ${MONTH_NAMES[month.value - 1]}`;
+const daysInMonth = computed(() => (month.value <= 6 ? 31 : 30));
+
+function apply(data: PriceMonth) {
+  sheets.value = data.sheets;
+  versions.value = data.versions;
+  day.value = data.day;
+  if (!sheets.value.some((s) => s.id === active.value)) active.value = sheets.value[0]?.id ?? null;
+}
 const active = ref<number | null>(null);
 const loading = ref(true);
 const busy = ref(false);
@@ -39,19 +52,18 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    sheets.value = (await sales2Api.priceMonth(year.value, month.value)).sheets;
-    if (!sheets.value.some((s) => s.id === active.value)) active.value = sheets.value[0]?.id ?? null;
+    apply(await sales2Api.priceMonth(year.value, month.value, day.value));
   } catch (e) {
     error.value = apiError(e);
   } finally {
     loading.value = false;
   }
 }
-watch([year, month], load);
+watch([year, month], () => { day.value = null; load(); });
+function pick(d: number) { day.value = d; load(); }
 onMounted(load);
 
 const sheet = computed(() => sheets.value.find((s) => s.id === active.value) ?? null);
-const ownMonth = computed(() => sheets.value.length > 0 && sheets.value.every((s) => s.is_own_month));
 
 function price(width: number, length: number, cut: string, waste: string | null, pct: number): number {
   const s = sheet.value!;
@@ -63,12 +75,24 @@ async function copyHere() {
   busy.value = true;
   try {
     const kind = sheet.value ? [sheet.value.grammage, sheet.value.is_official] : null;
-    sheets.value = (await sales2Api.copyPriceMonth(year.value, month.value)).sheets;
+    apply(await sales2Api.copyPriceMonth(year.value, month.value, newDay.value));
     active.value = sheets.value.find((s) => kind && s.grammage === kind[0] && s.is_official === kind[1])?.id
       ?? sheets.value[0]?.id ?? null;
-    toast.success(`لیست قیمت ${monthLabel(year.value, month.value)} ساخته شد؛ حالا ویرایش کنید.`);
+    toast.success(`لیست قیمت از ${dayLabel(newDay.value)} ساخته شد؛ حالا ویرایش کنید.`);
   } catch (e) { error.value = apiError(e); }
   finally { busy.value = false; }
+}
+
+async function removeVersion() {
+  if (!day.value) return;
+  const ok = await confirm({
+    title: `حذف لیست از ${dayLabel(day.value)}؟`,
+    message: "از این روز لیست قبلی اعمال می‌شود. اسناد صادرشده قیمت و فی خودشان را نگه می‌دارند.",
+    danger: true,
+  });
+  if (!ok) return;
+  try { apply(await sales2Api.deletePriceVersion(year.value, month.value, day.value)); }
+  catch (e) { error.value = apiError(e); }
 }
 
 async function save() {
@@ -81,18 +105,18 @@ async function save() {
       rows: s.rows.map((r) => ({ ...r, waste_pct: r.waste_pct === "" ? null : r.waste_pct })),
     });
     Object.assign(s, saved, { is_own_month: true });
-    toast.success(`«${s.name}» ${monthLabel(year.value, month.value)} ذخیره شد.`);
+    toast.success(`«${s.name}» از ${dayLabel(s.jalali_day)} ذخیره شد.`);
   } catch (e) { error.value = apiError(e); }
   finally { busy.value = false; }
 }
 
 async function exportFile() {
   try {
-    const blob = await sales2Api.exportPrices(year.value, month.value);
+    const blob = await sales2Api.exportPrices(year.value, month.value, day.value);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `لیست-قیمت-${MONTH_NAMES[month.value - 1]}-${year.value}.xlsx`;
+    a.download = `لیست-قیمت-${day.value ?? ""}-${MONTH_NAMES[month.value - 1]}-${year.value}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   } catch (e) { error.value = apiError(e); }
@@ -114,21 +138,37 @@ const years = computed(() => [now.jy - 1, now.jy, now.jy + 1]);
         <option v-for="y in years" :key="y" :value="y">{{ FA.format(y).replace(/٬/g, "") }}</option>
       </select>
       <div class="flex-1" />
-      <ExcelImport import-key="sales2-price-list" label="ورود اکسل لیست قیمت" :year="year" :month="month" @done="load" />
+      <ExcelImport import-key="sales2-price-list" label="ورود اکسل لیست قیمت" :year="year" :month="month" :day="newDay" @done="load" />
       <button class="rounded-xl px-3 py-2 text-sm bg-slate-100 text-slate-700" :disabled="!sheets.length" @click="exportFile">خروجی اکسل</button>
     </div>
 
     <div v-if="loading"><Skeleton class="h-64 rounded-card" /></div>
     <EmptyState v-else-if="!sheets.length" title="برای این ماه یا قبل از آن لیست قیمتی نیست" hint="اکسل لیست قیمت را برای این ماه وارد کنید." />
     <template v-else>
-      <div v-if="!ownMonth" class="bg-amber-50 text-amber-800 text-sm rounded-xl px-4 py-3 flex flex-wrap items-center gap-3">
-        <span>
-          {{ monthLabel(year, month) }} لیست قیمت خودش را ندارد؛ لیست
-          {{ monthLabel(sheets[0].jalali_year, sheets[0].jalali_month) }} در این ماه اعمال می‌شود.
+      <!-- The month's versions: «لیست ۱ از ۱ شهریور · لیست ۲ از ۶ شهریور» -->
+      <div class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2">
+        <span class="text-xs text-slate-500">لیست‌های {{ monthLabel(year, month) }}:</span>
+        <button
+          v-for="v in versions" :key="v.day"
+          class="rounded-xl px-3 py-1.5 text-sm"
+          :class="v.day === day ? 'bg-panel text-white' : 'bg-slate-100 text-slate-600'"
+          @click="pick(v.day)"
+        >لیست {{ FA.format(v.n) }} · از {{ dayLabel(v.day) }}</button>
+        <span v-if="!versions.length" class="text-xs text-amber-700">
+          این ماه لیست خودش را ندارد؛ لیست
+          {{ monthLabel(sheets[0].jalali_year, sheets[0].jalali_month) }} (از روز {{ FA.format(sheets[0].jalali_day) }}) اعمال می‌شود.
         </span>
-        <button class="rounded-xl px-3 py-1.5 text-sm bg-amber-600 text-white" :disabled="busy" @click="copyHere">
-          ساخت لیست {{ monthLabel(year, month) }} از روی آن
+        <div class="flex-1" />
+        <label class="flex items-center gap-1 text-xs text-slate-500">
+          لیست جدید از روز
+          <select v-model.number="newDay" class="bg-slate-100 rounded-lg px-2 py-1.5 text-sm outline-none">
+            <option v-for="d in daysInMonth" :key="d" :value="d">{{ FA.format(d) }}</option>
+          </select>
+        </label>
+        <button class="rounded-xl px-3 py-1.5 text-sm bg-amber-600 text-white" :disabled="busy || versions.some((v) => v.day === newDay)" @click="copyHere">
+          + ساخت (کپی از لیست قبلی)
         </button>
+        <button v-if="day" class="rounded-xl px-3 py-1.5 text-sm bg-red-50 text-red-600" @click="removeVersion">حذف این لیست</button>
       </div>
 
       <div class="flex flex-wrap gap-2">
@@ -153,7 +193,7 @@ const years = computed(() => [now.jy - 1, now.jy, now.jy + 1]);
           <label class="text-xs text-slate-500 mb-1 block">{{ t.min_qty ? `از ${FA.format(t.min_qty)} رول` : "کمتر" }} +٪</label>
           <input v-model.number="t.pct" :disabled="!sheet.is_own_month" class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none w-20" inputmode="decimal" />
         </div>
-        <p class="text-xs text-slate-400 flex-1">لیست {{ monthLabel(sheet.jalali_year, sheet.jalali_month) }}</p>
+        <p class="text-xs text-slate-400 flex-1">معتبر از {{ FA.format(sheet.jalali_day) }} {{ monthLabel(sheet.jalali_year, sheet.jalali_month) }} تا لیست بعدی</p>
         <button v-if="sheet.is_own_month" class="bg-panel text-white rounded-xl px-4 py-2 text-sm" :disabled="busy" @click="save">ذخیره</button>
       </div>
 

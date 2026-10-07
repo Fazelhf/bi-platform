@@ -73,16 +73,16 @@ def read_workbook(fileobj) -> list[dict]:
 
 
 @transaction.atomic
-def save_month(sheets: list[dict], jy: int, jm: int) -> list[PriceSheet]:
+def save_month(sheets: list[dict], jy: int, jm: int, jd: int = 1) -> list[PriceSheet]:
     """The month's sheets, replacing that month's own (earlier months untouched)."""
     saved = []
     for sh in sheets:
         PriceSheet.objects.filter(grammage=sh["grammage"], is_official=sh["is_official"],
-                                  jalali_year=jy, jalali_month=jm).delete()
+                                  jalali_year=jy, jalali_month=jm, jalali_day=jd).delete()
         obj = PriceSheet.objects.create(
             name=f"{'رسمی' if sh['is_official'] else 'غیر رسمی'} {sh['grammage']}",
             grammage=sh["grammage"], is_official=sh["is_official"],
-            base_fi_rial=sh["base_fi_rial"], jalali_year=jy, jalali_month=jm,
+            base_fi_rial=sh["base_fi_rial"], jalali_year=jy, jalali_month=jm, jalali_day=jd,
         )
         default_waste = obj.waste_pct
         for i, r in enumerate(sh["rows"]):
@@ -97,7 +97,7 @@ def save_month(sheets: list[dict], jy: int, jm: int) -> list[PriceSheet]:
     return saved
 
 
-def copy_to_month(sheets: list[PriceSheet], jy: int, jm: int) -> list[PriceSheet]:
+def copy_to_month(sheets: list[PriceSheet], jy: int, jm: int, jd: int = 1) -> list[PriceSheet]:
     """Carry the sheets in force into a month of its own, ready to edit."""
     data = [{
         "grammage": s.grammage, "is_official": s.is_official, "base_fi_rial": s.base_fi_rial,
@@ -105,14 +105,14 @@ def copy_to_month(sheets: list[PriceSheet], jy: int, jm: int) -> list[PriceSheet
                   "print_fee_rial": r.print_fee_rial, "waste_pct": r.waste_pct, "note": r.note}
                  for r in s.rows.all()],
     } for s in sheets]
-    created = save_month(data, jy, jm)
+    created = save_month(data, jy, jm, jd)
     for new, old in zip(created, sheets):
         new.waste_pct, new.qty_tiers = old.waste_pct, old.qty_tiers
         new.save(update_fields=["waste_pct", "qty_tiers"])
     return created
 
 
-def export_workbook(sheets: list[PriceSheet], jy: int, jm: int) -> bytes:
+def export_workbook(sheets: list[PriceSheet], jy: int, jm: int, jd: int = 1) -> bytes:
     """The company's layout: A1 title, row 2 date and «فی 02», formula prices."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font
@@ -126,7 +126,7 @@ def export_workbook(sheets: list[PriceSheet], jy: int, jm: int) -> bytes:
         tiers = sorted(sh.qty_tiers or [], key=lambda t: -t["min_qty"])
         ws["A1"] = sh.name
         ws["A1"].font = Font(bold=True, size=13)
-        ws["A2"] = f"{jy}/{jm:02d}/01"
+        ws["A2"] = f"{jy}/{jm:02d}/{jd:02d}"
         ws["C2"] = "تاریخ:"
         ws["D2"] = int(sh.base_fi_rial)
         ws["E2"] = f"فی 02 {'رسمی' if sh.is_official else 'غیر رسمی'}:"

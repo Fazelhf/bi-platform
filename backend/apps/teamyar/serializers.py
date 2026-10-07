@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import LogEntry, Meeting, Phase, Task
+from .models import LogEntry, Meeting, Module, Phase, Task
 
 
 class PhaseSerializer(serializers.ModelSerializer):
@@ -9,9 +9,17 @@ class PhaseSerializer(serializers.ModelSerializer):
         fields = ["id", "title", "order", "color"]
 
 
+class ModuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Module
+        fields = ["id", "title", "owner", "specialist", "keywords", "starts_on", "ends_on",
+                  "in_scope", "order"]
+
+
 class TaskSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
     phase_title = serializers.CharField(source="phase.title", read_only=True, default="")
+    module_title = serializers.CharField(source="module.title", read_only=True, default="")
     is_overdue = serializers.BooleanField(read_only=True)
     days_left = serializers.IntegerField(read_only=True)
 
@@ -20,7 +28,7 @@ class TaskSerializer(serializers.ModelSerializer):
         fields = [
             "id", "phase", "phase_title", "title", "description", "owner",
             "start_on", "end_on", "progress", "status", "status_label",
-            "is_milestone", "depends_on", "done_on", "order",
+            "is_milestone", "depends_on", "done_on", "order", "module", "module_title",
             "is_overdue", "days_left", "updated_at",
         ]
         read_only_fields = ["done_on"]
@@ -41,13 +49,14 @@ class TaskSerializer(serializers.ModelSerializer):
 class MeetingSerializer(serializers.ModelSerializer):
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
     status_label = serializers.CharField(source="get_status_display", read_only=True)
+    module_title = serializers.CharField(source="module.title", read_only=True, default="")
 
     class Meta:
         model = Meeting
         fields = [
             "id", "title", "kind", "kind_label", "status", "status_label",
             "held_at", "duration_min", "attendees", "agenda", "summary",
-            "decisions", "rating", "task",
+            "decisions", "rating", "task", "module", "module_title",
         ]
 
     def validate_rating(self, value):

@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.sales2 import views, views_pricing
+from apps.sales2 import views, views_grades, views_pricing
 
 router = DefaultRouter()
 router.register("warehouses", views.WarehouseViewSet, basename="sales2-warehouse")
@@ -31,6 +31,9 @@ urlpatterns = [
     path("commission/tiers/", views_pricing.CommissionTiersView.as_view(), name="sales2-commission-tiers"),
     path("commission/export/", views_pricing.CommissionExportView.as_view(), name="sales2-commission-export"),
     path("summary/", views.SummaryView.as_view(), name="sales2-summary"),
+    path("kpis/", views_grades.KpiView.as_view(), name="sales2-kpis"),
+    path("grades/", views_grades.GradesView.as_view(), name="sales2-grades"),
+    path("grades/<int:customer_id>/", views_grades.GradeSetView.as_view(), name="sales2-grade-set"),
     path("receivables/", views.ReceivablesView.as_view(), name="sales2-receivables"),
     path("sales-list/", views.SalesListView.as_view(), name="sales2-sales-list"),
     path("sales-list/export/", views.SalesListExportView.as_view(), name="sales2-sales-list-export"),

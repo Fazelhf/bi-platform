@@ -149,6 +149,11 @@ const router = createRouter({
           component: () => import("@/views/sales2/ReceivablesView.vue"),
         },
         {
+          path: "grades",
+          name: "sales2-grades",
+          component: () => import("@/views/sales2/GradesView.vue"),
+        },
+        {
           path: "commission",
           name: "sales2-commission",
           component: () => import("@/views/sales2/CommissionView.vue"),

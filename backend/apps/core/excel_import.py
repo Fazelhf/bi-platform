@@ -46,7 +46,7 @@ def fold(text) -> str:
 @dataclass
 class Col:
     name: str
-    kind: str = "text"  # text | int | money | date | bool | choice
+    kind: str = "text"  # text | raw | int | money | date | bool | choice
     required: bool = False
     help: str = ""
     choices: dict | None = None  # label → value, for kind="choice"
@@ -154,7 +154,7 @@ class Importer:
         guide.append(["ستون", "الزامی", "نوع", "توضیح"])
         for cell in guide[guide.max_row]:
             cell.font = Font(bold=True)
-        kinds = {"text": "متن", "int": "عدد صحیح", "money": "مبلغ (ریال)", "date": "تاریخ شمسی ۱۴۰۵/۰۷/۰۱",
+        kinds = {"text": "متن", "raw": "متن", "int": "عدد صحیح", "money": "مبلغ (ریال)", "date": "تاریخ شمسی ۱۴۰۵/۰۷/۰۱",
                  "bool": "بله / خیر", "choice": "یکی از گزینه‌ها"}
         for c in self.columns:
             extra = f" — گزینه‌ها: {'، '.join(c.choices)}" if c.choices else ""
@@ -262,6 +262,10 @@ def _typed(c: Col, v):
         return None
     if c.kind == "text":
         return fold(v)
+    if c.kind == "raw":
+        # Free text kept as typed — half-spaces, line breaks and Persian
+        # digits survive; only the edges are trimmed.
+        return str(v).strip() or None
     if c.kind in ("int", "money"):
         s = fold(v).replace(",", "").replace("٬", "")
         try:
@@ -305,8 +309,9 @@ def _typed(c: Col, v):
 def registry() -> dict[str, Importer]:
     from apps.finance import importers as fin
     from apps.sales2 import importers as s2
+    from apps.teamyar import importers as teamyar
 
-    return {i.key: i for i in (*s2.IMPORTERS, *fin.IMPORTERS)}
+    return {i.key: i for i in (*s2.IMPORTERS, *fin.IMPORTERS, *teamyar.IMPORTERS)}
 
 
 def _importer(key: str, user) -> Importer:
@@ -326,6 +331,11 @@ def _params(imp: Importer, data) -> dict:
             if not (y and m):
                 raise ValidationError({"detail": "سال و ماه را انتخاب کنید."})
             out["year"], out["month"] = int(y), int(m)
+            # The day a version starts on — a month may carry several price lists.
+            d = int(data.get("day") or 1)
+            if not 1 <= d <= jalali.month_days(out["year"], out["month"]):
+                raise ValidationError({"detail": "روز نامعتبر است."})
+            out["day"] = d
         else:
             v = data.get(p.name)
             if v in (None, ""):

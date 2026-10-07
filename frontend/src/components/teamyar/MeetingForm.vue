@@ -3,15 +3,16 @@
 import { reactive, ref } from "vue";
 import {
   MEETING_KINDS, MEETING_STATUSES, teamyarApi, toLocalInput,
-  type Meeting, type TeamyarTask,
+  type Meeting, type Module, type TeamyarTask,
 } from "@/api/teamyar";
 import { apiError } from "@/components/crm/formError";
 import FormModal from "@/components/crm/FormModal.vue";
+import AttendeesPicker from "@/components/teamyar/AttendeesPicker.vue";
 import PickerField from "@/components/PickerField.vue";
 import JalaliDateField from "@/components/JalaliDateField.vue";
 import { todayIso } from "@/utils/jalali";
 
-const props = defineProps<{ meeting?: Meeting | null; tasks: TeamyarTask[] }>();
+const props = defineProps<{ meeting?: Meeting | null; tasks: TeamyarTask[]; modules: Module[] }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
 const m = props.meeting;
@@ -27,7 +28,9 @@ const form = reactive({
   decisions: m?.decisions ?? "",
   rating: m?.rating ?? (null as number | null),
   task: m?.task ?? (null as number | null),
+  module: m?.module ?? (null as number | null),
 });
+const MODULE_OPTIONS = props.modules.map((x) => ({ value: x.id, label: x.title }));
 const saving = ref(false);
 const error = ref("");
 
@@ -35,6 +38,7 @@ async function save() {
   saving.value = true;
   error.value = "";
   try {
+    // No module chosen: the server reads it from the title, then the activity.
     const body = { ...form, rating: form.status === "held" ? form.rating : null };
     if (m) await teamyarApi.meetings.update(m.id, body);
     else await teamyarApi.meetings.create(body);
@@ -109,8 +113,16 @@ const inp =
         </div>
       </div>
       <div>
+        <label class="block text-xs text-slate-500 mb-1">ماژول</label>
+        <PickerField
+          v-model="form.module"
+          :options="MODULE_OPTIONS"
+          placeholder="خودکار از روی عنوان" clearable
+        />
+      </div>
+      <div>
         <label class="block text-xs text-slate-500 mb-1">حاضرین</label>
-        <input v-model="form.attendees" :class="inp" placeholder="با ویرگول جدا کنید" />
+        <AttendeesPicker v-model="form.attendees" />
       </div>
       <div>
         <label class="block text-xs text-slate-500 mb-1">دستور جلسه</label>

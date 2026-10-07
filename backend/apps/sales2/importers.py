@@ -13,14 +13,29 @@ from apps.core import jalali
 from apps.core.excel_import import Col, Importer, Param, Row, fold
 from apps.crm.models import Customer, Product
 from apps.sales2 import catalog, cost_import, pricing, services
-from apps.sales2.models import AccountingCost, CustomerAccount, PriceListItem, Receipt
+from apps.sales2.models import AccountingCost, CustomerAccount, PriceListItem, Receipt, version_key
 from apps.sales2.permissions import can_use_sales2
 
+#: Month and the day the version starts on — a month may carry several
+#: price lists (and costs) as prices rise: «لیست ۲ از ۶ شهریور».
 MONTH = Param("month", "ماه", "month")
 
 
-def _month_key(ctx) -> int:
-    return ctx["params"]["year"] * 100 + ctx["params"]["month"]
+def _ymd(ctx) -> tuple[int, int, int]:
+    p = ctx["params"]
+    return p["year"], p["month"], p.get("day") or 1
+
+
+def _key(ctx) -> int:
+    return version_key(*_ymd(ctx))
+
+
+def _on(ctx):
+    return jalali.to_gregorian(*_ymd(ctx))
+
+
+def _since(obj) -> str:
+    return f"{obj.jalali_day}/{obj.jalali_month}/{obj.jalali_year}"
 
 
 def _products() -> dict[str, Product]:
@@ -81,27 +96,25 @@ class CostImporter(Sales2Importer):
                 return
         else:
             gram = 0
-        prev = (AccountingCost.objects.filter(product=prod, grammage=gram)
-                .filter(Q(jalali_year__lt=ctx["params"]["year"])
-                        | Q(jalali_year=ctx["params"]["year"], jalali_month__lte=ctx["params"]["month"]))
-                .order_by("-jalali_year", "-jalali_month").first())
+        prev = pricing.cost_row(prod, gram, _on(ctx))
         cost = v["فی حسابداری"]
         row.data = {"product": prod.id, "grammage": gram, "cost": cost}
         if prev is None:
             row.status, row.message = "new", "فی تازه"
-        elif prev.cost_rial == cost and prev.month_key == _month_key(ctx):
+        elif prev.cost_rial == cost and prev.version_key == _key(ctx):
             row.status, row.message = "same", "بدون تغییر"
         elif prev.cost_rial == cost:
-            row.status, row.message = "same", f"همان فی {prev.jalali_month}/{prev.jalali_year}"
+            row.status, row.message = "same", f"همان فی از {_since(prev)}"
         else:
             row.status = "changed"
-            row.message = f"قبلی {_money(prev.cost_rial)} ({prev.jalali_month}/{prev.jalali_year})"
+            row.message = f"قبلی {_money(prev.cost_rial)} (از {_since(prev)})"
 
     def write(self, rows, ctx, user):
-        y, m = ctx["params"]["year"], ctx["params"]["month"]
+        y, m, d = _ymd(ctx)
         for r in rows:
             AccountingCost.objects.update_or_create(
                 product_id=r.data["product"], grammage=r.data["grammage"], jalali_year=y, jalali_month=m,
+                jalali_day=d,
                 defaults={"cost_rial": r.data["cost"], "source": "ورود اکسل"},
             )
         return len(rows)
@@ -137,7 +150,7 @@ class FixedPriceImporter(Sales2Importer):
             row.status, row.message = "error", "هیچ قیمتی ندارد"
             return
         row.key = str(prod.id)
-        on = jalali.to_gregorian(ctx["params"]["year"], ctx["params"]["month"], 1)
+        on = _on(ctx)
         changes = []
         for official, price in prices.items():
             if price is None:
@@ -155,12 +168,13 @@ class FixedPriceImporter(Sales2Importer):
             row.message = "؛ ".join(changes)
 
     def write(self, rows, ctx, user):
-        y, m = ctx["params"]["year"], ctx["params"]["month"]
+        y, m, d = _ymd(ctx)
         for r in rows:
             for official, price in r.data["prices"].items():
                 if price is not None:
                     PriceListItem.objects.update_or_create(
                         product_id=r.data["product"], is_official=official, jalali_year=y, jalali_month=m,
+                        jalali_day=d,
                         defaults={"price_rial": price},
                     )
         return len(rows)
@@ -176,7 +190,7 @@ class PriceListImporter(Sales2Importer):
     key = "sales2-price-list"
     title = "لیست قیمت رول (فرمولی)"
     description = ("همان اکسل لیست قیمت شرکت: هر برگه یک گرماژ و رسمی/غیر رسمی، فی پایه در ردیف ۲. "
-                   "برگه‌های فایل جای برگه‌های همان ماه را می‌گیرند.")
+                   "لیست از روز انتخاب‌شده اعتبار دارد تا لیست بعدی؛ اگر از همان روز لیستی باشد جایگزین می‌شود.")
     params = [MONTH]
     columns = [Col("برگه"), Col("سایز", "int"), Col("متراژ", "int"),
                Col("اجرت برش", "money"), Col("اجرت چاپ", "money")]
@@ -184,12 +198,12 @@ class PriceListImporter(Sales2Importer):
     def template(self) -> bytes:
         from apps.sales2 import price_list_io
 
-        jy, jm = price_list_io.month_of(timezone.localdate())
-        sheets = list(catalog.sheets_in_force(jy, jm).values())
+        jy, jm, jd = jalali.from_gregorian(timezone.localdate())
+        sheets = list(catalog.sheets_in_force(jy, jm, jd).values())
         if not sheets:
             return super().template()
         return price_list_io.export_workbook(
-            sorted(sheets, key=lambda s: (s.grammage, not s.is_official)), jy, jm)
+            sorted(sheets, key=lambda s: (s.grammage, not s.is_official)), jy, jm, jd)
 
     def run(self, fileobj, params, user):
         from rest_framework.exceptions import ValidationError
@@ -203,7 +217,7 @@ class PriceListImporter(Sales2Importer):
         if not sheets:
             raise ValidationError({"file": "برگه‌ای با ۴۸ یا ۵۵ در نام و ستون «سایز» پیدا نشد."})
         ctx = {"params": params, "sheets": sheets}
-        in_force = catalog.sheets_in_force(params["year"], params["month"])
+        in_force = catalog.sheets_in_force(params["year"], params["month"], params.get("day") or 1)
         rows: list[Row] = []
         n = 0
         for sh in sheets:
@@ -252,7 +266,7 @@ class PriceListImporter(Sales2Importer):
 
         if not rows:
             return 0
-        price_list_io.save_month(ctx["sheets"], ctx["params"]["year"], ctx["params"]["month"])
+        price_list_io.save_month(ctx["sheets"], *_ymd(ctx))
         return sum(len(s["rows"]) for s in ctx["sheets"])
 
 

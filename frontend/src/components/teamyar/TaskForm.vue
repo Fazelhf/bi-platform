@@ -1,14 +1,16 @@
 <script setup lang="ts">
 /** ثبت / ویرایش فعالیت گانت. */
 import { reactive, ref } from "vue";
-import { STATUS_LABELS, teamyarApi, type Phase, type TeamyarTask } from "@/api/teamyar";
+import {
+  STATUS_LABELS, teamyarApi, type Module, type Phase, type TeamyarTask,
+} from "@/api/teamyar";
 import { apiError } from "@/components/crm/formError";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
 import JalaliDateField from "@/components/JalaliDateField.vue";
 import { todayIso } from "@/utils/jalali";
 
-const props = defineProps<{ task?: TeamyarTask | null; phases: Phase[]; tasks: TeamyarTask[] }>();
+const props = defineProps<{ task?: TeamyarTask | null; phases: Phase[]; tasks: TeamyarTask[]; modules: Module[] }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
 const t = props.task;
@@ -23,7 +25,9 @@ const form = reactive({
   status: t?.status ?? "todo",
   is_milestone: t?.is_milestone ?? false,
   depends_on: t?.depends_on ?? (null as number | null),
+  module: t?.module ?? (null as number | null),
 });
+const MODULE_OPTIONS = props.modules.map((x) => ({ value: x.id, label: x.title }));
 const saving = ref(false);
 const error = ref("");
 
@@ -31,6 +35,7 @@ async function save() {
   saving.value = true;
   error.value = "";
   try {
+    // No module chosen: the server reads it from the title.
     const body = { ...form, progress: Number(form.progress) || 0 };
     if (form.is_milestone) body.start_on = form.end_on;
     if (t) await teamyarApi.tasks.update(t.id, body);
@@ -81,9 +86,17 @@ const inp =
           />
         </div>
         <div>
-          <label class="block text-xs text-slate-500 mb-1">مسئول</label>
-          <input v-model="form.owner" :class="inp" placeholder="نام شخص یا تیم" />
+          <label class="block text-xs text-slate-500 mb-1">ماژول</label>
+          <PickerField
+            v-model="form.module"
+            :options="MODULE_OPTIONS"
+            placeholder="خودکار از روی عنوان" clearable
+          />
         </div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">مسئول</label>
+        <input v-model="form.owner" :class="inp" placeholder="نام شخص یا تیم" />
       </div>
       <label class="flex items-center gap-2 text-sm text-ink">
         <input v-model="form.is_milestone" type="checkbox" class="accent-amber-500" />

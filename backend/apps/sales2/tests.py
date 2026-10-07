@@ -706,3 +706,119 @@ class CutoverTests(Sales2Base):
         cutover.undo()
         self.assertFalse(SalesDocument.objects.exists())
         self.assertIsNotNone(old)
+
+
+class GradeAndDecisionTests(Sales2Base):
+    """کتاب فروش: گرید مشتری، کارت تصمیم پیش از صدور و شاخص‌ها."""
+
+    def test_grade_is_suggested_then_approved_by_management(self):
+        self.make(qty=10, price=1000)
+        rows = self.client.get(f"{URL}/grades/").data["rows"]
+        row = next(r for r in rows if r["customer"] == self.customer.id)
+        self.assertEqual(row["grade"], "")
+        self.assertIn(row["suggested"], ("A", "B", "C"))
+        self.assertEqual(set(row["parts"]), {"profit", "collection", "volume", "strategic", "service", "growth"})
+        r = self.client.post(f"{URL}/grades/{self.customer.id}/", {"grade": "SP", "strategic_score": 90}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        acc = CustomerAccount.objects.get(customer=self.customer)
+        self.assertEqual((acc.grade, acc.strategic_score), ("SP", 90))
+        self.assertEqual(self.client.post(f"{URL}/grades/{self.customer.id}/", {"grade": "Z"}, format="json").status_code, 400)
+
+    def _check(self, **kw):
+        doc = self.make(issue=False, **kw)
+        return {c["code"]: c["level"] for c in self.client.post(f"{URL}/documents/{doc['id']}/check/").data["checks"]}
+
+    def test_ungraded_customer_is_a_warning(self):
+        self.assertEqual(self._check().get("grade"), "warn")
+
+    def test_margin_below_floor_needs_a_reason(self):
+        # cost 700: price 720 is ~2.8٪ margin, under the 5٪ default floor.
+        self.assertEqual(self._check(price=720).get("margin_floor"), "block")
+        self.assertNotIn("margin_floor", self._check(price=1000))
+
+    def test_order_far_above_the_customers_pattern_needs_a_reason(self):
+        for _ in range(3):
+            self.make(qty=10)
+        self.assertEqual(self._check(qty=50).get("big_order"), "block")
+        self.assertNotIn("big_order", self._check(qty=12))
+
+    def test_credit_sale_to_grade_c_needs_a_reason(self):
+        CustomerAccount.objects.create(customer=self.customer, grade="C")
+        doc = self.make(issue=False)
+        self.client.patch(f"{URL}/documents/{doc['id']}/", {"settlement": "credit"}, format="json")
+        checks = {c["code"]: c["level"] for c in self.client.post(f"{URL}/documents/{doc['id']}/check/").data["checks"]}
+        self.assertEqual(checks.get("grade_credit"), "block")
+
+    def test_kpis(self):
+        self.make(qty=10, price=1000)
+        d = self.client.get(f"{URL}/kpis/").data
+        cur = d["current"]
+        self.assertEqual(cur["active_customers"], 1)
+        self.assertEqual(cur["new_customers"], 1)
+        self.assertEqual(cur["margin_pct"], 30.0)
+        self.assertIn("deals_without_next_action", d)
+
+
+class PriceVersionTests(Sales2Base):
+    """
+    With inflation a month carries several price lists: «لیست ۱ از ۱ شهریور،
+    لیست ۲ از ۶ شهریور». A document is priced — and costed, so commission —
+    from the version in force on its own date.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from apps.core import jalali
+        from apps.sales2.models import PriceSheet, PriceSheetRow
+
+        self.j = jalali
+        self.r79 = Product.objects.create(code="p79", name_fa="79 - 36 - ساده")
+        ProductProfile.objects.create(product=self.r79, width_mm=79, length_m=36)
+        for day, base, cost in ((1, 200000, 600000), (6, 220000, 650000), (20, 240000, 700000)):
+            sh = PriceSheet.objects.create(name="رسمی 55", grammage=55, is_official=True, base_fi_rial=base,
+                                           jalali_year=1405, jalali_month=6, jalali_day=day)
+            PriceSheetRow.objects.create(sheet=sh, width_mm=79, length_m=36, cut_fee_rial=0)
+            AccountingCost.objects.create(product=self.r79, grammage=55, cost_rial=cost,
+                                          jalali_year=1405, jalali_month=6, jalali_day=day)
+
+    def quote(self, day):
+        on = self.j.to_gregorian(1405, 6, day)
+        return self.client.get(f"{URL}/quote/", {"product": self.r79.id, "grammage": 55,
+                                                 "quantity": 200, "date": on.isoformat()}).data
+
+    def test_each_day_reads_the_list_in_force(self):
+        size = 79 * 36 * 103 / 100 / 1000
+        self.assertEqual(Decimal(self.quote(5)["price_rial"]), round(Decimal(size * 200000)))
+        self.assertEqual(Decimal(self.quote(5)["cost_rial"]), 600000)
+        self.assertEqual(Decimal(self.quote(6)["price_rial"]), round(Decimal(size * 220000)))
+        self.assertEqual(Decimal(self.quote(19)["cost_rial"]), 650000)
+        self.assertEqual(Decimal(self.quote(31)["cost_rial"]), 700000)
+        self.assertIn("1405/06/06", self.quote(10)["source"])
+
+    def test_invoice_line_keeps_the_cost_of_its_date(self):
+        def line_cost(day):
+            r = self.client.post(f"{URL}/documents/", {
+                "kind": "invoice", "customer": self.customer.id, "is_official": True,
+                "doc_date": self.j.to_gregorian(1405, 6, day).isoformat(),
+                "lines": [{"product": self.r79.id, "grammage": 55, "quantity": 10, "unit_price_rial": 900000}],
+            }, format="json")
+            self.assertEqual(r.status_code, 200, r.data)
+            return Decimal(r.data["lines"][0]["unit_cost_rial"])
+        self.assertEqual(line_cost(3), 600000)
+        self.assertEqual(line_cost(8), 650000)
+
+    def test_month_view_lists_versions_and_starts_a_new_one(self):
+        d = self.client.get(f"{URL}/price-sheets/month/", {"year": 1405, "month": 6}).data
+        self.assertEqual([v["day"] for v in d["versions"]], [1, 6, 20])
+        self.assertEqual(d["day"], 20)
+        d = self.client.get(f"{URL}/price-sheets/month/", {"year": 1405, "month": 6, "day": 6}).data
+        self.assertEqual(Decimal(d["sheets"][0]["base_fi_rial"]), 220000)
+        self.assertTrue(d["sheets"][0]["is_own_month"])
+        r = self.client.post(f"{URL}/price-sheets/month/", {"year": 1405, "month": 6, "day": 25}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual([v["day"] for v in r.data["versions"]], [1, 6, 20, 25])
+        self.assertEqual(Decimal(r.data["sheets"][0]["base_fi_rial"]), 240000)  # copied from list of the 20th
+        self.assertEqual(self.client.post(f"{URL}/price-sheets/month/", {"year": 1405, "month": 6, "day": 25},
+                                          format="json").status_code, 400)
+        r = self.client.delete(f"{URL}/price-sheets/month/?year=1405&month=6&day=25")
+        self.assertEqual([v["day"] for v in r.data["versions"]], [1, 6, 20])

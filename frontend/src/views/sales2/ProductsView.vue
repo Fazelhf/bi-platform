@@ -25,7 +25,12 @@ const cell = "w-full bg-slate-100 rounded-lg px-2 py-1 text-xs text-ink outline-
 const now = toJalali(new Date());
 const year = ref(now.jy);
 const month = ref(now.jm);
+const day = ref(now.jd);
 const monthKey = computed(() => year.value * 100 + month.value);
+/** 14050606 — the version the page reads and edits: from this day on. */
+const dayKey = computed(() => year.value * 10000 + month.value * 100 + day.value);
+const sinceLabel = (v: number | null | undefined) => (v ? `${FA.format(v % 100)} ${MONTH_NAMES[Math.floor(v / 100) % 100 - 1]}` : "");
+const daysInMonth = computed(() => (month.value <= 6 ? 31 : 30));
 const monthLabel = (m: number | null) => (m ? `${MONTH_NAMES[(m % 100) - 1]} ${FA.format(Math.floor(m / 100)).replace(/٬/g, "")}` : "");
 
 const rows = ref<ProductRow[]>([]);
@@ -40,7 +45,7 @@ async function load() {
   loading.value = true;
   try {
     const data = await sales2Api.products({
-      q: q.value.trim(), year: year.value, month: month.value,
+      q: q.value.trim(), year: year.value, month: month.value, day: day.value,
       missing: filter.value === "cost" || filter.value === "price" ? filter.value : "",
     });
     let list = data.rows;
@@ -64,7 +69,7 @@ async function load() {
 }
 let timer: ReturnType<typeof setTimeout> | undefined;
 watch(q, () => { clearTimeout(timer); timer = setTimeout(load, 300); });
-watch([filter, year, month], load);
+watch([filter, year, month, day], load);
 onMounted(load);
 
 async function toggle(r: ProductRow) {
@@ -78,9 +83,9 @@ async function saveCost(r: ProductRow, g: string) {
   const v = draft.value[k(r.id, `c${g}`)];
   if ((r.costs[g].cost_rial ?? "") === (v ?? "")) return;
   try {
-    await sales2Api.saveCost(r.id, Number(g), v || "0", year.value, month.value);
-    r.costs[g] = { cost_rial: v || "0", month: monthKey.value };
-    toast.success(`فی ${r.name_fa} برای ${monthLabel(monthKey.value)} ذخیره شد.`);
+    await sales2Api.saveCost(r.id, Number(g), v || "0", year.value, month.value, day.value);
+    r.costs[g] = { cost_rial: v || "0", month: monthKey.value, since: dayKey.value };
+    toast.success(`فی ${r.name_fa} از ${sinceLabel(dayKey.value)} ذخیره شد.`);
   } catch (e) { error.value = apiError(e); }
 }
 
@@ -89,14 +94,14 @@ async function savePrice(r: ProductRow, official: boolean) {
   const cur = official ? r.prices["0"]?.official : r.prices["0"]?.unofficial;
   if ((cur ?? "") === (v ?? "")) return;
   try {
-    await sales2Api.savePriceItem(r.id, official, v || "0", year.value, month.value);
+    await sales2Api.savePriceItem(r.id, official, v || "0", year.value, month.value, day.value);
     r.prices["0"] = { ...r.prices["0"], [official ? "official" : "unofficial"]: v || "0" };
-    toast.success(`قیمت ${r.name_fa} برای ${monthLabel(monthKey.value)} ذخیره شد.`);
+    toast.success(`قیمت ${r.name_fa} از ${sinceLabel(dayKey.value)} ذخیره شد.`);
   } catch (e) { error.value = apiError(e); }
 }
 
 const years = computed(() => [now.jy - 1, now.jy, now.jy + 1]);
-const carried = (m: number | null) => m && m !== monthKey.value;
+const carried = (since: number | null | undefined) => !!since && since !== dayKey.value;
 </script>
 
 <template>
@@ -108,6 +113,12 @@ const carried = (m: number | null) => m && m !== monthKey.value;
       <select v-model.number="year" class="bg-slate-100 rounded-xl px-3 py-2 text-sm outline-none">
         <option v-for="y in years" :key="y" :value="y">{{ FA.format(y).replace(/٬/g, "") }}</option>
       </select>
+      <label class="flex items-center gap-1 text-xs text-slate-500">
+        از روز
+        <select v-model.number="day" class="bg-slate-100 rounded-xl px-2 py-2 text-sm outline-none">
+          <option v-for="d in daysInMonth" :key="d" :value="d">{{ FA.format(d) }}</option>
+        </select>
+      </label>
       <input v-model="q" placeholder="نام یا کد کالا…" class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none flex-1 min-w-[160px]" />
       <select v-model="filter" class="bg-slate-100 rounded-xl px-3 py-2 text-sm outline-none">
         <option value="sellable">کالاهای فعال</option>
@@ -116,12 +127,13 @@ const carried = (m: number | null) => m && m !== monthKey.value;
         <option value="cost">بدون فی حسابداری</option>
         <option value="price">بدون قیمت</option>
       </select>
-      <ExcelImport import-key="sales2-costs" label="اکسل فی حسابداری" :year="year" :month="month" @done="load" />
-      <ExcelImport import-key="sales2-fixed-prices" label="اکسل قیمت غیررول" :year="year" :month="month" @done="load" />
+      <ExcelImport import-key="sales2-costs" label="اکسل فی حسابداری" :year="year" :month="month" :day="day" @done="load" />
+      <ExcelImport import-key="sales2-fixed-prices" label="اکسل قیمت غیررول" :year="year" :month="month" :day="day" @done="load" />
       <span class="text-xs text-slate-400">{{ FA.format(rows.length) }} کالا</span>
     </div>
 
     <p class="text-xs text-slate-500 px-1">
+      قیمت و فی هر روز از نسخه‌ای خوانده می‌شود که آن روز معتبر است (یک ماه می‌تواند چند لیست داشته باشد). ویرایش این صفحه از {{ sinceLabel(dayKey) }} به بعد اعمال می‌شود.
       قیمت رول‌ها از لیست قیمت {{ monthLabel(monthKey) }} (پله‌ی ۲۰۰ رول) خوانده می‌شود و در صفحه‌ی «لیست قیمت» عوض می‌شود؛ قیمت کالاهای غیررول همین‌جا.
       کالای غیرفعال در فاکتور و پیش‌فاکتور دیده نمی‌شود.
     </p>
@@ -165,7 +177,7 @@ const carried = (m: number | null) => m && m !== monthKey.value;
               </template>
               <td class="px-2 py-1">
                 <MoneyInput v-model="draft[k(r.id, `c${g}`)]" :class="[cell, !r.costs[g].cost_rial ? 'ring-1 ring-amber-300' : '']" @focusout="saveCost(r, g)" />
-                <span v-if="carried(r.costs[g].month)" class="text-[10px] text-slate-400">از {{ monthLabel(r.costs[g].month) }}</span>
+                <span v-if="carried(r.costs[g].since)" class="text-[10px] text-slate-400">از {{ sinceLabel(r.costs[g].since) }}</span>
               </td>
               <td class="px-2 text-xs ltr-nums">
                 <template v-if="r.prices[g]?.official && r.costs[g].cost_rial">

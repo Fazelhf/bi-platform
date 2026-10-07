@@ -27,6 +27,8 @@ from django.db import models
 
 from apps.core.models import TimeStampedModel
 
+from . import modules
+
 
 class Phase(TimeStampedModel):
     """A stage of the rollout — «نیازسنجی», «پیاده‌سازی», «آموزش»."""
@@ -41,6 +43,40 @@ class Phase(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.title
+
+
+class Module(TimeStampedModel):
+    """
+    یک ماژول — what goes live: «شعبه», «حسابداری», «پست و پیامک».
+
+    The charter's twelve are seeded by migration; management adds the rest
+    as Teamyar splits the work. Progress is counted per module and then
+    averaged over those `in_scope` — see `progress`.
+    """
+
+    title = models.CharField("نام ماژول", max_length=120)
+    owner = models.CharField("مسئول داخلی", max_length=150, blank=True)
+    specialist = models.CharField("متخصص تیمیار", max_length=150, blank=True)
+    #: Extra words that file an activity or meeting here by its title; the
+    #: module's own name always counts. Comma or line separated.
+    keywords = models.TextField("کلمات کلیدی", blank=True)
+    #: The charter's window for it — the fallback «طبق برنامه» when the
+    #: module has no activities yet. Empty for modules added later.
+    starts_on = models.DateField(null=True, blank=True)
+    ends_on = models.DateField(null=True, blank=True)
+    in_scope = models.BooleanField("در پیشرفت کل", default=True)
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ("order", "id")
+        verbose_name = "module (ماژول تیمیار)"
+
+    def __str__(self) -> str:
+        return self.title
+
+
+def _guess_module(*texts):
+    return modules.guess(Module.objects.all(), *texts)
 
 
 class Task(TimeStampedModel):
@@ -71,10 +107,20 @@ class Task(TimeStampedModel):
     )
     done_on = models.DateField(null=True, blank=True)
     order = models.PositiveIntegerField(default=0)
+    #: Which of the charter's modules this moves forward. Left empty, it is
+    #: read from the title on save — see `modules.guess`.
+    module = models.ForeignKey(
+        Module, null=True, blank=True, on_delete=models.SET_NULL, related_name="tasks"
+    )
 
     class Meta:
         ordering = ("order", "start_on", "id")
         verbose_name = "task (فعالیت تیمیار)"
+
+    def save(self, *args, **kwargs):
+        if not self.module_id:
+            self.module = _guess_module(self.title, self.phase.title if self.phase else "")
+        super().save(*args, **kwargs)
 
     @property
     def is_overdue(self) -> bool:
@@ -114,10 +160,20 @@ class Meeting(TimeStampedModel):
     task = models.ForeignKey(
         Task, null=True, blank=True, on_delete=models.SET_NULL, related_name="meetings"
     )
+    module = models.ForeignKey(
+        Module, null=True, blank=True, on_delete=models.SET_NULL, related_name="meetings"
+    )
 
     class Meta:
         ordering = ("-held_at",)
         verbose_name = "meeting (جلسه تیمیار)"
+
+    def save(self, *args, **kwargs):
+        if not self.module_id:
+            # The title, then the activity it is about. Not the agenda: one
+            # meeting's agenda routinely names three other modules.
+            self.module = _guess_module(self.title) or (self.task.module if self.task else None)
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.title

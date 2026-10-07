@@ -14,5 +14,6 @@ urlpatterns = [
     path("drill/", views.DrillView.as_view(), name="dashboards-drill"),
     path("insights/", views.InsightsView.as_view(), name="dashboards-insights"),
     path("ask/", views.AskView.as_view(), name="dashboards-ask"),
+    path("ask/log/", views.AskLogView.as_view(), name="dashboards-ask-log"),
     path("", include(router.urls)),
 ]

@@ -103,3 +103,29 @@ class Widget(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.title or self.get_kind_display()} · {self.dashboard.title}"
+
+
+class AskLog(models.Model):
+    """
+    Every question put to «بپرس», and whether it was understood.
+
+    The vocabulary in ``ask.py`` is fixed; this is how it grows. The questions
+    that came back «متوجه نشدم» are the words managers actually use that the
+    parser does not know yet — reviewed by an administrator, then added.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                             null=True, related_name="+")
+    question = models.CharField(max_length=300)
+    ok = models.BooleanField(default=False, db_index=True)
+    understood = models.CharField(max_length=300, blank=True)
+    answer = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        verbose_name = "سؤال بپرس"
+        verbose_name_plural = "سؤال‌های بپرس"
+
+    def __str__(self) -> str:
+        return self.question

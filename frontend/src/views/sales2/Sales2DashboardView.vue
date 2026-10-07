@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { sales2Api, type Summary } from "@/api/sales2";
+import { sales2Api, type KpiMonth, type Summary } from "@/api/sales2";
 import Skeleton from "@/components/Skeleton.vue";
 import { apiError } from "@/components/crm/formError";
 import { useMoney, loadMoneySettings } from "@/composables/useMoney";
@@ -15,11 +15,20 @@ const { money } = useMoney();
 const FA = new Intl.NumberFormat("fa-IR");
 const s = ref<Summary | null>(null);
 const error = ref("");
+const k = ref<{ current: KpiMonth; previous: KpiMonth; deals_without_next_action: number } | null>(null);
+
+/** «فروش خوب» (کتاب فروش، فصل ۱۶): beside how much was sold, how well. */
+const pct = (v: number | null) => (v == null ? "—" : `${FA.format(v)}٪`);
+function delta(cur: number | null, prev: number | null, unit = "٪") {
+  if (cur == null || prev == null) return "";
+  const d = Math.round((cur - prev) * 10) / 10;
+  return d === 0 ? "بدون تغییر" : `${d > 0 ? "▲" : "▼"} ${FA.format(Math.abs(d))}${unit} نسبت به ماه قبل`;
+}
 
 onMounted(async () => {
   try {
     await loadMoneySettings();
-    s.value = await sales2Api.summary();
+    [s.value, k.value] = await Promise.all([sales2Api.summary(), sales2Api.kpis()]);
   } catch (e) {
     error.value = apiError(e);
   }
@@ -65,6 +74,49 @@ onMounted(async () => {
           <p class="text-xl font-bold text-ink mt-1">{{ money(s.month_received_rial) }}</p>
         </router-link>
       </div>
+
+      <template v-if="k">
+        <h2 class="text-sm font-bold text-ink pt-2">کیفیت فروش ماه <span class="text-xs font-normal text-slate-400">— فروش زیاد لزوماً فروش خوب نیست</span></h2>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="bg-surface rounded-card shadow-soft p-4">
+            <p class="text-xs text-slate-500">حاشیه سود ناخالص</p>
+            <p class="text-xl font-bold mt-1" :class="k.current.margin_pct != null && k.current.margin_pct < 5 ? 'text-red-600' : 'text-ink'">{{ pct(k.current.margin_pct) }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">{{ delta(k.current.margin_pct, k.previous.margin_pct) }}</p>
+          </div>
+          <router-link :to="{ name: 'sales2-proformas' }" class="bg-surface rounded-card shadow-soft p-4 block">
+            <p class="text-xs text-slate-500">تبدیل پیش‌فاکتور به فاکتور</p>
+            <p class="text-xl font-bold text-ink mt-1">{{ pct(k.current.conversion_pct) }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">
+              {{ FA.format(k.current.converted) }} از {{ FA.format(k.current.proformas) }}
+              <template v-if="k.current.avg_conversion_days != null"> · میانگین {{ FA.format(k.current.avg_conversion_days) }} روز</template>
+            </p>
+          </router-link>
+          <router-link :to="{ name: 'sales2-receivables' }" class="bg-surface rounded-card shadow-soft p-4 block">
+            <p class="text-xs text-slate-500">وصول در سررسید</p>
+            <p class="text-xl font-bold mt-1" :class="(k.current.on_time_pct ?? 100) < 70 ? 'text-amber-600' : 'text-ink'">{{ pct(k.current.on_time_pct) }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">از {{ money(k.current.due_rial) }} سررسید این ماه</p>
+          </router-link>
+          <div class="bg-surface rounded-card shadow-soft p-4">
+            <p class="text-xs text-slate-500">خرید مجدد</p>
+            <p class="text-xl font-bold text-ink mt-1">{{ pct(k.current.repeat_pct) }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">از مشتریان ماه، در ۶ ماه قبل هم خریده‌اند</p>
+          </div>
+          <router-link :to="{ name: 'sales2-grades' }" class="bg-surface rounded-card shadow-soft p-4 block">
+            <p class="text-xs text-slate-500">مشتری فعال سودآور</p>
+            <p class="text-xl font-bold text-ink mt-1">{{ FA.format(k.current.profitable_customers) }} <span class="text-sm font-normal text-slate-400">از {{ FA.format(k.current.active_customers) }}</span></p>
+          </router-link>
+          <div class="bg-surface rounded-card shadow-soft p-4">
+            <p class="text-xs text-slate-500">مشتری جدید فعال</p>
+            <p class="text-xl font-bold text-ink mt-1">{{ FA.format(k.current.new_customers) }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">ماه قبل: {{ FA.format(k.previous.new_customers) }}</p>
+          </div>
+          <router-link :to="{ name: 'crm-today' }" class="bg-surface rounded-card shadow-soft p-4 block">
+            <p class="text-xs text-slate-500">فرصت بدون اقدام بعدی (CRM)</p>
+            <p class="text-xl font-bold mt-1" :class="k.deals_without_next_action ? 'text-red-600' : 'text-emerald-600'">{{ FA.format(k.deals_without_next_action) }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">هشدار مستقیم ضعف پیگیری</p>
+          </router-link>
+        </div>
+      </template>
 
       <h2 class="text-sm font-bold text-ink pt-2">مطالبات و کارهای باز</h2>
       <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
