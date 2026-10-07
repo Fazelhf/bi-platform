@@ -9,6 +9,7 @@ import {
 import BoardCanvas from "./BoardCanvas.vue";
 import DrillDrawer from "./DrillDrawer.vue";
 import WidgetEditor from "./WidgetEditor.vue";
+import BoardCompareModal from "./BoardCompareModal.vue";
 import {
   bottomRow, compact, newUid, newWidget, toDraft, type DraftWidget,
 } from "./layout";
@@ -38,6 +39,11 @@ const props = defineProps<{
   /** The host page's own month selector, so both halves show one period. */
   period?: number | null;
   /**
+   * A week the host page has drilled into. The cards then read that week
+   * alone and say so in their titles; back on the month, they say «ماه» again.
+   */
+  week?: number | null;
+  /**
    * Which part of the board to draw, when the page splits it around its own
    * content: "top" is every widget not marked otherwise, "bottom" the ones
    * whose `options.placement` is "bottom" (the sales page puts the trend and
@@ -56,6 +62,19 @@ const editing = ref(false);
 const showAdd = ref(false);
 const editorFor = ref<DraftWidget | null>(null);
 const drill = ref<{ widget: DraftWidget; key: string; label: string } | null>(null);
+/**
+ * The cards as seen right now. In a week, «فروش ماه» reads «فروش هفته». The
+ * plan is set per month, so «تحقق تارگت» (a week's sales against a month's
+ * plan) is left out rather than shown as a number that only looks like a shortfall.
+ */
+const WEEK_TITLES: Record<string, string> = { "فروش ماه": "فروش هفته" };
+const shown = computed(() => {
+  if (!props.week || editing.value) return widgets.value;
+  return widgets.value
+    .filter((w) => w.kind !== "progress")
+    .map((w) => (WEEK_TITLES[w.title] ? { ...w, title: WEEK_TITLES[w.title] } : w));
+});
+const comparing = ref<DraftWidget | null>(null);
 
 /**
  * «ویرایش چیدمان» is locked for now, at the company's request: the boards
@@ -123,7 +142,7 @@ async function refresh() {
   }
   loading.value = true;
   try {
-    results.value = await dashboardsApi.queryBatch(items, props.period ?? null);
+    results.value = await dashboardsApi.queryBatch(items, props.week ?? props.period ?? null);
   } finally {
     loading.value = false;
   }
@@ -131,7 +150,7 @@ async function refresh() {
 
 watch(() => props.section, load, { immediate: true });
 // The host page owns the month; following it keeps one period on one page.
-watch(() => props.period, () => board.value && refresh());
+watch(() => [props.period, props.week], () => board.value && refresh());
 
 // ------------------------------------------------------------------ editing
 function startEdit() {
@@ -275,7 +294,7 @@ const kindGroups = computed(() => [
     </div>
 
     <BoardCanvas
-      :widgets="widgets"
+      :widgets="shown"
       :results="results"
       :loading="loading"
       :editing="editing"
@@ -284,6 +303,7 @@ const kindGroups = computed(() => [
       @remove="removeWidget"
       @duplicate="duplicateWidget"
       @drill="openDrill"
+      @compare="(uid) => (comparing = widgets.find((w) => w.uid === uid) ?? null)"
     />
 
     <p v-if="editing && !widgets.length" class="text-sm text-slate-400 text-center py-8">
@@ -300,13 +320,21 @@ const kindGroups = computed(() => [
       @close="editorFor = null"
     />
 
+    <BoardCompareModal
+      v-if="comparing && catalog"
+      :widget="comparing"
+      :periods="catalog.periods"
+      :current="period ?? catalog.default_period"
+      @close="comparing = null"
+    />
+
     <DrillDrawer
       v-if="drill"
       :config="drill.widget.config"
       :data-key="drill.key"
       :label="drill.label"
       :title="drill.widget.title"
-      :period="period ?? null"
+      :period="week ?? period ?? null"
       @close="drill = null"
     />
   </section>

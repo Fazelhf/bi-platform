@@ -165,30 +165,51 @@ class ExecutiveOverviewView(APIView):
             k = m.get(code)
             return k.actual if k else None
 
-        team_revenue = actual(team, "revenue") or 0
-        org_revenue = actual(org, "revenue") or 0
-        b2b_revenue = actual(b2b, "revenue") or 0
+        # The KPI table is a cache that is only filled when someone recomputes;
+        # the trend chart reads the facts directly. When the cache is empty for
+        # a month that does have approved facts, the hero showed ۰ while the
+        # chart beside it showed the real figure — so fall back to the facts.
+        from apps.core.periods import month_nodes
+        from apps.sales.models import SalesChannel as _Ch
+
+        leaf_ids = [p.id for p in month_nodes(period)]
+        fact_revenue = {
+            r["channel"]: float(r["t"] or 0)
+            for r in FactSalesMonthly.objects.filter(
+                period_id__in=leaf_ids, status=ApprovalStatus.APPROVED
+            ).values("channel").annotate(t=Sum("revenue_rial"))
+        }
+
+        def revenue(m, channel):
+            v = actual(m, "revenue")
+            return v if v else fact_revenue.get(channel, 0)
+
+        team_revenue = revenue(team, _Ch.TEAM)
+        org_revenue = revenue(org, _Ch.ORGANIZATIONAL)
+        b2b_revenue = revenue(b2b, _Ch.B2B)
         total_sales_revenue = team_revenue + org_revenue + b2b_revenue
         production_cost = (
-            FactProductionCost.objects.filter(period=period).aggregate(
+            FactProductionCost.objects.filter(period_id__in=leaf_ids).aggregate(
                 t=Sum("amount_rial")
             )["t"]
             or 0
         )
         piece_rate_revenue = sum(
             (r.amount_rial for r in FactProductionRevenue.objects.filter(
-                period=period).select_related("product")),
+                period_id__in=leaf_ids).select_related("product")),
             0,
         )
 
         # Data-completeness signal so executives know how much to trust the view.
         def completeness(model):
-            total = model.objects.filter(period=period).count()
-            approved = model.objects.filter(
-                period=period, status=ApprovalStatus.APPROVED
-            ).count()
+            # The whole month, not just the month row: weekly sections store
+            # on their weeks, and counting only the month showed ۰ of ۰.
+            rows = model.objects.filter(period_id__in=leaf_ids)
+            total = rows.count()
+            approved = rows.filter(status=ApprovalStatus.APPROVED).count()
             return {"total": total, "approved": approved,
-                    "complete": total > 0 and total == approved}
+                    "complete": total > 0 and total == approved,
+                    "has_data": total > 0}
 
         return Response(
             {

@@ -29,7 +29,19 @@ class PeriodSerializer(serializers.ModelSerializer):
     def get_has_data(self, obj) -> bool:
         # A period "has data" if any computed KPI exists for it — this drives
         # the dashboard's default selection (latest filled month).
-        return FactKPI.objects.filter(period=obj).exists()
+        # The KPI table is only filled on recompute, so also accept approved
+        # figures anywhere in the period (its weeks and days included) —
+        # otherwise a month full of sales read as empty and the page opened
+        # on اسفند.
+        if FactKPI.objects.filter(period=obj).exists():
+            return True
+        from apps.core.periods import month_nodes
+        from apps.sales.models import ApprovalStatus, FactSalesMonthly
+
+        ids = [p.id for p in month_nodes(obj)] if obj.kind == "month" else [obj.id]
+        return FactSalesMonthly.objects.filter(
+            period_id__in=ids, status=ApprovalStatus.APPROVED
+        ).exists()
 
 
 class TeamSerializer(serializers.ModelSerializer):

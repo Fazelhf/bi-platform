@@ -192,13 +192,14 @@ const buyer = computed(() => (isB2B.value ? "شرکت" : "مشتری"));
 
 const peopleCharts = computed<ChartDef[]>(() => {
   const base: ChartDef[] = [
-    { title: "فروش ریالی", scope: "people", metrics: [{ key: "revenue", label: "فروش ریالی" }] },
+    // No «فروش ریالی» here: the board's «فروش هر کارشناس» above is the same
+    // chart (with the target beside it), and showing both read as two numbers.
     { title: `تعداد ${buyer.value} جدید`, scope: "people", metrics: [{ key: "new_customers", label: `${buyer.value} جدید` }] },
-    // One chart for profit, led by the percentage: «سود فروش» alone rewards
-    // whoever sold the most. The rial amount rides along as a line.
-    { title: "درصد سود فروش", scope: "people", percent: true,
-      metrics: [{ key: "profit_margin", label: "درصد سود", percent: true }],
-      line: { key: "profit", label: "سود فروش" } },
+    // Profit in rial as the bars, the margin as a line on its own percent axis
+    // — so the amount and how good a margin it was read off one chart.
+    { title: "درصد سود فروش", scope: "people",
+      metrics: [{ key: "profit", label: "سود فروش" }],
+      line: { key: "profit_margin", label: "درصد سود", percent: true } },
     { title: "سود فروش", scope: "people", metrics: [{ key: "profit", label: "سود فروش" }] },
     { title: `تعداد فروش / تعداد ${buyer.value}`, scope: "people", metrics: [
       { key: "invoices", label: isB2B.value ? "تعداد قرارداد" : "تعداد فاکتور" },
@@ -465,7 +466,7 @@ watch([periodA, () => props.channel], () => {
     <!-- The section's board — the month's headline figures — first, above
          the per-salesperson charts: they are what a manager opens this page
          to see. Not on «گزارش دوره‌ای», which picks its own range of months. -->
-    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" part="top" />
+    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" :week="weekId" part="top" />
 
     <!-- ========== گزارش دوره‌ای ==========
          A range of months rather than one, so it owns its own period picker
@@ -558,6 +559,6 @@ watch([periodA, () => props.channel], () => {
     </template>
 
     <!-- The board's trend and detail table, under the charts. -->
-    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" part="bottom" />
+    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" :week="weekId" part="bottom" />
 </div>
 </template>

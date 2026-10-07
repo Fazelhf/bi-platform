@@ -27,6 +27,7 @@ const emit = defineEmits<{
   (e: "remove"): void;
   (e: "duplicate"): void;
   (e: "drill", key: string, label: string): void;
+  (e: "compare"): void;
 }>();
 
 /**
@@ -41,6 +42,16 @@ function drill(key: string, label: string) {
 const CHART_KINDS = ["bar", "hbar", "line", "area", "stacked", "pie", "donut"];
 
 const isChart = computed(() => CHART_KINDS.includes(props.widget.kind));
+/**
+ * A card that breaks one figure down by something (an employee, a team) can be
+ * set against other months. One that already runs along the months, or is a
+ * single number, has nothing to line up.
+ */
+const canCompare = computed(() => {
+  const c = props.widget.config;
+  return !!c?.dataset && !!c.dimension && c.dimension !== "month" && !c.split
+    && (isChart.value || props.widget.kind === "table");
+});
 const isStatic = computed(() =>
   props.widget.kind === "text" || props.widget.kind === "divider");
 
@@ -79,7 +90,7 @@ const isEmpty = computed(() => {
   >
     <!-- Header: kept out of the way when there is nothing to say -->
     <div
-      v-if="widget.title || widget.subtitle || editing"
+      v-if="widget.title || widget.subtitle || editing || (canCompare && result)"
       class="px-4 pt-3 pb-1 flex items-start justify-between gap-2 shrink-0"
     >
       <div class="min-w-0">
@@ -88,6 +99,11 @@ const isEmpty = computed(() => {
         </h3>
         <p v-if="widget.subtitle" class="text-[11px] text-slate-400 truncate">{{ widget.subtitle }}</p>
       </div>
+      <button
+        v-if="!editing && canCompare && result"
+        class="shrink-0 text-[11px] rounded-lg px-2 py-1 bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-ink transition no-print"
+        @click.stop="emit('compare')"
+      >مقایسه ماه‌ها</button>
       <div
         v-if="editing"
         class="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity no-print"

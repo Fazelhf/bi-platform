@@ -96,10 +96,10 @@ export interface MonthProgress {
 export function defaultPeriodId(periods: Period[]): number | null {
   if (!periods.length) return null;
   const withData = periods.filter((p) => p.has_data);
-  const pick = (withData.length ? withData : periods)[
-    (withData.length ? withData : periods).length - 1
-  ];
-  return pick.id;
+  if (withData.length) return withData[withData.length - 1].id;
+  // Nothing entered yet: the current month, not the last row of the table —
+  // that is اسفند, months away, with no weeks to pick and every figure ۰.
+  return currentPeriodId(periods);
 }
 
 /**
@@ -119,8 +119,14 @@ export function currentPeriodId(periods: Period[]): number | null {
   if (!periods.length) return null;
   const today = new Date().toISOString().slice(0, 10);
   const started = periods.filter((p) => p.start_date && p.start_date <= today);
-  const pool = started.length ? started : periods;
-  return pool[pool.length - 1].id;
+  if (started.length) return started[started.length - 1].id;
+  // Months without dates (older rows): match today's Jalali month directly.
+  const parts = new Intl.DateTimeFormat("en-US-u-ca-persian", { year: "numeric", month: "numeric" })
+    .formatToParts(new Date());
+  const y = Number(parts.find((x) => x.type === "year")?.value);
+  const m = Number(parts.find((x) => x.type === "month")?.value);
+  const thisMonth = periods.filter((p) => p.jalali_year < y || (p.jalali_year === y && p.jalali_month <= m));
+  return (thisMonth.length ? thisMonth : periods)[(thisMonth.length ? thisMonth : periods).length - 1].id;
 }
 
 /** Mirrors `accounts.Department` on the server. Keep the two in step. */
@@ -345,6 +351,8 @@ interface Completeness {
   total: number;
   approved: number;
   complete: boolean;
+  /** False when nothing was entered at all — not the same as «ناقص». */
+  has_data?: boolean;
 }
 
 export interface ExecutiveOverview {

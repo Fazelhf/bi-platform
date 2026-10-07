@@ -52,14 +52,17 @@ const toneBar = {
 
 <template>
   <div class="h-full flex flex-col justify-center" :class="options.align === 'center' ? 'items-center text-center' : ''">
+    <!-- «تحقق تارگت» leads with the percentage — that is its answer; the
+         amounts behind it are the line underneath. -->
     <p
-      class="font-extrabold text-ink ltr-nums leading-tight"
-      :class="kind === 'progress' ? 'text-2xl' : 'text-3xl'"
+      class="font-extrabold ltr-nums leading-tight whitespace-nowrap truncate text-2xl 2xl:text-3xl"
+      :class="kind === 'progress' && secondary ? toneText[tone] : 'text-ink'"
       :style="options.color ? { color: options.color } : {}"
     >
-      {{ primary ? byUnit(value, primary.unit) : "—" }}
+      <template v-if="kind === 'progress' && secondary">{{ ratio === null ? "—" : pct(ratio) }}</template>
+      <template v-else>{{ primary ? byUnit(value, primary.unit) : "—" }}</template>
     </p>
-    <p v-if="primary" class="text-xs text-slate-400 mt-1">{{ primary.name }}</p>
+    <p v-if="primary && !(kind === 'progress' && secondary)" class="text-xs text-slate-400 mt-1">{{ primary.name }}</p>
 
     <template v-if="secondary">
       <div v-if="kind === 'progress'" class="mt-3">
@@ -71,8 +74,8 @@ const toneBar = {
           ></div>
         </div>
         <div class="flex justify-between items-baseline mt-1.5 text-[11px]">
-          <span class="ltr-nums font-semibold" :class="toneText[tone]">
-            {{ ratio === null ? "—" : pct(ratio) }}
+          <span class="ltr-nums text-slate-500">
+            {{ primary!.name }} {{ byUnit(value, primary!.unit) }}
           </span>
           <span class="text-slate-400 ltr-nums">
             {{ secondary.name }} {{ byUnit(against, secondary.unit) }}

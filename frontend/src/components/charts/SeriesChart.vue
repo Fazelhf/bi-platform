@@ -42,6 +42,14 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ (e: "compare", spec: CompareSpec, title: string): void }>();
 
 const ui = useUiStore();
+
+/**
+ * Every value zero or missing: a field nobody keys (تماس، مشتری جدید) drew an
+ * empty 0–1 axis that read as «everyone scored zero». Say what it is instead.
+ */
+const empty = computed(() =>
+  [...props.series, ...props.lines].every((s) => s.values.every((v) => !v)),
+);
 const el = ref<HTMLElement | null>(null);
 
 const option = computed<EChartsOption>(() => {
@@ -164,6 +172,11 @@ useChart(el, option);
       @click="emit('compare', compare, title)"
     >مقایسه ماه‌ها</button>
 
-    <div ref="el" :style="{ height: height + 'px' }"></div>
+    <div class="relative">
+      <div ref="el" :style="{ height: height + 'px' }" :class="empty ? 'opacity-30' : ''"></div>
+      <p v-if="empty" class="absolute inset-0 flex items-center justify-center text-xs text-slate-400">
+        برای این دوره ثبت نشده است
+      </p>
+    </div>
   </div>
 </template>

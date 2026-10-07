@@ -30,6 +30,10 @@ const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
 const data = ref<ExecutiveOverview | null>(null);
 const trend = ref<TrendMonth[]>([]);
+/** The year of the chosen month: the trend must follow it, not today's date. */
+const selectedYear = computed(
+  () => periods.value.find((p) => p.id === selectedPeriod.value)?.jalali_year,
+);
 const loading = ref(false);
 
 /** The financial picture. Optional: if it cannot be read, the rest still shows. */
@@ -49,7 +53,7 @@ async function load() {
   try {
     const [ov, tr, fin] = await Promise.all([
       executiveApi.overview(selectedPeriod.value),
-      executiveApi.trend(),
+      executiveApi.trend(selectedYear.value),
       canSeeFinance.value
         ? financeApi.executiveSummary(selectedPeriod.value).catch(() => null)
         : Promise.resolve(null),
@@ -115,6 +119,19 @@ const margin = computed(() => {
 /** Only months that have been reported — a flat zero tail is noise, not data. */
 const reported = computed(() => trend.value.filter((m) => m.total > 0 || m.target > 0));
 
+/**
+ * The year up to the month being viewed (or the last one reported, if later).
+ * Showing only reported months drew a lone bar that read as «a year of one
+ * month»; the empty months stay on the axis, as gaps rather than zeros.
+ */
+const yearSoFar = computed(() => {
+  const lastIdx = Math.max(
+    trend.value.findIndex((m) => m.period === selectedPeriod.value),
+    trend.value.reduce((acc, m, i) => (m.total > 0 || m.target > 0 ? i : acc), -1),
+  );
+  return lastIdx < 0 ? [] : trend.value.slice(0, lastIdx + 1);
+});
+
 type Tone = "good" | "warn" | "bad" | "none";
 const achievementTone = computed<Tone>(() =>
   !here.value?.target ? "none" : achievement.value >= 100 ? "good" : achievement.value >= 70 ? "warn" : "bad",
@@ -159,6 +176,13 @@ const channels = computed(() => {
   ].map((c) => ({ ...c, share: share(c.value) }));
 });
 
+/** Anything at all keyed for production this month — otherwise its ۰ is «ثبت نشده». */
+const productionEntered = computed(() => {
+  const d = data.value;
+  return !!d && (d.production.completeness.total > 0 || !!d.combined.production_cost
+    || !!d.combined.internal_piece_rate_revenue);
+});
+
 const productionKpis = computed(() =>
   pick(data.value?.production.kpis, ["prod_productivity", "waste_rate", "financial_return"]),
 );
@@ -180,13 +204,14 @@ const alerts = computed(() => {
   }
   if (!salesReported.value) {
     out.push({ text: `فروش ${d.period.label} هنوز ثبت نشده است`, tone: "warn" });
-  } else if (!d.sales_completeness.complete) {
+  } else if (d.sales_completeness.total > 0 && !d.sales_completeness.complete) {
     out.push({
       text: `داده فروش کامل تایید نشده (${num(d.sales_completeness.approved)} از ${num(d.sales_completeness.total)})`,
       tone: "warn",
     });
   }
-  if (!d.production.completeness.complete) {
+  // Nothing entered is not «incomplete»: production simply isn't tracked this month.
+  if (d.production.completeness.total > 0 && !d.production.completeness.complete) {
     out.push({
       text: `داده تولید کامل تایید نشده (${num(d.production.completeness.approved)} از ${num(d.production.completeness.total)})`,
       tone: "warn",
@@ -256,7 +281,8 @@ const status = computed(() => {
     const low = Number(f.cash.low_threshold_rial);
     items.push({
       title: "نقدینگی", icon: ICON.cash,
-      value: rial(closing),
+      // A ledger nobody has opened is not a balance of zero.
+      value: !f.cash.has_movements && !closing ? "ثبت نشده" : rial(closing),
       // Carries what the cash card used to say, so nothing was lost by
       // folding that card into this tile.
       note: `ابتدای ماه ${rial(Number(f.cash.opening_rial))}`
@@ -278,7 +304,7 @@ const status = computed(() => {
 
   items.push({
     title: "تولید", icon: ICON.production,
-    value: rial(d.combined.production_margin),
+    value: productionEntered.value ? rial(d.combined.production_margin) : "ثبت نشده",
     note: "حاشیهٔ تولید",
     tone: d.combined.production_margin > 0 ? "good" : d.combined.production_margin < 0 ? "bad" : "none",
     route: "production-dashboard",
@@ -287,21 +313,31 @@ const status = computed(() => {
   return items;
 });
 
+// «همه‌چیز رو به راه است» is a claim about data: with nothing entered for the
+// month there is nothing to be on track, so say that instead.
 const overallTone = computed<Tone>(() =>
-  status.value.some((s) => s.tone === "bad") ? "bad"
-    : status.value.some((s) => s.tone === "warn") ? "warn" : "good",
+  status.value.some((s) => s.tone === "bad") || alerts.value.some((a) => a.tone === "bad") ? "bad"
+    : status.value.some((s) => s.tone === "warn") || alerts.value.length ? "warn"
+    : !salesReported.value ? "none" : "good",
 );
 /** Shown in the header rather than as a tile: it is a state of the data, not
  *  a figure about the business, and it only matters when it is «ناقص». */
 const dataGap = computed(() => {
   const d = data.value;
-  if (!d || (d.sales_completeness.complete && d.production.completeness.complete)) return null;
-  return `داده ناقص · فروش ${num(d.sales_completeness.approved)}/${num(d.sales_completeness.total)}`
-    + ` · تولید ${num(d.production.completeness.approved)}/${num(d.production.completeness.total)}`;
+  if (!d) return null;
+  const gaps: { label: string; c: typeof d.sales_completeness; route: string }[] = [
+    { label: "فروش", c: d.sales_completeness, route: "sales-entry" },
+    { label: "تولید", c: d.production.completeness, route: "production-entry" },
+  ].filter((g) => g.c.total > 0 && !g.c.complete);
+  if (!gaps.length) return null;
+  return {
+    text: "در انتظار تایید · " + gaps.map((g) => `${g.label} ${num(g.c.approved)}/${num(g.c.total)}`).join(" · "),
+    route: gaps[0].route,
+  };
 });
 
 const overallText: Record<Tone, string> = {
-  good: "همه‌چیز رو به راه است", warn: "چند مورد نیازمند توجه", bad: "وضعیت هشدار", none: "",
+  good: "همه‌چیز رو به راه است", warn: "چند مورد نیازمند توجه", bad: "وضعیت هشدار", none: "داده‌ای برای این ماه ثبت نشده",
 };
 const toneIcon: Record<Tone, string> = {
   good: "bg-slate-100 text-slate-400",
@@ -370,10 +406,14 @@ const budgetGauges = computed(() => {
           <span class="w-1.5 h-1.5 rounded-full" :class="toneBar[overallTone]"></span>
           {{ overallText[overallTone] }}
         </span>
-        <RouterLink v-if="dataGap" :to="{ name: 'sales-entry' }"
-                    class="hidden sm:inline-flex items-center text-xs rounded-full px-3 py-1.5 font-medium bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 transition">
-          {{ dataGap }}
-        </RouterLink>
+        <component
+          :is="auth.canEnter ? RouterLink : 'span'" v-if="dataGap"
+          v-bind="auth.canEnter ? { to: { name: dataGap.route } } : {}"
+          class="hidden sm:inline-flex items-center text-xs rounded-full px-3 py-1.5 font-medium bg-amber-500/10 text-amber-700 transition"
+          :class="auth.canEnter && 'hover:bg-amber-500/20'"
+        >
+          {{ dataGap.text }}
+        </component>
         <ExportActions :excel="false" />
         <select v-model.number="selectedPeriod" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
@@ -481,12 +521,12 @@ const budgetGauges = computed(() => {
           <ComboTrendChart
             v-if="reported.length"
             title="روند فروش سال — در برابر تارگت"
-            :categories="reported.map((m) => m.label)"
+            :categories="yearSoFar.map((m) => m.label)"
             :bars="[
-              { name: 'فروش', values: reported.map((m) => m.total), tone: 'actual' },
-              { name: 'سود', values: reported.map((m) => m.profit), tone: 'in' },
+              { name: 'فروش', values: yearSoFar.map((m) => m.total || null), tone: 'actual' },
+              { name: 'سود', values: yearSoFar.map((m) => m.profit || null), tone: 'in' },
             ]"
-            :lines="[{ name: 'تارگت', values: reported.map((m) => m.target || null), tone: 'budget', dashed: true }]"
+            :lines="[{ name: 'تارگت', values: yearSoFar.map((m) => m.target || null), tone: 'budget', dashed: true }]"
             :height="300"
           />
           <div v-else :class="card" class="h-full min-h-[200px] flex items-center justify-center text-sm text-slate-400">
@@ -532,7 +572,7 @@ const budgetGauges = computed(() => {
             <p v-if="c.change !== null" class="text-xs mt-0.5 ltr-nums" :class="c.change >= 0 ? 'text-green-600' : 'text-red-500'">
               {{ c.change >= 0 ? "▲" : "▼" }} {{ deltaText(c.change) }} <span class="text-slate-400">نسبت به ماه قبل</span>
             </p>
-            <p v-else class="text-xs mt-0.5 text-slate-300">{{ salesReported ? "بدون مقایسه" : "هنوز ثبت نشده" }}</p>
+            <p v-else class="text-xs mt-0.5 text-slate-300">{{ salesReported && c.value ? "ماه قبل ثبت نشده" : "این ماه ثبت نشده" }}</p>
             <div class="h-1.5 rounded-full bg-slate-100 overflow-hidden mt-3">
               <div class="h-full rounded-full transition-all duration-700" :style="{ width: c.share + '%', backgroundColor: c.color }"></div>
             </div>

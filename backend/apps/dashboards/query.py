@@ -125,6 +125,20 @@ def latest_month_with_data(dataset: Dataset) -> tuple[int, int] | None:
     return row[f"{p}__jalali_year"], row[f"{p}__jalali_month"]
 
 
+def _sub_period(spec_time: dict, period_id: int | None) -> DimPeriod | None:
+    """
+    The week (or day) a widget is pinned to, when the page has drilled into one.
+
+    Only «selected» follows it: a six-month trend or a year-to-date total that
+    shrank to seven days when someone clicked a week dot would stop being what
+    its title says.
+    """
+    if not period_id or (spec_time or {}).get("mode", "selected") != "selected":
+        return None
+    node = DimPeriod.objects.filter(pk=period_id).first()
+    return node if node and node.kind != "month" else None
+
+
 def _months_for(spec_time: dict, period_id: int | None) -> list[tuple[int, int]] | None:
     """
     The (year, month) pairs a widget should cover, or None for "everything".
@@ -144,6 +158,16 @@ def _months_for(spec_time: dict, period_id: int | None) -> list[tuple[int, int]]
     current = None
     if period_id:
         current = next((p for p in months if p.id == period_id), None)
+        if current is None:
+            # A week or day: it belongs to the month that carries its year and
+            # month, which is what every roll-up here already keys on.
+            node = DimPeriod.objects.filter(pk=period_id).first()
+            if node:
+                current = next(
+                    (p for p in months
+                     if (p.jalali_year, p.jalali_month) == (node.jalali_year, node.jalali_month)),
+                    None,
+                )
     if current is None:
         current = default_month(months)
 
@@ -181,6 +205,15 @@ def _month_rows(months: list[tuple[int, int]]) -> list[DimPeriod]:
 def _time_filter(dataset: Dataset, spec: dict, period_id: int | None) -> Q:
     if not (dataset.period_path or dataset.date_path):
         return Q()
+    sub = _sub_period(spec.get("time") or {}, period_id)
+    if sub is not None:
+        ids = [sub.id] + [c.id for c in sub.children.all()]
+        if dataset.period_path:
+            return Q(**{f"{dataset.period_path}__in": ids})
+        if sub.start_date and sub.end_date:
+            return Q(**{f"{dataset.date_path}__range": (sub.start_date, sub.end_date)})
+        return Q(pk__in=[])
+
     months = _months_for(spec.get("time") or {}, period_id)
     if months is None:
         return Q()
@@ -512,7 +545,10 @@ def _side(dataset: Dataset, metric: Metric, spec: dict, period_id, groups: list[
 
 def _meta(dataset: Dataset, spec: dict, period_id: int | None) -> dict:
     months = _months_for(spec.get("time") or {}, period_id)
-    if months is None:
+    sub = _sub_period(spec.get("time") or {}, period_id)
+    if sub is not None:
+        label = sub.label
+    elif months is None:
         label = "همه دوره‌ها"
     elif len(months) == 1:
         label = _month_label(*months[0])
