@@ -200,7 +200,6 @@ const peopleCharts = computed<ChartDef[]>(() => {
     { title: "درصد سود فروش", scope: "people",
       metrics: [{ key: "profit", label: "سود فروش" }],
       line: { key: "profit_margin", label: "درصد سود", percent: true } },
-    { title: "سود فروش", scope: "people", metrics: [{ key: "profit", label: "سود فروش" }] },
     { title: `تعداد فروش / تعداد ${buyer.value}`, scope: "people", metrics: [
       { key: "invoices", label: isB2B.value ? "تعداد قرارداد" : "تعداد فاکتور" },
       { key: "active_customers", label: `${buyer.value} فعال` }] },
