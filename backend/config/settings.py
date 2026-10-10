@@ -71,7 +71,11 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # Admin-Panel switches: IP allow/deny lists and maintenance mode.
     "apps.adminpanel.middleware.AdminGuardMiddleware",
+    # Logs every /api/ request slower than SLOW_REQUEST_MS, with its query
+    # count, to stderr.log — the server's data is the only place to see this.
+    "apps.core.slowlog.SlowRequestMiddleware",
 ]
+SLOW_REQUEST_MS = env.int("SLOW_REQUEST_MS", default=1000)
 
 ROOT_URLCONF = "config.urls"
 

@@ -33,6 +33,15 @@ class PeriodSerializer(serializers.ModelSerializer):
         # figures anywhere in the period (its weeks and days included) —
         # otherwise a month full of sales read as empty and the page opened
         # on اسفند.
+        #
+        # The list endpoint annotates the same answer onto every row (see
+        # PeriodViewSet.get_queryset) — read per row, it was two or three
+        # queries per period, ~90 for a year, on the request every page opens
+        # with. A period loaded any other way still answers below.
+        if hasattr(obj, "_has_kpi"):
+            if obj._has_kpi or obj._has_sales_self:
+                return True
+            return obj.kind == "month" and obj._has_sales_below
         if FactKPI.objects.filter(period=obj).exists():
             return True
         from apps.core.periods import month_nodes

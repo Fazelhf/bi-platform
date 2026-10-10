@@ -88,7 +88,8 @@ class ExecutiveTrendView(APIView):
         months = list(
             DimPeriod.objects.filter(jalali_year=year, kind=PeriodKind.MONTH)
             .order_by("jalali_month")
-            .prefetch_related("children")
+            # Weeks and their days: month_nodes walks both levels.
+            .prefetch_related("children__children")
         )
 
         # One query per fact table rather than per month.

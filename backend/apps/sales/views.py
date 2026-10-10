@@ -1,6 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Count, Max, Sum
+from django.db.models import Count, Exists, Max, OuterRef, Q, Sum
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from rest_framework import status as http_status
@@ -282,6 +282,18 @@ class PeriodViewSet(viewsets.ModelViewSet):
         # every day-level action return 404, because the default kind is month.
         if self.detail:
             return qs
+
+        # `has_data` for every row in this one query, rather than per row in
+        # the serializer. Below a month means its weeks and their days — the
+        # same tree apps.core.periods.month_nodes walks.
+        approved = FactSalesMonthly.objects.filter(status=ApprovalStatus.APPROVED)
+        qs = qs.annotate(
+            _has_kpi=Exists(FactKPI.objects.filter(period=OuterRef("pk"))),
+            _has_sales_self=Exists(approved.filter(period=OuterRef("pk"))),
+            _has_sales_below=Exists(approved.filter(
+                Q(period__parent=OuterRef("pk")) | Q(period__parent__parent=OuterRef("pk"))
+            )),
+        )
 
         kind = params.get("kind", "month")
         if kind != "all":
