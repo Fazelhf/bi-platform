@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import { graphic } from "@/lib/echarts";
-import { paletteByKey, type Palette } from "./palettes";
+import { IOS_PALETTE, paletteByKey, type Palette } from "./palettes";
 import { store } from "@/lib/storage";
 
 /**
@@ -8,6 +8,8 @@ import { store } from "@/lib/storage";
  * store / localStorage) so every chart in every section changes together.
  */
 export function activePalette(): Palette {
+  // The iOS skin brings its own colours all the way down to the charts.
+  if (document.documentElement.dataset.skin === "ios") return IOS_PALETTE;
   return paletteByKey(store.get("chartTheme") || "modern");
 }
 
@@ -69,13 +71,17 @@ const themeTick = ref(0);
 export function bumpChartTheme() {
   themeTick.value++;
 }
+/** Read inside a watcher to re-draw when the skin or mode changes. */
+export function chartThemeVersion(): number {
+  return themeTick.value;
+}
 
 /** The card colour a chart sits on — pie slice gaps must match it, not be
  *  hardcoded white (which turns into glaring outlines in dark mode). */
 export function surfaceColor(): string {
   themeTick.value;
-  // Not --c-surface: شیشه‌ای paints white at 9% over a dark page, so the
-  // literal token would hand ECharts white. --c-chart-surface is the colour
+  // Not --c-surface: a skin with translucent cards would hand ECharts the
+  // pane's tint rather than what shows through it. --c-chart-surface is the colour
   // the card actually resolves to on screen.
   return token("c-chart-surface", isDark() ? "#1e1e22" : "#ffffff");
 }

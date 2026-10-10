@@ -14,6 +14,8 @@ import NotificationBell from "@/components/NotificationBell.vue";
 import RefreshButton from "@/components/RefreshButton.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import DrillDrawer from "@/components/crm/DrillDrawer.vue";
+import IosTabBar from "@/components/ios/IosTabBar.vue";
+import { useIosNavbar } from "@/composables/useIosNavbar";
 
 const auth = useAuthStore();
 const ui = useUiStore(); // the live version, shown in the footer
@@ -390,6 +392,25 @@ async function refreshBadges() {
 
 function go(name: string) { router.push({ name }); mobileOpen.value = false; }
 
+// iOS skin: the navigation bar's scroll state, and every destination the
+// menu offers (group children included), which the tab bar picks from.
+const { scrolled } = useIosNavbar();
+const tabItems = computed(() => {
+  const out: Item[] = [];
+  const walk = (list: Item[]) => {
+    for (const it of list) {
+      if (it.children) walk(it.children);
+      else if (!it.placeholder) out.push(it);
+    }
+  };
+  walk(primary.value);
+  // The workspaces behind their own doors can be pinned too.
+  out.push({ name: "office-home", label: "اتوماسیون اداری", icon: "briefcase" });
+  if (showCrm.value) out.push({ name: "crm-dashboard", label: "CRM", icon: "contact" });
+  // One entry per destination even when two groups share it.
+  return out.filter((it, i) => out.findIndex((o) => o.name === it.name) === i);
+});
+
 function logout() { auth.logout(); router.push({ name: "login" }); }
 
 // The shell is not the whole app: CRM and the admin panel are their own
@@ -416,7 +437,7 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
 
     <!-- ============ Sidebar (right in RTL) ============ -->
     <aside
-      class="bg-surface shadow-soft flex flex-col shrink-0 transition-transform duration-200
+      class="app-sidebar bg-surface shadow-soft flex flex-col shrink-0 transition-transform duration-200
              fixed inset-y-0 right-0 z-50 w-64 rounded-none h-screen
              md:sticky md:top-4 md:z-auto md:rounded-card md:h-[calc(100vh-2rem)]"
       :class="[
@@ -574,6 +595,7 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
             </svg>
           </template>
         </button>
+
       </nav>
 
       <!-- Bottom: profile, settings (admin+CEO only), logout -->
@@ -639,7 +661,10 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
     <!-- ============ Main ============ -->
     <div class="flex-1 min-w-0 flex flex-col gap-4 p-3 md:p-0">
       <!-- Topbar -->
-      <header class="bg-surface rounded-card shadow-soft px-4 md:px-5 py-3 flex items-center justify-between gap-2">
+      <header
+        class="app-navbar bg-surface rounded-card shadow-soft px-4 md:px-5 py-3 flex items-center justify-between gap-2"
+        :class="{ 'is-scrolled': scrolled }"
+      >
         <!-- Title (right) + hamburger -->
         <div class="flex items-center gap-2 min-w-0">
           <button
@@ -651,6 +676,9 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
           <span class="text-slate-300 hidden sm:inline">|</span>
           <span class="text-xs text-slate-400 hidden sm:inline">{{ today }}</span>
         </div>
+
+        <!-- iOS skin, desktop: the tab bar sits here, between title and toolbar. -->
+        <div v-if="ui.skin === 'ios'" class="ios-tabslot"></div>
 
         <!-- Actions (left) -->
         <div class="flex items-center gap-2 md:gap-3 shrink-0">
@@ -691,9 +719,18 @@ onBeforeUnmount(() => window.clearInterval(badgeTimer));
       </header>
 
       <!-- Page content -->
-      <main class="flex-1 min-w-0">
+      <main class="app-main flex-1 min-w-0">
         <RouterView />
       </main>
+
+      <IosTabBar
+        v-if="ui.skin === 'ios'"
+        scope="main"
+        :items="tabItems"
+        :is-active="(n) => route.name === n"
+        @go="go"
+        @more="mobileOpen = true"
+      />
 
       <!-- CRM drill-down panel — mounted once, opened from any CRM page -->
       <DrillDrawer v-if="showCrm" />

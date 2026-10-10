@@ -256,7 +256,7 @@ async function save(submit: boolean) {
         >{{ side === "in" ? "واریز" : "برداشت" }}</h2>
 
         <div class="overflow-x-auto">
-          <table class="w-full text-sm">
+          <table v-entry-table class="w-full text-sm">
             <thead class="bg-slate-50/60 text-[11px] text-slate-400">
               <tr>
                 <!-- Pinned. This sheet is a grid, not a list — a card per day

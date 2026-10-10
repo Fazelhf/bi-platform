@@ -15,6 +15,8 @@ import { useAuthStore } from "@/stores/auth";
 import { useUiStore } from "@/stores/ui";
 import { usePresence } from "@/composables/usePresence";
 import NavIcon from "@/components/NavIcon.vue";
+import IosTabBar from "@/components/ios/IosTabBar.vue";
+import { useIosNavbar } from "@/composables/useIosNavbar";
 import UserAvatar from "@/components/UserAvatar.vue";
 import CommandPalette from "@/components/admin/CommandPalette.vue";
 import type { AdminNavItem } from "@/types/admin";
@@ -134,6 +136,9 @@ watch(() => route.name, () => (mobileOpen.value = false));
 
 function backToApp() { router.push({ name: "home" }); }
 function logout() { auth.logout(); admin.reset(); router.push({ name: "login" }); }
+
+// iOS skin: frosted navigation bar + bottom tab bar on phones.
+const { scrolled } = useIosNavbar();
 </script>
 
 <template>
@@ -146,7 +151,7 @@ function logout() { auth.logout(); admin.reset(); router.push({ name: "login" })
 
     <!-- ===== Rail ===== -->
     <aside
-      class="bg-panel text-white flex flex-col shrink-0 transition-transform duration-200
+      class="app-sidebar app-sidebar--dark bg-panel text-white flex flex-col shrink-0 transition-transform duration-200
              fixed inset-y-0 right-0 z-50 w-64 h-screen
              md:sticky md:top-4 md:z-auto md:rounded-card md:h-[calc(100vh-2rem)]"
       :class="[
@@ -227,7 +232,10 @@ function logout() { auth.logout(); admin.reset(); router.push({ name: "login" })
 
     <!-- ===== Main ===== -->
     <div class="flex-1 min-w-0 flex flex-col gap-4 p-3 md:p-0">
-      <header class="bg-surface rounded-card shadow-soft px-4 py-3 flex items-center justify-between gap-2">
+      <header
+        class="app-navbar bg-surface rounded-card shadow-soft px-4 py-3 flex items-center justify-between gap-2"
+        :class="{ 'is-scrolled': scrolled }"
+      >
         <div class="flex items-center gap-2 min-w-0">
           <button
             class="md:hidden text-slate-500 hover:text-ink p-1"
@@ -242,6 +250,9 @@ function logout() { auth.logout(); admin.reset(); router.push({ name: "login" })
             <NavIcon name="alert" :size="12" /> حالت تعمیرات فعال است
           </span>
         </div>
+
+        <!-- iOS skin, desktop: the tab bar sits here, between title and toolbar. -->
+        <div v-if="ui.skin === 'ios'" class="ios-tabslot"></div>
 
         <div class="flex items-center gap-2 shrink-0">
           <button
@@ -298,6 +309,14 @@ function logout() { auth.logout(); admin.reset(); router.push({ name: "login" })
         <RouterView v-else-if="admin.loaded" />
         <div v-else class="text-center text-slate-400 py-16 text-sm">در حال بارگذاری…</div>
       </main>
+      <IosTabBar
+        v-if="ui.skin === 'ios'"
+        scope="admin"
+        :items="visible"
+        :is-active="(n) => route.name === n"
+        @go="go"
+        @more="mobileOpen = true"
+      />
 
       <footer class="text-center text-[11px] text-slate-400 pb-2">
         پنل مدیریت · {{ admin.companyName }}

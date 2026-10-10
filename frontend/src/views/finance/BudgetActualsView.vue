@@ -291,7 +291,7 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
         <!-- The sheet -->
         <section class="bg-surface rounded-card shadow-soft">
           <div class="overflow-x-auto">
-            <table class="min-w-full text-sm">
+            <table v-entry-table class="min-w-full text-sm">
               <thead>
                 <tr class="text-[11px] text-slate-500 border-b border-slate-100">
                   <th class="text-right font-medium p-3 min-w-[15rem]">سرفصل</th>

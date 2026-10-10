@@ -9,13 +9,13 @@ import { SKINS, type SkinKey } from "@/lib/skins";
  * light/dark switch lives inside this panel rather than as a second button
  * in the topbar.
  *
- * Two independent choices: the skin (کلاسیک / شیشه‌ای / شفق) and the mode
+ * Two independent choices: the skin (کلاسیک / iOS / شفق) and the mode
  * (روشن / شب). Both are per-device preferences, so the same account can be
- * glass-and-dark on a laptop and classic-and-light on the shop-floor terminal.
+ * iOS-and-dark on a laptop and classic-and-light on the shop-floor terminal.
  *
  * The panel is teleported to <body> and positioned with `fixed`. It has to
- * be: in شیشه‌ای every card carries a backdrop-filter, and that makes the
- * card a stacking context — an absolutely-positioned child could not escape
+ * be: a glass panel (iOS's sheets, sidebar and menus) carries a
+ * backdrop-filter, and that makes it a stacking context — an absolutely-positioned child could not escape
  * it at any z-index, so the panel rendered *behind* the page content and was
  * impossible to click. Teleporting sidesteps the whole ancestor chain.
  *
@@ -73,6 +73,10 @@ onBeforeUnmount(() => {
 
 function pick(key: SkinKey) {
   ui.setSkin(key);
+}
+
+function dispatchEditTabs() {
+  window.dispatchEvent(new Event("ios-edit-tabs"));
 }
 </script>
 
@@ -162,9 +166,7 @@ function pick(key: SkinKey) {
               class="relative w-16 h-11 shrink-0 rounded-xl overflow-hidden border border-slate-200"
               :style="{
                 background: ui.dark ? s.preview.canvasDark : s.preview.canvas,
-                backgroundImage: s.preview.glass
-                  ? 'radial-gradient(120% 90% at 90% 0%, ' + s.preview.accent + '66, transparent 60%), radial-gradient(110% 80% at 0% 100%, #38bdf866, transparent 60%)'
-                  : s.preview.aurora
+                backgroundImage: s.preview.aurora
                     ? 'radial-gradient(90% 80% at 10% 5%, ' + s.preview.accent + '80, transparent 60%), radial-gradient(80% 70% at 95% 100%, #f472b680, transparent 60%), radial-gradient(80% 70% at 85% 0%, #2dd4bf66, transparent 60%)'
                     : 'none',
               }"
@@ -174,17 +176,21 @@ function pick(key: SkinKey) {
                 :style="{
                   background: ui.dark ? s.preview.surfaceDark : s.preview.surface,
                   borderRadius: s.preview.radius,
-                  backdropFilter: s.preview.glass ? 'blur(4px)' : 'none',
-                  borderColor: s.preview.glass
-                    ? 'rgba(255,255,255,0.45)'
-                    : (ui.dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,20,25,0.08)'),
+                  borderColor: ui.dark ? 'rgba(255,255,255,0.10)' : 'rgba(20,20,25,0.08)',
                   boxShadow: s.preview.aurora
                     ? '0 3px 10px -3px ' + s.preview.accent
-                    : s.preview.glass || ui.dark
+                    : s.preview.ios || ui.dark
                       ? 'none'
                       : '0 2px 6px -2px rgba(20,20,25,0.28)',
                 }"
-              ></span>
+              >
+                <!-- iOS: an inset-grouped list — two rows split by a hairline -->
+                <span
+                  v-if="s.preview.ios"
+                  class="absolute inset-x-1.5 top-1/2 h-px"
+                  :style="{ background: ui.dark ? 'rgba(84,84,88,0.6)' : 'rgba(60,60,67,0.18)' }"
+                ></span>
+              </span>
               <span
                 class="absolute top-1.5 right-2 w-2 h-2 rounded-full"
                 :style="{ background: s.preview.accent }"
@@ -203,6 +209,19 @@ function pick(key: SkinKey) {
             </span>
           </button>
         </div>
+
+        <!-- iOS only: which destinations sit in the tab bar (IosTabBar
+             listens for this event; long-press on the bar does the same). -->
+        <button
+          v-if="ui.skin === 'ios'"
+          class="w-full mt-3 flex items-center justify-center gap-2 rounded-full bg-slate-100 text-ink text-sm font-medium py-2.5"
+          @click="close(); dispatchEditTabs()"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+          </svg>
+          ویرایش نوار تب
+        </button>
       </div>
     </Teleport>
   </div>

@@ -25,7 +25,7 @@ import { MODAL_LAYER } from "@/components/picker";
  *   the hand leaving the keyboard.
  *
  * The panel is teleported and positioned fixed for the reason PickerField
- * documents: the شیشه‌ای skin's backdrop-filter makes every card a stacking
+ * documents: a glass panel's backdrop-filter (iOS skin) makes it a stacking
  * context that an absolutely positioned child cannot escape, and FormModal's
  * body scrolls and would clip it.
  */

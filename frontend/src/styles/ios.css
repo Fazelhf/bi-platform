@@ -1,0 +1,287 @@
+/* ================================================================== */
+/* SKIN: iOS — Apple Human Interface                                   */
+/* Not a copy of an iPhone screen; the same *softness*. Grouped grey   */
+/* page, white inset cards with almost no shadow, hairline separators, */
+/* Apple's system colours in place of the Tailwind hues, continuous    */
+/* (squircle) corners where the browser can draw them, the SF face     */
+/* where the OS ships it, and the sheet spring every iOS transition    */
+/* rides on. Dark is true black, like an OLED iPhone: elevation comes  */
+/* from lighter greys, never from shadow.                              */
+/* ================================================================== */
+html[data-skin="ios"] {
+  /* SF Pro for Latin and SF Arabic for Persian on Apple devices — that is
+     what -apple-system resolves to. Everywhere else it falls through to
+     Inter (Latin, SF's nearest open relative) and Vazirmatn (Persian). */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Arabic",
+    "Inter", "Vazirmatn", "Segoe UI", Tahoma, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+
+  --r-card: 1.375rem; /* 22px — inset-grouped list / widget corner */
+
+  /* UIKit's sheet curve: a fast start that eases into place with no
+     overshoot. Long enough to read as a spring, never long enough to wait. */
+  --motion-dur: 0.5s;
+  --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-from: translateY(10px) scale(0.96);
+  --motion-hover: none; /* touch-first: nothing lifts under a pointer */
+  --shimmer-dur: 1.6s;
+
+  /* Barely-there depth: a 0.5px edge plus a wide, faint ambient shadow. */
+  --shadow-soft: 0 0 0 0.5px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.04),
+    0 8px 24px -12px rgb(0 0 0 / 0.1);
+  --shadow-pop: 0 0 0 0.5px rgb(0 0 0 / 0.06), 0 14px 44px -10px rgb(0 0 0 / 0.24);
+
+  --c-canvas: 242 242 247;  /* systemGroupedBackground */
+  --c-surface: 255 255 255; /* secondarySystemGroupedBackground */
+  --c-chart-surface: 255 255 255;
+  --c-ink: 0 0 0;           /* label */
+  --c-ink-soft: 60 60 67;   /* secondaryLabel, opaque */
+  --c-panel: 28 28 30;      /* graphite widgets */
+  --c-panel-soft: 44 44 46;
+  --c-brand-50: 230 242 255;
+  --c-accent-50: 232 249 237;
+
+  /* The slate ramp becomes Apple's systemGray family, so every muted label,
+     hairline and hover fill already in the app turns iOS grey. */
+  --c-slate-50: 242 242 247;  /* systemGray6 */
+  --c-slate-100: 229 229 234; /* systemGray5 — separators */
+  --c-slate-200: 209 209 214; /* systemGray4 */
+  --c-slate-300: 199 199 204; /* systemGray3 */
+  --c-slate-400: 142 142 147; /* systemGray — tertiary text */
+  --c-slate-500: 108 108 112; /* secondary text */
+  --c-slate-600: 72 72 74;
+  --c-slate-700: 58 58 60;
+  --c-slate-800: 44 44 46;
+  --c-slate-900: 28 28 30;
+
+  --c-scrollbar: 199 199 204;
+  --c-sum-bg: 232 249 237;
+  --c-sum-fg: 36 138 61;
+
+  /* Apple system colours (read by tailwind.config.js). 500 is the fill; 600
+     is Apple's accessible variant, which text on white needs for 4.5:1. */
+  --c-brand-500: 0 122 255;   --c-brand-600: 0 100 220;   --c-brand-700: 0 80 180;
+  --c-accent-500: 52 199 89;  --c-accent-600: 36 138 61;
+  --c-blue-500: 0 122 255;    --c-blue-600: 0 64 221;
+  --c-green-500: 52 199 89;   --c-green-600: 36 138 61;
+  --c-emerald-500: 52 199 89; --c-emerald-600: 36 138 61;
+  --c-red-500: 255 59 48;     --c-red-600: 215 0 21;
+  --c-rose-500: 255 45 85;    --c-rose-600: 211 15 69;
+  --c-pink-500: 255 45 85;    --c-pink-600: 211 15 69;
+  --c-orange-500: 255 149 0;  --c-orange-600: 201 52 0;
+  --c-amber-500: 255 149 0;   --c-amber-600: 178 80 0;
+  --c-yellow-500: 255 204 0;  --c-yellow-600: 160 122 0;
+  --c-teal-500: 48 176 199;   --c-teal-600: 0 130 153;
+  --c-sky-500: 50 173 230;    --c-sky-600: 0 113 164;
+  --c-indigo-500: 88 86 214;  --c-indigo-600: 54 52 163;
+  --c-violet-500: 175 82 222; --c-violet-600: 137 68 171;
+  --c-purple-500: 175 82 222; --c-purple-600: 137 68 171;
+
+  /* tertiarySystemFill — the grey well a text field sits in. */
+  --ios-fill: rgb(118 118 128 / 0.12);
+  --ios-placeholder: rgb(60 60 67 / 0.3);
+}
+
+html[data-skin="ios"].dark {
+  --shadow-soft: 0 0 0 0.5px rgb(255 255 255 / 0.07);
+  --shadow-pop: 0 0 0 0.5px rgb(255 255 255 / 0.1), 0 18px 50px -10px rgb(0 0 0 / 0.8);
+
+  --c-canvas: 0 0 0;
+  --c-surface: 28 28 30;
+  --c-chart-surface: 28 28 30;
+  --c-ink: 255 255 255;
+  --c-ink-soft: 235 235 245;
+  --c-panel: 44 44 46;
+  --c-panel-soft: 58 58 60;
+  --c-brand-50: 8 38 78;
+  --c-accent-50: 12 48 24;
+
+  --c-slate-50: 38 38 41;
+  --c-slate-100: 44 44 46;
+  --c-slate-200: 58 58 60;
+  --c-slate-300: 72 72 74;
+  --c-slate-400: 142 142 147;
+  --c-slate-500: 174 174 178;
+  --c-slate-600: 199 199 204;
+  --c-slate-700: 216 216 220;
+  --c-slate-800: 235 235 240;
+  --c-slate-900: 245 245 250;
+
+  --c-scrollbar: 72 72 74;
+  --c-sum-bg: 12 48 24;
+  --c-sum-fg: 48 209 88;
+
+  /* Dark-mode system colours are brighter; 600 stays light too, because on
+     a black page the lighter tone is the readable one. */
+  --c-brand-500: 10 132 255;  --c-brand-600: 10 132 255;  --c-brand-700: 0 113 227;
+  --c-accent-500: 48 209 88;  --c-accent-600: 48 209 88;
+  --c-blue-500: 10 132 255;   --c-blue-600: 64 156 255;
+  --c-green-500: 48 209 88;   --c-green-600: 48 209 88;
+  --c-emerald-500: 48 209 88; --c-emerald-600: 48 209 88;
+  --c-red-500: 255 69 58;     --c-red-600: 255 105 97;
+  --c-rose-500: 255 55 95;    --c-rose-600: 255 100 130;
+  --c-pink-500: 255 55 95;    --c-pink-600: 255 100 130;
+  --c-orange-500: 255 159 10; --c-orange-600: 255 179 64;
+  --c-amber-500: 255 159 10;  --c-amber-600: 255 179 64;
+  --c-yellow-500: 255 214 10; --c-yellow-600: 255 214 10;
+  --c-teal-500: 64 200 224;   --c-teal-600: 64 200 224;
+  --c-sky-500: 100 210 255;   --c-sky-600: 100 210 255;
+  --c-indigo-500: 94 92 230;  --c-indigo-600: 125 122 255;
+  --c-violet-500: 191 90 242; --c-violet-600: 218 143 255;
+  --c-purple-500: 191 90 242; --c-purple-600: 218 143 255;
+
+  --ios-fill: rgb(118 118 128 / 0.24);
+  --ios-placeholder: rgb(235 235 245 / 0.3);
+}
+
+html[data-skin="ios"] body {
+  text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+}
+html[data-skin="ios"] ::selection {
+  background: rgb(var(--c-brand-500) / 0.24);
+}
+
+/* Figures line up in columns, the way SF's tabular digits do in Numbers. */
+html[data-skin="ios"] :is(td, th, .ltr-nums) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Icons: SF Symbols are drawn lighter than Lucide's 2px. Only the ordinary
+   icon weights are thinned — ring gauges and bold ticks keep the heavier
+   stroke they were drawn with on purpose. */
+html[data-skin="ios"] svg:is([stroke-width="1.8"], [stroke-width="1.9"], [stroke-width="2"]) {
+  stroke-width: 1.6;
+}
+
+/* Touch feedback, UIKit-style: a control dims the instant it is pressed and
+   fades back on release — no hover lift, no ripple. */
+html[data-skin="ios"] :is(button, a, [role="button"], summary) {
+  transition-property: opacity, background-color, color, box-shadow, transform;
+  transition-duration: 0.25s;
+  transition-timing-function: ease-out;
+}
+html[data-skin="ios"] :is(button, a, [role="button"], summary):active:not(:disabled) {
+  opacity: 0.55;
+  transition-duration: 0s;
+}
+
+/* Filled call-to-action buttons become capsules with semibold labels. */
+html[data-skin="ios"] button:is(.bg-brand-500, .bg-brand-600, .bg-brand-700, .bg-accent-500, .bg-accent-600, .bg-red-500, .bg-emerald-600) {
+  border-radius: 9999px;
+  corner-shape: round; /* a squircle at 9999px is a slab, not a capsule */
+  font-weight: 600;
+}
+
+/* The selected sidebar row is a fill in system blue, as in the iPadOS
+   sidebar — not the graphite slab the other skins use. */
+html[data-skin="ios"] aside .bg-panel {
+  background-color: rgb(var(--c-brand-500));
+}
+
+/* Text fields sit in a grey well with no outline, the iOS search-field look.
+   Inline grid editors that chose a transparent cell are left alone. */
+html[data-skin="ios"] :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]), select, textarea):not([class*="bg-transparent"]) {
+  background-color: var(--ios-fill);
+  border-color: transparent;
+  border-radius: 10px;
+}
+html[data-skin="ios"] :is(input, textarea)::placeholder {
+  color: var(--ios-placeholder);
+}
+html[data-skin="ios"] :is(input, select, textarea):focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(var(--c-brand-500) / 0.3);
+}
+html[data-skin="ios"] :focus-visible {
+  outline: 2.5px solid rgb(var(--c-brand-500) / 0.6);
+  outline-offset: 2px;
+}
+
+/* Checkboxes and radios become the round selection mark from Mail and
+   Reminders: an empty grey ring, then a blue disc with a white tick. */
+html[data-skin="ios"] input:is([type="checkbox"], [type="radio"]) {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  border-radius: 9999px;
+  border: 1.5px solid rgb(var(--c-slate-300));
+  background: transparent center / 70% no-repeat;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s var(--motion-ease);
+}
+html[data-skin="ios"] input:is([type="checkbox"], [type="radio"]):checked {
+  border-color: rgb(var(--c-brand-500));
+  background-color: rgb(var(--c-brand-500));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+}
+html[data-skin="ios"] input:is([type="checkbox"], [type="radio"]):active:not(:disabled) {
+  transform: scale(0.88);
+}
+html[data-skin="ios"] input:is([type="checkbox"], [type="radio"]):disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+html[data-skin="ios"] :is(input[type="range"], progress, meter) {
+  accent-color: rgb(var(--c-brand-500));
+}
+
+/* Separators are hairlines — one device pixel on a Retina screen. */
+@media (min-resolution: 2dppx) {
+  html[data-skin="ios"] .border-b { border-bottom-width: 0.5px; }
+  html[data-skin="ios"] .border-t { border-top-width: 0.5px; }
+  html[data-skin="ios"] .divide-y > :not([hidden]) ~ :not([hidden]) {
+    border-top-width: 0.5px;
+  }
+}
+
+/* Cards do not rise under the pointer — iOS has nothing to hover with. */
+@media (hover: hover) {
+  html[data-skin="ios"] .rounded-card.bg-surface:hover {
+    box-shadow: var(--shadow-soft);
+  }
+}
+
+/* Loading placeholders pulse like SwiftUI's .redacted instead of sweeping. */
+@keyframes ios-redacted {
+  50% { opacity: 0.45; }
+}
+html[data-skin="ios"] .skeleton {
+  animation: ios-redacted var(--shimmer-dur) ease-in-out infinite;
+}
+html[data-skin="ios"] .skeleton::after,
+html[data-skin="ios"] .skeleton-dark::after {
+  display: none;
+}
+
+/* Overlay-style scrollbars: thin, rounded, quiet until you look for them. */
+html[data-skin="ios"] *::-webkit-scrollbar { width: 7px; height: 7px; }
+html[data-skin="ios"] *::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-scrollbar) / 0.8);
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+
+/* On a phone, popovers and dialogs rise like a sheet instead of zooming. */
+@media (max-width: 767px) {
+  html[data-skin="ios"] { --motion-from: translateY(36px); }
+}
+
+/* Continuous corners. Where the browser can draw a superellipse, every
+   rounded shape gets Apple's squircle; the radius grows to compensate,
+   because a squircle at the same radius reads visibly tighter than an arc. */
+@supports (corner-shape: squircle) {
+  html[data-skin="ios"] { --r-card: 1.75rem; }
+  html[data-skin="ios"] :is(.rounded-card, .rounded-3xl, .rounded-2xl, .rounded-xl, .rounded-lg, .rounded-md) {
+    corner-shape: squircle;
+  }
+  html[data-skin="ios"] .rounded-3xl { border-radius: 2rem; }
+  html[data-skin="ios"] .rounded-2xl { border-radius: 1.375rem; }
+  html[data-skin="ios"] .rounded-xl { border-radius: 1rem; }
+  html[data-skin="ios"] .rounded-lg { border-radius: 0.75rem; }
+}
+
