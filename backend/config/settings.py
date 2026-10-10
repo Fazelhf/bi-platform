@@ -105,6 +105,31 @@ else:
         }
     }
 
+# --- Logging ---
+# With DEBUG off, Django's default config sends a 500's traceback only to
+# mail_admins — and ADMINS is empty, so it went nowhere and the server showed a
+# bare «Server Error (500)» with nothing in stderr.log. Passenger captures
+# stderr into backend/stderr.log, so every error now lands there with its
+# traceback.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "stderr": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "formatter": "plain",
+        },
+    },
+    "loggers": {
+        "django": {"handlers": ["stderr"], "level": "WARNING"},
+        "apps": {"handlers": ["stderr"], "level": "WARNING"},
+    },
+}
+
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
