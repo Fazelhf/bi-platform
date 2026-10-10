@@ -1,5 +1,7 @@
 import { init, type EChartsOption, type EChartsType } from "@/lib/echarts";
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from "vue";
+import { iosChartOption } from "@/lib/iosCharts";
+import { chartThemeVersion } from "@/components/charts/theme";
 
 /**
  * Minimal ECharts wrapper: pass a ref to a DOM element and a reactive
@@ -55,7 +57,10 @@ export function useChart(
    * disposing and re-creating it, because callers hang handlers on the
    * instance (BoardChart's drill-down click) and a new one would drop them.
    */
-  function apply(instance: EChartsType, next: EChartsOption, notMerge: boolean) {
+  function apply(instance: EChartsType, raw: EChartsOption, notMerge: boolean) {
+    // The iOS skin re-draws every chart in Apple's chart language; in any
+    // other skin this hands the option back untouched.
+    const next = iosChartOption(raw);
     try {
       instance.setOption(next, notMerge);
     } catch {
@@ -100,6 +105,14 @@ export function useChart(
     },
     { deep: true },
   );
+
+  // A skin or light/dark switch re-draws even a chart whose option does not
+  // read the theme — the iOS rewrite depends on both.
+  watch(chartThemeVersion, () => {
+    const instance = chart.value;
+    if (!instance || instance.isDisposed()) return;
+    apply(instance, option.value, true);
+  });
 
   onBeforeUnmount(() => {
     window.removeEventListener("resize", resize);

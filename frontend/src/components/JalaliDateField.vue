@@ -23,7 +23,7 @@ import {
  * calendar rather than a hand-rolled leap-year cycle.
  *
  * The panel is teleported and layer-aware for the reason PickerField
- * documents: the شیشه‌ای skin's backdrop-filter traps absolutely positioned
+ * documents: a glass panel's backdrop-filter (iOS skin) traps absolutely positioned
  * children, and a modal body would clip this.
  */
 const props = withDefaults(defineProps<{

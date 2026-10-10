@@ -27,6 +27,9 @@ import { useClickOutside } from "@/composables/useClickOutside";
 import { homeRouteFor } from "@/router";
 import { OFFICE_SECTIONS, isActive, sectionFor } from "@/components/office/sections";
 import NavIcon from "@/components/NavIcon.vue";
+import IosTabBar from "@/components/ios/IosTabBar.vue";
+import { useIosNavbar } from "@/composables/useIosNavbar";
+import { useUiStore } from "@/stores/ui";
 import UserAvatar from "@/components/UserAvatar.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
@@ -85,6 +88,13 @@ function go(name: string) {
 function leave() {
   router.push({ name: homeRouteFor(auth.department) });
 }
+
+// iOS skin: frosted navigation bar + bottom tab bar on phones.
+const { scrolled } = useIosNavbar();
+const ui = useUiStore();
+const tabItems = computed(() =>
+  OFFICE_SECTIONS.map((it) => ({ ...it, badge: () => badges.value[it.name] })),
+);
 </script>
 
 <template>
@@ -101,7 +111,7 @@ function leave() {
 
     <!-- ===== Rail ===== -->
     <aside
-      class="bg-surface flex flex-col shrink-0 transition-transform duration-200
+      class="app-sidebar bg-surface flex flex-col shrink-0 transition-transform duration-200
              fixed inset-y-0 right-0 z-50 w-64 h-screen
              md:sticky md:top-4 md:z-auto md:rounded-card md:shadow-soft md:h-[calc(100vh-2rem)]"
       :class="[
@@ -179,7 +189,8 @@ function leave() {
     <!-- ===== Content ===== -->
     <div class="flex-1 min-w-0 p-3 md:p-0">
       <header
-        class="bg-surface md:rounded-card md:shadow-soft mb-4 overflow-hidden"
+        class="app-navbar bg-surface md:rounded-card md:shadow-soft mb-4 overflow-hidden"
+        :class="{ 'is-scrolled': scrolled }"
       >
         <!-- The section's colour as a top edge: present without shouting. -->
         <div class="h-1" :style="{ background: 'rgb(' + section.color + ')' }"></div>
@@ -202,7 +213,8 @@ function leave() {
             <p class="text-[11px] text-slate-400 truncate">{{ section.hint }}</p>
           </div>
 
-          <div class="flex-1"></div>
+          <!-- The spacer doubles as the iOS skin's desktop tab slot (IosTabBar). -->
+        <div class="flex-1 ios-tabslot"></div>
 
           <!-- Pages put their own buttons here instead of each building a
                second toolbar card under the header. -->
@@ -242,6 +254,14 @@ function leave() {
       </header>
 
       <RouterView />
+      <IosTabBar
+        v-if="ui.skin === 'ios'"
+        scope="office"
+        :items="tabItems"
+        :is-active="(n) => isActive(n, route.name as string)"
+        @go="go"
+        @more="mobileOpen = true"
+      />
     </div>
   </div>
 </template>

@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { init, type EChartsOption, type EChartsType } from "@/lib/echarts";
 import { useUiStore } from "@/stores/ui";
-import { AXIS, TOOLTIP, barGradient, barRadius, compact, seriesColor } from "@/components/charts/theme";
+import { AXIS, TOOLTIP, barGradient, barRadius, chartThemeVersion, compact, seriesColor } from "@/components/charts/theme";
+import { iosChartOption } from "@/lib/iosCharts";
 import { rial } from "@/utils/format";
 
 /**
@@ -108,7 +109,7 @@ const option = computed<EChartsOption>(() => {
 function mount() {
   if (!el.value) return;
   chart = init(el.value, undefined, { renderer: "canvas" });
-  chart.setOption(option.value);
+  chart.setOption(iosChartOption(option.value));
   chart.on("click", (p: any) => emit("pick", p.dataIndex, p.seriesName));
   // Show a pointer only where a click does something.
   chart.getZr().on("mousemove", (e: any) => {
@@ -146,8 +147,8 @@ onMounted(() => {
   // actually laid the page out breaks it.
   requestAnimationFrame(() => requestAnimationFrame(resize));
 });
-watch(option, (o) => {
-  chart?.setOption(o, true);
+watch([option, chartThemeVersion], ([o]) => {
+  chart?.setOption(iosChartOption(o), true);
   // Data arriving changes the layout around the chart; re-measure with it.
   resize();
 }, { deep: true });

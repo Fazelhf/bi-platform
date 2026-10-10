@@ -1,0 +1,278 @@
+/* ================================================================== */
+/* iOS FEEL                                                            */
+/* ios.css recolours, ios-structure.css rebuilds the layout. This file */
+/* is the part people recognise before they can say why: Liquid Glass  */
+/* with its lit rim, Settings' coloured icon tiles, controls that      */
+/* squish under a finger and spring back, widgets with a gradient      */
+/* face, the soft tint behind a large title.                           */
+/* ================================================================== */
+
+html[data-skin="ios"] {
+  /* Liquid Glass: a lit top rim, a faint inner edge and a soft drop. The
+     rim is what separates glass from a merely translucent box. */
+  --glass-rim: inset 0 1px 0 rgb(255 255 255 / 0.75), inset 0 0 0 0.5px rgb(255 255 255 / 0.35);
+  --glass-fill: rgb(255 255 255 / 0.62);
+  --glass-drop: 0 8px 28px -10px rgb(0 0 0 / 0.22), 0 0 0 0.5px rgb(0 0 0 / 0.05);
+  /* The release half of a press: overshoots a hair, then settles. */
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+html[data-skin="ios"].dark {
+  --glass-rim: inset 0 1px 0 rgb(255 255 255 / 0.18), inset 0 0 0 0.5px rgb(255 255 255 / 0.1);
+  --glass-fill: rgb(44 44 46 / 0.62);
+  --glass-drop: 0 8px 28px -10px rgb(0 0 0 / 0.7), 0 0 0 0.5px rgb(255 255 255 / 0.06);
+}
+
+/* ---- The page: grouped grey with a soft tint at the top --------------- */
+/* Health and Fitness wash the top of the screen in colour behind the large
+   title and let it fade into the grouped grey. */
+html[data-skin="ios"] body {
+  background-color: rgb(var(--c-canvas));
+  background-image:
+    radial-gradient(70rem 26rem at 85% -8rem, rgb(0 122 255 / 0.13), transparent 70%),
+    radial-gradient(50rem 22rem at 10% -6rem, rgb(175 82 222 / 0.08), transparent 70%);
+  background-repeat: no-repeat;
+}
+html[data-skin="ios"].dark body {
+  background-image:
+    radial-gradient(70rem 26rem at 85% -8rem, rgb(10 132 255 / 0.22), transparent 70%),
+    radial-gradient(50rem 22rem at 10% -6rem, rgb(191 90 242 / 0.14), transparent 70%);
+}
+
+/* ---- Liquid Glass on everything that floats --------------------------- */
+html[data-skin="ios"] .app-navbar::before,
+html[data-skin="ios"] .ios-tabbar,
+html[data-skin="ios"] .app-sidebar {
+  background-color: var(--glass-fill);
+  box-shadow: var(--glass-rim), var(--glass-drop);
+}
+html[data-skin="ios"] .app-navbar::before { border-radius: 1.5rem; }
+@media (max-width: 767px) {
+  html[data-skin="ios"] .app-navbar::before {
+    border-radius: 0;
+    box-shadow: 0 0.5px 0 rgb(var(--c-slate-200));
+  }
+}
+/* The selected tab is a lens of brighter glass, not a flat fill. */
+html[data-skin="ios"] .ios-tab.is-active {
+  background-color: rgb(255 255 255 / 0.7);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 10px -2px rgb(0 0 0 / 0.15);
+}
+html[data-skin="ios"].dark .ios-tab.is-active {
+  background-color: rgb(255 255 255 / 0.12);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2);
+}
+/* Selected glyphs fill in, as SF Symbols switch to their .fill variant. */
+html[data-skin="ios"] .ios-tab.is-active svg path { fill: currentColor; fill-opacity: 0.18; }
+
+/* Bar buttons are glass circles — the iOS 26 toolbar. */
+html[data-skin="ios"] .app-navbar button.rounded-full:is(.p-2, .p-1) {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  background-color: var(--glass-fill);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--glass-rim), 0 4px 14px -6px rgb(0 0 0 / 0.2);
+}
+html[data-skin="ios"] .app-navbar button.rounded-full:is(.p-2, .p-1):hover {
+  background-color: var(--glass-fill);
+}
+
+/* ---- Settings-style icon tiles ---------------------------------------- */
+/* Every destination gets the coloured rounded tile with a white glyph that
+   is the single most recognisable thing in iOS Settings. Colours cycle
+   through Apple's system palette so neighbouring rows never match. */
+html[data-skin="ios"] .app-sidebar nav button > svg:first-child {
+  box-sizing: content-box;
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0.3125rem;
+  border-radius: 0.5rem;
+  corner-shape: squircle;
+  color: #fff !important;
+  stroke-width: 2;
+  background: var(--tile, #007aff);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25);
+  flex-shrink: 0;
+}
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 1) { --tile: linear-gradient(180deg, #2b95ff, #007aff); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 2) { --tile: linear-gradient(180deg, #c27aec, #af52de); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 3) { --tile: linear-gradient(180deg, #4cd471, #34c759); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 4) { --tile: linear-gradient(180deg, #ffa733, #ff9500); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 5) { --tile: linear-gradient(180deg, #ff5d55, #ff3b30); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 6) { --tile: linear-gradient(180deg, #4dc3d9, #30b0c7); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 7) { --tile: linear-gradient(180deg, #7472e2, #5856d6); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 8) { --tile: linear-gradient(180deg, #ff5577, #ff2d55); }
+html[data-skin="ios"] .app-sidebar nav button:nth-of-type(9n + 9) { --tile: linear-gradient(180deg, #a2a2a7, #8e8e93); }
+/* Rows inside a group are one level down: grey tiles, like a sub-page. */
+html[data-skin="ios"] .app-sidebar nav div > button > svg:first-child {
+  --tile: linear-gradient(180deg, #a2a2a7, #8e8e93);
+  width: 1rem;
+  height: 1rem;
+  padding: 0.25rem;
+}
+/* The bottom block of the rail (profile, settings, sign-out) too. */
+html[data-skin="ios"] .app-sidebar > div:last-child > button > svg:first-child {
+  box-sizing: content-box;
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0.3125rem;
+  border-radius: 0.5rem;
+  corner-shape: squircle;
+  color: #fff !important;
+  stroke-width: 2;
+  background: linear-gradient(180deg, #a2a2a7, #8e8e93);
+}
+html[data-skin="ios"] .app-sidebar > div:last-child > button.text-red-500 > svg:first-child {
+  background: linear-gradient(180deg, #ff5d55, #ff3b30);
+}
+/* On the selected row the tile keeps its colour and gains a white ring. */
+html[data-skin="ios"] .app-sidebar :is(.bg-panel, .is-active, .bg-white.text-panel) > svg:first-child {
+  box-shadow: 0 0 0 1.5px rgb(255 255 255 / 0.9);
+}
+/* With tiles, the selected row reads better as a light lens than a slab. */
+html[data-skin="ios"] .app-sidebar nav :is(.bg-panel, .is-active, .bg-white.text-panel) {
+  background-color: rgb(var(--c-brand-500) / 0.14) !important;
+  color: rgb(var(--c-brand-500)) !important;
+}
+
+/* Icon squares inside cards (the KPI headers) become tiles as well. */
+html[data-skin="ios"] .rounded-card :is(span, div):is(.w-7, .w-8, .w-9, .w-10):is(.bg-slate-50, .bg-slate-100):has(> svg) {
+  background: linear-gradient(180deg, #2b95ff, #007aff);
+  color: #fff !important;
+  border-radius: 0.625rem;
+  corner-shape: squircle;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25);
+}
+html[data-skin="ios"] .grid > :nth-child(5n + 2) :is(span, div):is(.w-7, .w-8, .w-9, .w-10):is(.bg-slate-50, .bg-slate-100):has(> svg) { background: linear-gradient(180deg, #4cd471, #34c759); }
+html[data-skin="ios"] .grid > :nth-child(5n + 3) :is(span, div):is(.w-7, .w-8, .w-9, .w-10):is(.bg-slate-50, .bg-slate-100):has(> svg) { background: linear-gradient(180deg, #ffa733, #ff9500); }
+html[data-skin="ios"] .grid > :nth-child(5n + 4) :is(span, div):is(.w-7, .w-8, .w-9, .w-10):is(.bg-slate-50, .bg-slate-100):has(> svg) { background: linear-gradient(180deg, #c27aec, #af52de); }
+html[data-skin="ios"] .grid > :nth-child(5n + 5) :is(span, div):is(.w-7, .w-8, .w-9, .w-10):is(.bg-slate-50, .bg-slate-100):has(> svg) { background: linear-gradient(180deg, #ff5d55, #ff3b30); }
+html[data-skin="ios"] .rounded-card :is(span, div):is(.w-7, .w-8, .w-9, .w-10):is(.bg-slate-50, .bg-slate-100) > svg {
+  color: #fff;
+  stroke-width: 2;
+}
+
+/* ---- Widgets ----------------------------------------------------------- */
+/* The graphite hero becomes a home-screen widget: a deep blue-to-indigo
+   face with a lit top edge. Deep enough that white text keeps 7:1. */
+html[data-skin="ios"] main section.bg-panel,
+html[data-skin="ios"] main div.bg-panel.rounded-card,
+html[data-skin="ios"] .app-navbar ~ div :is(section, div).bg-panel.rounded-card {
+  background-color: #0a3fb8;
+  background-image:
+    radial-gradient(40rem 20rem at 100% 0%, rgb(90 200 250 / 0.35), transparent 60%),
+    linear-gradient(150deg, #0a5ce0 0%, #2b2aa8 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 18px 40px -18px rgb(10 60 200 / 0.55);
+}
+html[data-skin="ios"].dark main section.bg-panel,
+html[data-skin="ios"].dark main div.bg-panel.rounded-card,
+html[data-skin="ios"].dark .app-navbar ~ div :is(section, div).bg-panel.rounded-card {
+  background-image:
+    radial-gradient(40rem 20rem at 100% 0%, rgb(100 210 255 / 0.25), transparent 60%),
+    linear-gradient(150deg, #0a4fc4 0%, #24238f 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18);
+}
+/* Inside the widget, tracks and chips are frosted white, not grey. */
+html[data-skin="ios"] :is(section, div).bg-panel :is(.bg-white\/10, .bg-white\/5, .bg-panel-soft) {
+  background-color: rgb(255 255 255 / 0.16);
+}
+
+/* Cards: whiter than white on the grey page, with the faintest rim. */
+html[data-skin="ios"] .rounded-card.bg-surface {
+  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.03), 0 12px 32px -18px rgb(0 0 0 / 0.14);
+}
+html[data-skin="ios"].dark .rounded-card.bg-surface {
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.08);
+}
+
+/* ---- Large title ------------------------------------------------------- */
+html[data-skin="ios"] .app-navbar:not(.is-scrolled) h1 {
+  transform: scale(1.95); /* 17pt → 34pt, the real large-title size */
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  max-width: 17rem;
+}
+@media (max-width: 767px) {
+  html[data-skin="ios"] .app-navbar:not(.is-scrolled) h1 { transform: scale(1.45); max-width: 10rem; }
+}
+/* Most pages open with their own heading («نمای کلی سازمان», «ورود
+   اطلاعات تولید»). In iOS that heading *is* the large title, so it is drawn
+   at 34pt and the bar's own title stays hidden until the heading has
+   scrolled away — then it fades in, small, exactly like a UINavigationBar.
+   Headings inside cards, widgets and dialogs are not page titles. */
+html[data-skin="ios"] .app-navbar ~ * :is(h1, h2):is(.text-lg, .text-xl, .text-2xl):is(.font-bold, .font-extrabold):not(.rounded-card *):not(.bg-panel *):not(.fixed *):not(.app-navbar *) {
+  font-size: 2.125rem; /* 34pt largeTitle */
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+@media (max-width: 767px) {
+  html[data-skin="ios"] .app-navbar ~ * :is(h1, h2):is(.text-lg, .text-xl, .text-2xl):is(.font-bold, .font-extrabold):not(.rounded-card *):not(.bg-panel *):not(.fixed *):not(.app-navbar *) {
+    font-size: 1.875rem;
+  }
+}
+html[data-skin="ios"] .app-navbar:has(~ * :is(h1, h2):is(.text-lg, .text-xl, .text-2xl):is(.font-bold, .font-extrabold):not(.rounded-card *):not(.bg-panel *):not(.fixed *)) h1 {
+  transform: none;
+  font-weight: 600;
+  transition: opacity 0.25s ease;
+}
+html[data-skin="ios"] .app-navbar:not(.is-scrolled):has(~ * :is(h1, h2):is(.text-lg, .text-xl, .text-2xl):is(.font-bold, .font-extrabold):not(.rounded-card *):not(.bg-panel *):not(.fixed *)) h1 {
+  opacity: 0;
+}
+
+/* ---- Touch: squish on press, spring on release -------------------------- */
+html[data-skin="ios"] :is(button, [role="button"], a.rounded-card, .cursor-pointer.rounded-card, .cursor-pointer.rounded-2xl) {
+  transition:
+    transform 0.45s var(--spring),
+    opacity 0.25s ease,
+    background-color 0.25s ease,
+    color 0.2s ease,
+    box-shadow 0.25s ease;
+}
+html[data-skin="ios"] :is(button, [role="button"]):active:not(:disabled) {
+  transform: scale(0.96);
+  opacity: 0.8;
+  transition-duration: 0.1s;
+}
+html[data-skin="ios"] :is(a.rounded-card, .cursor-pointer.rounded-card, .cursor-pointer.rounded-2xl):active {
+  transform: scale(0.98);
+  transition-duration: 0.12s;
+}
+/* The sidebar rows and segmented pills only dim; a shrinking list row
+   looks broken, not pressed. */
+html[data-skin="ios"] :is(.app-sidebar button, button[role="switch"]):active:not(:disabled) {
+  transform: none;
+}
+
+/* A toggled switch's knob stretches as it travels — the UISwitch squish. */
+html[data-skin="ios"] button[role="switch"]:active:not(:disabled) > span {
+  width: 2.0625rem;
+}
+
+/* ---- Entry: cards rise into place, one after another -------------------- */
+@keyframes ios-rise {
+  from { opacity: 0; transform: translateY(0.75rem) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+html[data-skin="ios"] main .grid > .rounded-card,
+html[data-skin="ios"] main > div > .rounded-card,
+html[data-skin="ios"] main > div > section {
+  animation: ios-rise 0.6s var(--motion-ease) both;
+}
+html[data-skin="ios"] main .grid > .rounded-card:nth-child(2),
+html[data-skin="ios"] main > div > :nth-child(2) { animation-delay: 0.04s; }
+html[data-skin="ios"] main .grid > .rounded-card:nth-child(3),
+html[data-skin="ios"] main > div > :nth-child(3) { animation-delay: 0.08s; }
+html[data-skin="ios"] main .grid > .rounded-card:nth-child(4),
+html[data-skin="ios"] main > div > :nth-child(4) { animation-delay: 0.12s; }
+html[data-skin="ios"] main .grid > .rounded-card:nth-child(n + 5),
+html[data-skin="ios"] main > div > :nth-child(n + 5) { animation-delay: 0.16s; }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="ios"] :is(button, [role="button"], a, .rounded-card) { transition: none; }
+  html[data-skin="ios"] :is(button, [role="button"]):active { transform: none; }
+  html[data-skin="ios"] main :is(.rounded-card, section) { animation: none !important; }
+}

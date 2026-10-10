@@ -6,7 +6,7 @@
  *
  *   • A tint made by string-concatenating alpha onto hex (`color + "22"`)
  *     cannot adapt, so section-tinted chips were nearly invisible on the dark
- *     skin and muddy on شیشه‌ای.
+ *     skin and muddy on a glass one.
  *   • The section-coloured buttons had **no focus state at all** — they were
  *     the only unreachable-by-keyboard controls in the workspace.
  *   • Hover was `filter: brightness(.95)`, which dims the text along with the

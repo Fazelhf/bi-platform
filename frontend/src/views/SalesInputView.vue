@@ -581,7 +581,7 @@ watch(selectedDay, load);
           >{{ progress.complete ? "✓ همه‌ی هفته‌ها ثبت شده" : `${progress.entered} از ${progress.total} هفته ثبت شده` }}</span>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm">
+          <table v-entry-table class="w-full text-sm">
             <thead>
               <tr class="text-[11px] text-slate-400 border-b border-slate-100">
                 <th class="text-right font-medium pb-2 pe-3">شاخص</th>
@@ -647,7 +647,7 @@ watch(selectedDay, load);
           بقیه‌ی ردیف‌ها را شما پر می‌کنید.
         </p>
         <div class="overflow-x-auto">
-          <table class="text-sm border-separate" style="border-spacing: 0">
+          <table v-entry-table class="text-sm border-separate" style="border-spacing: 0">
             <thead>
               <tr>
                 <th class="text-right font-medium text-slate-500 py-2 px-3 sticky right-0 bg-surface z-10 min-w-[150px]">شاخص</th>
@@ -758,7 +758,7 @@ watch(selectedDay, load);
              lg, not xl: the sidebar eats 256px, so on a 1440px laptop the
              content is ~1150px and an xl breakpoint would never fire. -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-2">
-          <table v-for="(col, ci) in provinceColumns" :key="ci" class="w-full text-sm">
+          <table v-for="(col, ci) in provinceColumns" :key="ci" v-entry-table class="w-full text-sm">
             <thead>
               <tr class="text-[11px] text-slate-400 border-b border-slate-100">
                 <th class="text-right font-medium pb-2">استان</th>
@@ -893,7 +893,7 @@ watch(selectedDay, load);
           </div>
         </div>
 
-        <table class="w-full text-sm">
+        <table v-entry-table class="w-full text-sm">
           <thead>
             <tr class="text-[11px] text-slate-400 border-b border-slate-100">
               <th class="text-right font-medium pb-2">گروه مشتری</th>

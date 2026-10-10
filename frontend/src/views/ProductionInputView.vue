@@ -143,7 +143,7 @@ watch(selectedPeriod, load);
           <h3 class="font-bold text-ink">خطوط برش</h3>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm min-w-[720px]">
+          <table v-entry-table class="w-full text-sm min-w-[720px]">
             <thead>
               <tr class="text-slate-400 border-b border-slate-100">
                 <th class="text-right font-medium py-2 pr-2">خط تولید</th>
