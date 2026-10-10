@@ -190,7 +190,10 @@ html[data-skin="ios"] .app-navbar button.rounded-full:hover { background-color: 
 .ios-tab-label {
   font-size: 0.625rem;
   font-weight: 600;
-  line-height: 1;
+  /* Not 1: with overflow hidden, a line box that tight cuts off the tails
+     of Persian letters (ی، ر، ز، و) that hang below the baseline. */
+  line-height: 1.5;
+  padding-bottom: 0.0625rem;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;

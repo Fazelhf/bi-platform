@@ -37,8 +37,12 @@ function syncThemeColor() {
 
 /** The skin is a personal choice, so it follows dark mode's rules: stored
  *  per device in localStorage, never on the server, never inherited from a
- *  colleague. An unknown or missing value falls back to کلاسیک, which is
- *  what the app looked like before skins existed. */
+ *  colleague. With no choice made, a phone opens in iOS — the layout built
+ *  for it (tab bar, sheets, cards instead of wide tables) — and anything
+ *  larger in کلاسیک. The default is not stored, so it is only ever a
+ *  default: the first pick in «ظاهر سایت» is saved and wins from then on. */
+const PHONE = "(max-width: 767px), (pointer: coarse) and (max-width: 932px)";
+
 function initialSkin(): SkinKey {
   const saved = store.get("skin");
   // Someone who picked a skin that has since been retired keeps the look
@@ -47,7 +51,8 @@ function initialSkin(): SkinKey {
     store.set("skin", RETIRED_SKINS[saved]);
     return RETIRED_SKINS[saved];
   }
-  return isSkinKey(saved) ? saved : DEFAULT_SKIN;
+  if (isSkinKey(saved)) return saved;
+  return window.matchMedia?.(PHONE).matches ? "ios" : DEFAULT_SKIN;
 }
 
 function applySkin(key: SkinKey) {
