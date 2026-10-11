@@ -1,9 +1,9 @@
 import { defineStore } from "pinia";
 import { store } from "@/lib/storage";
 import api from "@/api/client";
-import { paletteByKey, type Palette } from "@/components/charts/palettes";
+import { IOS_PALETTE, paletteByKey, type Palette } from "@/components/charts/palettes";
 import { bumpChartTheme } from "@/components/charts/theme";
-import { DEFAULT_SKIN, isSkinKey, type SkinKey } from "@/lib/skins";
+import { DEFAULT_SKIN, RETIRED_SKINS, isSkinKey, type SkinKey } from "@/lib/skins";
 
 /**
  * Site-wide UI preferences. The chart theme is chosen by the CEO in
@@ -19,19 +19,45 @@ function initialDark(): boolean {
 
 function applyDark(on: boolean) {
   document.documentElement.classList.toggle("dark", on);
+  syncThemeColor();
+}
+
+/** The phone's status bar and the browser chrome take their colour from
+ *  <meta name="theme-color">. Matching it to the page background is what
+ *  makes an installed app feel native — most of all in the iOS skin, whose
+ *  grouped grey (or true black) runs edge to edge. */
+function syncThemeColor() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const rgb = getComputedStyle(document.documentElement)
+    .getPropertyValue("--c-canvas")
+    .trim();
+  if (rgb) meta.setAttribute("content", `rgb(${rgb.replace(/\s+/g, ",")})`);
 }
 
 /** The skin is a personal choice, so it follows dark mode's rules: stored
  *  per device in localStorage, never on the server, never inherited from a
- *  colleague. An unknown or missing value falls back to کلاسیک, which is
- *  what the app looked like before skins existed. */
+ *  colleague. With no choice made, a phone opens in iOS — the layout built
+ *  for it (tab bar, sheets, cards instead of wide tables) — and anything
+ *  larger in کلاسیک. The default is not stored, so it is only ever a
+ *  default: the first pick in «ظاهر سایت» is saved and wins from then on. */
+const PHONE = "(max-width: 767px), (pointer: coarse) and (max-width: 932px)";
+
 function initialSkin(): SkinKey {
   const saved = store.get("skin");
-  return isSkinKey(saved) ? saved : DEFAULT_SKIN;
+  // Someone who picked a skin that has since been retired keeps the look
+  // that replaced it, rather than being dropped back to کلاسیک.
+  if (saved && RETIRED_SKINS[saved]) {
+    store.set("skin", RETIRED_SKINS[saved]);
+    return RETIRED_SKINS[saved];
+  }
+  if (isSkinKey(saved)) return saved;
+  return window.matchMedia?.(PHONE).matches ? "ios" : DEFAULT_SKIN;
 }
 
 function applySkin(key: SkinKey) {
   document.documentElement.dataset.skin = key;
+  syncThemeColor();
 }
 
 export const useUiStore = defineStore("ui", {
@@ -46,7 +72,7 @@ export const useUiStore = defineStore("ui", {
   }),
   getters: {
     palette(): Palette {
-      return paletteByKey(this.chartTheme);
+      return this.skin === "ios" ? IOS_PALETTE : paletteByKey(this.chartTheme);
     },
   },
   actions: {

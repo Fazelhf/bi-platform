@@ -46,6 +46,20 @@ export const PALETTES: Palette[] = [
   },
 ];
 
+/**
+ * Apple's system colours, used whenever the iOS skin is on. Not in PALETTES:
+ * it is part of the skin (a per-device choice), not one of the CEO's
+ * site-wide chart themes, so the server never stores it. Flat fills and a
+ * small corner, the way Swift Charts draws bars.
+ */
+export const IOS_PALETTE: Palette = {
+  key: "ios",
+  label: "iOS",
+  actual: "#007aff", target: "#34c759", ideal: "#af52de",
+  series: ["#007aff", "#34c759", "#ff9500", "#af52de", "#ff2d55", "#5ac8fa", "#8e8e93"],
+  slate: "#d1d1d6", rose: "#ff3b30", gradient: false, radius: 5,
+};
+
 export function paletteByKey(key: string | undefined): Palette {
   return PALETTES.find((p) => p.key === key) ?? PALETTES[0];
 }

@@ -5,10 +5,15 @@ import router from "./router";
 import { useUiStore } from "./stores/ui";
 import { useAuthStore } from "./stores/auth";
 import { reloadIfStale } from "./composables/usePwa";
+import { installIosTransitions } from "./lib/iosTransitions";
+import { vEntryTable } from "./lib/entryTable";
 import "./style.css";
 
 const app = createApp(App);
 app.use(createPinia()).use(router);
+installIosTransitions(router);
+// Entry sheets: cards on a phone, a pinned row-name column elsewhere.
+app.directive("entry-table", vEntryTable);
 
 // A deploy replaces every hashed chunk at once. A tab that was already open —
 // or one that loaded a cached index.html — keeps asking for the names it was

@@ -21,7 +21,7 @@ import { MODAL_LAYER, matches, ordered, type PickerOption } from "@/components/p
  *   the database as a second, separate port.
  *
  * The panel is teleported to <body> and positioned fixed, for the reason
- * ThemePicker documents: in the شیشه‌ای skin every card carries a
+ * ThemePicker documents: a glass panel (iOS skin) carries a
  * backdrop-filter, which makes it a stacking context that an absolutely
  * positioned child cannot escape at any z-index. It also has to clear
  * FormModal's own scroll container, which would otherwise clip it.

@@ -1,4 +1,9 @@
 @import "./styles/office.css";
+@import "./styles/ios.css";
+@import "./styles/ios-structure.css";
+@import "./styles/ios-feel.css";
+@import "./styles/ios26.css";
+@import "./styles/entry-table.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,7 +13,7 @@
 /* <alpha-value> keeps working (bg-white/50, text-slate-400/70).        */
 /*                                                                      */
 /* Two independent axes:                                                */
-/*   • skin  — `data-skin` on <html>: classic | glass | material        */
+/*   • skin  — `data-skin` on <html>: classic | ios | aurora            */
 /*   • mode  — the `dark` class, exactly as before                      */
 /* Every skin ships both modes, so the light/dark switch keeps working  */
 /* whichever skin the user picked.                                      */
@@ -21,13 +26,18 @@
 :root {
   color-scheme: light;
 
+  /* The UI face. Emoji fonts sit at the end so a 👍 in a note renders in the
+     platform's colour emoji rather than as a Vazirmatn tofu box. */
+  --font-sans: "Vazirmatn", Tahoma, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+
   /* Shape & depth — see tailwind.config.js (rounded-card, shadow-soft). */
   --r-card: 1.5rem;
   --shadow-soft: 0 6px 24px -8px rgba(20, 20, 25, 0.1);
   --shadow-pop: 0 12px 40px -8px rgba(20, 20, 25, 0.28);
 
   /* Motion signature. Each skin moves differently on purpose: کلاسیک is
-     brisk and businesslike, شیشه‌ای glides on the iOS spring curve, شفق
+     brisk and businesslike, iOS rides UIKit's sheet spring, شفق
      overshoots and settles. Every animation in the app reads these, so a
      skin changes how the UI *feels*, not just how it looks. */
   --motion-dur: 0.16s;
@@ -36,13 +46,9 @@
   --motion-hover: none; /* what a card does when you point at it */
   --shimmer-dur: 1.4s;
 
-  /* Card translucency. 1 = opaque; only شیشه‌ای lowers it. */
-  --surface-alpha: 1;
-  --surface-blur: 0px;
-
-  /* The colour a chart visually sits on. Usually the same as --c-surface,
-     but شیشه‌ای paints white-at-8% over a dark page, so ECharts needs the
-     resolved colour instead — pie slice gaps and label halos read it. */
+  /* The colour a chart visually sits on — pie slice gaps and label halos
+     read it. Kept apart from --c-surface so a skin with translucent cards
+     can hand ECharts the colour the card actually resolves to. */
   --c-chart-surface: 255 255 255;
 
   --c-canvas: 233 232 228;   /* warm light-gray page background */
@@ -109,155 +115,6 @@
 }
 
 /* ================================================================== */
-/* SKIN: شیشه‌ای — Liquid Glass (iOS / visionOS)                       */
-/* Frosted panels floating over a lit gradient. The page background is */
-/* deliberately vivid: backdrop-filter has nothing to work with over a */
-/* flat grey, and glass without colour behind it just looks washed out.*/
-/* ================================================================== */
-html[data-skin="glass"] {
-  --surface-alpha: 0.55;
-  --surface-blur: 20px;
-  --r-card: 1.75rem; /* 28px — iOS continuous-corner feel */
-
-  /* The iOS/visionOS spring: long, decelerating, never bouncing. */
-  --motion-dur: 0.42s;
-  --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --motion-from: translateY(12px) scale(0.96);
-  --motion-hover: translateY(-2px);
-  --shimmer-dur: 2s;
-
-  /* A lit top edge over a wide, soft cast shadow: the standard glass cue. */
-  --shadow-soft: inset 0 1px 0 0 rgb(255 255 255 / 0.6),
-    0 8px 32px -10px rgb(23 33 66 / 0.24);
-  --shadow-pop: inset 0 1px 0 0 rgb(255 255 255 / 0.7),
-    0 20px 50px -12px rgb(23 33 66 / 0.38);
-
-  --c-canvas: 232 238 252;
-  --c-surface: 255 255 255; /* solid — inputs, chips, anything with text on it */
-  --c-glass-tint: 255 255 255; /* the pane colour, painted at --surface-alpha */
-  --c-chart-surface: 244 246 253; /* white@55% resolved over the gradient */
-  --c-ink: 19 23 36;
-  --c-ink-soft: 42 48 66;
-  --c-panel: 22 27 44;
-  --c-panel-soft: 38 45 70;
-  --c-brand-50: 232 240 255;
-  --c-accent-50: 226 248 238;
-
-  --c-slate-50: 247 249 254;
-  --c-slate-100: 238 242 251;
-  --c-slate-200: 221 228 243;
-  --c-slate-300: 195 205 227;
-  --c-slate-400: 138 149 176;
-  --c-slate-500: 95 107 136;
-  --c-slate-600: 68 79 105;
-  --c-slate-700: 49 59 82;
-  --c-slate-800: 30 39 58;
-  --c-slate-900: 15 21 36;
-
-  --c-scrollbar: 168 179 205;
-  --c-sum-bg: 228 250 240;
-  --c-sum-fg: 4 108 79;
-}
-
-html[data-skin="glass"].dark {
-  --surface-alpha: 0.09;
-  --surface-blur: 26px;
-
-  --shadow-soft: inset 0 1px 0 0 rgb(255 255 255 / 0.12),
-    0 8px 32px -10px rgb(0 0 0 / 0.6);
-  --shadow-pop: inset 0 1px 0 0 rgb(255 255 255 / 0.16),
-    0 20px 50px -12px rgb(0 0 0 / 0.75);
-
-  --c-canvas: 9 11 22;
-  --c-surface: 34 37 52; /* solid dark — an input must not be white here */
-  --c-glass-tint: 255 255 255;
-  --c-chart-surface: 32 35 50; /* white@9% resolved over the dark gradient */
-  --c-ink: 236 238 246;
-  --c-ink-soft: 208 212 226;
-  --c-panel: 40 44 62;
-  --c-panel-soft: 54 59 82;
-  --c-brand-50: 32 44 82;
-  --c-accent-50: 20 56 46;
-
-  --c-slate-50: 38 42 58;
-  --c-slate-100: 47 52 70;
-  --c-slate-200: 62 68 90;
-  --c-slate-300: 86 93 119;
-  --c-slate-400: 142 150 176;
-  --c-slate-500: 168 176 200;
-  --c-slate-600: 192 199 218;
-  --c-slate-700: 212 217 232;
-  --c-slate-800: 230 234 244;
-  --c-slate-900: 244 246 252;
-
-  --c-scrollbar: 78 85 110;
-  --c-sum-bg: 18 54 44;
-  --c-sum-fg: 62 216 160;
-}
-
-/* Cards stop being solid and start refracting the page behind them.
-   Form controls are excluded deliberately: a text field is where contrast
-   matters most, and a translucent one over a moving gradient is exactly the
-   4.5:1 failure the glass style is notorious for. They keep --c-surface,
-   which is why that token stays a solid colour in both modes above.
-   --------------------------------------------------------------------
-   The blur sits on a pseudo-element, NOT on the card. `backdrop-filter`
-   makes its element the containing block for every `position: fixed`
-   descendant, and this app renders modals, drawers and dialogs inside the
-   cards they belong to — so putting the filter on .bg-surface pinned each
-   of those overlays to a card's box instead of the viewport, and the
-   dialog rendered as a sliver somewhere inside the card. A pseudo-element
-   blurs the same backdrop but has no element descendants to capture. */
-html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select),
-html[data-skin="glass"] .bg-panel {
-  background-color: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select)::before,
-html[data-skin="glass"] .bg-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1; /* behind the card's content, in front of the page */
-  border-radius: inherit;
-  backdrop-filter: blur(var(--surface-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(180%);
-  pointer-events: none;
-}
-html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select)::before {
-  background-color: rgb(var(--c-glass-tint) / var(--surface-alpha));
-}
-/* Hero cards and sticky bars are glass too — just a darker pane. */
-html[data-skin="glass"] .bg-panel::before {
-  background-color: rgb(var(--c-panel) / 0.82);
-}
-/* An absolutely-positioned pseudo needs a positioned parent, but only the
-   cards Tailwind left static: anything already carrying a position utility
-   (including responsive ones like `md:sticky`) is its own anchor already,
-   and forcing `relative` on the sidebar would unpin it. */
-html[data-skin="glass"] .bg-surface:not([class*="fixed"]):not([class*="absolute"]):not([class*="sticky"]):not([class*="relative"]),
-html[data-skin="glass"] .bg-panel:not([class*="fixed"]):not([class*="absolute"]):not([class*="sticky"]):not([class*="relative"]) {
-  position: relative;
-}
-
-/* The light source. Fixed so panels refract a still image while scrolling. */
-html[data-skin="glass"] body {
-  background-color: rgb(var(--c-canvas));
-  background-image:
-    radial-gradient(58rem 40rem at 88% -12%, rgb(99 102 241 / 0.3), transparent 62%),
-    radial-gradient(48rem 36rem at 4% 2%, rgb(56 189 248 / 0.28), transparent 60%),
-    radial-gradient(44rem 34rem at 46% 112%, rgb(236 72 153 / 0.2), transparent 62%);
-  background-attachment: fixed;
-}
-html[data-skin="glass"].dark body {
-  background-image:
-    radial-gradient(58rem 40rem at 88% -12%, rgb(79 70 229 / 0.42), transparent 62%),
-    radial-gradient(48rem 36rem at 4% 2%, rgb(14 116 144 / 0.4), transparent 60%),
-    radial-gradient(44rem 34rem at 46% 112%, rgb(157 23 77 / 0.32), transparent 62%);
-}
-
-/* ================================================================== */
 /* SKIN: شفق — Aurora                                                  */
 /* The playful one. Colour does the work no other skin does: a slow    */
 /* drifting aurora behind the page and a violet *glow* instead of a    */
@@ -266,7 +123,7 @@ html[data-skin="glass"].dark body {
 /* the background and the elevation, never behind a number.            */
 /* ================================================================== */
 html[data-skin="aurora"] {
-  --r-card: 1.375rem; /* 22px — tighter than glass, softer than classic */
+  --r-card: 1.375rem; /* 22px — softer than classic */
 
   /* Overshoot and settle — the playful curve, kept short so it never feels
      like the app is making you wait for the fun. */
@@ -427,8 +284,8 @@ body,
    `position: fixed` descendant, exactly like backdrop-filter, so lifting a
    card on hover would have re-broken any dialog living inside it the moment
    the pointer crossed the card. Elevation says the same thing and stays
-   per-skin: --shadow-pop is a drop shadow in کلاسیک, a lit edge in شیشه‌ای
-   and a violet glow in شفق. */
+   per-skin: --shadow-pop is a drop shadow in کلاسیک and a violet glow in
+   شفق (iOS keeps cards flat; see styles/ios.css). */
 @media (hover: hover) {
   .rounded-card.bg-surface:hover {
     box-shadow: var(--shadow-pop);
@@ -470,26 +327,14 @@ body,
     transparent
   );
 }
-/* `background-attachment: fixed` is what makes the glass refract a still
-   image and the aurora sit behind the page rather than scroll with it. It is
+/* `background-attachment: fixed` is what makes the aurora sit behind the
+   page rather than scroll with it. It is
    also badly behaved on mobile — iOS Safari in particular repaints the whole
    backdrop on every scroll frame, which on a long entry sheet reads as the
    page freezing. Phones get the same gradient, scrolling with the content. */
 @media (max-width: 767px), (hover: none) {
-  html[data-skin="glass"] body,
   html[data-skin="aurora"] body {
     background-attachment: scroll;
-  }
-  /* Blur is per-frame GPU work on every card at once; on a phone that is the
-     difference between a list that scrolls and one that stutters. The tint
-     and the lit edge carry the look on their own. */
-  html[data-skin="glass"] .bg-surface::before,
-  html[data-skin="glass"] .bg-panel::before {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  html[data-skin="glass"] .bg-surface:not(input):not(textarea):not(select)::before {
-    background-color: rgb(var(--c-glass-tint) / 0.82);
   }
 }
 
@@ -499,13 +344,14 @@ body,
   .skeleton::after { animation: none; }
   html[data-skin="aurora"] body { animation: none; }
   :root,
-  html[data-skin="glass"],
-  html[data-skin="aurora"] {
+  html[data-skin="aurora"],
+  html[data-skin="ios"] {
     --motion-dur: 0.01s;
     --motion-from: none;
     --motion-hover: none;
   }
   body, .bg-surface, .bg-panel { transition: none; }
+  html[data-skin="ios"] .skeleton { animation: none; }
 }
 
 /* ------------------------------------------------------------------ */
@@ -536,8 +382,8 @@ body,
     box-shadow: none !important;
   }
 
-  /* شیشه‌ای prints as paper, not as glass: blur costs a fortune in toner
-     and translucent panels come out muddy. */
+  /* iOS's glass panes print as paper: blur costs a fortune in toner and
+     translucent panels come out muddy. */
   .bg-surface, .bg-panel {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;

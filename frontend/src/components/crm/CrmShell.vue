@@ -21,6 +21,9 @@ import { usePresence } from "@/composables/usePresence";
 import { useClickOutside } from "@/composables/useClickOutside";
 import { homeRouteFor } from "@/router";
 import NavIcon from "@/components/NavIcon.vue";
+import IosTabBar from "@/components/ios/IosTabBar.vue";
+import { useIosNavbar } from "@/composables/useIosNavbar";
+import { useUiStore } from "@/stores/ui";
 import UserAvatar from "@/components/UserAvatar.vue";
 import ThemePicker from "@/components/ThemePicker.vue";
 import NotificationBell from "@/components/NotificationBell.vue";
@@ -106,6 +109,10 @@ function leave() {
 onMounted(() => {
   crm.loadOptions();
 });
+
+// iOS skin: frosted navigation bar + bottom tab bar on phones.
+const { scrolled } = useIosNavbar();
+const ui = useUiStore();
 </script>
 
 <template>
@@ -118,7 +125,7 @@ onMounted(() => {
 
     <!-- ===== Rail ===== -->
     <aside
-      class="bg-surface flex flex-col shrink-0 transition-transform duration-200
+      class="app-sidebar bg-surface flex flex-col shrink-0 transition-transform duration-200
              fixed inset-y-0 right-0 z-50 w-64 h-screen
              md:sticky md:top-4 md:z-auto md:rounded-card md:shadow-soft md:h-[calc(100vh-2rem)]"
       :class="[
@@ -185,7 +192,9 @@ onMounted(() => {
          ones on the platform whose cards ran edge to edge on a phone, with
          nothing between the text and the side of the screen. -->
     <div class="flex-1 min-w-0 p-3 md:p-0">
-      <header class="bg-surface md:rounded-card md:shadow-soft px-3 sm:px-4 h-14 flex items-center gap-3 mb-4">
+      <header
+        class="app-navbar bg-surface md:rounded-card md:shadow-soft px-3 sm:px-4 h-14 flex items-center gap-3 mb-4"
+        :class="{ 'is-scrolled': scrolled }">
         <button
           class="md:hidden text-slate-500 p-1"
           aria-label="منو"
@@ -203,7 +212,8 @@ onMounted(() => {
                  text-slate-500 rounded-full px-2.5 py-1 shrink-0"
         >{{ crm.bookLabel }}</span>
 
-        <div class="flex-1"></div>
+        <!-- The spacer doubles as the iOS skin's desktop tab slot (IosTabBar). -->
+        <div class="flex-1 ios-tabslot"></div>
 
         <CrmSearch />
         <QuickAdd />
@@ -251,6 +261,14 @@ onMounted(() => {
       </p>
 
       <RouterView />
+      <IosTabBar
+        v-if="ui.skin === 'ios'"
+        scope="crm"
+        :items="nav"
+        :is-active="active"
+        @go="go"
+        @more="mobileOpen = true"
+      />
     </div>
 
     <DrillDrawer />

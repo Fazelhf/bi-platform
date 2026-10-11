@@ -1,0 +1,523 @@
+/* ================================================================== */
+/* iOS STRUCTURE                                                       */
+/* ios.css recolours. This file rebuilds: the shell, navigation, lists, */
+/* sheets, alerts, controls and widgets are drawn the way iOS draws    */
+/* them. Every page is built from these pieces, so every page changes  */
+/* — none of it through a page's own template, which is what keeps the */
+/* other three skins exactly as they were.                             */
+/*                                                                      */
+/* Hooks: .app-sidebar / .app-navbar / .app-main on every shell,       */
+/* .ios-tabbar (components/ios/IosTabBar.vue), .ui-* in UiHost.vue.    */
+/* ================================================================== */
+
+/* ---- Sidebar: the floating glass sidebar of iPadOS --------------- */
+html[data-skin="ios"] .app-sidebar {
+  background-color: rgb(var(--c-surface) / 0.72);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: var(--shadow-soft);
+  color: rgb(var(--c-ink));
+}
+html[data-skin="ios"].dark .app-sidebar {
+  background-color: rgb(var(--c-surface) / 0.8);
+}
+html[data-skin="ios"] .app-sidebar :is(nav, div) > button {
+  border-radius: 11px;
+  min-height: 2.5rem;
+  font-size: 0.9375rem; /* 15pt — the iPadOS sidebar row */
+}
+html[data-skin="ios"] .app-sidebar nav button:not(.bg-panel):not(.is-active):not(.bg-white):not(.text-slate-300) {
+  color: rgb(var(--c-ink));
+}
+/* Glyphs tinted, labels black — the iPadOS sidebar signature. */
+html[data-skin="ios"] .app-sidebar nav button:not(.bg-panel):not(.is-active):not(.bg-white) > svg {
+  color: rgb(var(--c-brand-500));
+}
+html[data-skin="ios"] .app-sidebar nav button:not(.bg-panel):not(.is-active):not(.bg-white) > svg.text-slate-300 {
+  color: rgb(var(--c-slate-300)); /* the group chevron stays quiet */
+}
+html[data-skin="ios"] .app-sidebar :is(.bg-panel, .is-active, .bg-white.text-panel) {
+  background-color: rgb(var(--c-brand-500)) !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+html[data-skin="ios"] .app-sidebar :is(.bg-panel, .is-active, .bg-white.text-panel) svg {
+  color: #fff;
+}
+/* The tile at the top of each workspace rail: an app icon. */
+html[data-skin="ios"] .app-sidebar > div:first-child > span.bg-panel,
+html[data-skin="ios"] .app-sidebar > div:first-child > span.bg-white\/10 {
+  background: linear-gradient(160deg, rgb(90 200 250), rgb(var(--c-brand-500))) !important;
+  color: #fff;
+}
+/* Group sub-lists: an indented list, no rule beside it. */
+html[data-skin="ios"] .app-sidebar nav .border-r { border-right-color: transparent; }
+/* The admin rail was the one dark sidebar; in iOS every sidebar is light. */
+html[data-skin="ios"] .app-sidebar--dark { background-color: rgb(var(--c-surface) / 0.72); }
+html[data-skin="ios"] .app-sidebar--dark [class*="text-white/"] { color: rgb(var(--c-slate-500)); }
+html[data-skin="ios"] .app-sidebar--dark .bg-white\/10 { background-color: rgb(var(--c-slate-100)); }
+html[data-skin="ios"] .app-sidebar--dark .border-white\/10 { border-color: rgb(var(--c-slate-100)); }
+html[data-skin="ios"] .app-sidebar--dark .text-red-300 { color: rgb(var(--c-red-500)); }
+/* Section captions in a sidebar: grouped-list headers. */
+html[data-skin="ios"] .app-sidebar nav p {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: rgb(var(--c-slate-400));
+}
+
+/* ---- Navigation bar with a collapsing large title ----------------- */
+/* At the top of a page the bar is invisible and its title is the large
+   title; once content scrolls under it the bar turns to frosted glass and
+   the title shrinks into it — UINavigationBar's prefersLargeTitles. The
+   title scales rather than resizing, so the bar never changes height —
+   that would shift the page and flip the scroll state back and forth. */
+html[data-skin="ios"] .app-navbar {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 30;
+  isolation: isolate;
+  min-height: 3.75rem;
+  overflow: visible;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* The glass is a pseudo-element: backdrop-filter on the bar itself would
+   capture the bell's and the profile menu's positioned panels. */
+html[data-skin="ios"] .app-navbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: rgb(var(--c-surface) / 0.7);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--shadow-soft);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+html[data-skin="ios"] .app-navbar.is-scrolled::before { opacity: 1; }
+html[data-skin="ios"] .app-navbar h1 {
+  font-size: 1.0625rem; /* 17pt headline */
+  font-weight: 600;
+  transform-origin: right center;
+  transition: transform 0.45s var(--motion-ease);
+}
+html[data-skin="ios"] .app-navbar:not(.is-scrolled) h1 {
+  transform: scale(1.65);
+  font-weight: 700;
+  max-width: 20rem;
+}
+/* The «| date» crumbs and the workspace badge would sit under a large title. */
+html[data-skin="ios"] .app-navbar h1 ~ span { display: none !important; }
+/* So would the office bar's hint line under its title. */
+html[data-skin="ios"] .app-navbar h1 + p { display: none; }
+/* The office bar's section stripe and icon tile give way to the title. */
+html[data-skin="ios"] .app-navbar > .h-1 { display: none; }
+html[data-skin="ios"] .app-navbar > div > span.rounded-xl { display: none !important; }
+/* Search becomes the iOS search field. */
+html[data-skin="ios"] .app-navbar .bg-slate-100.rounded-full {
+  background-color: var(--ios-fill);
+  border-radius: 10px;
+}
+/* Bar buttons: plain tinted glyphs. */
+html[data-skin="ios"] .app-navbar button:not([class*="bg-brand"]) { color: rgb(var(--c-brand-500)); }
+html[data-skin="ios"] .app-navbar button.rounded-full:hover { background-color: var(--ios-fill); }
+
+@media (max-width: 767px) {
+  html[data-skin="ios"] .app-navbar {
+    top: 0;
+    margin: -0.75rem -0.75rem 0.75rem;
+    border-radius: 0 !important;
+    padding-inline: 1rem;
+  }
+  html[data-skin="ios"] .app-navbar::before { box-shadow: 0 0.5px 0 rgb(var(--c-slate-200)); }
+  html[data-skin="ios"] .app-navbar:not(.is-scrolled) h1 { transform: scale(1.3); max-width: 11rem; }
+  /* The tab bar carries the menu now. */
+  html[data-skin="ios"] .app-navbar button[aria-label="منو"] { display: none; }
+  html[data-skin="ios"] body:has(.ios-tabbar) {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  /* Sticky save bars (entry sheets) ride above the tab bar, not under it,
+     and their buttons keep one line each — the hint text wraps instead. */
+  html[data-skin="ios"] body:has(.ios-tabbar) :is(.sticky, .fixed).bottom-4 {
+    bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+  }
+  html[data-skin="ios"] :is(.sticky, .fixed).bottom-4 button { white-space: nowrap; }
+}
+
+/* ---- Tab bar: the floating capsule of iOS 26 ------------------------ */
+.ios-tabbar {
+  position: fixed;
+  z-index: 45;
+  inset-inline: 0.75rem;
+  bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0.125rem;
+  padding: 0.3125rem;
+  border-radius: 9999px;
+  background-color: rgb(var(--c-surface) / 0.72);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  backdrop-filter: blur(30px) saturate(190%);
+  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.06), 0 10px 30px -8px rgb(0 0 0 / 0.25);
+}
+.dark .ios-tabbar {
+  background-color: rgb(var(--c-surface) / 0.8);
+  box-shadow: 0 0 0 0.5px rgb(255 255 255 / 0.1), 0 10px 30px -8px rgb(0 0 0 / 0.7);
+}
+.ios-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  min-height: 3.25rem;
+  min-width: 0;
+  padding: 0.25rem 0.125rem;
+  border-radius: 9999px;
+  color: rgb(var(--c-ink) / 0.85);
+  transition: background-color 0.3s var(--motion-ease), color 0.2s ease;
+}
+.ios-tab.is-active {
+  color: rgb(var(--c-brand-500));
+  background-color: var(--ios-fill);
+}
+.ios-tab-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  /* Not 1: with overflow hidden, a line box that tight cuts off the tails
+     of Persian letters (ی، ر، ز، و) that hang below the baseline. */
+  line-height: 1.5;
+  padding-bottom: 0.0625rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ios-tab-badge {
+  position: absolute;
+  top: -0.375rem;
+  left: -0.625rem;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  padding: 0 0.3125rem;
+  border-radius: 9999px;
+  background: rgb(var(--c-red-500));
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.125rem;
+  text-align: center;
+}
+
+/* ---- Push / pop between pages ------------------------------------- */
+@keyframes ios-push-in {
+  from { opacity: 0; transform: translateX(-2.5rem); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ios-pop-in {
+  from { opacity: 0; transform: translateX(2.5rem); }
+  to   { opacity: 1; transform: none; }
+}
+html.ios-push[data-skin="ios"] .app-navbar ~ :not(.ios-tabbar):not(.fixed):not(footer) {
+  animation: ios-push-in 0.45s var(--motion-ease);
+}
+html.ios-pop[data-skin="ios"] .app-navbar ~ :not(.ios-tabbar):not(.fixed):not(footer) {
+  animation: ios-pop-in 0.45s var(--motion-ease);
+}
+
+/* ---- Widgets ------------------------------------------------------ */
+/* Graphite hero cards get the soft top light of an iOS widget. */
+html[data-skin="ios"] div.bg-panel:not(.app-sidebar) {
+  background-image: linear-gradient(160deg, rgb(255 255 255 / 0.1), transparent 55%);
+}
+/* Big figures in the widget face: SF Pro Rounded, tight, tabular. */
+html[data-skin="ios"] :is(.text-2xl, .text-3xl, .text-4xl, .text-5xl):is(.font-bold, .font-extrabold, .font-black) {
+  font-family: ui-rounded, "SF Pro Rounded", var(--font-sans);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+/* Card titles read as the 17pt headline. */
+html[data-skin="ios"] .rounded-card :is(h2, h3):is(.font-bold, .font-semibold) {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* ---- Segmented controls -------------------------------------------- */
+/* A row made only of buttons, one of them the active graphite one, is a
+   tab switcher. iOS draws it as a segmented control: a grey track with the
+   chosen segment as a raised white pill. */
+html[data-skin="ios"] :is(div, nav):has(> button.bg-panel):not(:has(> :not(button))):not(.app-sidebar *) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  gap: 0.125rem !important;
+  padding: 0.125rem;
+  border-radius: 0.5625rem;
+  background-color: var(--ios-fill);
+}
+html[data-skin="ios"] :is(div, nav):has(> button.bg-panel):not(:has(> :not(button))):not(.app-sidebar *) > button {
+  border: 0 !important;
+  background-color: transparent;
+  box-shadow: none;
+  color: rgb(var(--c-ink));
+  border-radius: 0.4375rem !important;
+  corner-shape: round;
+  padding: 0.3125rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+html[data-skin="ios"] :is(div, nav):has(> button.bg-panel):not(:has(> :not(button))):not(.app-sidebar *) > button.bg-panel {
+  background-color: rgb(var(--c-surface));
+  color: rgb(var(--c-ink));
+  font-weight: 600;
+  box-shadow: 0 3px 8px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.04);
+}
+html[data-skin="ios"].dark :is(div, nav):has(> button.bg-panel):not(:has(> :not(button))):not(.app-sidebar *) > button.bg-panel {
+  background-color: rgb(99 99 102);
+  color: #fff;
+}
+/* Any other graphite button is a primary action: a filled blue capsule. */
+html[data-skin="ios"] button.bg-panel:not(.app-sidebar *) {
+  background-color: rgb(var(--c-brand-500));
+  color: #fff;
+  border-radius: 9999px;
+  corner-shape: round;
+  font-weight: 600;
+}
+
+/* ---- Secondary buttons: grey-filled, borderless -------------------- */
+html[data-skin="ios"] button.border:is(.border-slate-100, .border-slate-200, .border-slate-300):not([class*="bg-brand"]):not([class*="bg-accent"]):not([role="switch"]) {
+  border-color: transparent;
+  background-color: var(--ios-fill);
+}
+html[data-skin="ios"] button.border:is(.border-slate-100, .border-slate-200, .border-slate-300):not([class*="bg-brand"]):not([class*="bg-accent"]):hover {
+  background-color: rgb(118 118 128 / 0.2);
+}
+
+/* ---- Switches: UISwitch ------------------------------------------- */
+html[data-skin="ios"] button[role="switch"] {
+  width: 3.1875rem;  /* 51pt */
+  height: 1.9375rem; /* 31pt */
+  margin-top: 0;
+  border-radius: 9999px;
+  corner-shape: round;
+}
+html[data-skin="ios"] button[role="switch"][aria-checked="false"] {
+  background-color: rgb(120 120 128 / 0.16);
+}
+html[data-skin="ios"].dark button[role="switch"][aria-checked="false"] {
+  background-color: rgb(120 120 128 / 0.32);
+}
+html[data-skin="ios"] button[role="switch"][aria-checked="true"] {
+  background-color: rgb(var(--c-green-500));
+}
+html[data-skin="ios"] button[role="switch"] > span {
+  top: 2px;
+  width: 1.6875rem;
+  height: 1.6875rem;
+  right: 2px !important;
+  background: #fff;
+  box-shadow: 0 3px 8px rgb(0 0 0 / 0.15), 0 3px 1px rgb(0 0 0 / 0.06);
+  transition: right 0.35s var(--motion-ease);
+}
+html[data-skin="ios"] button[role="switch"][aria-checked="true"] > span {
+  right: calc(100% - 1.6875rem - 2px) !important;
+}
+
+/* ---- Selects: the iOS pop-up button --------------------------------- */
+html[data-skin="ios"] select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23007aff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9l4-4 4 4M8 15l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 0.5rem center;
+  background-size: 0.875rem;
+  padding-left: 1.875rem !important;
+}
+html[data-skin="ios"] :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]), select):not(td *):not([class*="bg-transparent"]) {
+  min-height: 2.5rem;
+}
+
+/* ---- Lists & tables: inset-grouped -------------------------------- */
+html[data-skin="ios"] thead th {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgb(var(--c-slate-400));
+  letter-spacing: 0;
+  text-transform: none;
+}
+html[data-skin="ios"] :is(thead, thead tr, thead th).bg-slate-50 {
+  background-color: rgb(var(--c-surface) / 0.94);
+}
+html[data-skin="ios"] tbody tr { transition: background-color 0.15s ease; }
+html[data-skin="ios"] tbody tr:hover { background-color: rgb(var(--c-slate-50) / 0.7); }
+html[data-skin="ios"] :is(tbody tr, thead tr) { border-color: rgb(var(--c-slate-100)); }
+html[data-skin="ios"] td:not(.sum-cell) { border-inline-color: transparent; }
+/* Zebra stripes are not an iOS idea; separators do that work. */
+html[data-skin="ios"] tbody tr[class*="odd:bg-slate-50"]:nth-child(odd),
+html[data-skin="ios"] tbody tr[class*="even:bg-slate-50"]:nth-child(even) {
+  background-color: transparent;
+}
+/* A clickable list row ends in a chevron, like a UITableViewCell. */
+html[data-skin="ios"] tbody tr.cursor-pointer > td:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  margin-inline-start: 0.5rem;
+  border-left: 2px solid rgb(var(--c-slate-300));
+  border-bottom: 2px solid rgb(var(--c-slate-300));
+  transform: rotate(45deg);
+  vertical-align: middle;
+}
+
+/* ---- Menus & popovers: the context-menu material ------------------ */
+html[data-skin="ios"] :is(.absolute, .fixed:not(.inset-0)).shadow-pop.bg-surface {
+  background-color: rgb(var(--c-surface) / 0.82);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  border-color: transparent;
+  border-radius: 14px;
+}
+html[data-skin="ios"] :is(.absolute, .fixed:not(.inset-0)).shadow-pop.bg-surface > button {
+  border-radius: 8px;
+  font-size: 0.9375rem;
+}
+
+/* ---- Sheets ------------------------------------------------------- */
+html[data-skin="ios"] :is(.bg-black\/30, .bg-black\/40, .bg-black\/60).inset-0 {
+  background-color: rgb(0 0 0 / 0.32);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-skin="ios"].dark :is(.bg-black\/30, .bg-black\/40, .bg-black\/60).inset-0 {
+  background-color: rgb(0 0 0 / 0.55);
+}
+/* Desktop: a centred form sheet. */
+html[data-skin="ios"] .fixed.inset-0 > .bg-surface:is(.rounded-card, .rounded-2xl, .rounded-3xl, .rounded-xl):not(.ui-alert) {
+  border-radius: 1.25rem;
+  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.06), 0 30px 80px -20px rgb(0 0 0 / 0.4);
+}
+@keyframes ios-sheet-up {
+  from { transform: translateY(100%); }
+  to   { transform: none; }
+}
+@media (max-width: 767px) {
+  /* Phone: a page sheet rising from the bottom, with its grabber. */
+  html[data-skin="ios"] .fixed.inset-0:is(.flex, .grid):has(> .bg-surface:not(aside):not(.ui-alert)) {
+    align-items: flex-end !important;
+    justify-content: center !important;
+    padding: 0 !important;
+  }
+  html[data-skin="ios"] .fixed.inset-0:is(.flex, .grid) > .bg-surface:not(aside):not(.ui-alert) {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: 92vh;
+    margin: 0 !important;
+    border-radius: 1.25rem 1.25rem 0 0 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    animation: ios-sheet-up 0.5s var(--motion-ease);
+  }
+  html[data-skin="ios"] .fixed.inset-0:is(.flex, .grid) > .bg-surface:not(aside):not(.ui-alert)::before {
+    content: "";
+    display: block;
+    flex-shrink: 0;
+    width: 2.25rem;
+    height: 0.3125rem;
+    margin: 0.375rem auto 0;
+    border-radius: 9999px;
+    background-color: rgb(var(--c-slate-300));
+  }
+}
+
+/* ---- Alerts: UIAlertController --------------------------------------- */
+html[data-skin="ios"] .ui-alert {
+  max-width: 16.875rem; /* 270pt */
+  padding: 1.25rem 1rem 0;
+  border-radius: 0.875rem !important;
+  text-align: center;
+  background-color: rgb(var(--c-surface) / 0.9);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  overflow: hidden;
+}
+html[data-skin="ios"] .ui-alert h3 { font-size: 1.0625rem; font-weight: 600; margin-bottom: 0.25rem; }
+html[data-skin="ios"] .ui-alert p { font-size: 0.8125rem; color: rgb(var(--c-ink)); line-height: 1.5; }
+html[data-skin="ios"] .ui-alert input { text-align: right; }
+html[data-skin="ios"] .ui-alert-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 !important;
+  margin: 1rem -1rem 0;
+  border-top: 0.5px solid rgb(var(--c-slate-200));
+}
+html[data-skin="ios"] .ui-alert-actions > button {
+  border-radius: 0 !important;
+  padding: 0.6875rem 0.5rem;
+  font-size: 1.0625rem;
+  background: transparent !important;
+  color: rgb(var(--c-brand-500));
+  font-weight: 400;
+}
+html[data-skin="ios"] .ui-alert-actions > .ui-alert-ok {
+  font-weight: 600;
+  border-inline-start: 0.5px solid rgb(var(--c-slate-200));
+}
+html[data-skin="ios"] .ui-alert-actions > .ui-alert-ok[data-danger] { color: rgb(var(--c-red-500)); }
+html[data-skin="ios"] .ui-alert-actions > button:hover { background: var(--ios-fill) !important; }
+
+/* ---- Toasts: a banner that drops from the top, Dynamic-Island style -- */
+html[data-skin="ios"] .ui-toasts {
+  top: max(0.625rem, env(safe-area-inset-top, 0px));
+  bottom: auto;
+}
+html[data-skin="ios"] .ui-toast {
+  border: 0 !important;
+  border-radius: 9999px !important;
+  corner-shape: round;
+  padding: 0.625rem 1.125rem 0.625rem 0.75rem;
+  background-color: rgb(28 28 30 / 0.92);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 12px 34px -8px rgb(0 0 0 / 0.45);
+  animation: ios-toast-drop 0.55s var(--motion-ease);
+}
+html[data-skin="ios"] .ui-toast > span:last-child { color: #fff; font-weight: 500; }
+@keyframes ios-toast-drop {
+  from { opacity: 0; transform: translateY(-1.5rem) scale(0.9); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---- Small things that make it feel native ------------------------- */
+/* Badges and chips: capsules, never boxes. */
+html[data-skin="ios"] span.rounded-md,
+html[data-skin="ios"] span.rounded-lg:is([class*="text-[10px]"], [class*="text-[11px]"], .text-xs) {
+  border-radius: 9999px;
+  corner-shape: round;
+  white-space: nowrap; /* a capsule that wraps to two lines is a lozenge */
+}
+html[data-skin="ios"] span.rounded-full:is([class*="text-[10px]"], [class*="text-[11px]"], .text-xs):is([class*="px-"]) {
+  white-space: nowrap;
+}
+/* Progress tracks: the system fill. */
+html[data-skin="ios"] .rounded-full.bg-slate-100:is(.h-1, .h-1\.5, .h-2, .h-2\.5) {
+  background-color: var(--ios-fill);
+}
+/* Footer: a footnote. */
+html[data-skin="ios"] footer { font-size: 0.6875rem; color: rgb(var(--c-slate-400)); }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="ios"] .app-navbar h1,
+  html[data-skin="ios"] .ios-tab,
+  html[data-skin="ios"] button[role="switch"] > span { transition: none; }
+  html[data-skin="ios"] .app-navbar ~ *,
+  html[data-skin="ios"] .ui-toast,
+  html[data-skin="ios"] .fixed.inset-0 > .bg-surface { animation: none !important; }
+}

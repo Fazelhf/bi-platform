@@ -1,0 +1,529 @@
+/* ================================================================== */
+/* iOS 26 — LIQUID GLASS                                               */
+/* Loaded last; it moves the iOS skin from the iOS 17 look to iOS 26:  */
+/*   • no nav bar slab — content runs under a soft scroll-edge blur,    */
+/*     and toolbar buttons float in a shared glass capsule             */
+/*   • clear glass with specular light on both rims, not frosted white */
+/*   • capsules everywhere: buttons, fields, segments, selections       */
+/*   • concentric, much rounder corners; sheets float inset on phones  */
+/*   • the tab bar is a glass capsule that shrinks while you scroll    */
+/*   • the pill-knob switch, and alerts with capsule buttons           */
+/* ================================================================== */
+
+html[data-skin="ios"] {
+  /* Liquid Glass. Clearer than the old materials (less white, less blur),
+     with the light caught on the top-leading rim and, more faintly, the
+     bottom-trailing one — that double rim is the iOS 26 signature. */
+  --lg-fill: rgb(255 255 255 / 0.55);
+  --lg-fill-strong: rgb(255 255 255 / 0.68);
+  --lg-blur: blur(16px) saturate(200%) brightness(1.04);
+  --lg-rim:
+    inset 1.5px 1.5px 0 -0.5px rgb(255 255 255 / 0.95),
+    inset -1px -1px 0 -0.5px rgb(255 255 255 / 0.55),
+    inset 0 0 14px rgb(255 255 255 / 0.3);
+  --lg-drop: 0 10px 30px -10px rgb(0 0 0 / 0.18), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  /* Tinted ("prominent") glass for primary actions. */
+  --lg-tint-rim:
+    inset 1.5px 1.5px 0 -0.5px rgb(255 255 255 / 0.55),
+    inset -1px -1px 0 -0.5px rgb(255 255 255 / 0.25),
+    inset 0 0 12px rgb(255 255 255 / 0.18);
+
+  --r-card: 1.75rem; /* 28pt — iOS 26 grouped containers */
+}
+html[data-skin="ios"].dark {
+  --lg-fill: rgb(50 50 54 / 0.5);
+  --lg-fill-strong: rgb(72 72 76 / 0.62);
+  --lg-rim:
+    inset 1.5px 1.5px 0 -0.5px rgb(255 255 255 / 0.32),
+    inset -1px -1px 0 -0.5px rgb(255 255 255 / 0.14),
+    inset 0 0 14px rgb(255 255 255 / 0.06);
+  --lg-drop: 0 10px 30px -10px rgb(0 0 0 / 0.65), 0 0 0 0.5px rgb(255 255 255 / 0.06);
+}
+@supports (corner-shape: squircle) {
+  html[data-skin="ios"] { --r-card: 2.125rem; }
+}
+
+/* ---- Navigation: no bar, a scroll-edge blur and floating glass ------- */
+/* The old frosted capsule goes. iOS 26 keeps the bar itself invisible;
+   where content passes beneath it a soft blur fades in from the top edge. */
+html[data-skin="ios"] .app-navbar::before {
+  inset: -0.75rem -1.5rem -1.25rem;
+  border-radius: 0 !important;
+  background: linear-gradient(to bottom, rgb(var(--c-canvas) / 0.9), rgb(var(--c-canvas) / 0));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent);
+  mask-image: linear-gradient(to bottom, #000 45%, transparent);
+  box-shadow: none !important;
+}
+@media (max-width: 767px) {
+  html[data-skin="ios"] .app-navbar::before {
+    inset: calc(-1 * env(safe-area-inset-top, 0px)) 0 -1.25rem;
+    box-shadow: none !important;
+  }
+}
+
+/* The toolbar: every trailing button shares one glass capsule. */
+html[data-skin="ios"] .app-navbar > div:last-child:has(> button, > div > button):not(:has(h1)) {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem !important;
+  padding: 0.25rem;
+  border-radius: 9999px;
+  background-color: var(--lg-fill);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-rim), var(--lg-drop);
+}
+html[data-skin="ios"] .app-navbar > div:last-child button.rounded-full:is(.p-2, .p-1) {
+  width: 2.25rem;
+  height: 2.25rem;
+  background-color: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  color: rgb(var(--c-ink));
+}
+/* Shells whose bar has no wrapper keep one glass circle per button. */
+html[data-skin="ios"] .app-navbar > button.rounded-full,
+html[data-skin="ios"] .app-navbar > div:not(:last-child) button.rounded-full:is(.p-2, .p-1),
+html[data-skin="ios"] .app-navbar > div > div > button.rounded-full:is(.p-2, .p-1) {
+  background-color: var(--lg-fill);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-rim), var(--lg-drop);
+  color: rgb(var(--c-ink));
+}
+/* Glyphs in the toolbar are ink, not tinted — iOS 26 dropped blue bar items. */
+html[data-skin="ios"] .app-navbar button:not([class*="bg-brand"]) { color: rgb(var(--c-ink)); }
+html[data-skin="ios"] .app-navbar .bg-slate-100.rounded-full {
+  background-color: rgb(118 118 128 / 0.12);
+  border-radius: 9999px;
+}
+
+/* ---- Tab bar: a glass capsule plus a separate circle, minimising --------- */
+html[data-skin="ios"] .ios-tabbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.625rem;
+  padding: 0;
+  background: none !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-radius: 0;
+  pointer-events: none;
+}
+html[data-skin="ios"] .ios-tabgroup,
+html[data-skin="ios"] .ios-tab-more {
+  pointer-events: auto;
+  background-color: var(--lg-fill);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-rim), var(--lg-drop);
+}
+html[data-skin="ios"] .ios-tabgroup {
+  flex: 1;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0;
+  padding: 0.25rem;
+  border-radius: 9999px;
+  transition: flex 0.5s var(--motion-ease), padding 0.4s var(--motion-ease);
+}
+html[data-skin="ios"] .ios-tab-more {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 3.75rem;
+  height: 3.75rem;
+  border-radius: 9999px;
+  color: rgb(var(--c-ink));
+  transition: width 0.4s var(--motion-ease), height 0.4s var(--motion-ease);
+}
+html[data-skin="ios"] .ios-tab-more.is-active { color: rgb(var(--c-brand-500)); }
+html[data-skin="ios"] .ios-tab {
+  min-height: 3.25rem;
+  border-radius: 9999px;
+  color: rgb(var(--c-ink));
+  transition: min-height 0.4s var(--motion-ease), background-color 0.3s ease, color 0.2s ease;
+}
+/* ---- Desktop: the iPadOS 26 arrangement ---------------------------------
+   The sidebar starts closed and the tabs float at the top centre. The
+   sidebar button in the leading corner swaps one for the other: with the
+   sidebar open the tab bar steps aside, exactly as on iPad. */
+.ios-sidebar-toggle { display: none; }
+@media (min-width: 768px) {
+  html[data-skin="ios"] .ios-sidebar-toggle {
+    position: fixed;
+    z-index: 60;
+    top: 1.375rem;
+    right: 1.5rem;
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 9999px;
+    color: rgb(var(--c-ink));
+    background-color: var(--lg-fill);
+    -webkit-backdrop-filter: var(--lg-blur);
+    backdrop-filter: var(--lg-blur);
+    box-shadow: var(--lg-rim), var(--lg-drop);
+  }
+  /* Closed: the opener is the labelled button beside the tabs instead. */
+  html[data-skin="ios"]:not(.ios-sidebar-open) .ios-sidebar-toggle { display: none; }
+  html[data-skin="ios"].ios-sidebar-open .ios-sidebar-toggle {
+    color: rgb(var(--c-brand-500));
+    background-color: transparent;
+    box-shadow: none;
+  }
+  html[data-skin="ios"]:not(.ios-sidebar-open) .app-sidebar { display: none; }
+  /* The toggle sits in the sidebar's top corner while it is open. */
+  html[data-skin="ios"].ios-sidebar-open .app-sidebar { padding-top: 3.25rem; }
+  html[data-skin="ios"].ios-sidebar-open .ios-tabbar { display: none; }
+  /* On iPad the large title lives in the content, never in the bar: a
+     scaled bar title would run into the tabs at the centre. */
+  html[data-skin="ios"] .app-navbar:not(.is-scrolled) h1 { transform: none; font-weight: 700; }
+
+  /* The tab bar lives in the nav bar's slot, in flow: it takes only the
+     room between the title and the toolbar, centred in it. */
+  html[data-skin="ios"] .ios-tabslot {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+  }
+  html[data-skin="ios"] .ios-tabslot > .ios-tabbar {
+    position: static;
+    inset: auto;
+    transform: none;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+  }
+  html[data-skin="ios"].ios-sidebar-open .ios-tabslot > .ios-tabbar { display: none; }
+  /* «همه‌ی بخش‌ها»: a labelled glass capsule on the leading side of the tabs. */
+  html[data-skin="ios"] .ios-tab-more {
+    order: -1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.4375rem;
+    width: auto;
+    height: 2.75rem;
+    padding: 0 1rem;
+    color: rgb(var(--c-brand-500));
+    font-size: 0.875rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  html[data-skin="ios"] .ios-tabbar.is-min .ios-tab-more { width: auto; height: 2.75rem; }
+  @media (max-width: 1100px) {
+    html[data-skin="ios"] .ios-tab-more-label { display: none; }
+    html[data-skin="ios"] .ios-tab-more { padding: 0; width: 2.75rem; justify-content: center; }
+  }
+  /* One-time pointer to it, as iPadOS does for a moved control. */
+  html[data-skin="ios"] .ios-hint {
+    position: absolute;
+    top: calc(100% + 0.625rem);
+    right: 0;
+    z-index: 70;
+    width: max-content;
+    max-width: 16rem;
+    padding: 0.5rem 0.875rem;
+    border-radius: 1rem;
+    background: rgb(var(--c-brand-500));
+    color: #fff;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.5;
+    white-space: normal;
+    text-align: right;
+    box-shadow: var(--lg-tint-rim), 0 12px 30px -8px rgb(0 60 200 / 0.5);
+    animation: ios-hint-in 0.6s var(--spring) both;
+    cursor: pointer;
+  }
+  html[data-skin="ios"] .ios-hint::before {
+    content: "";
+    position: absolute;
+    top: -0.375rem;
+    right: 1.25rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    background: inherit;
+    transform: rotate(45deg);
+    border-radius: 0.1875rem;
+  }
+  html[data-skin="ios"] .ios-tabgroup {
+    flex: 0 1 auto;
+    display: flex;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  html[data-skin="ios"] .ios-tabgroup::-webkit-scrollbar { display: none; }
+  html[data-skin="ios"] .ios-tab { flex-shrink: 0; }
+  /* iPad tabs are words, not icons. */
+  html[data-skin="ios"] .ios-tab {
+    flex-direction: row;
+    min-height: 2.5rem;
+    padding: 0 1.125rem;
+    min-width: 0;
+  }
+  html[data-skin="ios"] .ios-tab > .relative > svg { display: none; }
+  html[data-skin="ios"] .ios-tab-label,
+  html[data-skin="ios"] .ios-tabbar.is-min .ios-tab-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+  html[data-skin="ios"] .ios-tab-badge { position: static; display: inline-block; margin-inline-end: 0.25rem; }
+  html[data-skin="ios"] .ios-tabbar.is-min .ios-tab { min-height: 2.5rem; }
+  @media (max-width: 1100px) {
+    html[data-skin="ios"] .ios-tab { padding: 0 0.75rem; }
+  }
+}
+
+/* ---- Tab-bar editor -------------------------------------------------- */
+.ios-edit-tile {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  color: #fff;
+  background: linear-gradient(180deg, #2b95ff, #007aff);
+  flex-shrink: 0;
+}
+.ios-edit-row:nth-child(n) { transition: background-color 0.2s ease; }
+li:nth-child(5n + 2) > .ios-edit-row .ios-edit-tile { background: linear-gradient(180deg, #c27aec, #af52de); }
+li:nth-child(5n + 3) > .ios-edit-row .ios-edit-tile { background: linear-gradient(180deg, #4cd471, #34c759); }
+li:nth-child(5n + 4) > .ios-edit-row .ios-edit-tile { background: linear-gradient(180deg, #ffa733, #ff9500); }
+li:nth-child(5n + 5) > .ios-edit-row .ios-edit-tile { background: linear-gradient(180deg, #ff5d55, #ff3b30); }
+.ios-edit-order,
+.ios-edit-empty {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.ios-edit-order { background: rgb(var(--c-brand-500)); color: #fff; }
+.ios-edit-empty { border: 1.5px solid rgb(var(--c-slate-300)); }
+.ios-edit-row:disabled { opacity: 0.4; }
+/* The selected tab is a lens: a brighter drop of glass with its own rim. */
+html[data-skin="ios"] .ios-tab.is-active {
+  color: rgb(var(--c-brand-500));
+  background-color: rgb(118 118 128 / 0.14);
+  box-shadow: inset 1px 1px 0 -0.5px rgb(255 255 255 / 0.7);
+}
+html[data-skin="ios"].dark .ios-tab.is-active {
+  background-color: rgb(255 255 255 / 0.12);
+  box-shadow: inset 1px 1px 0 -0.5px rgb(255 255 255 / 0.25);
+}
+/* Scrolling down: the capsule shrinks to its icons and tucks to the side. */
+html[data-skin="ios"] .ios-tabbar.is-min .ios-tabgroup { flex: 0 1 15rem; }
+html[data-skin="ios"] .ios-tabbar.is-min .ios-tab { min-height: 2.75rem; }
+html[data-skin="ios"] .ios-tabbar.is-min .ios-tab-label { display: none; }
+html[data-skin="ios"] .ios-tabbar.is-min .ios-tab-more { width: 3.25rem; height: 3.25rem; }
+
+/* ---- Sidebar: a floating glass panel, capsule selection ---------------- */
+html[data-skin="ios"] .app-sidebar {
+  background-color: var(--lg-fill-strong);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-rim), var(--lg-drop);
+}
+@media (min-width: 768px) {
+  html[data-skin="ios"] .app-sidebar { border-radius: var(--r-card); }
+}
+html[data-skin="ios"] .app-sidebar :is(nav, div) > button { border-radius: 9999px; corner-shape: round; }
+/* Settings tiles in iOS 26 are glassier: a lit edge on the tile itself. */
+html[data-skin="ios"] .app-sidebar button > svg:first-child {
+  border-radius: 0.5625rem;
+  box-shadow: inset 1px 1px 0 -0.25px rgb(255 255 255 / 0.55), inset -1px -1px 0 -0.25px rgb(0 0 0 / 0.08);
+}
+
+/* ---- Buttons: glass and prominent glass, always capsules -------------- */
+/* Secondary buttons are clear glass. */
+html[data-skin="ios"] button.border:is(.border-slate-100, .border-slate-200, .border-slate-300):not([class*="bg-brand"]):not([class*="bg-accent"]):not([role="switch"]),
+html[data-skin="ios"] main button:is(.bg-slate-100, .bg-slate-50):not(.rounded-card *):not(table *) {
+  border-color: transparent;
+  background-color: var(--lg-fill-strong);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-rim), 0 4px 14px -8px rgb(0 0 0 / 0.2);
+  border-radius: 9999px;
+  corner-shape: round;
+}
+/* Inside a card the glass would have nothing behind it to bend: grey fill. */
+html[data-skin="ios"] .rounded-card button.border:is(.border-slate-100, .border-slate-200, .border-slate-300):not([class*="bg-brand"]):not([class*="bg-accent"]):not([role="switch"]) {
+  background-color: rgb(118 118 128 / 0.12);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+/* Primary buttons are tinted glass: colour with the same lit rims. */
+html[data-skin="ios"] button:is(.bg-brand-500, .bg-brand-600, .bg-brand-700, .bg-accent-500, .bg-accent-600, .bg-red-500, .bg-emerald-600, .bg-panel):not(.app-sidebar *):not(.ios-tabbar *) {
+  border-radius: 9999px;
+  corner-shape: round;
+  box-shadow: var(--lg-tint-rim), 0 6px 18px -8px rgb(var(--c-brand-500) / 0.55);
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0));
+}
+
+/* ---- Fields: capsules ---------------------------------------------------- */
+html[data-skin="ios"] :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]), select):not(td *):not([class*="bg-transparent"]) {
+  border-radius: 9999px;
+  corner-shape: round;
+  padding-inline: 1rem;
+  min-height: 2.75rem;
+}
+html[data-skin="ios"] select:not(td *) { padding-left: 2.25rem !important; background-position: left 0.875rem center; }
+html[data-skin="ios"] textarea { border-radius: 1.25rem; }
+
+/* ---- Segmented controls: a glass capsule with a lens ------------------- */
+html[data-skin="ios"] :is(div, nav):has(> button.bg-panel):not(:has(> :not(button))):not(.app-sidebar *) {
+  border-radius: 9999px;
+  padding: 0.25rem;
+  background-color: rgb(118 118 128 / 0.12);
+  box-shadow: inset 0 0.5px 1px rgb(0 0 0 / 0.06);
+}
+html[data-skin="ios"] :is(div, nav):has(> button.bg-panel):not(:has(> :not(button))):not(.app-sidebar *) > button {
+  border-radius: 9999px !important;
+  padding: 0.4375rem 1rem;
+  box-shadow: none;
+  background-image: none;
+}
+html[data-skin="ios"] :is(div, nav):has(> button.bg-panel):not(:has(> :not(button))):not(.app-sidebar *) > button.bg-panel {
+  background-color: rgb(var(--c-surface));
+  box-shadow: var(--lg-rim), 0 4px 12px -4px rgb(0 0 0 / 0.18);
+}
+
+/* ---- Switch: the iOS 26 pill knob --------------------------------------- */
+html[data-skin="ios"] button[role="switch"] {
+  width: 3.875rem;   /* 62pt */
+  height: 1.75rem;   /* 28pt */
+}
+html[data-skin="ios"] button[role="switch"] > span {
+  top: 2px;
+  width: 2.375rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  right: 2px !important;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.16), inset 0 0 0 0.5px rgb(0 0 0 / 0.04);
+  transition: right 0.45s var(--spring), width 0.25s ease, background-color 0.2s ease;
+}
+html[data-skin="ios"] button[role="switch"][aria-checked="true"] > span {
+  right: calc(100% - 2.375rem - 2px) !important;
+}
+/* Pressed, the knob turns into a magnifying glass lens and swells. */
+html[data-skin="ios"] button[role="switch"]:active:not(:disabled) > span {
+  width: 2.75rem;
+  background-color: rgb(255 255 255 / 0.55);
+  -webkit-backdrop-filter: blur(2px) saturate(200%);
+  backdrop-filter: blur(2px) saturate(200%);
+  box-shadow: var(--lg-rim), 0 4px 10px rgb(0 0 0 / 0.2);
+}
+
+/* ---- Menus and popovers: clear glass, big radius -------------------------- */
+html[data-skin="ios"] :is(.absolute, .fixed:not(.inset-0)).shadow-pop.bg-surface {
+  background-color: var(--lg-fill-strong);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-rim), 0 20px 50px -12px rgb(0 0 0 / 0.3);
+  border-radius: 1.625rem;
+  padding: 0.375rem;
+}
+html[data-skin="ios"] :is(.absolute, .fixed:not(.inset-0)).shadow-pop.bg-surface > button {
+  border-radius: 9999px;
+  padding-inline: 1rem;
+}
+
+/* ---- Sheets: floating, inset, very round ------------------------------- */
+html[data-skin="ios"] .fixed.inset-0 > .bg-surface:is(.rounded-card, .rounded-2xl, .rounded-3xl, .rounded-xl):not(.ui-alert) {
+  border-radius: 2.25rem;
+  box-shadow: var(--lg-rim), 0 30px 80px -20px rgb(0 0 0 / 0.4);
+}
+@media (max-width: 767px) {
+  html[data-skin="ios"] .fixed.inset-0:is(.flex, .grid):has(> .bg-surface:not(aside):not(.ui-alert)) {
+    padding: 0 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  html[data-skin="ios"] .fixed.inset-0:is(.flex, .grid) > .bg-surface:not(aside):not(.ui-alert) {
+    border-radius: 2.25rem !important;
+    max-height: 90vh;
+    padding-bottom: 0;
+  }
+}
+
+/* ---- Alerts: big radius, capsule buttons side by side ---------------------- */
+html[data-skin="ios"] .ui-alert {
+  max-width: 18.75rem;
+  padding: 1.5rem 1.25rem 1.25rem;
+  border-radius: 2.125rem !important;
+  background-color: var(--lg-fill-strong);
+  box-shadow: var(--lg-rim), 0 30px 80px -20px rgb(0 0 0 / 0.45);
+}
+html[data-skin="ios"] .ui-alert-actions {
+  gap: 0.625rem !important;
+  margin: 1.25rem 0 0;
+  border-top: 0;
+}
+html[data-skin="ios"] .ui-alert-actions > button {
+  border-radius: 9999px !important;
+  padding: 0.75rem 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  background: rgb(118 118 128 / 0.14) !important;
+  color: rgb(var(--c-ink));
+  border: 0 !important;
+}
+html[data-skin="ios"] .ui-alert-actions > .ui-alert-ok {
+  background: rgb(var(--c-brand-500)) !important;
+  color: #fff;
+  box-shadow: var(--lg-tint-rim);
+}
+html[data-skin="ios"] .ui-alert-actions > .ui-alert-ok[data-danger] {
+  background: rgb(var(--c-red-500)) !important;
+  color: #fff;
+}
+
+/* ---- Toasts: a glass capsule, like an iOS 26 notification ------------------ */
+html[data-skin="ios"] .ui-toast {
+  background-color: var(--lg-fill-strong);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-rim), 0 16px 40px -10px rgb(0 0 0 / 0.3);
+}
+html[data-skin="ios"] .ui-toast > span:last-child { color: rgb(var(--c-ink)); }
+
+/* ---- Widgets: lit rims on the hero, concentric inner corners ------------- */
+html[data-skin="ios"] main section.bg-panel,
+html[data-skin="ios"] main div.bg-panel.rounded-card,
+html[data-skin="ios"] .app-navbar ~ div :is(section, div).bg-panel.rounded-card {
+  box-shadow:
+    inset 1.5px 1.5px 0 -0.5px rgb(255 255 255 / 0.45),
+    inset -1px -1px 0 -0.5px rgb(255 255 255 / 0.2),
+    0 22px 44px -20px rgb(10 60 200 / 0.6);
+}
+/* Things nested in a card follow its curve (concentric corners). */
+html[data-skin="ios"] .rounded-card :is(.rounded-xl, .rounded-2xl):not(button):not(input):not(select) {
+  border-radius: 1.25rem;
+}
+/* Grouped cards in iOS 26 drop the shadow; the grey page separates them. */
+html[data-skin="ios"] .rounded-card.bg-surface { box-shadow: none; }
+html[data-skin="ios"].dark .rounded-card.bg-surface { box-shadow: none; }
+
+/* Chips: soft glass capsules. */
+html[data-skin="ios"] main span.rounded-full:is(.bg-slate-100, .bg-slate-50) {
+  background-color: rgb(118 118 128 / 0.12);
+}
+
+@keyframes ios-hint-in {
+  from { opacity: 0; transform: translateY(-0.5rem) scale(0.9); }
+  to   { opacity: 1; transform: none; }
+}

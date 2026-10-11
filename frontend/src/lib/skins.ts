@@ -1,5 +1,5 @@
 /**
- * The three site skins. A skin is a whole visual language — colour, corner
+ * The site skins. A skin is a whole visual language — colour, corner
  * radius, elevation, translucency — and it is orthogonal to light/dark:
  * every skin below ships both modes, so the sun/moon button keeps working
  * exactly as it does today whichever one is picked.
@@ -7,7 +7,7 @@
  * The tokens themselves live in src/style.css under `html[data-skin="…"]`.
  * This file only carries what the picker needs to draw itself.
  */
-export type SkinKey = "classic" | "glass" | "aurora";
+export type SkinKey = "classic" | "ios" | "aurora";
 
 export interface Skin {
   key: SkinKey;
@@ -21,10 +21,10 @@ export interface Skin {
     canvasDark: string;
     accent: string;
     radius: string;
-    /** Glass previews get a blur + gradient wash instead of a flat fill. */
-    glass?: boolean;
     /** Aurora previews get the drifting colour pools behind the card. */
     aurora?: boolean;
+    /** iOS previews draw the card as an inset-grouped list with hairlines. */
+    ios?: boolean;
   };
 }
 
@@ -43,17 +43,17 @@ export const SKINS: Skin[] = [
     },
   },
   {
-    key: "glass",
-    label: "شیشه‌ای",
-    hint: "پنل‌های مات و شفاف روی پس‌زمینه‌ی رنگی — به سبک iOS",
+    key: "ios",
+    label: "iOS",
+    hint: "خاکستری گروه‌بندی‌شده، آبی سیستمی، گوشه‌های پیوسته و حرکت فنری — حس آیفون",
     preview: {
-      canvas: "#e8eefc",
-      surface: "rgba(255,255,255,0.55)",
-      canvasDark: "#090b16",
-      surfaceDark: "rgba(255,255,255,0.10)",
-      accent: "#6366f1",
-      radius: "12px",
-      glass: true,
+      canvas: "#f2f2f7",
+      surface: "#ffffff",
+      canvasDark: "#000000",
+      surfaceDark: "#1c1c1e",
+      accent: "#007aff",
+      radius: "11px",
+      ios: true,
     },
   },
   {
@@ -73,6 +73,11 @@ export const SKINS: Skin[] = [
 ];
 
 export const DEFAULT_SKIN: SkinKey = "classic";
+
+/** Skins that were retired, and the skin that took each one's place. */
+export const RETIRED_SKINS: Record<string, SkinKey> = {
+  glass: "ios", // شیشه‌ای was folded into iOS, which does glass properly
+};
 
 export function isSkinKey(v: string | null): v is SkinKey {
   return !!v && SKINS.some((s) => s.key === v);
