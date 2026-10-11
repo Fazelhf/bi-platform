@@ -185,19 +185,25 @@ def sales_block(budget: Budget, period: DimPeriod, setting: FinanceSetting | Non
     total_budget = total_actual = ZERO
     for channel, label in sales_channels():
         forecast = forecasts.get(channel)
-        sold = actual.get(channel, ZERO)
+        section = actual.get(channel, ZERO)
+        # Finance's sheet is the company's figure; the sales section's own
+        # total stays beside it so a gap between the two is visible.
+        keyed = forecast is not None and forecast.actual_rial is not None
+        sold = forecast.actual_rial if keyed else section
         planned = forecast.amount_rial if forecast else ZERO
         total_budget += planned
         total_actual += sold
         rows.append({
             "channel": channel,
             "label": label,
+            "source": "excel" if keyed else "sales",
+            "section_rial": str(section),
             **_cell(planned, sold, forecast.baseline_rial if forecast else None, Direction.IN, setting),
         })
     return {
         "rows": rows,
         "total": _cell(total_budget, total_actual, None, Direction.IN, setting),
-        "has_actuals": bool(actual),
+        "has_actuals": bool(actual) or any(r["source"] == "excel" for r in rows),
     }
 
 
@@ -470,8 +476,9 @@ def series(budget: Budget) -> dict:
         .select_related("period")
         .order_by("period__jalali_year", "period__jalali_month")
     )
-    lines = list(BudgetLine.objects.filter(budget=budget, is_active=True))
+    lines = list(BudgetLine.objects.filter(budget=budget, is_active=True).select_related("category"))
     by_id = {line.id: line for line in lines}
+    opening = any("مانده" in line.category.name_fa for line in lines)
 
     points: list[dict] = []
     run_budget = ZERO
@@ -499,10 +506,17 @@ def series(budget: Budget) -> dict:
         net_actual = got[Direction.IN] - got[Direction.OUT]
         run_budget += net_budget
         run_actual += net_actual
-        forecast = sum(
-            (f.amount_rial for f in BudgetSalesForecast.objects.filter(budget_period=bp)), ZERO
-        )
-        sold = sum(actual_sales(bp.period).values(), ZERO)
+        fs = list(BudgetSalesForecast.objects.filter(budget_period=bp))
+        forecast = sum((f.amount_rial for f in fs), ZERO)
+        section = actual_sales(bp.period)
+        keyed = {f.channel: f.actual_rial for f in fs if f.actual_rial is not None}
+        sold = sum((keyed.get(c, section.get(c, ZERO)) for c in {*keyed, *section}), ZERO)
+        # A budget carrying «مانده نقد اول دوره» as a line counts like the
+        # sheet: each month's net already includes the cash it started
+        # with, so the month's net IS the closing balance — summing them
+        # again would count every opening balance twice.
+        if opening:
+            run_budget, run_actual = net_budget, net_actual
 
         points.append({
             "period_id": bp.period_id,
@@ -524,6 +538,8 @@ def series(budget: Budget) -> dict:
     return {
         "budget": {"id": budget.id, "title": budget.title},
         "points": points,
+        # True: «مانده» is each month's closing balance as in the sheet.
+        "has_opening": opening,
     }
 
 

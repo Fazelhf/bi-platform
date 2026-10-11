@@ -195,7 +195,10 @@ class PermissionTests(TestCase):
     def test_sections_follow_their_departments(self):
         self.assertTrue(can_read_section(self.finance, "finance"))
         self.assertFalse(can_read_section(self.sales, "finance"))
-        self.assertFalse(can_read_section(self.finance, "sales_team"))
+        # The finance manager reads every section (User.reads_company); a
+        # finance operator does not.
+        self.assertTrue(can_read_section(self.finance, "sales_team"))
+        self.assertFalse(can_read_section(_user("fin_op", Role.OPERATOR, Department.FINANCE), "sales_team"))
         self.assertFalse(can_read_section(self.sales, "overview"))
         self.assertTrue(can_read_section(self.ceo, "finance"))
 

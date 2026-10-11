@@ -17,7 +17,7 @@ import SignedMoney from "./SignedMoney.vue";
 const props = defineProps<{
   title: string;
   subtitle?: string;
-  items: { label: string; budget: number; actual: number; verdict: Verdict; hint?: string }[];
+  items: { label: string; budget: number; actual: number; verdict: Verdict; hint?: string; note?: string }[];
   empty?: string;
 }>();
 
@@ -60,6 +60,7 @@ const toneBar = (v: Verdict) => (v === "good" ? "bg-emerald-500" : v === "bad" ?
             </span>
           </p>
         </div>
+        <p v-if="i.note" class="text-[10px] text-amber-600 -mt-0.5 mb-1">{{ i.note }}</p>
         <div class="relative h-3 rounded bg-slate-100 dark:bg-white/5" role="img"
           :aria-label="`${i.label}: واقعی ${money(i.actual)} از بودجه ${money(i.budget)}`">
           <div class="absolute inset-y-0 right-0 rounded" :class="toneBar(i.verdict)" :style="{ width: w(i.actual) }"></div>

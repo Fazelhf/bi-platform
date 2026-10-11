@@ -521,8 +521,9 @@ def read_sheet(wbf, wbv, sheet: str) -> dict:
             row.include, row.reason = False, "در جمع ورودی/خروجی اکسل نیامده (سطر اطلاعاتی)"
             continue
         if "مانده" in row.label:
-            row.include, row.reason = False, "مانده نقد است، نه جریان نقد"
-            continue
+            # Counted the way the sheet counts it: its «ورودی» and «مانده»
+            # include the cash the month started with.
+            row.warnings.append("مانده ابتدای ماه — مثل اکسل در ورودی حساب می‌شود")
         if any(v is not None and v < 0 for v in values):
             row.warnings.append("رقم منفی دارد — منفی‌ها وارد نمی‌شوند")
 
@@ -730,7 +731,7 @@ def analyse(data: bytes, *, sheet: str | None, year: int, budget: Budget | None,
             out_rows.append({
                 "row": row.n, "label": row.label, "direction": Direction.IN,
                 "include": True, "is_total": False,
-                "reason": "پیش‌بینی فروش — رقم واقعی از بخش فروش خوانده می‌شود",
+                "reason": "پیش‌بینی فروش — واقعی طبق ستون «واقعی» اکسل؛ رقم بخش فروش کنارش نشان داده می‌شود",
                 "warnings": row.warnings, "match": "sales", "channel": channel,
                 "channel_label": dict((c.value, c.label) for c in SalesChannel).get(channel, channel),
                 "category_id": None, "category_name": "", "category_parent": "",
@@ -902,7 +903,7 @@ def apply(data: bytes, *, sheet: str | None, year: int, budget: Budget | None,
             if r["category_id"]:
                 r["match"] = "category"
         if r["match"] == "sales":
-            if r["include"] and "budget" in parts:
+            if r["include"] and parts & {"budget", "actual"}:
                 sales_rows.append(r)
             continue
         if r["include"] and not r["is_total"]:
@@ -1033,16 +1034,22 @@ def apply(data: bytes, *, sheet: str | None, year: int, budget: Budget | None,
 
     forecasts = 0
     for r in sales_rows:
-        for k, raw in r["budget"].items():
-            v = _clean(raw)
-            bp = bps.get(months[k].id) if k in months else None
-            if bp is None or (v is not None and v < 0):
+        for part, field in (("budget", "amount_rial"), ("actual", "actual_rial")):
+            if part not in parts:
                 continue
-            f, made = BudgetSalesForecast.objects.get_or_create(budget_period=bp, channel=r["channel"])
-            if made or f.amount_rial != (v or ZERO):
-                f.amount_rial = v or ZERO
-                f.save(update_fields=["amount_rial", "updated_at"])
-                forecasts += 1
+            for k, raw in r[part].items():
+                v = _clean(raw)
+                bp = bps.get(months[k].id) if k in months else None
+                if bp is None or (v is not None and v < 0):
+                    continue
+                if part == "actual" and v is None:
+                    continue
+                f, made = BudgetSalesForecast.objects.get_or_create(budget_period=bp, channel=r["channel"])
+                new = v or ZERO
+                if made or getattr(f, field) != new:
+                    setattr(f, field, new)
+                    f.save(update_fields=[field, "updated_at"])
+                    forecasts += 1
 
     return {
         "budget_id": budget.id,

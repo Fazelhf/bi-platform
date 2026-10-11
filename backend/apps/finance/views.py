@@ -926,7 +926,10 @@ def _grid_sales(periods: list[BudgetPeriod]) -> list[dict]:
             cells[str(bp.id)] = {
                 "amount_rial": str(f.amount_rial) if f else "0",
                 "baseline_rial": str(f.baseline_rial) if f and f.baseline_rial is not None else None,
-                "actual_rial": str(sold[bp.id].get(channel, 0)),
+                # Finance's sheet first, the sales section otherwise.
+                "actual_rial": str(
+                    f.actual_rial if f and f.actual_rial is not None else sold[bp.id].get(channel, 0)
+                ),
             }
         rows.append({"channel": channel, "label": label, "cells": cells})
     return rows

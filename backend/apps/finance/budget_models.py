@@ -359,6 +359,14 @@ class BudgetSalesForecast(TimeStampedModel):
         max_digits=20, decimal_places=0, null=True, blank=True,
         help_text="مبلغ در لحظهٔ تصویب — پس از آن تغییر نمی‌کند",
     )
+    #: The month's sales as finance's own sheet reports them («واقعی» column
+    #: of the Excel). When present it is the actual — the company's figures
+    #: follow that sheet — and the sales section's figure is shown beside it,
+    #: so a gap between the two is visible instead of silently resolved.
+    actual_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, null=True, blank=True,
+        help_text="فروش واقعی طبق اکسل مالی — خالی یعنی از بخش فروش خوانده شود",
+    )
 
     class Meta:
         unique_together = ("budget_period", "channel")

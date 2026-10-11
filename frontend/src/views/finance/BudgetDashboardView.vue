@@ -169,7 +169,7 @@ const cards = computed(() => {
     },
     {
       title: "فروش",
-      hint: "پیش‌بینی بودجه در برابر فروش تأییدشدهٔ بخش فروش",
+      hint: "پیش‌بینی بودجه در برابر فروش واقعی (اکسل مالی، وگرنه بخش فروش)",
       budget: n(r.sales?.total.budget_rial),
       actual: n(r.sales?.total.actual_rial),
       verdict: r.sales?.total.verdict ?? "on-track",
@@ -277,7 +277,16 @@ const outGroups = computed(() => groupsOf("out"));
 const salesChannels = computed(() =>
   (report.value?.sales?.rows ?? [])
     .filter((r) => n(r.budget_rial) || n(r.actual_rial))
-    .map((r) => ({ label: r.label, budget: n(r.budget_rial), actual: n(r.actual_rial), verdict: r.verdict })),
+    .map((r) => ({
+      label: r.label,
+      budget: n(r.budget_rial),
+      actual: n(r.actual_rial),
+      verdict: r.verdict,
+      // Finance's sheet and the sales section disagree: say so, with both figures.
+      note: r.source === "excel" && n(r.section_rial) !== n(r.actual_rial)
+        ? `طبق اکسل مالی · بخش فروش: ${money(n(r.section_rial), false)} (اختلاف ${money(n(r.actual_rial) - n(r.section_rial), false)})`
+        : undefined,
+    })),
 );
 const hasSalesPlan = computed(() => points.value.some((p) => n(p.budget_sales) || n(p.actual_sales)));
 
@@ -405,7 +414,7 @@ const worst = computed(() =>
           :points="netPoints"
         />
         <BudgetCumulativeChart
-          title="مانده تجمعی نقد — بودجه در برابر واقعی"
+          :title="series?.has_opening ? 'مانده پایان ماه — بودجه در برابر واقعی (مثل ردیف «مانده» اکسل)' : 'مانده تجمعی نقد — بودجه در برابر واقعی'"
           :labels="labels"
           :budget="cumulativeBudget"
           :actual="cumulativeActual"
@@ -432,7 +441,7 @@ const worst = computed(() =>
         <div class="xl:col-span-2">
           <PlanActualBars
             :title="`فروش به تفکیک کانال — ${report.month.label}`"
-            subtitle="واقعی: فروش تأییدشده در بخش فروش (همان داشبوردهای فروش)"
+            subtitle="واقعی: ستون «واقعی» اکسل مالی؛ اگر خالی باشد، فروش تأییدشدهٔ بخش فروش"
             :items="salesChannels"
             empty="برای این ماه پیش‌بینی یا فروشی ثبت نشده."
           />

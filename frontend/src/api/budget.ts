@@ -129,7 +129,8 @@ export interface VarianceRow extends VarianceCell {
 export type ActualSource = "keyed" | "ledger" | "none";
 
 export interface SalesBlock {
-  rows: (VarianceCell & { channel: string; label: string })[];
+  /** source: excel = finance's sheet; sales = the sales section. section_rial is always the sales section's own figure. */
+  rows: (VarianceCell & { channel: string; label: string; source?: "excel" | "sales"; section_rial?: string })[];
   total: VarianceCell;
   has_actuals: boolean;
 }
@@ -173,6 +174,8 @@ export interface SeriesPoint {
 export interface BudgetSeries {
   budget: { id: number; title: string };
   points: SeriesPoint[];
+  /** The budget carries «مانده نقد اول دوره»: cumulative = each month's closing balance. */
+  has_opening?: boolean;
 }
 
 export interface WaterfallStep {

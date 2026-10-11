@@ -62,7 +62,8 @@ class BudgetExcelTests(TreasuryTestCase):
         self.assertTrue(by["وصول نقدی"]["include"])
         # =B3*20% with B3 = SUM(B2) = 300 — evaluated, the file has no cache.
         self.assertEqual(by["وصول نقدی"]["budget"]["1405-06"], "60")
-        self.assertFalse(by["مانده نقد اول دوره"]["include"])
+        # Counted like the sheet counts it: «ورودی» and «مانده» include it.
+        self.assertTrue(by["مانده نقد اول دوره"]["include"])
         self.assertEqual(by["هزینه دستمزد اداری"]["category_name"], "دستمزد اداری")
         self.assertEqual(by["هزینه دستمزد اداری"]["direction"], Direction.OUT)
         self.assertEqual(by["خرید جمبو"]["budget"]["1405-06"], "30")
@@ -75,7 +76,13 @@ class BudgetExcelTests(TreasuryTestCase):
                                overrides={}, user=self.finance)
         budget = Budget.objects.get(pk=r["budget_id"])
         self.assertEqual(budget.title, "آزمایشی")
-        self.assertEqual(BudgetLine.objects.filter(budget=budget).count(), 3)
+        self.assertEqual(BudgetLine.objects.filter(budget=budget).count(), 4)
+        # The Excel «واقعی» of a sales row is the month's sales actual.
+        self.assertEqual(
+            BudgetSalesForecast.objects.get(budget_period__budget=budget, channel="team",
+                                            budget_period__period__jalali_month=6).actual_rial,
+            D(320),
+        )
         self.assertEqual(
             BudgetSalesForecast.objects.get(budget_period__budget=budget, channel="team",
                                             budget_period__period__jalali_month=7).amount_rial,
@@ -87,7 +94,7 @@ class BudgetExcelTests(TreasuryTestCase):
         again = budget_excel.apply(data, sheet=None, year=1405, budget=budget, title="",
                                    scale=1, parts={"budget", "actual"}, mode="merge",
                                    overrides={}, user=self.finance)
-        self.assertEqual((again["written_budget"], again["written_actual"], again["lines"]), (0, 0, 3))
+        self.assertEqual((again["written_budget"], again["written_actual"], again["lines"]), (0, 0, 4))
 
     def test_overrides_and_replace(self):
         data = workbook()
@@ -153,7 +160,7 @@ class TotalCheckTests(TreasuryTestCase):
         self.assertIn("وارد می‌شود", by["مجموع جریان های نقدی خروجی"]["reason"])
         # «خالص» is ورودی − خروجی: the minus must be respected, not added.
         self.assertTrue(by["خالص"]["check"])
-        self.assertIn("مانده نقد اول دوره", by["مجموع جریان های نقدی ورودی"]["reason"])
+        self.assertIn("وارد می‌شود ✓", by["مجموع جریان های نقدی ورودی"]["reason"])
 
 
 class EmptyRowTests(TreasuryTestCase):
