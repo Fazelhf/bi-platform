@@ -154,3 +154,25 @@ class TotalCheckTests(TreasuryTestCase):
         # «خالص» is ورودی − خروجی: the minus must be respected, not added.
         self.assertTrue(by["خالص"]["check"])
         self.assertIn("مانده نقد اول دوره", by["مجموع جریان های نقدی ورودی"]["reason"])
+
+
+class EmptyRowTests(TreasuryTestCase):
+    def test_an_empty_line_is_kept_and_a_heading_is_not(self):
+        """«دین بانک ملی» with nothing in it yet is a سرفصل; «جریان های نقدی خروجی» is a title."""
+        from openpyxl import load_workbook
+
+        wb = load_workbook(BytesIO(workbook()))
+        wb.active.insert_rows(9)
+        wb.active["A9"] = "بازپرداخت دین بانک ملی"
+        buf = BytesIO()
+        wb.save(buf)
+        r = budget_excel.analyse(buf.getvalue(), sheet=None, year=1405, budget=None)
+        by = {row["label"]: row for row in r["rows"]}
+        self.assertTrue(by["بازپرداخت دین بانک ملی"]["include"])
+        self.assertEqual(by["بازپرداخت دین بانک ملی"]["direction"], Direction.OUT)
+        self.assertNotIn("جریان های نقدی خروجی", by)
+
+        res = budget_excel.apply(buf.getvalue(), sheet=None, year=1405, budget=None, title="",
+                                 scale=1, parts={"budget"}, mode="merge", overrides={}, user=self.finance)
+        self.assertTrue(BudgetLine.objects.filter(
+            budget_id=res["budget_id"], category__name_fa="بازپرداخت دین بانک ملی").exists())

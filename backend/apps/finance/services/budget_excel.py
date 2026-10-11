@@ -850,7 +850,7 @@ def _explain_totals(rows: list[dict]) -> None:
         r["check"] = ok
 
 
-_HEADING_WORDS = ("جریان های نقدی", "جریان نقدی", "جریانهای نقدی", "جریان وجوه")
+_HEADING_WORDS = ("جریان های نقدی", "جریان نقدی", "جریانهای نقدی", "جریان وجوه", "پیش بینی فروش")
 
 
 def is_heading(label: str) -> bool:
