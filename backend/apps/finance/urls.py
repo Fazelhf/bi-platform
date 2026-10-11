@@ -26,6 +26,8 @@ urlpatterns = [
     path("budget-actuals/", views.BudgetActualEntryView.as_view(), name="budget-actuals"),
     path("budget-notes/", views.BudgetNoteView.as_view(), name="budget-notes"),
     path("budget-heatmap/", views.BudgetHeatmapView.as_view(), name="budget-heatmap"),
+    # The cash-flow workbook in: read (nothing written), then write.
+    path("budget-import/<str:step>/", views.BudgetExcelImportView.as_view(), name="budget-import"),
     # The CEO's overview: one call for cash, credit and budget.
     path("executive-summary/", views.ExecutiveFinanceView.as_view(), name="executive-summary"),
     path("", include(router.urls)),

@@ -7,11 +7,12 @@ import { defaultPeriodId } from "@/types";
 import type { ExecutiveOverview, KpiResult, Period } from "@/types";
 import { kpiValue, num, pct, rial } from "@/utils/format";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import ExportActions from "@/components/ExportActions.vue";
 import { financeApi, type FinanceSummary } from "@/api/finance";
 import { useAuthStore } from "@/stores/auth";
 import ComboTrendChart from "@/components/charts/ComboTrendChart.vue";
-import GaugeChart from "@/components/charts/GaugeChart.vue";
+import PlanActualBars from "@/components/charts/PlanActualBars.vue";
 import SeriesChart from "@/components/charts/SeriesChart.vue";
 
 /**
@@ -34,7 +35,13 @@ const trend = ref<TrendMonth[]>([]);
 const selectedYear = computed(
   () => periods.value.find((p) => p.id === selectedPeriod.value)?.jalali_year,
 );
-const loading = ref(false);
+/**
+ * True from the first paint: the month list is fetched before anything else,
+ * and a page that showed nothing during that wait read as a broken site.
+ */
+const loading = ref(true);
+/** Set when the page could not be read — said out loud, with a retry. */
+const failed = ref(false);
 
 /** The financial picture. Optional: if it cannot be read, the rest still shows. */
 const finance = ref<FinanceSummary | null>(null);
@@ -48,8 +55,12 @@ function pick(kpis: KpiResult[] | undefined, codes: string[]) {
 }
 
 async function load() {
-  if (!selectedPeriod.value) return;
+  if (!selectedPeriod.value) {
+    loading.value = false;
+    return;
+  }
   loading.value = true;
+  failed.value = false;
   try {
     const [ov, tr, fin] = await Promise.all([
       executiveApi.overview(selectedPeriod.value),
@@ -61,16 +72,30 @@ async function load() {
     data.value = ov;
     trend.value = tr.months;
     finance.value = fin;
+  } catch {
+    failed.value = true;
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(async () => {
-  periods.value = await salesApi.periods();
-  selectedPeriod.value = defaultPeriodId(periods.value);
-  await load();
-});
+/** Months first, then the page; also what «تلاش دوباره» runs. */
+async function start() {
+  loading.value = true;
+  failed.value = false;
+  try {
+    if (!periods.value.length) periods.value = await salesApi.periods();
+  } catch {
+    failed.value = true;
+    loading.value = false;
+    return;
+  }
+  const first = defaultPeriodId(periods.value);
+  if (selectedPeriod.value === first || !first) await load();
+  else selectedPeriod.value = first; // the watcher loads it
+}
+
+onMounted(start);
 watch(selectedPeriod, load);
 
 // ---- context: this month against the last, and against plan ---------------
@@ -378,15 +403,14 @@ const outOfIn = computed(() => {
   return i ? (Number(c?.out_rial ?? 0) / i) * 100 : 0;
 });
 
-const budgetGauges = computed(() => {
+/** Plan against actual for the month — bars with the plan marked, not dials. */
+const budgetBars = computed(() => {
   const b = finance.value?.budget;
   if (!b || !b.has_actuals) return [];
-  const p = (c: { budget_rial: string; actual_rial: string }) =>
-    Number(c.budget_rial) ? (Number(c.actual_rial) / Number(c.budget_rial)) * 100 : null;
-  return [
-    { title: "تحقق ورودی نقد", value: p(b.totals.in), good: true },
-    { title: "مصرف بودجهٔ خروجی", value: p(b.totals.out), good: false },
-  ];
+  const row = (label: string, c: { budget_rial: string; actual_rial: string; verdict: any }) => ({
+    label, budget: Number(c.budget_rial), actual: Number(c.actual_rial), verdict: c.verdict,
+  });
+  return [row("ورودی نقد", b.totals.in), row("خروجی نقد", b.totals.out)];
 });
 </script>
 
@@ -422,6 +446,20 @@ const budgetGauges = computed(() => {
     </div>
 
     <DashboardSkeleton v-if="loading" :cards="4" :charts="2" :rows="0" />
+
+    <div v-else-if="failed" :class="card">
+      <EmptyState icon="⚠️" title="اطلاعات بارگذاری نشد" hint="ارتباط با سرور برقرار نشد. چند لحظه بعد دوباره تلاش کنید.">
+        <template #action>
+          <button class="text-sm bg-panel text-white rounded-lg px-4 py-2 hover:opacity-90 transition" @click="start">
+            تلاش دوباره
+          </button>
+        </template>
+      </EmptyState>
+    </div>
+
+    <div v-else-if="!data" :class="card">
+      <EmptyState title="هنوز ماهی برای نمایش نیست" hint="وقتی ارقام ماه ثبت شود، اینجا نمایش داده می‌شود." />
+    </div>
 
     <template v-else-if="data">
       <!-- ===== Hero: the month, judged ===== -->
@@ -694,11 +732,8 @@ const budgetGauges = computed(() => {
               هنوز رقم واقعی برای این ماه ثبت نشده
             </span>
           </div>
-          <div v-if="budgetGauges.length" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
-            <GaugeChart
-              v-for="g in budgetGauges" :key="g.title" flat
-              :title="g.title" :value="g.value" :good-when-high="g.good" :height="170"
-            />
+          <div v-if="budgetBars.length" class="mt-2">
+            <PlanActualBars title="بودجهٔ ماه — واقعی در برابر بودجه" :items="budgetBars" />
           </div>
           <ul v-if="finance.budget.top_bad.length" class="mt-3 space-y-1.5 border-t border-slate-100 pt-3">
             <li v-for="b in finance.budget.top_bad" :key="b.label" class="flex items-center justify-between text-xs">

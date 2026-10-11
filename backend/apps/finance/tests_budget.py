@@ -5,7 +5,8 @@ The rules a budget report cannot get wrong without quietly lying:
 
 * the CEO defines the plan; the finance team reports against it and cannot move it;
 * an actual is what finance keyed for a سرفصل for the month — the budget is monthly;
-* the cash ledger no longer counts toward the budget;
+* the budget reads the cash ledger and the sales section; a keyed figure
+  replaces the ledger's for its month, never adds to it;
 * over budget is judged by direction, never by sign;
 * the approved figure survives every later edit, and the edit is recorded.
 """
@@ -100,19 +101,26 @@ class VarianceTests(BudgetTestCase):
         self.assertEqual(cash_row["verdict"], "good")
         self.assertTrue(jumbo_row["is_material"])  # 20% clears the default 10%
 
-    def test_cash_movements_no_longer_count_toward_the_budget(self):
-        """Keyed in both places, the same rial would be counted twice."""
+    def test_the_cash_ledger_is_the_actual_until_one_is_keyed(self):
+        """
+        The budget reads the cash ledger; a keyed figure replaces it for the
+        month rather than adding to it, so a rial is never counted twice.
+        """
         jumbo = self.line(self.jumbo, Direction.OUT, 200)
         self.movement(0, Direction.OUT, self.jumbo, 240)
 
         report = budget_service.build(self.budget, self.month)
-        self.assertEqual(self.row(report, kind="line", code="raw-jumbo")["actual_rial"], "0")
-        self.assertFalse(report["has_actuals"])
+        row = self.row(report, kind="line", code="raw-jumbo")
+        self.assertEqual(row["actual_rial"], "240")
+        self.assertEqual(row["source"], "ledger")
+        self.assertTrue(report["has_actuals"])
 
         self.actual(jumbo, 230)
         report = budget_service.build(self.budget, self.month)
-        self.assertEqual(self.row(report, kind="line", code="raw-jumbo")["actual_rial"], "230")
-        self.assertTrue(report["has_actuals"])
+        row = self.row(report, kind="line", code="raw-jumbo")
+        self.assertEqual(row["actual_rial"], "230")
+        self.assertEqual(row["source"], "keyed")
+        self.assertEqual(report["totals"]["out"]["actual_rial"], "230")
 
     def test_totals_do_not_count_category_headers(self):
         """A header is already a sum; adding it to the total would double it."""
@@ -370,23 +378,49 @@ class ManualCategoryTests(BudgetTestCase):
         self.assertIn("direction", response.data)
 
 
-class QuarantineTests(BudgetTestCase):
-    """The budget reads nothing from another module — only what is keyed into it."""
+class SalesForecastTests(BudgetTestCase):
+    """Forecast sales per channel, read against what the sales section recorded."""
 
-    def test_the_report_carries_only_budget_figures(self):
-        rent = self.line(self.rent, Direction.OUT, 1000)
-        self.actual(rent, 400)
+    def test_forecast_reads_approved_sales_and_stays_out_of_cash_totals(self):
+        from apps.finance.models import BudgetSalesForecast
+        from apps.sales.models import ApprovalStatus, DimEmployee, FactSalesMonthly
+
+        BudgetSalesForecast.objects.create(budget_period=self.bp, channel="team", amount_rial=D(1000))
+        emp = DimEmployee.objects.create(code="e1", full_name_fa="کارشناس")
+        from apps.core.periods import units_of
+
+        unit = units_of(self.month, "sales_team")[0]  # where the sales section stores it
+        FactSalesMonthly.objects.create(period=unit, employee=emp, channel="team",
+                                        revenue_rial=D(1200), status=ApprovalStatus.APPROVED)
+        # A draft is not yet a sale — the dashboards do not count it either.
+        emp2 = DimEmployee.objects.create(code="e2", full_name_fa="دیگری")
+        FactSalesMonthly.objects.create(period=unit, employee=emp2, channel="team",
+                                        revenue_rial=D(500), status=ApprovalStatus.DRAFT)
+
         report = budget_service.build(self.budget, self.month)
-        self.assertNotIn("sales", report)
-        self.assertEqual(report["totals"]["out"]["actual_rial"], "400")
+        team = next(r for r in report["sales"]["rows"] if r["channel"] == "team")
+        self.assertEqual(team["budget_rial"], "1000")
+        self.assertEqual(team["actual_rial"], "1200")
+        self.assertEqual(team["verdict"], "good")
+        self.assertEqual(report["totals"]["in"]["budget_rial"], "0")
 
-    def test_budget_code_imports_no_other_module(self):
-        import inspect
+    def test_approving_a_month_stamps_the_forecast_baseline(self):
+        from apps.finance.models import BudgetSalesForecast
 
-        from apps.finance import budget_models
-        from apps.finance.services import budget as service
+        f = BudgetSalesForecast.objects.create(budget_period=self.bp, channel="b2b", amount_rial=D(700))
+        self.bp.approve()
+        f.refresh_from_db()
+        self.assertEqual(f.baseline_rial, D(700))
 
-        for module in (budget_models, service):
-            source = inspect.getsource(module)
-            for other in ("apps.sales", "apps.crm", "apps.commercial", "apps.hr"):
-                self.assertNotIn(other, source, f"{module.__name__} reads {other}")
+
+class TwoWayGroupTests(BudgetTestCase):
+    def test_a_loan_received_is_not_added_to_the_instalments_paid(self):
+        """تسهیلات is drawn down (in) and repaid (out): two headers, not one sum."""
+        self.line(CashCategory.objects.get(code="facility-drawdown"), Direction.IN, 300)
+        self.line(self.principal, Direction.OUT, 100)
+
+        report = budget_service.build(self.budget, self.month)
+        headers = {r["label"]: r for r in report["rows"] if r["kind"] == "category" and r["code"] == "facility"}
+        self.assertEqual(headers["تسهیلات بانکی · ورودی"]["budget_rial"], "300")
+        self.assertEqual(headers["تسهیلات بانکی · خروجی"]["budget_rial"], "100")
+        self.assertEqual(headers["تسهیلات بانکی · خروجی"]["direction"], Direction.OUT)

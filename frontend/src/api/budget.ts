@@ -2,8 +2,9 @@
  * Budget API. Money comes back as strings so Rial figures stay exact; only
  * percentages and counts are numbers.
  *
- * There is no «actual» endpoint to write to: actuals are the cash movements
- * the finance team already records, matched to budget lines on the server.
+ * The budget is not an island: a سرفصل's actual is the cash ledger's figure
+ * for its category unless finance keyed one (which replaces it), and the
+ * sales forecast reads the sales section's approved figures per channel.
  */
 import api from "./client";
 import type { CashCategory, FinanceSettings } from "./finance";
@@ -76,10 +77,19 @@ export interface GridLine extends BudgetLine {
   cells: Record<string, GridCell>;
 }
 
+/** One sales channel's forecast row in the plan grid. */
+export interface GridSalesRow {
+  channel: string;
+  label: string;
+  /** Keyed by budget_period_id; actual_rial is what the sales section recorded. */
+  cells: Record<string, { amount_rial: string; baseline_rial: string | null; actual_rial: string }>;
+}
+
 export interface BudgetGrid {
   budget: Budget;
   months: GridMonth[];
   lines: GridLine[];
+  sales: GridSalesRow[];
   unit: FinanceSettings;
   can_edit: boolean;
 }
@@ -112,6 +122,16 @@ export interface VarianceRow extends VarianceCell {
   credit_line: string;
   note: string;
   depth: number;
+  /** Where the actual came from: keyed by finance, or the cash ledger. */
+  source?: ActualSource;
+}
+
+export type ActualSource = "keyed" | "ledger" | "none";
+
+export interface SalesBlock {
+  rows: (VarianceCell & { channel: string; label: string })[];
+  total: VarianceCell;
+  has_actuals: boolean;
 }
 
 export interface VarianceReport {
@@ -126,8 +146,11 @@ export interface VarianceReport {
   totals: { in: VarianceCell; out: VarianceCell; net: VarianceCell };
   thresholds: { pct: string; rial: string };
   unbudgeted_count: number;
-  /** False when no cash movement has been recorded in the period yet. */
+  /** False when nothing — keyed, ledger or sales — exists for the month yet. */
   has_actuals: boolean;
+  sources: Record<ActualSource, number>;
+  /** Forecast sales per channel against the sales section — never in the cash totals. */
+  sales: SalesBlock;
 }
 
 export interface SeriesPoint {
@@ -142,6 +165,9 @@ export interface SeriesPoint {
   actual_net: string;
   cumulative_budget: string;
   cumulative_actual: string;
+  has_actuals: boolean;
+  budget_sales: string;
+  actual_sales: string;
 }
 
 export interface BudgetSeries {
@@ -178,6 +204,9 @@ export interface ActualEntryLine extends VarianceCell {
   /** Whether anything was keyed for it in this period. */
   entered: boolean;
   note: string;
+  /** The cash ledger's figure — the actual while nothing is keyed. */
+  ledger_rial: string | null;
+  source: ActualSource;
 }
 
 export interface ActualEntrySheet {
@@ -187,9 +216,90 @@ export interface ActualEntrySheet {
   line_count: number;
   lines: ActualEntryLine[];
   totals: { in: VarianceCell; out: VarianceCell };
+  sales: SalesBlock;
   can_edit: boolean;
   unit: FinanceSettings;
 }
+
+// ---- Excel import -----------------------------------------------------------
+
+export interface ImportMonth {
+  key: string;
+  year: number;
+  month: number;
+  label: string;
+  has_budget: boolean;
+  has_actual: boolean;
+}
+
+export interface ImportRow {
+  row: number;
+  label: string;
+  direction: Direction;
+  include: boolean;
+  is_total: boolean;
+  /** For a total: true when it equals the rows it is made of (so skipping it loses nothing). */
+  check?: boolean | null;
+  reason: string;
+  warnings: string[];
+  /** line: an existing سرفصل of the budget · category: an existing category · new · sales: a channel's forecast */
+  match: "line" | "category" | "new" | "sales";
+  channel: string | null;
+  channel_label?: string;
+  category_id: number | null;
+  category_name: string;
+  category_parent: string;
+  new_parent_id: number | null;
+  new_parent_name: string;
+  /** Keyed by month key «1405-07». */
+  budget: Record<string, string | null>;
+  actual: Record<string, string | null>;
+}
+
+export interface ImportAnalysis {
+  sheet: string;
+  sheets: string[];
+  header_row: number;
+  label_column: string;
+  duplicate_columns: string[];
+  months: ImportMonth[];
+  rows: ImportRow[];
+  year: number;
+  can_plan: boolean;
+  can_actual: boolean;
+}
+
+export interface ImportOptions {
+  parts: ("budget" | "actual")[];
+  mode: "merge" | "replace";
+  title?: string;
+  rows: { row: number; include?: boolean; direction?: Direction; category_id?: number | null }[];
+}
+
+export interface ImportResult {
+  budget_id: number;
+  budget_title: string;
+  created: boolean;
+  lines: number;
+  new_categories: number;
+  written_budget: number;
+  written_actual: number;
+  written_forecasts: number;
+  cleared_budget: number;
+  cleared_actual: number;
+  skipped_negative: number;
+}
+
+export interface BudgetStats {
+  lines: number;
+  months: number;
+  amounts: number;
+  actuals: number;
+  forecasts: number;
+  approved: number;
+}
+
+export type ClearWhat = "plan" | "actuals" | "sales" | "lines" | "all";
 
 /** Top-level groups × months, for the variance heatmap. */
 export interface BudgetHeatmapData {
@@ -246,9 +356,43 @@ export const budgetApi = {
     const { data } = await api.get("/finance/budget-grid/", { params: { budget: budgetId } });
     return data;
   },
-  async saveGrid(cells: SaveCell[]) {
-    const { data } = await api.post("/finance/budget-grid/", { cells });
+  async saveGrid(
+    cells: SaveCell[],
+    salesCells: { budget_period_id: number; channel: string; amount_rial: string }[] = [],
+  ) {
+    const { data } = await api.post("/finance/budget-grid/", { cells, sales_cells: salesCells });
     return data as { written: number };
+  },
+
+  async stats(id: number): Promise<BudgetStats> {
+    const { data } = await api.get(`/finance/budgets/${id}/stats/`);
+    return data;
+  },
+  async clear(id: number, what: ClearWhat) {
+    const { data } = await api.post(`/finance/budgets/${id}/clear/`, { what });
+    return data as { removed: Record<string, number> };
+  },
+  async exportExcel(id: number): Promise<Blob> {
+    const { data } = await api.get(`/finance/budgets/${id}/export/`, { responseType: "blob" });
+    return data;
+  },
+
+  async importExcel<S extends "analyse" | "apply">(
+    step: S,
+    form: { file: File; year?: number; budget?: number | null; sheet?: string; scale?: number },
+    options?: ImportOptions,
+  ): Promise<S extends "analyse" ? ImportAnalysis : ImportResult> {
+    const body = new FormData();
+    body.append("file", form.file);
+    if (form.year) body.append("year", String(form.year));
+    if (form.budget) body.append("budget", String(form.budget));
+    if (form.sheet) body.append("sheet", form.sheet);
+    if (form.scale) body.append("scale", String(form.scale));
+    if (options) body.append("options", JSON.stringify(options));
+    const { data } = await api.post(`/finance/budget-import/${step}/`, body, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return data;
   },
 
   async actuals(budgetId: number, periodId: number): Promise<ActualEntrySheet> {
@@ -260,7 +404,7 @@ export const budgetApi = {
   async saveActuals(
     budgetId: number,
     periodId: number,
-    cells: { line_id: number; amount_rial: string; note: string }[],
+    cells: { line_id: number; amount_rial: string; note: string; clear?: boolean }[],
   ) {
     const { data } = await api.post("/finance/budget-actuals/", {
       budget: budgetId,

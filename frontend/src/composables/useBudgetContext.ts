@@ -75,9 +75,15 @@ export function useBudgetContext() {
     syncQuery();
   }
 
-  async function refreshBudgets(selectId?: number) {
-    budgets.value = await budgetApi.list();
+  async function refreshBudgets(selectId?: number | null) {
+    // An Excel import may have created months the period list has not seen.
+    const [b, p] = await Promise.all([budgetApi.list(), salesApi.periods()]);
+    budgets.value = b;
+    periods.value = p;
     if (selectId) budgetId.value = selectId;
+    else if (selectId === null || !b.some((x) => x.id === budgetId.value)) {
+      budgetId.value = b.find((x) => x.is_active)?.id ?? b[0]?.id ?? null;
+    }
   }
 
   function syncQuery() {

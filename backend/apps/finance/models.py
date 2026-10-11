@@ -436,6 +436,7 @@ from .budget_models import (  # noqa: E402,F401  (import position is required)
     BudgetAmountChange,
     BudgetLine,
     BudgetPeriod,
+    BudgetSalesForecast,
     BudgetStatus,
     is_material,
 )

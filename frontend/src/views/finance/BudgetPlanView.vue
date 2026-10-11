@@ -19,8 +19,12 @@ import {
   type Direction,
   type GridLine,
   type GridMonth,
+  type GridSalesRow,
+  type ImportResult,
   type TreeCategory,
 } from "@/api/budget";
+import BudgetExcelImport from "@/components/finance/BudgetExcelImport.vue";
+import BudgetManagePanel from "@/components/finance/BudgetManagePanel.vue";
 import { financeApi, type CreditLine } from "@/api/finance";
 import { useBudgetContext } from "@/composables/useBudgetContext";
 import { faYear, loadMoneySettings, useMoney } from "@/composables/useMoney";
@@ -36,6 +40,7 @@ const { money } = useMoney();
 const auth = useAuthStore();
 /** Defining the budget is the CEO's; everyone else reads it. */
 const isCeo = computed(() => auth.isExecutive || !!auth.me?.is_superuser);
+const isFinance = computed(() => auth.department === "finance" || !!auth.me?.is_superuser);
 
 const grid = ref<BudgetGrid | null>(null);
 const loading = ref(true);
@@ -49,7 +54,30 @@ const n = (v: string | number | null | undefined) => Number(v ?? 0);
 
 /** Edited values keyed `${budgetPeriodId}:${lineId}`. Anything here is unsaved. */
 const draft = reactive<Record<string, string>>({});
-const dirtyCount = computed(() => Object.keys(draft).length);
+/** Sales forecast edits keyed `${budgetPeriodId}:${channel}`. */
+const salesDraft = reactive<Record<string, string>>({});
+const dirtyCount = computed(() => Object.keys(draft).length + Object.keys(salesDraft).length);
+
+const sKey = (bpId: number, channel: string) => `${bpId}:${channel}`;
+const salesStored = (row: GridSalesRow, bpId: number) => row.cells[String(bpId)]?.amount_rial ?? "0";
+function salesValue(row: GridSalesRow, bpId: number): string {
+  const k = sKey(bpId, row.channel);
+  return k in salesDraft ? salesDraft[k] : salesStored(row, bpId);
+}
+function setSales(row: GridSalesRow, bpId: number, raw: string) {
+  const k = sKey(bpId, row.channel);
+  const clean = raw === "" || raw === "-" ? "0" : raw;
+  if (n(clean) === n(salesStored(row, bpId))) delete salesDraft[k];
+  else salesDraft[k] = clean;
+}
+const salesRowTotal = (row: GridSalesRow) =>
+  (grid.value?.months ?? []).reduce((s, m) => s + n(salesValue(row, m.budget_period_id)), 0);
+const salesColTotal = (bpId: number) =>
+  (grid.value?.sales ?? []).reduce((s, r) => s + n(salesValue(r, bpId)), 0);
+const salesActualTotal = (bpId: number) =>
+  (grid.value?.sales ?? []).reduce((s, r) => s + n(r.cells[String(bpId)]?.actual_rial), 0);
+const salesGrand = computed(() =>
+  (grid.value?.months ?? []).reduce((s, m) => s + salesColTotal(m.budget_period_id), 0));
 const key = (bpId: number, lineId: number) => `${bpId}:${lineId}`;
 
 function stored(line: GridLine, bpId: number): string {
@@ -161,6 +189,7 @@ async function save() {
     g.months.filter((m) => m.status === "approved").map((m) => m.budget_period_id),
   );
   const keys = Object.keys(draft);
+  const salesKeys = Object.keys(salesDraft);
   const touchesApproved = keys.some((k) => approved.has(Number(k.split(":")[0])));
 
   // Editable after approval was the requirement; silently editable was not.
@@ -186,8 +215,13 @@ async function save() {
         ...(approved.has(bp) ? { reason } : {}),
       };
     });
-    const res = await budgetApi.saveGrid(cells);
+    const salesCells = salesKeys.map((k) => {
+      const [bp, channel] = k.split(":");
+      return { budget_period_id: Number(bp), channel, amount_rial: salesDraft[k] };
+    });
+    const res = await budgetApi.saveGrid(cells, salesCells);
     for (const k of keys) delete draft[k];
+    for (const k of salesKeys) delete salesDraft[k];
     await loadGrid();
     toast.success(`${FA.format(res.written)} رقم ذخیره شد.`);
   } catch (e) {
@@ -379,8 +413,22 @@ async function removeLine(line: GridLine) {
 watch(budgetId, (id, old) => {
   if (id === old) return;
   for (const k of Object.keys(draft)) delete draft[k];
+  for (const k of Object.keys(salesDraft)) delete salesDraft[k];
   loadGrid();
 });
+
+// ---- import / manage ------------------------------------------------------
+
+async function imported(res: ImportResult) {
+  categories.value = (await financeApi.categories()) as TreeCategory[];
+  await refreshBudgets(res.budget_id);
+  await loadGrid();
+}
+
+async function managed(selectId?: number | null) {
+  await refreshBudgets(selectId);
+  await loadGrid();
+}
 
 onMounted(async () => {
   try {
@@ -444,6 +492,12 @@ const statusChip = (s: string) =>
           :to="{ name: 'finance-budget-variance', query: linkQuery }"
           class="px-3 py-1.5 text-sm rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200"
         >انحراف بودجه</router-link>
+        <BudgetExcelImport
+          v-if="isCeo || isFinance"
+          :budgets="budgets" :budget-id="budgetId" focus="budget"
+          :can-plan="isCeo" :can-actual="isFinance"
+          @done="imported"
+        />
         <button
           v-if="isCeo"
           class="px-3 py-1.5 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700"
@@ -483,6 +537,12 @@ const statusChip = (s: string) =>
       </div>
     </section>
 
+    <BudgetManagePanel
+      v-if="budget && isCeo"
+      :budget="budget" :month-periods="monthPeriods"
+      @changed="managed"
+    />
+
     <p v-if="error" class="bg-red-50 text-red-600 rounded-card p-4 text-sm">{{ error }}</p>
 
     <DashboardSkeleton v-else-if="loading && !grid" />
@@ -497,9 +557,16 @@ const statusChip = (s: string) =>
           ? "یک بودجه برای بازه‌ای از ماه‌ها بسازید، سرفصل‌هایش را اضافه کنید و ارقام مورد انتظار را وارد کنید."
           : "تعریف بودجه با مدیرعامل است؛ پس از تعریف، ارقام واقعی را در «ورود ارقام واقعی بودجه» وارد کنید." }}
       </p>
-      <button class="mt-4 px-4 py-2 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700" v-if="isCeo" @click="showNew = true">
-        + ساخت اولین بودجه
-      </button>
+      <div v-if="isCeo" class="mt-4 flex justify-center gap-2">
+        <button class="px-4 py-2 text-sm rounded-xl bg-brand-600 text-white hover:bg-brand-700" @click="showNew = true">
+          + ساخت اولین بودجه
+        </button>
+        <BudgetExcelImport
+          :budgets="budgets" :budget-id="null" focus="budget"
+          :can-plan="isCeo" :can-actual="isFinance" label="ساخت از روی اکسل"
+          @done="imported"
+        />
+      </div>
     </section>
 
     <template v-else-if="grid">
@@ -648,6 +715,48 @@ const statusChip = (s: string) =>
               </tr>
             </thead>
 
+            <!-- Sales forecast: accrual, kept out of the cash totals; its actual is the sales section's. -->
+            <tbody v-if="grid.sales?.length">
+              <tr>
+                <td :colspan="grid.months.length + 2" class="sticky right-0 px-3 pt-4 pb-2 text-xs font-bold text-sky-700">
+                  پیش‌بینی فروش
+                  <span class="font-normal text-slate-400 ms-1">رقم واقعی زیر هر خانه از بخش فروش خوانده می‌شود · در جمع نقدینگی نیست</span>
+                </td>
+              </tr>
+              <tr v-for="row in grid.sales" :key="row.channel" class="group hover:bg-slate-50/60">
+                <td class="sticky right-0 z-10 bg-surface group-hover:bg-slate-50 p-2 pe-3 border-b border-slate-50">
+                  <p class="text-ink">{{ row.label }}</p>
+                </td>
+                <td
+                  v-for="m in grid.months" :key="m.budget_period_id"
+                  class="p-1.5 border-b border-slate-50"
+                >
+                  <MoneyInput
+                    v-if="grid.can_edit"
+                    :model-value="salesValue(row, m.budget_period_id)"
+                    class="w-full border rounded-lg px-2 py-1 text-sm text-left ltr-nums bg-surface focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                    :class="sKey(m.budget_period_id, row.channel) in salesDraft ? 'border-amber-300 bg-amber-50/60' : 'border-slate-200'"
+                    @update:model-value="(v: string) => setSales(row, m.budget_period_id, v)"
+                  />
+                  <p v-else class="text-left ltr-nums px-2 py-1">{{ FA.format(n(salesValue(row, m.budget_period_id))) }}</p>
+                  <p
+                    v-if="n(row.cells[String(m.budget_period_id)]?.actual_rial)"
+                    class="text-[10px] text-sky-700 text-left ltr-nums px-2 mt-0.5"
+                    title="فروش تأییدشده در بخش فروش"
+                  >واقعی {{ money(n(row.cells[String(m.budget_period_id)]?.actual_rial), false) }}</p>
+                </td>
+                <td class="p-2 text-left ltr-nums text-slate-600 border-b border-slate-50 whitespace-nowrap">{{ money(salesRowTotal(row), false) }}</td>
+              </tr>
+              <tr class="bg-sky-50/50 font-semibold">
+                <td class="sticky right-0 z-10 bg-sky-50 p-2 pe-3 text-xs">جمع پیش‌بینی فروش</td>
+                <td v-for="m in grid.months" :key="m.budget_period_id" class="p-2 text-left ltr-nums text-xs whitespace-nowrap">
+                  {{ money(salesColTotal(m.budget_period_id), false) }}
+                  <span v-if="salesActualTotal(m.budget_period_id)" class="block font-normal text-sky-700">واقعی {{ money(salesActualTotal(m.budget_period_id), false) }}</span>
+                </td>
+                <td class="p-2 text-left ltr-nums text-xs whitespace-nowrap">{{ money(salesGrand, false) }}</td>
+              </tr>
+            </tbody>
+
             <tbody v-for="section in sections" :key="section.dir">
               <tr>
                 <td
@@ -726,7 +835,7 @@ const statusChip = (s: string) =>
 
       <p class="text-[11px] text-slate-400 px-1">
         سال بودجه: {{ faYear(grid.budget.jalali_year) }} ·
-        بودجه مستقل است و از هیچ ماژول دیگری داده نمی‌خواند؛ ارقام واقعی را واحد مالی در «ورود ارقام واقعی بودجه» وارد می‌کند.
+        رقم واقعی هر سرفصل از دفتر نقدینگی خوانده می‌شود، مگر واحد مالی رقمی وارد کرده باشد (جایگزینش می‌شود)؛ فروش واقعی از بخش فروش.
       </p>
     </template>
   </div>

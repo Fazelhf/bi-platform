@@ -22,7 +22,7 @@ import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { prompt, toast } from "@/composables/useUi";
 import { useAuthStore } from "@/stores/auth";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
-import BulletBars from "@/components/charts/BulletBars.vue";
+import PlanActualBars from "@/components/charts/PlanActualBars.vue";
 
 const { budgets, budgetId, periodId, months, linkQuery, init } = useBudgetContext();
 const { money, unitLabel } = useMoney();
@@ -245,7 +245,7 @@ const totalCards = computed(() => {
     <template v-else-if="report">
       <!-- Nothing recorded yet: the plan is being compared against zero. -->
       <div v-if="!report.has_actuals" class="rounded-card p-3 text-sm bg-sky-50 text-sky-800 leading-6">
-        <span class="font-semibold">برای {{ report.period.label }} هنوز هیچ رقم واقعی ثبت نشده است.</span>
+        <span class="font-semibold">برای {{ report.period.label }} هنوز هیچ رقم واقعی نیست — نه دستی، نه در دفتر نقدینگی.</span>
         ستون «واقعی» صفر است، پس انحراف‌های زیر یعنی «هنوز ثبت نشده»، نه کسری یا صرفه‌جویی.
       </div>
 
@@ -281,9 +281,17 @@ const totalCards = computed(() => {
       </div>
 
       <div v-if="inGroups.length || outGroups.length" class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-        <BulletBars v-if="outGroups.length" title="خروجی به تفکیک گروه" :items="outGroups" />
-        <BulletBars v-if="inGroups.length" title="ورودی به تفکیک گروه" :items="inGroups" />
+        <PlanActualBars v-if="inGroups.length" title="ورودی به تفکیک گروه" subtitle="بیشتر از بودجه = مطلوب" :items="inGroups" />
+        <PlanActualBars v-if="outGroups.length" title="خروجی به تفکیک گروه" subtitle="کمتر از بودجه = مطلوب" :items="outGroups" />
       </div>
+
+      <!-- Sales: the forecast against the sales section's approved figures -->
+      <PlanActualBars
+        v-if="report.sales?.rows.some((r) => n(r.budget_rial) || n(r.actual_rial))"
+        title="فروش — پیش‌بینی بودجه در برابر بخش فروش"
+        subtitle="واقعی: فروش تأییدشدهٔ هر کانال، همان عدد داشبوردهای فروش · در جمع نقدینگی نیست"
+        :items="report.sales.rows.filter((r) => n(r.budget_rial) || n(r.actual_rial)).map((r) => ({ label: r.label, budget: n(r.budget_rial), actual: n(r.actual_rial), verdict: r.verdict }))"
+      />
 
       <!-- Filters -->
       <section class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center justify-between gap-3">
@@ -361,6 +369,11 @@ const totalCards = computed(() => {
                       :class="row.kind === 'unbudgeted' ? 'text-amber-700 italic' : 'text-ink'"
                     >{{ row.label }}</span>
                     <span v-if="row.is_material && row.kind !== 'category'" class="w-1.5 h-1.5 rounded-full bg-current" :class="verdictText[row.verdict]" title="انحراف مهم"></span>
+                    <span
+                      v-if="row.source === 'ledger'"
+                      class="px-1.5 py-0.5 rounded text-[10px] bg-sky-50 text-sky-700"
+                      title="رقم واقعی از دفتر نقدینگی خوانده شده"
+                    >دفتر نقدینگی</span>
                   </div>
                 </td>
                 <td class="p-2 text-left ltr-nums text-slate-600 whitespace-nowrap">{{ money(n(row.budget_rial), false) }}</td>

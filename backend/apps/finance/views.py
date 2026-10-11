@@ -7,6 +7,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import filters, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -25,6 +26,7 @@ from apps.finance.models import (
     BudgetAmountChange,
     BudgetLine,
     BudgetPeriod,
+    BudgetSalesForecast,
     BudgetStatus,
     CashCategory,
     CashMovement,
@@ -607,8 +609,78 @@ class BudgetViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         budget = serializer.save()
-        _sync_budget_months(budget)
+        _sync_budget_months(budget, trim=True)
         audit_log(self.request.user, budget, AuditLog.Action.UPDATE)
+
+    def perform_destroy(self, instance):
+        """
+        A budget goes with everything that is only its own: months, lines,
+        figures, keyed actuals and forecasts. Categories it created stay —
+        the cash ledger may already be using them.
+        """
+        audit_log(self.request.user, instance, AuditLog.Action.DELETE)
+        instance.delete()
+
+    @extend_schema(responses=dict)
+    @action(detail=True, methods=["get"])
+    def stats(self, request, pk=None):
+        """What a delete or a clear would take with it — shown before asking."""
+        budget = self.get_object()
+        return Response({
+            "lines": BudgetLine.objects.filter(budget=budget).count(),
+            "months": BudgetPeriod.objects.filter(budget=budget).count(),
+            "amounts": BudgetAmount.objects.filter(budget_period__budget=budget).exclude(amount_rial=0).count(),
+            "actuals": BudgetActual.objects.filter(line__budget=budget).count(),
+            "forecasts": BudgetSalesForecast.objects.filter(budget_period__budget=budget).exclude(amount_rial=0).count(),
+            "approved": BudgetPeriod.objects.filter(budget=budget, status=BudgetStatus.APPROVED).count(),
+        })
+
+    @extend_schema(responses=dict)
+    @action(detail=True, methods=["post"])
+    def clear(self, request, pk=None):
+        """
+        Empty a budget without deleting it.
+
+        `what`: plan | actuals | sales | lines | all. «lines» removes the
+        سرفصل‌ها themselves (and so every figure on them). Approval is reset
+        with the plan: a month whose figures are gone has nothing approved.
+        """
+        budget = self.get_object()
+        what = str(request.data.get("what") or "")
+        if what not in ("plan", "actuals", "sales", "lines", "all"):
+            raise ValidationError({"what": "نوع پاک‌سازی معتبر نیست."})
+        removed = {}
+        with transaction.atomic():
+            if what in ("plan", "all"):
+                removed["amounts"], _ = BudgetAmount.objects.filter(budget_period__budget=budget).delete()
+            if what in ("sales", "all"):
+                removed["forecasts"], _ = BudgetSalesForecast.objects.filter(budget_period__budget=budget).delete()
+            if what in ("actuals", "all"):
+                removed["actuals"], _ = BudgetActual.objects.filter(line__budget=budget).delete()
+            if what in ("lines", "all"):
+                removed["lines"], _ = BudgetLine.objects.filter(budget=budget).delete()
+            if what in ("plan", "lines", "all"):
+                BudgetPeriod.objects.filter(budget=budget).update(
+                    status=BudgetStatus.DRAFT, approved_at=None, approved_by=None
+                )
+        audit_log(request.user, budget, AuditLog.Action.UPDATE,
+                  {"cleared": {"before": None, "after": what}})
+        return Response({"removed": removed})
+
+    @action(detail=True, methods=["get"])
+    def export(self, request, pk=None):
+        """The budget as the Excel sheet it is planned in — بودجه / واقعی per month."""
+        from django.http import HttpResponse
+        from apps.finance.services import budget_excel
+
+        assert_finance_visible(request.user)
+        budget = self.get_object()
+        resp = HttpResponse(
+            budget_excel.export(budget),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        resp["Content-Disposition"] = f'attachment; filename="budget-{budget.id}.xlsx"'
+        return resp
 
     @extend_schema(
         parameters=[OpenApiParameter("period", int, required=True)], responses=dict
@@ -666,13 +738,15 @@ def _budget_param(value) -> Budget:
         raise ValidationError({"budget": "بودجه انتخاب نشده یا معتبر نیست."})
 
 
-def _sync_budget_months(budget: Budget) -> None:
+def _sync_budget_months(budget: Budget, trim: bool = False) -> None:
     """
     Make sure every month in the budget's span has a row.
 
     Without this a plan created over seven months would have figures only for
     the months someone happened to open, and the dashboard's cumulative line
-    would have holes in it.
+    would have holes in it. With `trim`, months the span no longer covers are
+    removed along with their figures — the edit that shortened the budget
+    asked for exactly that.
     """
     start = (budget.start_period.jalali_year, budget.start_period.jalali_month)
     end = (budget.end_period.jalali_year, budget.end_period.jalali_month)
@@ -684,6 +758,12 @@ def _sync_budget_months(budget: Budget) -> None:
     for month in months:
         if start <= (month.jalali_year, month.jalali_month) <= end:
             BudgetPeriod.objects.get_or_create(budget=budget, period=month)
+    if trim:
+        for bp in BudgetPeriod.objects.filter(budget=budget).select_related("period"):
+            key = (bp.period.jalali_year, bp.period.jalali_month)
+            if not start <= key <= end:
+                BudgetActual.objects.filter(line__budget=budget, period=bp.period).delete()
+                bp.delete()
 
 
 class BudgetGridView(APIView):
@@ -753,6 +833,7 @@ class BudgetGridView(APIView):
                 }
                 for line in lines
             ],
+            "sales": _grid_sales(periods),
             "unit": FinanceSettingSerializer(FinanceSetting.get()).data,
             "can_edit": is_ceo(request.user),
         })
@@ -805,7 +886,50 @@ class BudgetGridView(APIView):
                 row.variance_note = str(cell.get("variance_note") or "")
                 row.save(update_fields=["variance_note", "updated_at"])
 
+        channels = {c for c, _ in budget_service.sales_channels()}
+        for cell in request.data.get("sales_cells", []):
+            channel = cell.get("channel")
+            try:
+                bp = BudgetPeriod.objects.get(pk=cell.get("budget_period_id"))
+                amount = Decimal(str(cell.get("amount_rial") or 0))
+            except (BudgetPeriod.DoesNotExist, ValueError, TypeError, InvalidOperation):
+                raise ValidationError({"detail": "پیش‌بینی فروش معتبر نیست."})
+            if channel not in channels:
+                raise ValidationError({"detail": "کانال فروش معتبر نیست."})
+            if amount < 0:
+                raise ValidationError({"detail": "پیش‌بینی فروش نمی‌تواند منفی باشد."})
+            row, created = BudgetSalesForecast.objects.get_or_create(budget_period=bp, channel=channel)
+            if created or row.amount_rial != amount:
+                row.amount_rial = amount
+                row.save(update_fields=["amount_rial", "updated_at"])
+                written += 1
+
         return Response({"written": written})
+
+
+def _grid_sales(periods: list[BudgetPeriod]) -> list[dict]:
+    """
+    The sales forecast rows of the plan grid: one per channel, a cell per
+    month, and beside it what the sales section actually recorded — the
+    budget reads it, nobody keys it here.
+    """
+    stored = {
+        (f.budget_period_id, f.channel): f
+        for f in BudgetSalesForecast.objects.filter(budget_period__in=periods)
+    }
+    sold = {bp.id: budget_service.actual_sales(bp.period) for bp in periods}
+    rows = []
+    for channel, label in budget_service.sales_channels():
+        cells = {}
+        for bp in periods:
+            f = stored.get((bp.id, channel))
+            cells[str(bp.id)] = {
+                "amount_rial": str(f.amount_rial) if f else "0",
+                "baseline_rial": str(f.baseline_rial) if f and f.baseline_rial is not None else None,
+                "actual_rial": str(sold[bp.id].get(channel, 0)),
+            }
+        rows.append({"channel": channel, "label": label, "cells": cells})
+    return rows
 
 
 class BudgetVarianceView(APIView):
@@ -944,6 +1068,12 @@ class BudgetActualEntryView(APIView):
             note = str(cell.get("note") or "")[:250]
 
             existing = BudgetActual.objects.filter(line=line, period=period).first()
+            if cell.get("clear"):
+                # Back to the cash ledger's figure: the keyed one is removed.
+                if existing is not None:
+                    existing.delete()
+                    written += 1
+                continue
             # Never keyed and still blank: leave it out rather than filling
             # the table with zeros nobody entered.
             if existing is None and not amount and not note:
@@ -1019,3 +1149,99 @@ class BudgetHeatmapView(APIView):
         assert_finance_visible(request.user)
         return Response(budget_service.heatmap(_budget_param(request.query_params.get("budget"))))
 
+
+
+# --------------------------------------------------------------------------
+# بودجه از اکسل
+# --------------------------------------------------------------------------
+
+class BudgetExcelImportView(APIView):
+    """
+    The cash-flow workbook in: `analyse` reads it and writes nothing,
+    `apply` writes the reading as adjusted on the page.
+
+    One file carries both halves — «بودجه <ماه>» columns are the CEO's plan,
+    «واقعی <ماه>» the finance team's actuals — so each half is checked
+    against its owner: the plan needs the CEO, the actuals need finance.
+    """
+
+    permission_classes = [IsAuthenticated]  # role checks below, per half
+
+    def _common(self, request):
+        import json
+
+        from apps.core.jalali import from_gregorian
+        from django.utils import timezone
+
+        assert_finance_visible(request.user)
+        if not (is_ceo(request.user) or is_finance(request.user)):
+            raise PermissionDenied("ورود بودجه از اکسل با مدیرعامل و واحد مالی است.")
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise ValidationError({"file": "فایل اکسل را انتخاب کنید."})
+        data = upload.read()
+        try:
+            year = int(request.data.get("year") or 0)
+        except (TypeError, ValueError):
+            year = 0
+        year = year or from_gregorian(timezone.localdate())[0]
+        budget = None
+        if request.data.get("budget"):
+            budget = _budget_param(request.data.get("budget"))
+        try:
+            scale = int(request.data.get("scale") or 1)
+        except (TypeError, ValueError):
+            scale = 1
+        if scale not in (1, 10):
+            scale = 1
+        options = {}
+        if request.data.get("options"):
+            try:
+                options = json.loads(request.data.get("options"))
+            except ValueError:
+                raise ValidationError({"options": "تنظیمات ورود معتبر نیست."})
+        return data, year, budget, scale, options
+
+    def post(self, request, step: str):
+        from apps.finance.services import budget_excel
+
+        if step not in ("analyse", "apply"):
+            raise ValidationError({"detail": "مرحله معتبر نیست."})
+        data, year, budget, scale, options = self._common(request)
+        sheet = request.data.get("sheet") or None
+        if step == "analyse":
+            result = budget_excel.analyse(data, sheet=sheet, year=year, budget=budget, scale=scale)
+            result["year"] = year
+            result["can_plan"] = is_ceo(request.user)
+            result["can_actual"] = is_finance(request.user)
+            return Response(result)
+
+        parts = {p for p in options.get("parts", []) if p in ("budget", "actual")}
+        if not parts:
+            raise ValidationError({"detail": "دست‌کم یکی از «بودجه» یا «واقعی» را انتخاب کنید."})
+        if "budget" in parts and not is_ceo(request.user):
+            raise PermissionDenied("ورود ارقام بودجه (برنامه) با مدیرعامل است.")
+        if "actual" in parts and not is_finance(request.user):
+            raise PermissionDenied("ورود ارقام واقعی با واحد مالی است.")
+        if budget is None and not is_ceo(request.user):
+            raise PermissionDenied("ساختن بودجهٔ تازه با مدیرعامل است.")
+        mode = options.get("mode") if options.get("mode") in ("merge", "replace") else "merge"
+        overrides = {}
+        for o in options.get("rows", []):
+            try:
+                overrides[int(o.get("row"))] = o
+            except (TypeError, ValueError):
+                continue
+        result = budget_excel.apply(
+            data, sheet=sheet, year=year, budget=budget,
+            title=str(options.get("title") or "").strip(), scale=scale, parts=parts,
+            mode=mode, overrides=overrides, user=request.user,
+        )
+        target = Budget.objects.get(pk=result["budget_id"])
+        audit_log(request.user, target, AuditLog.Action.UPDATE, {
+            "excel_import": {"before": None, "after": (
+                f"{'بودجه' if 'budget' in parts else ''} {'واقعی' if 'actual' in parts else ''}"
+                f" — {result['lines']} سرفصل ({mode})"
+            ).strip()},
+        })
+        return Response(result)

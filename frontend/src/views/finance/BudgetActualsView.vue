@@ -8,6 +8,11 @@
  *
  * Enter moves down the column, so a month of figures can be keyed without the
  * mouse; nothing is saved until «ذخیره».
+ *
+ * Not a blank sheet: a سرفصل already shows what the cash ledger recorded on
+ * its category. Keying a figure replaces that one for the month («دستی»);
+ * «بازگشت به دفتر» removes the keyed figure again. Sales are not keyed at
+ * all — they come from the sales section and are shown at the bottom.
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
@@ -22,12 +27,15 @@ import {
 import { useBudgetContext } from "@/composables/useBudgetContext";
 import { loadMoneySettings, useMoney } from "@/composables/useMoney";
 import { confirm, toast } from "@/composables/useUi";
-import ExcelImport from "@/components/ExcelImport.vue";
+import BudgetExcelImport from "@/components/finance/BudgetExcelImport.vue";
+import { useAuthStore } from "@/stores/auth";
 import MoneyInput from "@/components/MoneyInput.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 
-const { budgets, budgetId, periodId, months, linkQuery, init } = useBudgetContext();
-const currentMonth = computed(() => months.value.find((p) => p.id === periodId.value));
+const { budgets, budgetId, periodId, months, linkQuery, init, refreshBudgets } = useBudgetContext();
+const auth = useAuthStore();
+const isCeo = computed(() => auth.isExecutive || !!auth.me?.is_superuser);
+const isFinance = computed(() => auth.department === "finance" || !!auth.me?.is_superuser);
 const { money, unitLabel } = useMoney();
 
 const sheet = ref<ActualEntrySheet | null>(null);
@@ -41,7 +49,7 @@ const n = (v: string | number | null | undefined) => Number(v ?? 0);
 // ---- edits ------------------------------------------------------------------
 
 /** Unsaved edits by line id. Anything here differs from what is stored. */
-const draft = reactive<Record<number, { amount: string; note: string }>>({});
+const draft = reactive<Record<number, { amount: string; note: string; clear?: boolean }>>({});
 const dirtyCount = computed(() => Object.keys(draft).length);
 
 function clearDraft() {
@@ -63,6 +71,13 @@ function setNote(line: ActualEntryLine, note: string) {
   setCell(line, amountOf(line), note);
 }
 const isDirty = (line: ActualEntryLine) => line.line_id in draft;
+
+/** Drop the keyed figure: the line shows the cash ledger's again. */
+function backToLedger(line: ActualEntryLine) {
+  draft[line.line_id] = { amount: line.ledger_rial ?? "0", note: "", clear: true };
+}
+const sourceOf = (line: ActualEntryLine) =>
+  draft[line.line_id]?.clear ? "ledger" : isDirty(line) ? "keyed" : line.source;
 
 // ---- figures as typed --------------------------------------------------------------
 
@@ -124,7 +139,13 @@ function moveDown(row: number, e: KeyboardEvent) {
 }
 
 const readonly = computed(() => !sheet.value?.can_edit);
-const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.entered).length);
+const enteredCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.source !== "none").length);
+const ledgerCount = computed(() => (sheet.value?.lines ?? []).filter((l) => l.source === "ledger").length);
+
+async function imported() {
+  await refreshBudgets(budgetId.value);
+  await load();
+}
 
 // ---- load / save ---------------------------------------------------------------------
 
@@ -169,6 +190,7 @@ async function save() {
       line_id: Number(id),
       amount_rial: d.amount,
       note: d.note,
+      ...(d.clear ? { clear: true } : {}),
     }));
     const res = await budgetApi.saveActuals(budgetId.value, s.month.id, cells);
     await load();
@@ -230,9 +252,12 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
             <option v-for="p in months" :key="p.id" :value="p.id">{{ p.label }}</option>
           </select>
         </label>
-        <ExcelImport
-          v-if="budgetId && currentMonth" import-key="finance-budget-actuals" label="ورود از اکسل"
-          :params="{ budget: budgetId }" :year="currentMonth.jalali_year" :month="currentMonth.jalali_month" @done="load"
+        <BudgetExcelImport
+          v-if="budgets.length && (isFinance || isCeo)"
+          :budgets="budgets" :budget-id="budgetId" focus="actual"
+          :can-plan="isCeo" :can-actual="isFinance"
+          label="ورود از اکسل (ستون‌های واقعی)"
+          @done="imported"
         />
         <router-link
           :to="{ name: 'finance-budget-variance', query: linkQuery }"
@@ -279,10 +304,13 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
             <p class="text-base font-bold ltr-nums mt-2" :class="verdictText[s.verdict]">{{ signed(s.actual - s.budget) }}</p>
           </div>
           <div class="bg-surface rounded-card shadow-soft p-4">
-            <p class="text-xs font-semibold text-ink">پیشرفت ثبت — {{ sheet.month.label }}</p>
+            <p class="text-xs font-semibold text-ink">سرفصل‌های دارای رقم — {{ sheet.month.label }}</p>
             <p class="text-2xl font-bold text-ink mt-2">
               {{ FA.format(enteredCount) }}
               <span class="text-sm font-normal text-slate-400">از {{ FA.format(sheet.line_count) }} سرفصل</span>
+            </p>
+            <p class="text-[11px] text-slate-400 mt-1">
+              {{ FA.format(ledgerCount) }} از دفتر نقدینگی · {{ FA.format(enteredCount - ledgerCount) }} دستی/اکسل
             </p>
             <p v-if="dirtyCount" class="text-xs text-amber-600 mt-1">{{ FA.format(dirtyCount) }} تغییر ذخیره‌نشده</p>
           </div>
@@ -316,6 +344,20 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
                     <td class="p-2 ps-5">
                       <p class="text-ink">{{ line.category_name }}</p>
                       <p v-if="line.counterparty" class="text-[11px] text-slate-500">{{ line.counterparty }}</p>
+                      <p class="mt-0.5 flex items-center gap-1.5 text-[10px]">
+                        <span
+                          v-if="sourceOf(line) === 'ledger'"
+                          class="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700"
+                          title="رقم ثبت‌شده در دفتر نقدینگی برای این دسته"
+                        >از دفتر نقدینگی</span>
+                        <span v-else-if="sourceOf(line) === 'keyed'" class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">دستی</span>
+                        <button
+                          v-if="!readonly && line.source === 'keyed' && line.ledger_rial !== null && !draft[line.line_id]?.clear"
+                          class="text-sky-700 hover:underline"
+                          :title="`رقم دفتر: ${money(n(line.ledger_rial), false)}`"
+                          @click="backToLedger(line)"
+                        >بازگشت به رقم دفتر</button>
+                      </p>
                     </td>
                     <td class="p-2 text-left ltr-nums text-slate-600 whitespace-nowrap">{{ money(n(line.budget_rial), false) }}</td>
                     <td
@@ -351,6 +393,24 @@ onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
               </tbody>
             </table>
           </div>
+        </section>
+
+        <!-- Sales: read from the sales section, never keyed here -->
+        <section v-if="sheet.sales?.rows.length" class="bg-surface rounded-card shadow-soft">
+          <div class="p-4 border-b border-slate-100">
+            <h2 class="text-sm font-semibold text-ink">فروش — پیش‌بینی بودجه در برابر بخش فروش</h2>
+            <p class="text-[11px] text-slate-400 mt-0.5">رقم واقعی، فروش تأییدشدهٔ هر کانال در بخش فروش است — همان عدد داشبوردها. در جمع نقدینگی نیست.</p>
+          </div>
+          <table class="min-w-full text-sm">
+            <tbody>
+              <tr v-for="r in sheet.sales.rows" :key="r.channel" class="border-b border-slate-50">
+                <td class="p-3 text-ink">{{ r.label }}</td>
+                <td class="p-3 text-left ltr-nums text-slate-600">{{ money(n(r.budget_rial), false) }}</td>
+                <td class="p-3 text-left ltr-nums text-ink">{{ money(n(r.actual_rial), false) }}</td>
+                <td class="p-3 text-left ltr-nums" :class="verdictText[r.verdict]">{{ signed(n(r.variance_rial)) }}</td>
+              </tr>
+            </tbody>
+          </table>
         </section>
 
         <!-- Save bar -->

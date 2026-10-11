@@ -221,7 +221,7 @@ class BudgetPeriod(TimeStampedModel):
         from django.utils import timezone
 
         stamped = 0
-        for amount in self.amounts.all():
+        for amount in [*self.amounts.all(), *self.sales_forecasts.all()]:
             if amount.baseline_rial is None:
                 amount.baseline_rial = amount.amount_rial
                 amount.save(update_fields=["baseline_rial", "updated_at"])
@@ -333,6 +333,41 @@ def is_material(variance_rial: Decimal, budget_rial: Decimal) -> bool:
         return size > ZERO
     pct = size * 100 / abs(budget_rial)
     return pct >= setting.variance_threshold_pct
+
+
+class BudgetSalesForecast(TimeStampedModel):
+    """
+    Expected sales for one channel in one month of a budget.
+
+    The rows at the top of the cash-flow sheet — فروش همکار، بانکی، PSP، B2B.
+    Accrual, not cash, so it never enters the budget's in/out totals: the cash
+    a sale turns into is planned on وصول نقدی and وصول مطالبات, and counting
+    both would plan the same rial twice.
+
+    Its actual is not keyed. It is the channel's approved sales as the sales
+    section recorded them (FactSalesMonthly.revenue_rial) — the figure every
+    sales dashboard shows — so the budget and the dashboards cannot disagree
+    about how much was sold.
+    """
+
+    budget_period = models.ForeignKey(
+        BudgetPeriod, on_delete=models.CASCADE, related_name="sales_forecasts"
+    )
+    channel = models.CharField(max_length=16)
+    amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    baseline_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, null=True, blank=True,
+        help_text="مبلغ در لحظهٔ تصویب — پس از آن تغییر نمی‌کند",
+    )
+
+    class Meta:
+        unique_together = ("budget_period", "channel")
+        ordering = ("channel",)
+        verbose_name = "sales forecast (پیش‌بینی فروش)"
+        verbose_name_plural = "sales forecasts"
+
+    def __str__(self) -> str:
+        return f"{self.channel} · {self.budget_period}"
 
 
 class BudgetActual(TimeStampedModel):

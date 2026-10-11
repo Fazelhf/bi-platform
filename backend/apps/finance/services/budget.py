@@ -8,9 +8,12 @@ disagree with the figures it is made of.
 Three rules the grid depends on, all of them decided here rather than in the
 UI, because a client that got one of them wrong would be quietly lying:
 
-* **A سرفصل's actual is what the finance team keyed for it** — monthly, on
-  «ورود ارقام واقعی بودجه». The cash ledger is not read: the same rial keyed
-  in both places would count twice.
+* **The budget reads the sections, it is not an island.** A سرفصل's actual
+  is the cash ledger's figure for its category (what the cash report shows),
+  unless finance keyed one on «ورود ارقام واقعی بودجه» or brought it from the
+  Excel sheet — a keyed figure replaces the ledger's, never adds to it, so a
+  rial cannot count twice. Sales forecasts read the sales section's approved
+  figures per channel, the same ones every sales dashboard shows.
 
 * **Over budget is not the same as bad.** Direction decides: spending more than
   planned is unfavourable, collecting more is favourable. Every row says so
@@ -23,16 +26,18 @@ from decimal import Decimal
 from django.db.models import Count, Sum
 
 from apps.core.models import DimPeriod, PeriodKind
-from apps.core.periods import leaf_ids_for
+from apps.core.periods import channel_department, unit_ids
 from apps.finance.budget_models import (
     Budget,
     BudgetActual,
     BudgetAmount,
     BudgetLine,
     BudgetPeriod,
+    BudgetSalesForecast,
     BudgetStatus,
 )
-from apps.finance.models import CashCategory, Direction, FinanceSetting
+from apps.finance.models import CashCategory, CashMovement, Direction, FinanceSetting
+from apps.sales.models import ApprovalStatus, FactSalesMonthly, SalesChannel
 
 ZERO = Decimal(0)
 
@@ -57,22 +62,143 @@ def actual_period_ids(period: DimPeriod) -> list[int]:
     return [_as_month(period).id]
 
 
+def _ledger(lines: list[BudgetLine], month: DimPeriod) -> dict[int, Decimal]:
+    """
+    What the cash ledger (نقدینگی) recorded on each line's category this month
+    — the figure the cash report shows. A line naming a credit line reads
+    only that counterparty's movements; one that does not reads them all.
+    """
+    if not lines:
+        return {}
+    ids = unit_ids(month, "finance")
+    rows = (
+        CashMovement.objects.filter(
+            period_id__in=ids, category_id__in={ln.category_id for ln in lines}
+        )
+        .values("category_id", "direction", "credit_line_id")
+        .annotate(total=Sum("amount_rial"))
+    )
+    by: dict[tuple, Decimal] = {}
+    for r in rows:
+        by[(r["category_id"], r["direction"], r["credit_line_id"])] = r["total"] or ZERO
+    out: dict[int, Decimal] = {}
+    for ln in lines:
+        if ln.credit_line_id:
+            got = by.get((ln.category_id, ln.direction, ln.credit_line_id))
+        else:
+            vals = [v for (c, d, _), v in by.items() if c == ln.category_id and d == ln.direction]
+            got = sum(vals, ZERO) if vals else None
+        if got is not None:
+            out[ln.id] = got
+    return out
+
+
+def actuals_with_source(
+    lines: list[BudgetLine], period: DimPeriod
+) -> dict[int, tuple[Decimal, str]]:
+    """
+    Each سرفصل's actual for the month and where it came from.
+
+    The budget is not an island: a line reads the cash ledger the treasury
+    team already keeps, so a payment recorded on «خرید جمبو» shows up here
+    without being typed twice. A figure finance keys on «ورود ارقام واقعی»
+    (or brings in from the Excel sheet) **replaces** the ledger's for that
+    line and month — never adds to it — so the same rial cannot count twice.
+
+    source: 'keyed' | 'ledger' | 'none'.
+    """
+    month = _as_month(period)
+    keyed = {
+        r["line_id"]: r["total"] or ZERO
+        for r in BudgetActual.objects.filter(line__in=lines, period_id__in=actual_period_ids(month))
+        .values("line_id").annotate(total=Sum("amount_rial"))
+    }
+    ledger = _ledger([ln for ln in lines if ln.id not in keyed], month)
+    out: dict[int, tuple[Decimal, str]] = {}
+    for ln in lines:
+        if ln.id in keyed:
+            out[ln.id] = (keyed[ln.id], "keyed")
+        elif ln.id in ledger:
+            out[ln.id] = (ledger[ln.id], "ledger")
+        else:
+            out[ln.id] = (ZERO, "none")
+    return out
+
+
 def actuals_by_line(
     lines: list[BudgetLine], period: DimPeriod
 ) -> tuple[dict[int, Decimal], list[dict]]:
     """
-    What the finance team keyed for each سرفصل under a period.
+    Each سرفصل's actual under a period — keyed, else the cash ledger's.
 
-    Returns `(actual per line id, extras)`. Extras are always empty now that
-    actuals are entered per سرفصل — there is no money without a line to land
-    on — and the slot stays so the report's shape does not change.
+    Returns `(actual per line id, extras)`. Extras are always empty — there is
+    no money without a line to land on — and the slot stays so the report's
+    shape does not change.
     """
-    rows = (
-        BudgetActual.objects.filter(line__in=lines, period_id__in=actual_period_ids(period))
-        .values("line_id")
-        .annotate(total=Sum("amount_rial"))
+    got = actuals_with_source(lines, period)
+    return {k: v for k, (v, src) in got.items() if src != "none"}, []
+
+
+# --------------------------------------------------------------------------
+# sales forecast — read from the sales section
+# --------------------------------------------------------------------------
+
+def sales_channels() -> list[tuple[str, str]]:
+    return [(c.value, c.label) for c in SalesChannel]
+
+
+def actual_sales(month: DimPeriod) -> dict[str, Decimal]:
+    """
+    Approved sales per channel for a month, exactly as the sales dashboards
+    and the CEO's overview total them: each channel read at its own grain.
+    """
+    out: dict[str, Decimal] = {}
+    for channel, _ in sales_channels():
+        ids = unit_ids(month, channel_department(channel))
+        total = (
+            FactSalesMonthly.objects.filter(
+                period_id__in=ids, channel=channel, status=ApprovalStatus.APPROVED
+            ).aggregate(t=Sum("revenue_rial"))["t"]
+        )
+        if total:
+            out[channel] = total
+    return out
+
+
+def sales_block(budget: Budget, period: DimPeriod, setting: FinanceSetting | None = None) -> dict:
+    """
+    Forecast sales per channel against what the sales section recorded.
+
+    Judged as an inflow — selling more than forecast is good news — and kept
+    out of the cash totals, because the cash those sales bring in is planned
+    on the collection lines.
+    """
+    setting = setting or FinanceSetting.get()
+    month = _as_month(period)
+    bp = BudgetPeriod.objects.filter(budget=budget, period=month).first()
+    forecasts = (
+        {f.channel: f for f in BudgetSalesForecast.objects.filter(budget_period=bp)}
+        if bp else {}
     )
-    return {r["line_id"]: r["total"] or ZERO for r in rows}, []
+    actual = actual_sales(month)
+    rows = []
+    total_budget = total_actual = ZERO
+    for channel, label in sales_channels():
+        forecast = forecasts.get(channel)
+        sold = actual.get(channel, ZERO)
+        planned = forecast.amount_rial if forecast else ZERO
+        total_budget += planned
+        total_actual += sold
+        rows.append({
+            "channel": channel,
+            "label": label,
+            **_cell(planned, sold, forecast.baseline_rial if forecast else None, Direction.IN, setting),
+        })
+    return {
+        "rows": rows,
+        "total": _cell(total_budget, total_actual, None, Direction.IN, setting),
+        "has_actuals": bool(actual),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -151,7 +277,9 @@ def build(budget: Budget, period: DimPeriod) -> dict:
         for a in BudgetAmount.objects.filter(budget_period=bp).select_related("line")
     } if bp else {}
 
-    actual, extras = actuals_by_line(lines, month)
+    sourced = actuals_with_source(lines, month)
+    actual = {k: v for k, (v, _) in sourced.items()}
+    extras: list[dict] = []
 
     # ---- one entry per line ------------------------------------------------
     leaf_rows: dict[int, list[dict]] = {}
@@ -167,6 +295,7 @@ def build(budget: Budget, period: DimPeriod) -> dict:
             "direction": line.direction,
             "credit_line": line.credit_line.counterparty if line.credit_line_id else "",
             "note": amount.variance_note if amount else "",
+            "source": sourced[line.id][1],
             **_cell(planned, actual.get(line.id, ZERO), baseline, line.direction, setting),
         }
         leaf_rows.setdefault(line.category_id, []).append(row)
@@ -189,28 +318,30 @@ def build(budget: Budget, period: DimPeriod) -> dict:
     # ---- roll the category tree up ----------------------------------------
     rows: list[dict] = []
 
-    def walk(category: CashCategory, depth: int) -> dict[str, Decimal]:
+    def walk(category: CashCategory, depth: int, only: str | None = None,
+             suffix: str = "") -> dict[str, Decimal]:
         own = {"budget": ZERO, "actual": ZERO}
         header_index = len(rows)
         rows.append(None)  # placeholder; filled once the children are summed
 
         for child in category.children.filter(is_active=True).order_by("sort_order"):
-            got = walk(child, depth + 1)
+            got = walk(child, depth + 1, only)
             own["budget"] += got["budget"]
             own["actual"] += got["actual"]
 
         for row in sorted(
-            leaf_rows.get(category.id, []), key=lambda r: (r["kind"] != "line", r["label"])
+            (r for r in leaf_rows.get(category.id, []) if only is None or r["direction"] == only),
+            key=lambda r: (r["kind"] != "line", r["label"]),
         ):
             own["budget"] += Decimal(row["budget_rial"])
             own["actual"] += Decimal(row["actual_rial"])
             rows.append({**row, "depth": depth + 1})
 
-        direction = category.direction if category.direction != "both" else Direction.OUT
+        direction = only or (category.direction if category.direction != "both" else Direction.OUT)
         rows[header_index] = {
             "kind": "category",
             "line_id": None,
-            "label": category.name_fa,
+            "label": f"{category.name_fa}{suffix}",
             "code": category.code,
             "direction": direction,
             "credit_line": "",
@@ -234,8 +365,32 @@ def build(budget: Budget, period: DimPeriod) -> dict:
     totals = {Direction.IN: {"budget": ZERO, "actual": ZERO},
               Direction.OUT: {"budget": ZERO, "actual": ZERO}}
 
+    # A two-way group (تسهیلات: drawn down in, repaid out) is walked once per
+    # side. One header summing both would add a loan received to the
+    # instalments paid — 300 in plus 440 out is not «740 of outflow».
+    line_dirs: dict[int, set[str]] = {}
+    for line in lines:
+        line_dirs.setdefault(line.category_id, set()).add(line.direction)
+    all_cats = list(CashCategory.objects.filter(is_active=True).only("id", "parent_id"))
+    kids: dict[int | None, list[int]] = {}
+    for c in all_cats:
+        kids.setdefault(c.parent_id, []).append(c.id)
+
+    def sides(cat_id: int) -> set[str]:
+        got = set(line_dirs.get(cat_id, set()))
+        for k in kids.get(cat_id, []):
+            got |= sides(k)
+        return got
+
     for root in CashCategory.objects.filter(parent=None, is_active=True).order_by("sort_order"):
-        walk(root, 0)
+        both = sides(root.id)
+        if root.direction == "both" and len(both) == 2:
+            walk(root, 0, Direction.IN, " · ورودی")
+            walk(root, 0, Direction.OUT, " · خروجی")
+        elif root.direction == "both" and both:
+            walk(root, 0, next(iter(both)))
+        else:
+            walk(root, 0)
 
     # Totals come from the line rows, not the category headers — a header is
     # already a sum of them, and adding both would double count.
@@ -258,6 +413,7 @@ def build(budget: Budget, period: DimPeriod) -> dict:
 
     net_budget = totals[Direction.IN]["budget"] - totals[Direction.OUT]["budget"]
     net_actual = totals[Direction.IN]["actual"] - totals[Direction.OUT]["actual"]
+    sales = sales_block(budget, month, setting)
 
     return {
         "budget": {"id": budget.id, "title": budget.title},
@@ -288,9 +444,12 @@ def build(budget: Budget, period: DimPeriod) -> dict:
         # A period nobody has entered yet compares the whole plan against
         # zero: every inflow «short», every outflow «saved». The UI must say
         # that plainly instead of dressing it up as a variance.
-        "has_actuals": BudgetActual.objects.filter(
-            line__budget=budget, period_id__in=actual_period_ids(period)
-        ).exists(),
+        "has_actuals": any(src != "none" for _, src in sourced.values()) or sales["has_actuals"],
+        "sources": {
+            src: sum(1 for _, s in sourced.values() if s == src)
+            for src in ("keyed", "ledger", "none")
+        },
+        "sales": sales,
     }
 
 
@@ -340,6 +499,10 @@ def series(budget: Budget) -> dict:
         net_actual = got[Direction.IN] - got[Direction.OUT]
         run_budget += net_budget
         run_actual += net_actual
+        forecast = sum(
+            (f.amount_rial for f in BudgetSalesForecast.objects.filter(budget_period=bp)), ZERO
+        )
+        sold = sum(actual_sales(bp.period).values(), ZERO)
 
         points.append({
             "period_id": bp.period_id,
@@ -353,6 +516,9 @@ def series(budget: Budget) -> dict:
             "actual_net": str(net_actual),
             "cumulative_budget": str(run_budget),
             "cumulative_actual": str(run_actual),
+            "has_actuals": bool(actual),
+            "budget_sales": str(forecast),
+            "actual_sales": str(sold),
         })
 
     return {
@@ -421,6 +587,7 @@ def entry_sheet(budget: Budget, period: DimPeriod) -> dict:
         if bp else {}
     )
     stored = {row.line_id: row for row in BudgetActual.objects.filter(line__in=lines, period=month)}
+    ledger = _ledger(lines, month)
 
     totals = {
         Direction.IN: {"budget": ZERO, "actual": ZERO},
@@ -430,7 +597,8 @@ def entry_sheet(budget: Budget, period: DimPeriod) -> dict:
     for line in lines:
         plan = planned.get(line.id, ZERO)
         row = stored.get(line.id)
-        actual = row.amount_rial if row else ZERO
+        linked = ledger.get(line.id)
+        actual = row.amount_rial if row else (linked or ZERO)
         totals[line.direction]["budget"] += plan
         totals[line.direction]["actual"] += actual
         out_lines.append({
@@ -441,6 +609,10 @@ def entry_sheet(budget: Budget, period: DimPeriod) -> dict:
             "counterparty": line.credit_line.counterparty if line.credit_line_id else "",
             "direction": line.direction,
             "entered": row is not None,
+            # The cash ledger's figure for this سرفصل — the actual when
+            # nothing is keyed; a keyed figure replaces it.
+            "ledger_rial": None if linked is None else str(linked),
+            "source": "keyed" if row else ("ledger" if linked is not None else "none"),
             "note": row.note if row else "",
             **_cell(plan, actual, None, line.direction, setting),
         })
@@ -451,6 +623,7 @@ def entry_sheet(budget: Budget, period: DimPeriod) -> dict:
         "month": {"id": month.id, "label": month.label},
         "line_count": len(lines),
         "lines": out_lines,
+        "sales": sales_block(budget, month, setting),
         "totals": {
             "in": _cell(totals[Direction.IN]["budget"], totals[Direction.IN]["actual"],
                         None, Direction.IN, setting),
