@@ -106,6 +106,8 @@ class MeView(APIView):
             "two_factor_enabled": u.two_factor_active,
             # Drives the "پنل مدیریت" entry in the sidebar.
             "is_admin_panel_user": u.is_admin_panel_user,
+            # The CEO and the finance manager read every section (not CRM).
+            "reads_company": u.reads_company,
             # Whether figures are shown in ریال or تومان is an install-wide
             # display choice, not a finance secret — but it used to be
             # readable only from /api/finance/settings/, which is gated to the

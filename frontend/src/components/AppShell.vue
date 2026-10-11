@@ -237,19 +237,64 @@ const primary = computed<Item[]>(() => {
       { name: "sales-b2b-dashboard", label: "داشبورد فروش B2B", icon: "chart" },
     );
   } else if (auth.department === "finance") {
+    // Two working areas of their own, grouped — six flat rows read as six
+    // unrelated things — and, for the manager, the rest of the company to
+    // read: the budget and the cash are made of sales, production and
+    // بازرگانی (auth.readsCompany; the API enforces the same, read-only).
+    if (auth.readsCompany) {
+      items.push({ name: "overview", label: "نمای کلی", icon: "grid" });
+    }
     items.push(
-      { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "banknote" },
-      { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
-      // The treasury averages: this manager's own tool, and not on the page
-      // the CEO opens to read the company's position.
-      { name: "finance-treasury", label: "تحلیل خزانه", icon: "wallet" },
-      { name: "finance-budget-actuals", label: "ورود ارقام واقعی بودجه", icon: "banknote" },
-      { name: "finance-budget-variance", label: "انحراف بودجه", icon: "chart" },
-      { name: "finance-budget", label: "داشبورد بودجه", icon: "chart" },
-      // تأیید دریافت‌های فروش (the پورسانت side of فروش ۲) is hidden from
-      // finance for now; it comes back when فروش ۲ opens beyond admins. The
-      // Excel import on the cash and budget pages stays.
+      {
+        name: "group-cash",
+        label: "نقدینگی",
+        icon: "banknote",
+        children: [
+          { name: "finance-cash-entry", label: "ورود نقدینگی", icon: "banknote" },
+          { name: "finance-cash-report", label: "گزارش نقدینگی", icon: "chart" },
+          // The treasury averages: this manager's own tool, and not on the
+          // page the CEO opens to read the company's position.
+          { name: "finance-treasury", label: "تحلیل خزانه", icon: "wallet" },
+        ],
+      },
+      {
+        name: "group-budget",
+        label: "بودجه",
+        icon: "chart",
+        children: [
+          { name: "finance-budget", label: "داشبورد بودجه", icon: "chart" },
+          { name: "finance-budget-actuals", label: "ورود ارقام واقعی", icon: "banknote" },
+          { name: "finance-budget-variance", label: "انحراف بودجه", icon: "file" },
+          // Defined by the CEO; finance reads it here and brings actuals in
+          // from the same Excel sheet.
+          { name: "finance-budget-plan", label: "تعریف بودجه", icon: "file" },
+        ],
+      },
     );
+    if (auth.readsCompany) {
+      items.push(
+        {
+          name: "group-sales",
+          label: "فروش",
+          icon: "store",
+          children: [
+            { name: "sales-dashboard", label: "فروش همکار", icon: "store" },
+            { name: "sales-org-dashboard", label: "فروش بانکی", icon: "bank" },
+            { name: "sales-b2b-dashboard", label: "فروش B2B", icon: "building" },
+          ],
+        },
+        { name: "production-dashboard", label: "تولید", icon: "factory" },
+        {
+          name: "group-commercial",
+          label: "بازرگانی",
+          icon: "box",
+          children: [
+            { name: "commercial-dashboard", label: "بازرگانی داخلی", icon: "truck" },
+            { name: "foreign-dashboard", label: "بازرگانی خارجی", icon: "globe" },
+          ],
+        },
+      );
+    }
   } else if (auth.department === "commercial") {
     // Both halves, grouped: eleven rows at the top level would push پیام‌ها
     // and یادداشت‌ها off the first screen.

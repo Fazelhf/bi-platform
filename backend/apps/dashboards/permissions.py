@@ -50,6 +50,9 @@ def _has_access(user, access: str, request=None) -> bool:
         # The CEO oversees every section — except the demo lock, which is a
         # password, not a privilege.
         return access != "crm" or _crm_unlocked(user, request)
+    if getattr(user, "reads_company", False) and access != "crm":
+        # The finance manager reads every section too — reading, not editing.
+        return True
     if access == "":
         return True
     if access == "executive":
@@ -70,6 +73,8 @@ def can_read_section(user, section: Section | str, request=None) -> bool:
         return False
     if user.is_superuser or _is_executive(user):
         return section.access != "crm" or _crm_unlocked(user, request)
+    if getattr(user, "reads_company", False) and section.access != "crm":
+        return True
     if section.access:
         return _has_access(user, section.access, request)
     # A department's board is for that department; a section that names no

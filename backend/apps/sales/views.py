@@ -106,12 +106,12 @@ def assert_channel_visible(user, channel: str) -> None:
     the sidebar only ever offered them their own. The menu was the whole
     boundary, which is no boundary at all.
 
-    The CEO, executives and superusers still see every channel — that is the
-    point of the overview.
+    The CEO, the finance manager and superusers see every channel — that is
+    the point of the overview (see User.reads_company).
     """
     if not (user and user.is_authenticated):
         raise PermissionDenied("وارد نشده‌اید.")
-    if user.is_superuser or user.role == "executive":
+    if user.reads_company:
         return
     owner = CHANNEL_DEPARTMENT.get(channel)
     if owner and user.department == owner:
@@ -1945,7 +1945,7 @@ class SalesPeriodReportView(APIView):
         # Reading another department's numbers is the same disclosure as
         # reading their entry sheet, so the same check applies.
         user = request.user
-        if not (user.is_superuser or user.role == "executive"):
+        if not user.reads_company:
             if user.department != CHANNEL_DEPARTMENT.get(channel):
                 raise PermissionDenied("این کانال فروش متعلق به بخش شما نیست.")
 

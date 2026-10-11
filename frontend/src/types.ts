@@ -231,6 +231,8 @@ export interface Me {
   two_factor_enabled: boolean;
   /** Set by the server: may this account open the Admin Panel? */
   is_admin_panel_user?: boolean;
+  /** Reads every section (not CRM): the CEO and the finance manager. */
+  reads_company?: boolean;
   /**
    * Install-wide display unit. Served on `me` rather than read from the
    * finance settings endpoint, which only the finance department may call —

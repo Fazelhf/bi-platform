@@ -31,7 +31,7 @@ def can_read_commercial(user) -> bool:
     return bool(
         user
         and user.is_authenticated
-        and (user.is_superuser or user.role == "executive" or is_commercial(user))
+        and (user.reads_company or is_commercial(user))
     )
 
 

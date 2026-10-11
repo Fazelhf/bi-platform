@@ -118,6 +118,22 @@ class User(AbstractUser):
         return source[:2]
 
     @property
+    def reads_company(self) -> bool:
+        """
+        Read-only oversight of every section's figures: the CEO, and the
+        finance manager — whose job is the whole company's money, so sales,
+        production and بازرگانی are what their budget and cash are made of.
+
+        Reading only. Entry, approval and every write keep their own rules;
+        CRM (the customer file) is not part of it.
+        """
+        return bool(
+            self.is_superuser
+            or self.role == Role.EXECUTIVE
+            or (self.department == "finance" and self.role in {Role.MANAGER, Role.ADMIN})
+        )
+
+    @property
     def can_approve(self) -> bool:
         # A department manager approves their own section's submissions (see
         # apps.core.approval); the CEO and superusers may decide on anything.

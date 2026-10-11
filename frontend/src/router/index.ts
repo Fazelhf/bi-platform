@@ -687,7 +687,10 @@ router.beforeEach(async (to) => {
     return sentHome(to);
   }
   // Site settings: executives/superusers only.
-  if (to.meta.executive && !auth.isExecutive) {
+  // The overview is company-wide reading, so the finance manager opens it
+  // too (auth.readsCompany); site settings stay with the CEO.
+  const overviewPage = to.name === "overview" || to.path.endsWith("/reports/overview");
+  if (to.meta.executive && !auth.isExecutive && !(overviewPage && auth.readsCompany)) {
     return sentHome(to);
   }
   // استقرار تیمیار: the CEO and administrators.
@@ -712,7 +715,7 @@ router.beforeEach(async (to) => {
   // already only offered your own, but the URL was still reachable — and the
   // API now refuses, so without this the page would just show an error.
   const salesChannel = to.meta.salesChannel as string | undefined;
-  if (salesChannel && !auth.isExecutive && !auth.me?.is_superuser) {
+  if (salesChannel && !auth.readsCompany) {
     const owner = { team: "sales_team", organizational: "sales_org", b2b: "sales_b2b" }[salesChannel];
     if (auth.department !== owner) return sentHome(to);
   }
@@ -750,7 +753,7 @@ router.beforeEach(async (to) => {
   const worksCommercial =
     !!auth.me?.is_superuser || auth.department === "commercial";
   if (to.meta.commercial) {
-    if (!worksCommercial && !auth.isExecutive) {
+    if (!worksCommercial && !auth.readsCompany) {
       return sentHome(to);
     }
     if (to.meta.commercialOnly && !worksCommercial) {
@@ -758,7 +761,7 @@ router.beforeEach(async (to) => {
     }
   }
   if (to.meta.foreign) {
-    if (!worksCommercial && !auth.isExecutive) {
+    if (!worksCommercial && !auth.readsCompany) {
       return sentHome(to);
     }
     if (to.meta.foreignOnly && !worksCommercial) {

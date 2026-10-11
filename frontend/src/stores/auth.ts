@@ -31,6 +31,11 @@ export const useAuthStore = defineStore("auth", {
     /** May this account open the Admin Panel? Mirrors the server's rule. */
     isAdminPanelUser: (s) => !!s.me?.is_admin_panel_user,
     department: (s): string => s.me?.department ?? "",
+    /**
+     * Reads every section's figures (not CRM): the CEO, and the finance
+     * manager. Mirrors User.reads_company on the server — reading only.
+     */
+    readsCompany: (s) => !!(s.me?.reads_company || s.me?.role === "executive" || s.me?.is_superuser),
     canEnter: (s) => !!s.me?.can_enter_data,
   },
   actions: {
