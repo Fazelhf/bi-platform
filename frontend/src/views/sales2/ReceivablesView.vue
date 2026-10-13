@@ -5,9 +5,16 @@ import { sales2Api, type ReceivableRow } from "@/api/sales2";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import { apiError } from "@/components/crm/formError";
+import LedgerReceivables from "@/components/sales2/LedgerReceivables.vue";
 
 /**
- * مطالبات — for each customer, what they owe and how it has been met:
+ * Two views of مطالبات: «طبق دفتر آرپا» (the default — accounting's own
+ * ledger, both books, aged like «گزارش وصولی») and «اسناد فروش ۲» below.
+ */
+const view = ref<"ledger" | "sales2">("ledger");
+
+/**
+ * اسناد فروش ۲ — for each customer, what they owe and how it has been met:
  * نقدی، چک ثبت‌شده در صیاد، چک ثبت‌نشده (still inside its 48 hours), and
  * the rest, پرداخت‌نشده. A cheque not registered in time leaves this page
  * entirely; its amount is simply part of پرداخت‌نشده again.
@@ -19,7 +26,7 @@ const fa = (v: number | string | null | undefined) => FA.format(Math.round(Numbe
 const rows = ref<ReceivableRow[]>([]);
 const totals = ref<Record<string, string>>({});
 const graceHours = ref(48);
-const loading = ref(true);
+const loading = ref(false);
 const error = ref("");
 const q = ref("");
 const onlyOpen = ref(true);
@@ -41,7 +48,8 @@ async function load() {
 let timer: ReturnType<typeof setTimeout> | undefined;
 watch(q, () => { clearTimeout(timer); timer = setTimeout(load, 300); });
 watch(onlyOpen, load);
-onMounted(load);
+watch(view, (v) => { if (v === "sales2") load(); });
+onMounted(() => { if (view.value === "sales2") load(); });
 
 function hoursLeft(deadline: string | null): number {
   if (!deadline) return 0;
@@ -67,6 +75,18 @@ const TILES = computed(() => [
 
 <template>
   <div class="space-y-4">
+    <div class="flex gap-1 border-b border-slate-200">
+      <button
+        v-for="t in ([['ledger', 'طبق دفتر آرپا'], ['sales2', 'اسناد فروش ۲']] as const)" :key="t[0]"
+        class="px-4 py-2 text-sm -mb-px border-b-2"
+        :class="view === t[0] ? 'border-sky-500 text-ink font-medium' : 'border-transparent text-slate-500'"
+        @click="view = t[0]"
+      >{{ t[1] }}</button>
+    </div>
+
+    <LedgerReceivables v-if="view === 'ledger'" />
+
+    <template v-else>
     <div class="grid grid-cols-2 lg:grid-cols-6 gap-3">
       <div v-for="t in TILES" :key="t.key" class="bg-surface rounded-card shadow-soft p-4">
         <p class="text-xs text-slate-500">{{ t.label }}</p>
@@ -139,5 +159,6 @@ const TILES = computed(() => [
         </tbody>
       </table>
     </div>
+    </template>
   </div>
 </template>

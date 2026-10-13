@@ -826,3 +826,106 @@ class CommissionRun(TimeStampedModel):
     class Meta:
         unique_together = ("jalali_year", "jalali_month")
         ordering = ("-jalali_year", "-jalali_month")
+
+
+# ---------------------------------------------------------------------------
+# دفتر حساب آرپا — what accounting has actually booked against each customer
+# ---------------------------------------------------------------------------
+# فروش ۲'s own receipts start at the cut-over; before it, and for everything
+# still booked in آرپا, the truth about who paid what is accounting's ledger.
+# So the ledger is brought in as it is — one row per row of آرپا's «دفتر
+# حساب» export — and مطالبات is computed from it: each دریافت settles the
+# فاکتور its description names, and aging reads off what is left.
+#
+# The company keeps two books: the official one (دفتر اصلی) and a second,
+# unofficial one (دفتر دوم · رول مارکت). They are separate آرپا files with
+# separate balances, and a customer can owe on both, so every account is
+# one customer in one book.
+
+
+class LedgerBook(models.TextChoices):
+    MAIN = "main", "دفتر اصلی"
+    SECOND = "second", "دفتر دوم (رول مارکت)"
+
+
+class LedgerAccount(TimeStampedModel):
+    """One customer's account in one آرپا book, and the file it came from."""
+
+    book = models.CharField(max_length=8, choices=LedgerBook.choices, default=LedgerBook.MAIN)
+    customer = models.ForeignKey(
+        "crm.Customer", on_delete=models.PROTECT, related_name="ledger_accounts"
+    )
+    #: کد تفصیل in that book — the second book numbers its parties itself.
+    party_code = models.CharField(max_length=32, blank=True)
+    #: «توضیحات» and «بازاریاب» of the collections workbook, kept per book
+    #: because finance writes them per book.
+    note = models.CharField(max_length=400, blank=True)
+    marketer = models.CharField(max_length=100, blank=True)
+
+    # ---- the ledger file -----------------------------------------------
+    source_file = models.CharField(max_length=200, blank=True)
+    imported_at = models.DateTimeField(null=True, blank=True)
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    #: «موجودی قبل از دوره», signed: positive = بدهکار.
+    opening_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    first_date = models.DateField(null=True, blank=True)
+    last_date = models.DateField(null=True, blank=True)
+
+    # ---- the hand-kept collections workbook, for comparison -------------
+    #: «مانده بدهکاران» as finance last typed it into «گزارش وصولی».
+    manual_balance_rial = models.DecimalField(max_digits=20, decimal_places=0, null=True, blank=True)
+    manual_as_of = models.DateField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("book", "customer")
+        ordering = ("book", "customer__name_fa")
+        verbose_name = "حساب مشتری در دفتر آرپا"
+
+    def __str__(self) -> str:
+        return f"{self.get_book_display()} · {self.customer}"
+
+
+class LedgerEntry(models.Model):
+    """
+    One row of آرپا's «دفتر حساب», as آرپا printed it — plus what the row
+    *is*, read off its description: a فاکتور, a مرجوعی, a دریافت (and which
+    فاکتور it settles), or something else.
+    """
+
+    class Kind(models.TextChoices):
+        OPENING = "opening", "موجودی قبل از دوره"
+        INVOICE = "invoice", "فاکتور فروش"
+        RETURN = "return", "برگشت از فروش"
+        RECEIPT = "receipt", "دریافت"
+        OTHER = "other", "سایر"
+
+    class Method(models.TextChoices):
+        CASH = "cash", "نقد"
+        CHEQUE = "cheque", "چک"
+        TRANSFER = "transfer", "واریز"
+        OTHER = "", "—"
+
+    account = models.ForeignKey(LedgerAccount, on_delete=models.CASCADE, related_name="entries")
+    row_no = models.PositiveIntegerField()
+    doc_no = models.CharField(max_length=20, blank=True)       # شماره سند
+    fixed_no = models.CharField(max_length=20, blank=True)     # شماره ثابت سند
+    date = models.DateField()
+    debit_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    credit_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    #: آرپا's own «مانده» after this row, signed (بد +, بس −) — the figure
+    #: every computed balance is checked against.
+    file_balance_rial = models.DecimalField(max_digits=20, decimal_places=0, null=True, blank=True)
+    description = models.CharField(max_length=500, blank=True)
+    ticked = models.BooleanField(default=False)                # تیک
+    kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.OTHER)
+    method = models.CharField(max_length=8, choices=Method.choices, blank=True, default="")
+    #: The فاکتور number the row is for («بابت فاکتور فروش 168»,
+    #: «دریافت … بابت تسویه فاکتور فروش168»).
+    invoice_no = models.CharField(max_length=20, blank=True, db_index=True)
+    cheque_count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ("account", "row_no")
+        verbose_name = "ردیف دفتر آرپا"

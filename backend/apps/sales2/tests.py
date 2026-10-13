@@ -822,3 +822,189 @@ class PriceVersionTests(Sales2Base):
                                           format="json").status_code, 400)
         r = self.client.delete(f"{URL}/price-sheets/month/?year=1405&month=6&day=25")
         self.assertEqual([v["day"] for v in r.data["versions"]], [1, 6, 20])
+
+
+# ---------------------------------------------------------------------------
+# مطالبات طبق دفتر آرپا
+# ---------------------------------------------------------------------------
+def _ledger_xlsx(rows, opening=(0, "--"), tamper=None):
+    """
+    A «دفتر حساب» as آرپا exports it: header, «موجودی قبل از دوره», then
+    rows of (doc, date, debit, credit, description) with آرپا's running
+    مانده and بد/بس — and the =SUM row at the bottom, which must be skipped.
+    """
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["تيک", "شماره سند", "شماره ثابت سند", "تاريخ سند", "مبلغ بدهکار", "مبلغ بستانکار",
+               "مانده", "وضعيت", "شرح رديف سند", "نام لاتين شخص"])
+    ws.append([None, 0, 0, None, 0, 0, opening[0], opening[1], "موجودي قبل از دوره ...", None])
+    bal = opening[0] * (-1 if opening[1] == "بس" else 1)
+    for i, (doc, day, debit, credit, desc) in enumerate(rows):
+        bal += debit - credit
+        shown = bal + (tamper[1] if tamper and tamper[0] == i else 0)
+        ws.append(["False", doc, 1000 + doc, day, debit, credit, abs(shown),
+                   "بد" if shown > 0 else ("بس" if shown < 0 else "--"), desc, None])
+    ws.append([None, "=SUM(B2:B9)", None, None, "=SUM(E2:E9)", "=SUM(F2:F9)"])
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    buf.name = "دفتر.xlsx"
+    return buf
+
+
+#: Shaped like a real account: a receipt before its invoice, one دریافت
+#: split over two فاکتورها under one سند, one naming nothing.
+LEDGER = [
+    (10, "1405/02/06", 0, 300, "دريافت نقدي بابت تسويه فاکتور فروش13 (کاغذ)"),
+    (11, "1405/02/12", 1000, 0, "بابت فاکتور فروش 13 آقاي الف"),
+    (12, "1405/05/07", 2000, 0, "بابت فاکتور فروش 168 آقاي الف"),
+    (13, "1405/05/20", 0, 700, "دريافت 1 فقره چک بابت تسويه فاکتور فروش13 (کاغذ) مبلغ 1.000 ريال"),
+    (13, "1405/05/20", 0, 300, "دريافت 1 فقره چک بابت تسويه فاکتور فروش168 (کاغذ) مبلغ 1.000 ريال"),
+    (14, "1405/06/22", 4000, 0, "بابت فاکتور فروش 398 آقاي الف"),
+    (15, "1405/07/01", 0, 500, "دريافت نقدي علي الحساب"),
+]
+
+
+class LedgerTests(Sales2Base):
+    def _import(self, rows=LEDGER, book="main", customer=None, **kw):
+        return self.client.post(f"{URL}/ledger/import/", {
+            "file": _ledger_xlsx(rows, **kw), "book": book, "customer": (customer or self.customer).pk,
+        }, format="multipart")
+
+    def test_settles_each_receipt_against_the_invoice_it_names(self):
+        from apps.sales2 import ledger
+        from apps.sales2.models import LedgerAccount
+
+        r = self._import()
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.data["reconciled"])
+        a = ledger.analyse(LedgerAccount.objects.get())
+        items = {i.number: i for i in a.items}
+        # 13 is paid by the receipt *before* it and the cheque after it.
+        self.assertEqual(items["13"].remaining, 0)
+        self.assertEqual([p.doc_no for p in items["13"].payments], ["10", "13"])
+        # 168: 300 named, then the 500 on account goes to the oldest open item.
+        self.assertEqual(items["168"].remaining, 2000 - 300 - 500)
+        self.assertEqual(items["168"].payments[-1].how, "fifo")
+        self.assertEqual(items["398"].remaining, 4000)
+        self.assertEqual(a.balance, 1000 + 2000 + 4000 - 300 - 700 - 300 - 500)
+        self.assertEqual(a.balance, a.file_balance)
+        self.assertEqual(a.prepayment, 0)
+
+    def test_aging_puts_each_open_invoice_in_its_own_month(self):
+        r = self.client.get(f"{URL}/ledger/receivables/", {"book": "main", "as_of": "2026-10-13"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["rows"], [])
+        self._import()
+        r = self.client.get(f"{URL}/ledger/receivables/", {"book": "main", "as_of": "2026-10-13"})
+        row = r.data["rows"][0]
+        self.assertEqual(row["buckets"]["1405-05"], "1200")   # what is left of 168 (مرداد)
+        self.assertEqual(row["buckets"]["1405-06"], "4000")   # 398 (شهریور)
+        self.assertEqual(row["balance"], "5200")
+        self.assertEqual(row["oldest_open"], "2026-07-29")    # 1405/05/07
+        self.assertTrue(row["reconciled"])
+
+    def test_as_of_cuts_the_ledger_and_keeps_an_early_receipt_as_prepayment(self):
+        from apps.core import jalali
+        from apps.sales2 import ledger
+        from apps.sales2.models import LedgerAccount
+
+        self._import()
+        a = ledger.analyse(LedgerAccount.objects.get(), jalali.to_gregorian(1405, 2, 10))
+        # Paid for فاکتور 13 before it was booked: پیش دریافت, not a debt paid.
+        self.assertEqual(a.balance, -300)
+        self.assertEqual(a.prepayment, 300)
+        self.assertEqual(a.open_items, [])
+
+    def test_a_ledger_that_disagrees_with_arpa_is_flagged(self):
+        r = self._import(tamper=(3, 50))
+        self.assertFalse(r.data["reconciled"])
+        self.assertTrue(any(i["level"] == "error" for i in r.data["issues"]))
+
+    def test_opening_balance_is_paid_by_receipts_for_older_invoices(self):
+        from apps.sales2 import ledger
+        from apps.sales2.models import LedgerAccount
+
+        rows = [(20, "1405/01/15", 0, 400, "دريافت نقدي بابت تسويه فاکتور فروش 9001")]
+        self._import(rows, opening=(1000, "بد"))
+        a = ledger.analyse(LedgerAccount.objects.get())
+        self.assertEqual(a.items[0].kind, "opening")
+        self.assertEqual(a.items[0].remaining, 600)
+        self.assertEqual(a.items[0].payments[0].how, "opening")
+        self.assertTrue(a.reconciled)
+
+    def test_books_are_separate_and_all_adds_them(self):
+        self._import()
+        self._import([(1, "1405/07/02", 900, 0, "بابت فاکتور فروش 5 آقای الف")], book="second")
+        main = self.client.get(f"{URL}/ledger/receivables/", {"book": "main"}).data
+        second = self.client.get(f"{URL}/ledger/receivables/", {"book": "second"}).data
+        both = self.client.get(f"{URL}/ledger/receivables/", {"book": "all"}).data
+        self.assertEqual(main["totals"]["balance"], "5200")
+        self.assertEqual(second["totals"]["balance"], "900")
+        self.assertEqual(len(both["rows"]), 1)
+        self.assertEqual(both["rows"][0]["by_book"], {"main": "5200", "second": "900"})
+        self.assertEqual(both["rows"][0]["balance"], "6100")
+
+    def test_reimport_replaces_the_ledger(self):
+        from apps.sales2.models import LedgerEntry
+
+        self._import()
+        self._import(LEDGER[:2])
+        self.assertEqual(LedgerEntry.objects.count(), 2)
+
+    def test_export_has_the_workbook_layout_and_detail_sheets(self):
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        self._import()
+        r = self.client.get(f"{URL}/ledger/receivables/export/", {"book": "all", "as_of": "2026-10-13"})
+        self.assertEqual(r.status_code, 200)
+        wb = load_workbook(BytesIO(r.content))
+        self.assertEqual(wb.sheetnames[:2], ["دفتر اصلی", "دفتر دوم (رول مارکت)"])
+        self.assertIn("ریز فاکتورها", wb.sheetnames)
+        ws = wb["دفتر اصلی"]
+        headers = [c.value for c in ws[2]]
+        for h in ("کد تفصیل", "نام طرف حساب", "ماه های قبل", "مرداد", "شهریور", "مهر",
+                  "پیش دریافت", "مانده بدهکاران", "توضیحات", "بازاریاب"):
+            self.assertIn(h, headers)
+        self.assertEqual(ws.cell(row=3, column=headers.index("شهریور") + 1).value, 4000)
+        r = self.client.get(f"{URL}/ledger/customers/{self.customer.pk}/export/")
+        self.assertEqual(load_workbook(BytesIO(r.content)).sheetnames[0], "خلاصه")
+
+    def test_collections_workbook_brings_notes_and_hand_figures(self):
+        from io import BytesIO
+
+        from openpyxl import Workbook
+
+        from apps.crm.models import CustomerExternalRef, ExternalSource
+
+        CustomerExternalRef.objects.create(customer=self.customer, source=ExternalSource.ARPA, external_id="400827")
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "14050718"
+        ws.append(["گزارش وصولی منتهی به تاریخ 1405/07/18"])
+        ws.append(["ردیف", "کد تفصیل", "نام طرف حساب", "تاریخ ", "مرداد ", "مانده بدهکاران", "جمع",
+                   "توضیحات", "بازاریاب"])
+        ws.append([1, 400827, "الف", "1405/05/07", 4474, 4474, 4474, "چک ضمانت", "مهسا قنبری "])
+        ws.append([2, 999, "ناشناس", None, 10, 10, 10, None, None])
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        buf.name = "وصولی.xlsx"
+        r = self.client.post(f"{URL}/ledger/collections-import/", {"file": buf, "book": "main"}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.data["matched"], 1)
+        self.assertEqual([u["name"] for u in r.data["unmatched"]], ["ناشناس"])
+        self._import()
+        row = self.client.get(f"{URL}/ledger/receivables/", {"book": "main"}).data["rows"][0]
+        self.assertEqual((row["note"], row["marketer"], row["code"]), ("چک ضمانت", "مهسا قنبری", "400827"))
+        self.assertEqual(row["manual_balance"], "4474")
+
+    def test_non_admin_cannot_see_the_ledger(self):
+        self.client.force_authenticate(_user("ceo2", role="executive"))
+        self.assertEqual(self.client.get(f"{URL}/ledger/receivables/").status_code, 403)

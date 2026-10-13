@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.sales2 import views, views_grades, views_pricing
+from apps.sales2 import views, views_grades, views_ledger, views_pricing
 
 router = DefaultRouter()
 router.register("warehouses", views.WarehouseViewSet, basename="sales2-warehouse")
@@ -35,6 +35,16 @@ urlpatterns = [
     path("grades/", views_grades.GradesView.as_view(), name="sales2-grades"),
     path("grades/<int:customer_id>/", views_grades.GradeSetView.as_view(), name="sales2-grade-set"),
     path("receivables/", views.ReceivablesView.as_view(), name="sales2-receivables"),
+    path("ledger/receivables/", views_ledger.LedgerReceivablesView.as_view(), name="sales2-ledger-receivables"),
+    path("ledger/receivables/export/", views_ledger.LedgerReceivablesExportView.as_view(),
+         name="sales2-ledger-receivables-export"),
+    path("ledger/preview/", views_ledger.LedgerPreviewView.as_view(), name="sales2-ledger-preview"),
+    path("ledger/import/", views_ledger.LedgerImportView.as_view(), name="sales2-ledger-import"),
+    path("ledger/collections-import/", views_ledger.LedgerCollectionsImportView.as_view(),
+         name="sales2-ledger-collections-import"),
+    path("ledger/accounts/<int:pk>/", views_ledger.LedgerAccountView.as_view(), name="sales2-ledger-account"),
+    path("ledger/customers/<int:pk>/export/", views_ledger.LedgerCustomerExportView.as_view(),
+         name="sales2-ledger-customer-export"),
     path("sales-list/", views.SalesListView.as_view(), name="sales2-sales-list"),
     path("sales-list/export/", views.SalesListExportView.as_view(), name="sales2-sales-list-export"),
     path("", include(router.urls)),

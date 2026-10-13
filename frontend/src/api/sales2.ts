@@ -522,6 +522,85 @@ export interface StatementEntry {
   balance: string;
 }
 
+// ---- مطالبات طبق دفتر آرپا ------------------------------------------------
+export type LedgerBook = "main" | "second";
+export type LedgerBookFilter = LedgerBook | "all";
+
+export interface LedgerColumn { key: string; label: string; year: number | null; month: number | null }
+export interface LedgerIssue { level: "error" | "warn" | "info"; message: string; book?: LedgerBook; row?: number | null }
+
+export interface LedgerRow {
+  /** The account (one book); for «all», the first of the customer's accounts. */
+  id: number;
+  customer: number;
+  name: string;
+  book: LedgerBookFilter;
+  code: string;
+  codes: Partial<Record<LedgerBook, string>>;
+  accounts: number[];
+  buckets: Record<string, string>;
+  by_book: Partial<Record<LedgerBook, string>>;
+  prepayment: string;
+  balance: string;
+  file_balance: string | null;
+  manual_balance: string | null;
+  manual_as_of: string | null;
+  oldest_open: string | null;
+  last_date: string | null;
+  note: string;
+  marketer: string;
+  entries: number;
+  open_items: number;
+  issues: LedgerIssue[];
+  reconciled: boolean;
+  has_ledger: boolean;
+}
+
+export interface LedgerReport {
+  as_of: string;
+  book: LedgerBookFilter;
+  columns: LedgerColumn[];
+  rows: LedgerRow[];
+  totals: { buckets: Record<string, string>; prepayment: string; balance: string; manual_balance: string;
+    by_book: Record<LedgerBook, string> };
+  counts: { accounts: number; with_ledger: number; unreconciled: number };
+  books: { key: LedgerBook; label: string }[];
+}
+
+export interface LedgerParsed {
+  rows: number; sheet: string; first_date: string | null; last_date: string | null;
+  opening: string; debit: string; credit: string; file_balance: string | null;
+  invoices: number; receipts: number; returns: number; other: number;
+}
+
+export interface LedgerPayment { date: string; doc_no: string; amount: string; method: string; how: "named" | "fifo" | "opening" }
+
+export interface LedgerItem {
+  key: string; kind: "invoice" | "opening" | "other"; number: string; label: string; date: string; doc_no: string;
+  amount: string; paid: string; returned: string; remaining: string; settled_on: string | null;
+  days_open: number | null; days_to_settle: number | null; due_date: string | null; overdue_days: number | null;
+  arpa_total: string | null; salesperson: string; description: string; payments: LedgerPayment[];
+}
+
+export interface LedgerCredit {
+  date: string; doc_no: string; fixed_no: string; kind: string; method: string; amount: string; invoice_no: string;
+  cheque_count: number; left: string; description: string;
+  allocations: { label: string; amount: string; how: string }[];
+}
+
+export interface LedgerDetail {
+  account: {
+    id: number; book: LedgerBook; book_label: string; customer: number; name: string; party_code: string;
+    note: string; marketer: string; source_file: string; imported_at: string | null;
+    first_date: string | null; last_date: string | null; opening: string;
+    manual_balance: string | null; manual_as_of: string | null;
+  };
+  as_of: string; balance: string; file_balance: string | null; prepayment: string; reconciled: boolean;
+  oldest_open: string | null; issues: LedgerIssue[]; items: LedgerItem[]; credits: LedgerCredit[];
+  rows: { row: number; doc_no: string; fixed_no: string; date: string; debit: string; credit: string; balance: string;
+    file_balance: string | null; kind: string; invoice_no: string; ticked: boolean; description: string }[];
+}
+
 type Params = Record<string, string | number | boolean | undefined | null>;
 
 function clean(p: Params = {}): Params {
@@ -627,6 +706,44 @@ export const sales2Api = {
   receivables: (p: Params = {}) =>
     api.get<{ rows: ReceivableRow[]; totals: Record<string, string>; grace_hours: number }>(
       `${B}/receivables/`, { params: clean(p) }).then((r) => r.data),
+  ledgerReceivables: (p: Params = {}) =>
+    api.get<LedgerReport>(`${B}/ledger/receivables/`, { params: clean(p) }).then((r) => r.data),
+  ledgerExport: (p: Params = {}) =>
+    api.get(`${B}/ledger/receivables/export/`, { params: clean(p), responseType: "blob" }).then((r) => r.data as Blob),
+  ledgerPreview: (file: File, book: LedgerBook, customer?: number | null) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("book", book);
+    if (customer) fd.append("customer", String(customer));
+    return api.post<{ file: string; parsed: LedgerParsed; suggestions: { id: number; name: string }[];
+      replaces?: { rows: number; imported_at: string; last_date: string | null; source_file: string } | null }>(
+      `${B}/ledger/preview/`, fd).then((r) => r.data);
+  },
+  ledgerImport: (file: File, book: LedgerBook, customer: number, party_code = "") => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("book", book);
+    fd.append("customer", String(customer));
+    if (party_code) fd.append("party_code", party_code);
+    return api.post<{ account: number; name: string; balance: string; reconciled: boolean; issues: LedgerIssue[];
+      parsed: LedgerParsed }>(`${B}/ledger/import/`, fd).then((r) => r.data);
+  },
+  ledgerCollectionsImport: (file: File, book: LedgerBook) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("book", book);
+    return api.post<{ sheet: string; as_of: string | null; matched: number; created: number;
+      unmatched: { code: string; name: string; balance: number | null }[] }>(
+      `${B}/ledger/collections-import/`, fd).then((r) => r.data);
+  },
+  ledgerAccount: (id: number, as_of?: string) =>
+    api.get<LedgerDetail>(`${B}/ledger/accounts/${id}/`, { params: clean({ as_of }) }).then((r) => r.data),
+  saveLedgerAccount: (id: number, data: { note?: string; marketer?: string; party_code?: string }) =>
+    api.patch(`${B}/ledger/accounts/${id}/`, data).then((r) => r.data),
+  removeLedgerAccount: (id: number) => api.delete(`${B}/ledger/accounts/${id}/`),
+  ledgerCustomerExport: (customer: number, as_of?: string) =>
+    api.get(`${B}/ledger/customers/${customer}/export/`, { params: clean({ as_of }), responseType: "blob" })
+      .then((r) => r.data as Blob),
   sayad: (id: number, registered: boolean) =>
     api.post<Receipt>(`${B}/receipts/${id}/sayad/`, { registered }).then((r) => r.data),
   quote: (p: { product: number; grammage?: number | null; official?: boolean; quantity?: string | number; customer?: number | null; date?: string }) =>
