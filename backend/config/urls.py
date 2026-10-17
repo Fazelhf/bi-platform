@@ -64,9 +64,9 @@ urlpatterns = [
 # routing (deep links, refresh) works. WhiteNoise serves /assets/* itself.
 _INDEX = settings.BASE_DIR / "spa" / "index.html"
 if _INDEX.exists():
-    _html = _INDEX.read_text(encoding="utf-8")
 
     def spa_index(_request):
+        _html = _INDEX.read_text(encoding="utf-8")
         response = HttpResponse(_html, content_type="text/html; charset=utf-8")
         # index.html is the one file in the bundle whose name never changes,
         # and it is the file that names every hashed chunk. A browser holding

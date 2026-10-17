@@ -71,7 +71,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
     serializer_class = ProductionSerializer
     permission_classes = [DepartmentEntryPermission]
     entry_department = "production"
-    filterset_fields = ["period", "machine", "status"]
+    filterset_fields = ["period", "machine", "status", "shift"]
 
     def perform_update(self, serializer):
         before = snapshot(serializer.instance)
@@ -80,7 +80,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
                   audit_diff(before, snapshot(instance)))
 
     def _detail(self, fact) -> str:
-        return f"تولید {fact.machine.name_fa} · {fact.period.label}"
+        return f"تولید {fact.machine.name_fa} ({fact.get_shift_display()}) · {fact.period.label}"
 
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
@@ -192,13 +192,43 @@ class ProductionDashboardView(APIView):
             FactProduction.objects.filter(period_id__in=units)
             .values("machine__name_fa", "machine__kind", "machine__sort_order")
             .annotate(
-                active_shifts=Sum("active_shifts"), output_units=Sum("output_units"),
+                active_shifts=Sum("active_shifts"),
+                output_units=Sum("output_units"),
+                actual_journal=Sum("actual_journal"),
+                actual_pos=Sum("actual_pos"),
+                actual_receipt=Sum("actual_receipt"),
                 waste_pct=Avg("waste_pct"),
                 downtime_breakdown_shifts=Sum("downtime_breakdown_shifts"),
                 downtime_sizechange_shifts=Sum("downtime_sizechange_shifts"),
                 downtime_nowork_shifts=Sum("downtime_nowork_shifts"),
             )
             .order_by("machine__sort_order")
+        )
+
+        shifts_data = list(
+            FactProduction.objects.filter(period_id__in=units, machine__kind=DimMachine.Kind.CUTTING)
+            .values("shift")
+            .annotate(
+                output_units=Sum("output_units"),
+                actual_journal=Sum("actual_journal"),
+                actual_pos=Sum("actual_pos"),
+                actual_receipt=Sum("actual_receipt"),
+                active_shifts=Sum("active_shifts"),
+            )
+            .order_by("shift")
+        )
+
+        shifts_by_machine = list(
+            FactProduction.objects.filter(period_id__in=units, machine__kind=DimMachine.Kind.CUTTING)
+            .values("machine__name_fa", "machine__sort_order", "shift")
+            .annotate(
+                output_units=Sum("output_units"),
+                actual_journal=Sum("actual_journal"),
+                actual_pos=Sum("actual_pos"),
+                actual_receipt=Sum("actual_receipt"),
+                active_shifts=Sum("active_shifts"),
+            )
+            .order_by("machine__sort_order", "shift")
         )
 
         costs = (
@@ -208,6 +238,24 @@ class ProductionDashboardView(APIView):
             .annotate(amount=Sum("amount_rial"))
             .order_by("-amount")
         )
+
+        other_cost_facts = list(
+            FactProductionCost.objects.filter(
+                period_id__in=units,
+                category__code="cost-other",
+            )
+            .exclude(description__isnull=True)
+            .exclude(description__exact="")
+        )
+        other_cost_note = None
+        if other_cost_facts:
+            notes = [f.description.strip() for f in other_cost_facts if f.description.strip()]
+            if notes:
+                other_cost_note = {
+                    "description": " - ".join(notes),
+                    "amount_rial": sum((f.amount_rial for f in other_cost_facts), 0),
+                    "notes": notes,
+                }
 
         revenue = [
             {
@@ -236,7 +284,10 @@ class ProductionDashboardView(APIView):
                 "kpis": KPIResultSerializer(company_kpis, many=True).data,
                 "machine_kpis": KPIResultSerializer(machine_kpis, many=True).data,
                 "machines": list(machines),
+                "shifts_data": shifts_data,
+                "shifts_by_machine": shifts_by_machine,
                 "costs": list(costs),
+                "other_cost_note": other_cost_note,
                 "revenue": revenue,
                 "print_colors": list(print_colors),
                 "days_in_month": bench.days_in_month,
@@ -264,7 +315,9 @@ class RecomputeProductionView(APIView):
 # Combined production INPUT — the manager fills all four Excel tables here
 # --------------------------------------------------------------------------
 CUT_FIELDS = [
-    "active_shifts", "output_units", "waste_pct", "repair_count",
+    "active_shifts", "output_units",
+    "actual_journal", "actual_pos", "actual_receipt",
+    "waste_pct", "repair_count",
     "downtime_breakdown_shifts", "downtime_sizechange_shifts", "downtime_nowork_shifts",
 ]
 
@@ -294,19 +347,26 @@ class ProductionInputView(APIView):
         bench = self._bench(period)
 
         machines = list(DimMachine.objects.all())
-        facts = {f.machine_id: f for f in FactProduction.objects.filter(period=period)}
+        facts = {(f.machine_id, f.shift): f for f in FactProduction.objects.filter(period=period)}
 
-        def machine_row(m):
-            f = facts.get(m.id)
-            row = {"machine": m.id, "machine_name": m.name_fa, "kind": m.kind,
-                   "status": f.status if f else "draft"}
+        def machine_row(m, shift=FactProduction.Shift.DAY):
+            f = facts.get((m.id, shift))
+            row = {
+                "machine": m.id,
+                "machine_name": m.name_fa,
+                "kind": m.kind,
+                "shift": shift,
+                "status": f.status if f else "draft",
+            }
             for fld in CUT_FIELDS:
                 row[fld] = str(getattr(f, fld)) if f else "0"
             return row
 
-        cutting = [machine_row(m) for m in machines if m.kind == DimMachine.Kind.CUTTING]
+        cutting_day = [machine_row(m, FactProduction.Shift.DAY) for m in machines if m.kind == DimMachine.Kind.CUTTING]
+        cutting_night = [machine_row(m, FactProduction.Shift.NIGHT) for m in machines if m.kind == DimMachine.Kind.CUTTING]
         print_machine = next((m for m in machines if m.kind == DimMachine.Kind.PRINT), None)
-        print_row = machine_row(print_machine) if print_machine else None
+        print_day = machine_row(print_machine, FactProduction.Shift.DAY) if print_machine else None
+        print_night = machine_row(print_machine, FactProduction.Shift.NIGHT) if print_machine else None
 
         colors = {c.color_count: c for c in FactPrintColor.objects.filter(period=period)}
         print_colors = [
@@ -316,8 +376,9 @@ class ProductionInputView(APIView):
 
         cost_rows = {c.category_id: c for c in FactProductionCost.objects.filter(period=period)}
         costs = [
-            {"category": c.id, "category_name": c.name_fa,
-             "amount_rial": str(cost_rows[c.id].amount_rial) if c.id in cost_rows else "0"}
+            {"category": c.id, "category_code": c.code, "category_name": c.name_fa,
+             "amount_rial": str(cost_rows[c.id].amount_rial) if c.id in cost_rows else "0",
+             "description": cost_rows[c.id].description if c.id in cost_rows else ""}
             for c in DimCostCategory.objects.all()
         ]
 
@@ -338,8 +399,12 @@ class ProductionInputView(APIView):
             "grain": grain_of(period, "production"),
             "is_unit": is_unit(period, "production"),
             "benchmark": BenchmarkSerializer(bench).data,
-            "cutting": cutting,
-            "print": print_row,
+            "cutting": cutting_day,
+            "cutting_day": cutting_day,
+            "cutting_night": cutting_night,
+            "print": print_day,
+            "print_day": print_day,
+            "print_night": print_night,
             "print_colors": print_colors,
             "costs": costs,
             "rolls": rolls,
@@ -370,8 +435,29 @@ class ProductionInputView(APIView):
             bench.save(update_fields=["total_headcount"])
 
         # 2) Machines (cutting + print)
-        for row in list(data.get("cutting", [])) + ([data["print"]] if data.get("print") else []):
+        cutting_payload = []
+        if "cutting_day" in data or "cutting_night" in data:
+            for r in data.get("cutting_day", []):
+                cutting_payload.append({**r, "shift": FactProduction.Shift.DAY})
+            for r in data.get("cutting_night", []):
+                cutting_payload.append({**r, "shift": FactProduction.Shift.NIGHT})
+        else:
+            for r in data.get("cutting", []):
+                shift = r.get("shift") or FactProduction.Shift.DAY
+                cutting_payload.append({**r, "shift": shift})
+
+        if "print_day" in data or "print_night" in data:
+            if data.get("print_day"):
+                cutting_payload.append({**data["print_day"], "shift": FactProduction.Shift.DAY})
+            if data.get("print_night"):
+                cutting_payload.append({**data["print_night"], "shift": FactProduction.Shift.NIGHT})
+        elif data.get("print"):
+            print_row = data["print"]
+            cutting_payload.append({**print_row, "shift": print_row.get("shift") or FactProduction.Shift.DAY})
+
+        for row in cutting_payload:
             machine = DimMachine.objects.get(pk=row["machine"])
+            shift = row.get("shift") or FactProduction.Shift.DAY
             defaults = {f: (row.get(f) or 0) for f in CUT_FIELDS}
             defaults["status"] = status
             if submit:
@@ -379,7 +465,7 @@ class ProductionInputView(APIView):
             if approved:
                 defaults["approved_by"] = user
             obj, _ = FactProduction.objects.update_or_create(
-                period=period, machine=machine, defaults=defaults
+                period=period, machine=machine, shift=shift, defaults=defaults
             )
             audit_log(user, obj, AuditLog.Action.UPDATE)
 
@@ -392,9 +478,13 @@ class ProductionInputView(APIView):
 
         # 4) Costs
         for c in data.get("costs", []):
+            defaults = {
+                "amount_rial": c.get("amount_rial") or 0,
+                "description": c.get("description") or "",
+            }
             FactProductionCost.objects.update_or_create(
                 period=period, category_id=c["category"],
-                defaults={"amount_rial": c.get("amount_rial") or 0},
+                defaults=defaults,
             )
 
         # 5) Roll counts (revenue)

@@ -32,13 +32,24 @@ const numCol = (field: PField, header: string): ColDef<ProductionRow> => ({
 
 const columnDefs: ColDef<ProductionRow>[] = [
   { field: "machine_name", headerName: "خط تولید", pinned: "right", editable: false, minWidth: 110 },
+  {
+    field: "shift",
+    headerName: "شیفت",
+    pinned: "right",
+    editable: false,
+    minWidth: 90,
+    cellRenderer: (p: { value: string }) => (p.value === "night" ? "شیفت شب" : "شیفت روز"),
+  },
   numCol("active_shifts", "شیفت فعال"),
-  numCol("output_units", "تولید"),
+  numCol("output_units", "تولید (شاخص)"),
+  numCol("actual_journal", "واقعی: ژورنال"),
+  numCol("actual_pos", "واقعی: پوز"),
+  numCol("actual_receipt", "واقعی: رسید"),
   numCol("waste_pct", "ضایعات ٪"),
   numCol("repair_count", "تعمیری"),
-  numCol("downtime_breakdown_shifts", "خواب/خرابی"),
-  numCol("downtime_sizechange_shifts", "خواب/تغییر سایز"),
-  numCol("downtime_nowork_shifts", "خواب/عدم سفارش"),
+  numCol("downtime_breakdown_shifts", "خواب (خرابی)"),
+  numCol("downtime_sizechange_shifts", "خواب (تغییر سایز)"),
+  numCol("downtime_nowork_shifts", "خواب (ظرفیت خالی)"),
   {
     field: "status", headerName: "وضعیت", editable: false, minWidth: 110,
     cellRenderer: (p: { value: string }) => {

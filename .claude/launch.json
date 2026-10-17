@@ -1,13 +1,13 @@
 {
-  "//": "ONE backend and ONE frontend for every session, both rooted in the main worktree (C:/Users/Asus/bi-platform-v2), which holds the complete database. The worktree under .claude/worktrees carries an identical copy of this file, so a session started there drives these same two servers rather than a second pair backed by a near-empty database.",
+  "//": "ONE backend and ONE frontend for every session, both rooted in the main worktree (C:/Users/User/Projects/bi-platform), which holds the complete database. The worktree under .claude/worktrees carries an identical copy of this file, so a session started there drives these same two servers rather than a second pair backed by a near-empty database.",
   "//vite": "The root (positional) and --config are passed explicitly because `npm --prefix DIR` only changes where package.json is looked up: Vite still reads its config and its index.html from the current working directory. That is how a session in one tree ended up serving the other tree's frontend, proxying /api to the other backend, against the other database.",
   "version": "0.0.1",
   "configurations": [
     {
       "name": "backend-django",
-      "runtimeExecutable": "C:/Users/Asus/bi-platform-v2/backend/.venv/Scripts/python.exe",
+      "runtimeExecutable": "C:/Users/User/Projects/bi-platform/backend/.venv/Scripts/python.exe",
       "runtimeArgs": [
-        "C:/Users/Asus/bi-platform-v2/backend/manage.py",
+        "C:/Users/User/Projects/bi-platform/backend/manage.py",
         "runserver",
         "127.0.0.1:8001"
       ],
@@ -20,13 +20,13 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "--prefix",
-        "C:/Users/Asus/bi-platform-v2/frontend",
+        "C:/Users/User/Projects/bi-platform/frontend",
         "run",
         "dev",
         "--",
-        "C:/Users/Asus/bi-platform-v2/frontend",
+        "C:/Users/User/Projects/bi-platform/frontend",
         "--config",
-        "C:/Users/Asus/bi-platform-v2/frontend/vite.config.ts"
+        "C:/Users/User/Projects/bi-platform/frontend/vite.config.ts"
       ],
       "port": 5174,
       "//autoPort": "Auto-assigned: nothing outside the project depends on the frontend's port (no OAuth callback, webhook or CORS entry), so a second chat gets its own via PORT, which vite.config.ts reads — 5174 remains the default. The backend is the opposite case and stays fixed: the Vite proxy targets 8001.",
@@ -38,12 +38,28 @@
       "runtimeExecutable": "graft",
       "runtimeArgs": [
         "viz",
-        "C:/Users/Asus/bi-platform-v2",
+        "C:/Users/User/Projects/bi-platform",
         "--port",
         "4400",
         "--no-open"
       ],
       "port": 4400
+    },
+    {
+      "//": "TEMPORARY — تحلیل هوشمند on a demo copy of the database. Remove after testing.",
+      "name": "insights-demo",
+      "runtimeExecutable": "C:/Users/User/Projects/bi-platform/backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "C:/Users/User/AppData/Local/Temp/claude/C--Users-User-Projects-bi-platform/30045914-73d7-436c-bf35-a1d4299dadb7/scratchpad/wt/backend/manage.py",
+        "runserver",
+        "127.0.0.1:8002",
+        "--noreload"
+      ],
+      "env": {
+        "DATABASE_URL": "sqlite:///C:/Users/User/AppData/Local/Temp/claude/C--Users-User-Projects-bi-platform/30045914-73d7-436c-bf35-a1d4299dadb7/scratchpad/demo.sqlite3"
+      },
+      "port": 8002,
+      "autoPort": false
     }
   ]
 }

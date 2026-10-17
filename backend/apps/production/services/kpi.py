@@ -154,7 +154,8 @@ def _collect(period: DimPeriod, only_approved: bool) -> Totals:
         t.active_shifts += r.active_shifts
         t.repairs += r.repair_count
         t.downtime += r.total_downtime_shifts
-        t.machines += 1
+    # Unique cutting machines to avoid double counting across day/night shifts
+    t.machines = len([m_id for m_id in t.per_machine if m_id != getattr(next((m for m in DimMachine.objects.filter(kind=DimMachine.Kind.PRINT)), None), "id", None)])
     return t
 
 

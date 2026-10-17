@@ -4,9 +4,13 @@ export interface ProdInput {
   period: { id: number; label: string };
   benchmark: { total_headcount: number; ideal_output_per_shift: number; days_in_month: number };
   cutting: Record<string, any>[];
+  cutting_day?: Record<string, any>[];
+  cutting_night?: Record<string, any>[];
   print: Record<string, any> | null;
+  print_day?: Record<string, any> | null;
+  print_night?: Record<string, any> | null;
   print_colors: { color_count: number; area_sqm: string }[];
-  costs: { category: number; category_name: string; amount_rial: string }[];
+  costs: { category: number; category_code?: string; category_name: string; amount_rial: string; description?: string }[];
   rolls: { product: number; product_name: string; piece_rate_rial: string; quantity: string }[];
 }
 

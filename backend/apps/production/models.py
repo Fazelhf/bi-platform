@@ -137,11 +137,31 @@ class FactProduction(TimeStampedModel):
         DimMachine, on_delete=models.PROTECT, related_name="production"
     )
 
+    class Shift(models.TextChoices):
+        DAY = "day", "شیفت روز"
+        NIGHT = "night", "شیفت شب"
+
+    shift = models.CharField(
+        max_length=10, choices=Shift.choices, default=Shift.DAY,
+        help_text="شیفت کاری: روز یا شب"
+    )
+
     active_shifts = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     output_units = models.DecimalField(
         max_digits=18, decimal_places=2, default=0,
         help_text="Rolls for cutting lines, m² for the print unit.",
     )
+    # --- Actual production sub-branches (تولید واقعی) ---
+    actual_journal = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, help_text="تولید واقعی — ژورنال"
+    )
+    actual_pos = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, help_text="تولید واقعی — پوز"
+    )
+    actual_receipt = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, help_text="تولید واقعی — رسید"
+    )
+
     waste_pct = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     repair_count = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
@@ -168,8 +188,16 @@ class FactProduction(TimeStampedModel):
     )
 
     class Meta:
-        unique_together = ("period", "machine")
-        ordering = ("period", "machine__sort_order")
+        unique_together = ("period", "machine", "shift")
+        ordering = ("period", "machine__sort_order", "shift")
+
+    @property
+    def total_actual_output(self):
+        return (
+            (self.actual_journal or 0)
+            + (self.actual_pos or 0)
+            + (self.actual_receipt or 0)
+        )
 
     @property
     def total_downtime_shifts(self):
@@ -180,7 +208,7 @@ class FactProduction(TimeStampedModel):
         )
 
     def __str__(self) -> str:
-        return f"{self.machine} · {self.period}"
+        return f"{self.machine} ({self.get_shift_display()}) · {self.period}"
 
 
 class FactPrintColor(TimeStampedModel):
@@ -211,6 +239,7 @@ class FactProductionCost(TimeStampedModel):
     )
     category = models.ForeignKey(DimCostCategory, on_delete=models.PROTECT)
     amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    description = models.TextField(blank=True, default="", help_text="توضیحات هزینه")
 
     class Meta:
         unique_together = ("period", "category")

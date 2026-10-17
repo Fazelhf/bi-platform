@@ -48,12 +48,18 @@ class ProductionSerializer(serializers.ModelSerializer):
     total_downtime_shifts = serializers.DecimalField(
         max_digits=8, decimal_places=2, read_only=True
     )
+    total_actual_output = serializers.DecimalField(
+        max_digits=18, decimal_places=2, read_only=True
+    )
 
     class Meta:
         model = FactProduction
         fields = [
             "id", "period", "period_label", "machine", "machine_name", "machine_kind",
-            "active_shifts", "output_units", "waste_pct", "repair_count",
+            "shift",
+            "active_shifts", "output_units",
+            "actual_journal", "actual_pos", "actual_receipt", "total_actual_output",
+            "waste_pct", "repair_count",
             "downtime_breakdown_shifts", "downtime_sizechange_shifts",
             "downtime_nowork_shifts", "total_downtime_shifts",
             "status", "updated_at",
@@ -63,10 +69,11 @@ class ProductionSerializer(serializers.ModelSerializer):
 
 class ProductionCostSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name_fa", read_only=True)
+    category_code = serializers.CharField(source="category.code", read_only=True)
 
     class Meta:
         model = FactProductionCost
-        fields = ["id", "period", "category", "category_name", "amount_rial"]
+        fields = ["id", "period", "category", "category_code", "category_name", "amount_rial", "description"]
 
 
 class ProductionRevenueSerializer(serializers.ModelSerializer):
