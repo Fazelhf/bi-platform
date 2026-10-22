@@ -124,3 +124,43 @@ class ProductionApprovalFlowTests(TestCase):
         )
         fact.refresh_from_db()
         self.assertEqual(fact.status, ApprovalStatus.APPROVED)
+
+
+class ProductionShiftInputTests(TestCase):
+    """Day and night are separate rows of one line; neither overwrites the other."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        self.client = APIClient()
+        self.period = DimPeriod.objects.create(jalali_year=1405, jalali_month=4)
+        self.line = DimMachine.objects.create(code="cut-shift", name_fa="برش شیفت", sort_order=1)
+        self.client.force_authenticate(get_user_model().objects.create_user(
+            "prod_mgr_shift", password="Pass-12345!", role="manager", department="production",
+        ))
+
+    def test_day_and_night_are_saved_and_read_back_separately(self):
+        res = self.client.post("/api/production/input/", {
+            "period": self.period.id, "submit": False,
+            "cutting_day": [{"machine": self.line.id, "output_units": "100", "actual_journal": "60"}],
+            "cutting_night": [{"machine": self.line.id, "output_units": "80", "actual_pos": "25"}],
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = {f.shift: f for f in FactProduction.objects.filter(period=self.period)}
+        self.assertEqual(set(rows), {"day", "night"})
+        self.assertEqual(rows["day"].actual_journal, Decimal("60"))
+        self.assertEqual(rows["night"].actual_pos, Decimal("25"))
+
+        got = self.client.get(f"/api/production/input/?period={self.period.id}").data
+        self.assertEqual(got["cutting_day"][0]["output_units"], "100.00")
+        self.assertEqual(got["cutting_night"][0]["output_units"], "80.00")
+
+    def test_two_shifts_count_as_one_line(self):
+        from apps.production.services.kpi import _collect
+
+        for shift in ("day", "night"):
+            FactProduction.objects.create(
+                period=self.period, machine=self.line, shift=shift, output_units=10,
+            )
+        self.assertEqual(_collect(self.period, only_approved=False).machines, 1)

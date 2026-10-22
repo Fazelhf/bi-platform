@@ -137,6 +137,7 @@ def _collect(period: DimPeriod, only_approved: bool) -> Totals:
         rows = rows.filter(status=ApprovalStatus.APPROVED)
 
     t = Totals()
+    cutting_ids: set[int] = set()
     for r in rows:
         # A month recorded week by week has several rows per line: add them.
         m = t.per_machine.get(r.machine_id)
@@ -154,8 +155,9 @@ def _collect(period: DimPeriod, only_approved: bool) -> Totals:
         t.active_shifts += r.active_shifts
         t.repairs += r.repair_count
         t.downtime += r.total_downtime_shifts
-    # Unique cutting machines to avoid double counting across day/night shifts
-    t.machines = len([m_id for m_id in t.per_machine if m_id != getattr(next((m for m in DimMachine.objects.filter(kind=DimMachine.Kind.PRINT)), None), "id", None)])
+        cutting_ids.add(r.machine_id)
+    # Lines, not rows: a day and a night shift are two rows of one line.
+    t.machines = len(cutting_ids)
     return t
 
 

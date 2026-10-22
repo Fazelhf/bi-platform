@@ -8,6 +8,9 @@ import { selectIfZero } from "@/utils/inputs";
 import MoneyInput from "@/components/MoneyInput.vue";
 import ExportActions from "@/components/ExportActions.vue";
 
+type Shift = "day" | "night";
+type Row = Record<string, any>;
+
 const periods = ref<{ id: number; label: string }[]>([]);
 /** The month picked, and within it the week or day تولید records at. */
 const selectedMonth = ref<number | null>(null);
@@ -18,187 +21,109 @@ const data = ref<ProdInput | null>(null);
 const loading = ref(true);
 const saving = ref("");
 
-// Two-shift support: 'day' | 'night' | 'compare'
-const activeShift = ref<"day" | "night" | "compare">("day");
+/**
+ * Only the cutting lines (and the print machine's shift count) are recorded
+ * per shift; costs, print area and roll counts belong to the whole period.
+ * So the shift switch lives on section 1 alone, not on the page.
+ */
+const view = ref<Shift | "compare">("day");
+
+const SHIFT_FA: Record<Shift, string> = { day: "شیفت روز", night: "شیفت شب" };
+
+// Column groups of the cutting sheet. `sub` labels sit under the group.
+const ACTUAL_COLS = [
+  { key: "actual_journal", label: "ژورنال" },
+  { key: "actual_pos", label: "پوز" },
+  { key: "actual_receipt", label: "رسید" },
+];
+const QUALITY_COLS = [
+  { key: "waste_pct", label: "ضایعات ٪" },
+  { key: "repair_count", label: "تعمیری" },
+];
+const DOWNTIME_COLS = [
+  { key: "downtime_breakdown_shifts", label: "خرابی" },
+  { key: "downtime_sizechange_shifts", label: "تغییر سایز" },
+  { key: "downtime_nowork_shifts", label: "ظرفیت خالی" },
+];
+
+/** Costs kept off this form — entered elsewhere (finance), by stable code. */
+const HIDDEN_COSTS = new Set(["cost-rent", "cost-production", "cost-salary"]);
+const visibleCosts = computed(() =>
+  (data.value?.costs ?? []).filter((c) => !HIDDEN_COSTS.has(c.category_code ?? "")),
+);
 
 async function load() {
   if (!selectedPeriod.value) return;
   loading.value = true;
   try {
-    const res = await productionInputApi.get(selectedPeriod.value);
-    if (!res.cutting_day || res.cutting_day.length === 0) {
-      res.cutting_day = JSON.parse(JSON.stringify(res.cutting || []));
-    }
-    if (!res.cutting_night || res.cutting_night.length === 0) {
-      res.cutting_night = (res.cutting_day || []).map((m: any) => ({
-        machine: m.machine,
-        machine_name: m.machine_name,
-        kind: m.kind,
-        shift: "night",
-        active_shifts: "0",
-        output_units: "0",
-        actual_journal: "0",
-        actual_pos: "0",
-        actual_receipt: "0",
-        waste_pct: "0",
-        repair_count: "0",
-        downtime_breakdown_shifts: "0",
-        downtime_sizechange_shifts: "0",
-        downtime_nowork_shifts: "0",
-        status: "draft",
-      }));
-    }
-    if (!res.print_day && res.print) {
-      res.print_day = JSON.parse(JSON.stringify(res.print));
-    }
-    if (!res.print_night && res.print_day) {
-      res.print_night = {
-        ...JSON.parse(JSON.stringify(res.print_day)),
-        shift: "night",
-        active_shifts: "0",
-      };
-    }
-    data.value = res;
+    data.value = await productionInputApi.get(selectedPeriod.value);
   } finally {
     loading.value = false;
   }
 }
 
-const currentPrint = computed(() => {
-  if (!data.value) return null;
-  if (activeShift.value === "night") {
-    return data.value.print_night ?? data.value.print;
-  }
-  return data.value.print_day ?? data.value.print;
-});
-
-// Section 5: Exclude specific costs from Section 2 UI
-const EXCLUDED_COST_NAMES = ["هزینه اجاره", "هزینه تولید", "هزینه حقوق"];
-const visibleCosts = computed(() =>
-  (data.value?.costs ?? []).filter(
-    (c) => !EXCLUDED_COST_NAMES.some((ex) => c.category_name?.trim() === ex || c.category_name?.includes(ex)),
-  ),
-);
-
-function isOtherCost(c: { category_code?: string; category_name?: string }): boolean {
-  return c.category_code === "cost-other" || c.category_name?.trim() === "سایر";
+function rowsOf(shift: Shift): Row[] {
+  return (shift === "night" ? data.value?.cutting_night : data.value?.cutting_day) ?? [];
 }
+const n = (v: unknown) => Number(v) || 0;
+const actualOf = (r: Row) => ACTUAL_COLS.reduce((s, c) => s + n(r[c.key]), 0);
+const sum = (rows: Row[], key: string) => rows.reduce((s, r) => s + n(r[key]), 0);
 
-// Live helpers so managers see totals while they type.
-const totalCost = computed(() =>
-  visibleCosts.value.reduce((s, c) => s + Number(c.amount_rial || 0), 0),
-);
-const printTotal = computed(() =>
-  (data.value?.print_colors ?? []).reduce((s, c) => s + Number(c.area_sqm || 0), 0),
-);
-const revenueTotal = computed(() =>
-  (data.value?.rolls ?? []).reduce(
-    (s, r) => s + Number(r.quantity || 0) * Number(r.piece_rate_rial || 0), 0,
-  ),
-);
-
-// Aggregations per shift
-function sumField(list: Record<string, any>[] | undefined, field: string): number {
-  return (list ?? []).reduce((s, r) => s + (Number(r[field]) || 0), 0);
+function totalsOf(shift: Shift) {
+  const rows = rowsOf(shift);
+  const out: Record<string, number> = { actual: rows.reduce((s, r) => s + actualOf(r), 0) };
+  for (const k of ["active_shifts", "output_units", ...ACTUAL_COLS.map((c) => c.key),
+    ...DOWNTIME_COLS.map((c) => c.key)]) out[k] = sum(rows, k);
+  out.downtime = DOWNTIME_COLS.reduce((s, c) => s + out[c.key], 0);
+  return out;
 }
+const totals = computed(() => ({ day: totalsOf("day"), night: totalsOf("night") }));
 
-const dayTotals = computed(() => {
-  const list = data.value?.cutting_day ?? [];
-  const indexOutput = sumField(list, "output_units");
-  const journal = sumField(list, "actual_journal");
-  const pos = sumField(list, "actual_pos");
-  const receipt = sumField(list, "actual_receipt");
-  const actualTotal = journal + pos + receipt;
-  const activeShifts = sumField(list, "active_shifts");
-  const downtime = sumField(list, "downtime_breakdown_shifts") + sumField(list, "downtime_sizechange_shifts") + sumField(list, "downtime_nowork_shifts");
-  return { indexOutput, journal, pos, receipt, actualTotal, activeShifts, downtime };
-});
+const currentRows = computed(() => (view.value === "compare" ? [] : rowsOf(view.value)));
+const currentTotals = computed(() => totals.value[view.value === "night" ? "night" : "day"]);
 
-const nightTotals = computed(() => {
-  const list = data.value?.cutting_night ?? [];
-  const indexOutput = sumField(list, "output_units");
-  const journal = sumField(list, "actual_journal");
-  const pos = sumField(list, "actual_pos");
-  const receipt = sumField(list, "actual_receipt");
-  const actualTotal = journal + pos + receipt;
-  const activeShifts = sumField(list, "active_shifts");
-  const downtime = sumField(list, "downtime_breakdown_shifts") + sumField(list, "downtime_sizechange_shifts") + sumField(list, "downtime_nowork_shifts");
-  return { indexOutput, journal, pos, receipt, actualTotal, activeShifts, downtime };
-});
-
-const combinedTotals = computed(() => ({
-  indexOutput: dayTotals.value.indexOutput + nightTotals.value.indexOutput,
-  journal: dayTotals.value.journal + nightTotals.value.journal,
-  pos: dayTotals.value.pos + nightTotals.value.pos,
-  receipt: dayTotals.value.receipt + nightTotals.value.receipt,
-  actualTotal: dayTotals.value.actualTotal + nightTotals.value.actualTotal,
-  activeShifts: dayTotals.value.activeShifts + nightTotals.value.activeShifts,
-  downtime: dayTotals.value.downtime + nightTotals.value.downtime,
-}));
-
-// Current cutting list to show in single-shift edit mode
-const currentCuttingRows = computed(() => {
-  if (!data.value) return [];
-  return activeShift.value === "night" ? data.value.cutting_night ?? [] : data.value.cutting_day ?? [];
-});
-
-// Comparison rows for both shifts side-by-side
 const comparisonRows = computed(() => {
-  if (!data.value) return [];
-  const days = data.value.cutting_day ?? [];
-  const nights = data.value.cutting_night ?? [];
-  return days.map((dayRow, i) => {
-    const nightRow = nights[i] || {};
-    const dayActual = (Number(dayRow.actual_journal) || 0) + (Number(dayRow.actual_pos) || 0) + (Number(dayRow.actual_receipt) || 0);
-    const nightActual = (Number(nightRow.actual_journal) || 0) + (Number(nightRow.actual_pos) || 0) + (Number(nightRow.actual_receipt) || 0);
+  const nights = rowsOf("night");
+  return rowsOf("day").map((d) => {
+    const nr = nights.find((r) => r.machine === d.machine) ?? {};
+    const downtime = (r: Row) => DOWNTIME_COLS.reduce((s, c) => s + n(r[c.key]), 0);
     return {
-      machine_name: dayRow.machine_name,
-      day_index: Number(dayRow.output_units) || 0,
-      night_index: Number(nightRow.output_units) || 0,
-      total_index: (Number(dayRow.output_units) || 0) + (Number(nightRow.output_units) || 0),
-      day_actual: dayActual,
-      night_actual: nightActual,
-      total_actual: dayActual + nightActual,
-      day_journal: Number(dayRow.actual_journal) || 0,
-      night_journal: Number(nightRow.actual_journal) || 0,
-      day_pos: Number(dayRow.actual_pos) || 0,
-      night_pos: Number(nightRow.actual_pos) || 0,
-      day_receipt: Number(dayRow.actual_receipt) || 0,
-      night_receipt: Number(nightRow.actual_receipt) || 0,
-      day_shifts: Number(dayRow.active_shifts) || 0,
-      night_shifts: Number(nightRow.active_shifts) || 0,
+      machine: d.machine,
+      name: d.machine_name,
+      index: [n(d.output_units), n(nr.output_units)],
+      actual: [actualOf(d), actualOf(nr)],
+      downtime: [downtime(d), downtime(nr)],
     };
   });
 });
 
 const COLOR_FA: Record<number, string> = { 1: "تک‌رنگ", 2: "دو‌رنگ", 3: "سه‌رنگ", 4: "چهار‌رنگ" };
 
-function buildPayload(submit: boolean) {
-  const d = data.value!;
-  const cuttingDay = d.cutting_day ?? [];
-  const cuttingNight = d.cutting_night ?? [];
-  const printDay = d.print_day ?? d.print;
-  const printNight = d.print_night;
-  return {
-    period: selectedPeriod.value,
-    submit,
-    total_headcount: d.benchmark.total_headcount,
-    cutting: [...cuttingDay, ...cuttingNight],
-    cutting_day: cuttingDay,
-    cutting_night: cuttingNight,
-    print: currentPrint.value ?? d.print,
-    print_day: printDay,
-    print_night: printNight,
-    print_colors: d.print_colors,
-    costs: d.costs,
-    rolls: d.rolls,
-  };
-}
+// Live helpers so managers see totals while they type.
+const totalCost = computed(() => visibleCosts.value.reduce((s, c) => s + n(c.amount_rial), 0));
+const printTotal = computed(() =>
+  (data.value?.print_colors ?? []).reduce((s, c) => s + n(c.area_sqm), 0),
+);
+const revenueTotal = computed(() =>
+  (data.value?.rolls ?? []).reduce((s, r) => s + n(r.quantity) * n(r.piece_rate_rial), 0),
+);
 
 async function save(submit: boolean) {
+  const d = data.value!;
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
   try {
-    await productionInputApi.save(buildPayload(submit));
+    await productionInputApi.save({
+      period: selectedPeriod.value,
+      submit,
+      total_headcount: d.benchmark.total_headcount,
+      cutting_day: d.cutting_day ?? [],
+      cutting_night: d.cutting_night ?? [],
+      print_day: d.print_day ?? null,
+      print_night: d.print_night ?? null,
+      print_colors: d.print_colors,
+      costs: d.costs,
+      rolls: d.rolls,
+    });
     saving.value = submit ? `${submittedMessage()} ✓` : "ذخیره شد ✓";
     if (submit) await load();
   } catch (e: any) {
@@ -223,6 +148,7 @@ async function loadUnits() {
       (w.day_periods ?? []).map((d) => ({ id: d.id, label: d.label })),
     );
   }
+  // Open on the first week/day of the month.
   selectedPeriod.value = units.value[0]?.id ?? null;
 }
 
@@ -234,6 +160,11 @@ onMounted(async () => {
 });
 watch(selectedMonth, loadUnits);
 watch(selectedPeriod, load);
+
+const INPUT =
+  "w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition";
+const FIELD =
+  "w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none transition";
 </script>
 
 <template>
@@ -243,11 +174,11 @@ watch(selectedPeriod, load);
       <div>
         <h2 class="text-lg font-bold text-ink">ورود اطلاعات تولید</h2>
         <p class="text-xs text-slate-400 mt-0.5">
-          اطلاعات شیفت روز و شیفت شب را جداگانه ثبت کنید؛ شاخص‌ها پس از تأیید مدیر محاسبه می‌شوند.
+          خطوط برش را برای شیفت روز و شب جداگانه پر کنید؛ شاخص‌ها پس از تأیید مدیر تولید محاسبه می‌شوند.
         </p>
       </div>
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="text-sm font-medium" :class="saving.startsWith('خطا') ? 'text-red-500' : 'text-accent-600'">{{ saving }}</span>
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-sm" :class="saving.startsWith('خطا') ? 'text-red-500' : 'text-accent-600'">{{ saving }}</span>
         <ExportActions :excel="false" />
         <select v-model.number="selectedMonth" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
@@ -263,632 +194,273 @@ watch(selectedPeriod, load);
       </div>
     </div>
 
-    <div v-if="loading || !data" class="text-slate-400 py-12 text-center">در حال بارگذاری…</div>
+    <div v-if="loading || !data" class="text-slate-400">در حال بارگذاری…</div>
 
     <template v-else>
-      <!-- Global Shift Control Bar (Applies to all entered data) -->
-      <div
-        class="rounded-card p-4 transition-all duration-300 border shadow-soft flex items-center justify-between flex-wrap gap-4"
-        :class="activeShift === 'night'
-          ? 'bg-slate-900 text-slate-100 border-slate-800 shadow-pop'
-          : 'bg-surface text-ink border-slate-200'"
-      >
-        <div class="flex items-center gap-3">
-          <div
-            class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm transition-colors"
-            :class="activeShift === 'night' ? 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30' : 'bg-slate-100 text-slate-700 border border-slate-200'"
-          >
-            <svg v-if="activeShift === 'day'" class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-            </svg>
-            <svg v-else-if="activeShift === 'night'" class="w-5 h-5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-            <svg v-else class="w-5 h-5 text-slate-600 dark:text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
-            </svg>
-          </div>
-          <div>
-            <div class="text-xs text-slate-400">شیفت کاری فعال فرم ورود اطلاعات</div>
-            <div class="text-sm font-bold" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">
-              {{ activeShift === 'day' ? 'شیفت روز (Day Shift)' : activeShift === 'night' ? 'شیفت شب (Night Shift)' : 'مقایسه جامع دو شیفت کاری' }}
-            </div>
-          </div>
-        </div>
-
-        <!-- Shift Selector Buttons -->
-        <div
-          class="flex items-center gap-1.5 p-1 rounded-xl transition-colors"
-          :class="activeShift === 'night' ? 'bg-slate-800 border border-slate-700' : 'bg-slate-100 border border-slate-200'"
-        >
-          <button
-            type="button"
-            class="px-4 py-2 rounded-lg text-sm transition-all font-semibold flex items-center gap-2"
-            :class="activeShift === 'day'
-              ? 'bg-white text-ink shadow-sm'
-              : (activeShift === 'night' ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-ink')"
-            @click="activeShift = 'day'"
-          >
-            <span class="w-2 h-2 rounded-full" :class="activeShift === 'day' ? 'bg-amber-500' : 'bg-transparent'"></span>
-            شیفت روز
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 rounded-lg text-sm transition-all font-semibold flex items-center gap-2"
-            :class="activeShift === 'night'
-              ? 'bg-indigo-600 text-white shadow-sm'
-              : 'text-slate-600 hover:text-ink'"
-            @click="activeShift = 'night'"
-          >
-            <span class="w-2 h-2 rounded-full" :class="activeShift === 'night' ? 'bg-white' : 'bg-transparent'"></span>
-            شیفت شب
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 rounded-lg text-sm transition-all font-semibold flex items-center gap-2"
-            :class="activeShift === 'compare'
-              ? 'bg-panel text-white shadow-sm'
-              : (activeShift === 'night' ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-ink')"
-            @click="activeShift = 'compare'"
-          >
-            مقایسه دو شیفت
-          </button>
-        </div>
-      </div>
-
-      <!-- Formal Live Summary Strip -->
-      <div
-        class="flex items-center justify-between flex-wrap gap-3 py-2.5 px-4 rounded-xl text-xs border transition-colors duration-300"
-        :class="activeShift === 'night'
-          ? 'bg-slate-900 border-slate-800 text-slate-300'
-          : 'bg-surface border-slate-200 text-slate-600 shadow-soft'"
-      >
-        <div class="flex items-center gap-2">
-          <span class="text-slate-400">وضعیت شیفت جاری:</span>
-          <span class="font-bold" :class="activeShift === 'night' ? 'text-indigo-400' : 'text-ink'">
-            {{ activeShift === 'day' ? 'شیفت روز' : activeShift === 'night' ? 'شیفت شب' : 'مجموع روز + شب' }}
-          </span>
-        </div>
-        <div class="flex items-center gap-6 flex-wrap text-xs">
-          <div>
-            <span class="ml-1 text-slate-400">تولید (شاخص):</span>
-            <strong class="font-bold ltr-nums" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">
-              {{ num(activeShift === 'day' ? dayTotals.indexOutput : activeShift === 'night' ? nightTotals.indexOutput : combinedTotals.indexOutput) }}
-            </strong>
-          </div>
-          <div>
-            <span class="ml-1 text-slate-400">تولید واقعی:</span>
-            <strong class="font-bold ltr-nums" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">
-              {{ num(activeShift === 'day' ? dayTotals.actualTotal : activeShift === 'night' ? nightTotals.actualTotal : combinedTotals.actualTotal) }}
-            </strong>
-          </div>
-          <div>
-            <span class="ml-1 text-slate-400">شیفت فعال:</span>
-            <strong class="font-bold ltr-nums" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">
-              {{ num(activeShift === 'day' ? dayTotals.activeShifts : activeShift === 'night' ? nightTotals.activeShifts : combinedTotals.activeShifts) }}
-            </strong>
-          </div>
-          <div>
-            <span class="ml-1 text-slate-400">مجموع توقفات:</span>
-            <strong class="font-bold ltr-nums" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">
-              {{ num(activeShift === 'day' ? dayTotals.downtime : activeShift === 'night' ? nightTotals.downtime : combinedTotals.downtime) }}
-            </strong>
-          </div>
-        </div>
-      </div>
-
-      <!-- Section 1: Cutting lines -->
+      <!-- Table 1: cutting lines, per shift. The night shift wears the app's
+           own dark theme: `.dark` on this section alone flips every colour
+           token inside it, so it follows the skin instead of fixed hexes. -->
       <section
-        class="rounded-card shadow-soft p-5 transition-all duration-300"
-        :class="activeShift === 'night'
-          ? 'bg-slate-900 text-slate-100 border border-slate-800 shadow-pop'
-          : 'bg-surface text-ink border border-slate-100 dark:border-slate-800'"
+        class="bg-surface text-ink rounded-card shadow-soft p-5 transition-colors duration-300"
+        :class="{ dark: view === 'night' }"
       >
-        <!-- Section Header -->
-        <div class="flex items-center gap-2 mb-4">
-          <span
-            class="w-7 h-7 rounded-lg text-xs flex items-center justify-center font-bold transition-colors"
-            :class="activeShift === 'night' ? 'bg-indigo-600 text-white' : 'bg-panel text-white'"
-          >۱</span>
-          <div>
-            <h3 class="font-bold transition-colors" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">خطوط برش</h3>
-            <p class="text-xs transition-colors" :class="activeShift === 'night' ? 'text-slate-400' : 'text-slate-400'">
-              {{ activeShift === 'compare' ? 'مقایسه عملکرد شیفت روز و شب خطوط برش' : `ورود داده‌های خطوط برش (${activeShift === 'night' ? 'شیفت شب' : 'شیفت روز'})` }}
-            </p>
+        <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <div class="flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۱</span>
+            <h3 class="font-bold text-ink">خطوط برش</h3>
+            <span
+              v-if="view !== 'compare'"
+              class="text-xs font-medium rounded-full px-2.5 py-0.5"
+              :class="view === 'night' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-amber-500/10 text-amber-600'"
+            >{{ SHIFT_FA[view] }}</span>
+          </div>
+
+          <!-- Shift switch: each tab carries its shift's actual total, so a
+               shift left empty is visible before switching to it. -->
+          <div class="flex items-center gap-1 p-1 rounded-xl bg-slate-100" role="tablist">
+            <button
+              v-for="s in (['day', 'night'] as Shift[])"
+              :key="s"
+              type="button"
+              role="tab"
+              :aria-selected="view === s"
+              class="px-3 py-1.5 rounded-lg text-sm transition flex items-center gap-2"
+              :class="view === s ? 'bg-surface text-ink shadow-soft font-semibold' : 'text-slate-500 hover:text-ink'"
+              @click="view = s"
+            >
+              <span class="w-2 h-2 rounded-full" :class="s === 'night' ? 'bg-indigo-500' : 'bg-amber-500'"></span>
+              {{ SHIFT_FA[s] }}
+              <span class="text-xs text-slate-400 ltr-nums">{{ num(totals[s].actual) }}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="view === 'compare'"
+              class="px-3 py-1.5 rounded-lg text-sm transition"
+              :class="view === 'compare' ? 'bg-surface text-ink shadow-soft font-semibold' : 'text-slate-500 hover:text-ink'"
+              @click="view = 'compare'"
+            >
+              مقایسه روز و شب
+            </button>
           </div>
         </div>
 
-        <!-- Table View: Day or Night Shift (Editing Mode) -->
-        <div v-if="activeShift !== 'compare'" class="overflow-x-auto">
-          <table v-entry-table class="w-full text-sm min-w-[950px]">
+        <!-- Entry sheet for one shift -->
+        <div v-if="view !== 'compare'" class="overflow-x-auto">
+          <table v-entry-table class="w-full text-sm min-w-[900px]">
             <thead>
-              <tr
-                class="border-b text-xs font-medium"
-                :class="activeShift === 'night' ? 'text-slate-400 border-slate-800' : 'text-slate-400 border-slate-100'"
-              >
-                <th
-                  class="text-right font-medium py-2.5 pr-2 whitespace-nowrap"
-                  :style="activeShift === 'night' ? { backgroundColor: '#0f172a' } : {}"
-                >خط تولید</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">شیفت فعال</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">تولید (شاخص)</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">واقعی: ژورنال</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">واقعی: پوز</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">واقعی: رسید</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">جمع تولید واقعی</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">ضایعات ٪</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">تعمیری</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">خواب (خرابی)</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">خواب (تغییر سایز)</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">خواب (ظرفیت خالی)</th>
+              <tr class="text-xs text-slate-400">
+                <th></th>
+                <th></th>
+                <th></th>
+                <th :colspan="ACTUAL_COLS.length + 1" class="font-semibold text-accent-600 pt-1 pb-1.5 border-b-2 border-accent-500/40 bg-accent-50/60 rounded-t-lg">
+                  تولید واقعی
+                </th>
+                <th :colspan="QUALITY_COLS.length" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">کیفیت</th>
+                <th :colspan="DOWNTIME_COLS.length" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">خواب (شیفت)</th>
+              </tr>
+              <tr class="text-slate-400 border-b border-slate-100 text-xs">
+                <th class="text-right font-medium py-2 pr-2">خط تولید</th>
+                <th class="font-medium py-2 px-1.5 text-center">شیفت فعال</th>
+                <th class="font-medium py-2 px-1.5 text-center border-l border-slate-100">تولید (شاخص)</th>
+                <th v-for="c in ACTUAL_COLS" :key="c.key" class="font-medium py-2 px-1.5 text-center bg-accent-50/60">
+                  <span class="sr-only">تولید واقعی — </span>{{ c.label }}
+                </th>
+                <th class="font-medium py-2 px-1.5 text-center bg-accent-50/60 border-l border-slate-100">
+                  <span class="sr-only">تولید واقعی — </span>جمع
+                </th>
+                <th v-for="c in QUALITY_COLS" :key="c.key" class="font-medium py-2 px-1.5 text-center">{{ c.label }}</th>
+                <th v-for="(c, i) in DOWNTIME_COLS" :key="c.key" class="font-medium py-2 px-1.5 text-center" :class="i === 0 ? 'border-r border-slate-100' : ''">
+                  <span class="sr-only">خواب — </span>{{ c.label }}
+                </th>
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-for="m in currentCuttingRows"
-                :key="m.machine"
-                class="border-b transition-colors"
-                :class="activeShift === 'night'
-                  ? 'border-slate-800/80 hover:bg-slate-800/50'
-                  : 'border-slate-50 hover:bg-slate-50/50'"
-              >
-                <!-- Machine name -->
-                <td
-                  class="py-2 pr-2 font-medium whitespace-nowrap transition-colors"
-                  :class="activeShift === 'night' ? 'text-slate-200' : 'text-ink'"
-                  :style="activeShift === 'night' ? { backgroundColor: '#0f172a' } : {}"
-                >
-                  {{ m.machine_name }}
-                </td>
-
-                <!-- Active shifts -->
+              <tr v-for="m in currentRows" :key="m.machine" class="border-b border-slate-50">
+                <td class="py-2 pr-2 font-medium whitespace-nowrap">{{ m.machine_name }}</td>
                 <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.active_shifts"
-                    type="number" step="any"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
+                  <input v-model="m.active_shifts" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                 </td>
-
-                <!-- Index Output (تولید شاخص) -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.output_units"
-                    type="number" step="any"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums font-semibold outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
+                <td class="py-1.5 px-1 border-l border-slate-100">
+                  <input v-model="m.output_units" type="number" step="any" :class="[INPUT, 'font-semibold']" @focus="selectIfZero" />
                 </td>
-
-                <!-- Actual Production: Journal -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.actual_journal"
-                    type="number" step="any"
-                    placeholder="۰"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
+                <td v-for="c in ACTUAL_COLS" :key="c.key" class="py-1.5 px-1 bg-accent-50/40">
+                  <input v-model="m[c.key]" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                 </td>
-
-                <!-- Actual Production: POS -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.actual_pos"
-                    type="number" step="any"
-                    placeholder="۰"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
+                <td class="sum-cell py-1.5 px-2 text-center font-bold text-ink ltr-nums bg-accent-50/40 border-l border-slate-100">
+                  {{ num(actualOf(m)) }}
                 </td>
-
-                <!-- Actual Production: Receipt -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.actual_receipt"
-                    type="number" step="any"
-                    placeholder="۰"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
+                <td v-for="c in QUALITY_COLS" :key="c.key" class="py-1.5 px-1">
+                  <input v-model="m[c.key]" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                 </td>
-
-                <!-- Calculated Total Actual -->
-                <td
-                  class="py-1.5 px-2 text-center font-bold ltr-nums whitespace-nowrap rounded-lg"
-                  :class="activeShift === 'night'
-                    ? 'bg-slate-800/70 text-emerald-400'
-                    : 'bg-slate-50/60 text-ink'"
-                >
-                  {{ num((Number(m.actual_journal) || 0) + (Number(m.actual_pos) || 0) + (Number(m.actual_receipt) || 0)) }}
-                </td>
-
-                <!-- Quality: Waste % -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.waste_pct"
-                    type="number" step="any"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
-                </td>
-
-                <!-- Quality: Repairs -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.repair_count"
-                    type="number" step="any"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
-                </td>
-
-                <!-- Downtime: Breakdown -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.downtime_breakdown_shifts"
-                    type="number" step="any"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
-                </td>
-
-                <!-- Downtime: Size change -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.downtime_sizechange_shifts"
-                    type="number" step="any"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
-                </td>
-
-                <!-- Downtime: Capacity (formerly no-order) -->
-                <td class="py-1.5 px-1">
-                  <input
-                    v-model="m.downtime_nowork_shifts"
-                    type="number" step="any"
-                    class="w-full rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                    :class="activeShift === 'night'
-                      ? 'bg-slate-800/90 text-white border border-slate-700/70 focus:bg-slate-800 focus:border-indigo-500'
-                      : 'bg-slate-50 text-ink focus:bg-surface border border-transparent focus:border-accent-500'"
-                    @focus="selectIfZero"
-                  />
+                <td v-for="(c, i) in DOWNTIME_COLS" :key="c.key" class="py-1.5 px-1" :class="i === 0 ? 'border-r border-slate-100' : ''">
+                  <input v-model="m[c.key]" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                 </td>
               </tr>
             </tbody>
-            <!-- Footer Totals -->
             <tfoot>
-              <tr
-                class="border-t text-xs font-semibold"
-                :class="activeShift === 'night'
-                  ? 'border-slate-800 text-slate-300'
-                  : 'border-slate-200 text-slate-600'"
-              >
-                <td
-                  class="py-2.5 pr-2"
-                  :style="activeShift === 'night' ? { backgroundColor: '#0f172a' } : {}"
-                >جمع کل</td>
-                <td class="py-2.5 text-center ltr-nums" :class="activeShift === 'night' ? 'text-white' : ''">
-                  {{ num(activeShift === 'day' ? dayTotals.activeShifts : nightTotals.activeShifts) }}
-                </td>
-                <td class="py-2.5 text-center ltr-nums font-bold" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">
-                  {{ num(activeShift === 'day' ? dayTotals.indexOutput : nightTotals.indexOutput) }}
-                </td>
-                <td class="py-2.5 text-center ltr-nums" :class="activeShift === 'night' ? 'text-white' : ''">
-                  {{ num(activeShift === 'day' ? dayTotals.journal : nightTotals.journal) }}
-                </td>
-                <td class="py-2.5 text-center ltr-nums" :class="activeShift === 'night' ? 'text-white' : ''">
-                  {{ num(activeShift === 'day' ? dayTotals.pos : nightTotals.pos) }}
-                </td>
-                <td class="py-2.5 text-center ltr-nums" :class="activeShift === 'night' ? 'text-white' : ''">
-                  {{ num(activeShift === 'day' ? dayTotals.receipt : nightTotals.receipt) }}
-                </td>
-                <td class="py-2.5 text-center ltr-nums font-bold" :class="activeShift === 'night' ? 'text-emerald-400' : 'text-ink'">
-                  {{ num(activeShift === 'day' ? dayTotals.actualTotal : nightTotals.actualTotal) }}
-                </td>
-                <td class="py-2.5 text-center text-slate-400">—</td>
-                <td class="py-2.5 text-center text-slate-400">—</td>
-                <td class="py-2.5 text-center ltr-nums" :class="activeShift === 'night' ? 'text-white' : ''">
-                  {{ num(activeShift === 'day' ? sumField(data?.cutting_day, 'downtime_breakdown_shifts') : sumField(data?.cutting_night, 'downtime_breakdown_shifts')) }}
-                </td>
-                <td class="py-2.5 text-center ltr-nums" :class="activeShift === 'night' ? 'text-white' : ''">
-                  {{ num(activeShift === 'day' ? sumField(data?.cutting_day, 'downtime_sizechange_shifts') : sumField(data?.cutting_night, 'downtime_sizechange_shifts')) }}
-                </td>
-                <td class="py-2.5 text-center ltr-nums" :class="activeShift === 'night' ? 'text-white' : ''">
-                  {{ num(activeShift === 'day' ? sumField(data?.cutting_day, 'downtime_nowork_shifts') : sumField(data?.cutting_night, 'downtime_nowork_shifts')) }}
-                </td>
+              <tr class="text-xs font-semibold text-slate-500">
+                <td class="py-2.5 pr-2 whitespace-nowrap">جمع {{ SHIFT_FA[view] }}</td>
+                <td class="py-2.5 text-center ltr-nums">{{ num(currentTotals.active_shifts) }}</td>
+                <td class="py-2.5 text-center ltr-nums text-ink">{{ num(currentTotals.output_units) }}</td>
+                <td v-for="c in ACTUAL_COLS" :key="c.key" class="py-2.5 text-center ltr-nums">{{ num(currentTotals[c.key]) }}</td>
+                <td class="py-2.5 text-center ltr-nums text-accent-600 font-bold">{{ num(currentTotals.actual) }}</td>
+                <td v-for="c in QUALITY_COLS" :key="c.key" class="py-2.5 text-center text-slate-300">—</td>
+                <td v-for="c in DOWNTIME_COLS" :key="c.key" class="py-2.5 text-center ltr-nums">{{ num(currentTotals[c.key]) }}</td>
               </tr>
             </tfoot>
           </table>
         </div>
 
-        <!-- Comparison Table: Day vs Night Shift -->
+        <!-- Day vs night, read-only -->
         <div v-else class="overflow-x-auto">
-          <table v-entry-table class="w-full text-sm min-w-[1000px]">
+          <table class="w-full text-sm min-w-[720px]">
             <thead>
-              <tr class="text-slate-400 border-b border-slate-100 dark:border-slate-800 text-xs">
-                <th class="text-right font-medium py-2.5 pr-2 whitespace-nowrap">خط تولید</th>
-                <th class="text-center font-medium py-2.5 px-2 whitespace-nowrap">شاخص: روز</th>
-                <th class="text-center font-medium py-2.5 px-2 whitespace-nowrap bg-slate-100/60 dark:bg-slate-800/40">شاخص: شب</th>
-                <th class="text-center font-medium py-2.5 px-2 whitespace-nowrap">مجموع شاخص</th>
-                <th class="text-center font-medium py-2.5 px-2 whitespace-nowrap">واقعی: روز</th>
-                <th class="text-center font-medium py-2.5 px-2 whitespace-nowrap bg-slate-100/60 dark:bg-slate-800/40">واقعی: شب</th>
-                <th class="text-center font-medium py-2.5 px-2 whitespace-nowrap">مجموع واقعی</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">روز: ژورنال</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">روز: پوز</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap">روز: رسید</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap bg-slate-100/60 dark:bg-slate-800/40">شب: ژورنال</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap bg-slate-100/60 dark:bg-slate-800/40">شب: پوز</th>
-                <th class="text-center font-medium py-2.5 px-1.5 whitespace-nowrap bg-slate-100/60 dark:bg-slate-800/40">شب: رسید</th>
+              <tr class="text-xs text-slate-400">
+                <th></th>
+                <th colspan="3" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">تولید (شاخص)</th>
+                <th colspan="3" class="font-semibold text-accent-600 pt-1 pb-1.5 border-b-2 border-accent-500/40 bg-accent-50/60">تولید واقعی</th>
+                <th colspan="2" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">خواب (شیفت)</th>
+              </tr>
+              <tr class="text-slate-400 border-b border-slate-100 text-xs">
+                <th class="text-right font-medium py-2 pr-2">خط تولید</th>
+                <template v-for="g in ['index', 'actual']" :key="g">
+                  <th class="font-medium py-2 px-2 text-center" :class="g === 'actual' ? 'bg-accent-50/60' : ''">روز</th>
+                  <th class="font-medium py-2 px-2 text-center" :class="g === 'actual' ? 'bg-accent-50/60' : ''">شب</th>
+                  <th class="font-medium py-2 px-2 text-center border-l border-slate-100" :class="g === 'actual' ? 'bg-accent-50/60' : ''">جمع</th>
+                </template>
+                <th class="font-medium py-2 px-2 text-center">روز</th>
+                <th class="font-medium py-2 px-2 text-center">شب</th>
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-for="row in comparisonRows"
-                :key="row.machine_name"
-                class="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors"
-              >
-                <td class="py-2.5 pr-2 font-medium text-ink whitespace-nowrap">{{ row.machine_name }}</td>
-                <!-- Index Output -->
-                <td class="py-2 px-2 text-center ltr-nums text-slate-600 dark:text-slate-400">{{ num(row.day_index) }}</td>
-                <td class="py-2 px-2 text-center ltr-nums text-slate-600 dark:text-slate-300 bg-slate-100/40 dark:bg-slate-800/30">{{ num(row.night_index) }}</td>
-                <td class="py-2 px-2 text-center ltr-nums font-bold text-ink bg-slate-50/40 dark:bg-slate-800/50 rounded">{{ num(row.total_index) }}</td>
-                <!-- Actual Output -->
-                <td class="py-2 px-2 text-center ltr-nums text-slate-600 dark:text-slate-400">{{ num(row.day_actual) }}</td>
-                <td class="py-2 px-2 text-center ltr-nums text-slate-600 dark:text-slate-300 bg-slate-100/40 dark:bg-slate-800/30">{{ num(row.night_actual) }}</td>
-                <td class="py-2 px-2 text-center ltr-nums font-bold text-ink bg-slate-50/40 dark:bg-slate-800/50 rounded">{{ num(row.total_actual) }}</td>
-                <!-- Day Breakdown -->
-                <td class="py-2 px-1.5 text-center ltr-nums text-slate-500 dark:text-slate-400">{{ num(row.day_journal) }}</td>
-                <td class="py-2 px-1.5 text-center ltr-nums text-slate-500 dark:text-slate-400">{{ num(row.day_pos) }}</td>
-                <td class="py-2 px-1.5 text-center ltr-nums text-slate-500 dark:text-slate-400">{{ num(row.day_receipt) }}</td>
-                <!-- Night Breakdown -->
-                <td class="py-2 px-1.5 text-center ltr-nums text-slate-500 dark:text-slate-300 bg-slate-100/40 dark:bg-slate-800/30">{{ num(row.night_journal) }}</td>
-                <td class="py-2 px-1.5 text-center ltr-nums text-slate-500 dark:text-slate-300 bg-slate-100/40 dark:bg-slate-800/30">{{ num(row.night_pos) }}</td>
-                <td class="py-2 px-1.5 text-center ltr-nums text-slate-500 dark:text-slate-300 bg-slate-100/40 dark:bg-slate-800/30">{{ num(row.night_receipt) }}</td>
+              <tr v-for="r in comparisonRows" :key="r.machine" class="border-b border-slate-50">
+                <td class="py-2.5 pr-2 font-medium text-ink whitespace-nowrap">{{ r.name }}</td>
+                <template v-for="g in (['index', 'actual'] as const)" :key="g">
+                  <td class="py-2 px-2 text-center ltr-nums text-slate-600" :class="g === 'actual' ? 'bg-accent-50/40' : ''">{{ num(r[g][0]) }}</td>
+                  <td class="py-2 px-2 text-center ltr-nums text-slate-600" :class="g === 'actual' ? 'bg-accent-50/40' : ''">{{ num(r[g][1]) }}</td>
+                  <td class="py-2 px-2 text-center ltr-nums font-bold text-ink border-l border-slate-100" :class="g === 'actual' ? 'bg-accent-50/40' : ''">{{ num(r[g][0] + r[g][1]) }}</td>
+                </template>
+                <td class="py-2 px-2 text-center ltr-nums text-slate-600">{{ num(r.downtime[0]) }}</td>
+                <td class="py-2 px-2 text-center ltr-nums text-slate-600">{{ num(r.downtime[1]) }}</td>
               </tr>
             </tbody>
             <tfoot>
-              <tr class="border-t border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                <td class="py-3 pr-2">مجموع کارخانه</td>
-                <td class="py-3 text-center ltr-nums">{{ num(dayTotals.indexOutput) }}</td>
-                <td class="py-3 text-center ltr-nums bg-slate-100/40 dark:bg-slate-800/30">{{ num(nightTotals.indexOutput) }}</td>
-                <td class="py-3 text-center ltr-nums font-bold text-ink bg-slate-50/60 dark:bg-slate-800/60">{{ num(combinedTotals.indexOutput) }}</td>
-                <td class="py-3 text-center ltr-nums">{{ num(dayTotals.actualTotal) }}</td>
-                <td class="py-3 text-center ltr-nums bg-slate-100/40 dark:bg-slate-800/30">{{ num(nightTotals.actualTotal) }}</td>
-                <td class="py-3 text-center ltr-nums font-bold text-ink bg-slate-50/60 dark:bg-slate-800/60">{{ num(combinedTotals.actualTotal) }}</td>
-                <td class="py-3 text-center ltr-nums">{{ num(dayTotals.journal) }}</td>
-                <td class="py-3 text-center ltr-nums">{{ num(dayTotals.pos) }}</td>
-                <td class="py-3 text-center ltr-nums">{{ num(dayTotals.receipt) }}</td>
-                <td class="py-3 text-center ltr-nums bg-slate-100/40 dark:bg-slate-800/30">{{ num(nightTotals.journal) }}</td>
-                <td class="py-3 text-center ltr-nums bg-slate-100/40 dark:bg-slate-800/30">{{ num(nightTotals.pos) }}</td>
-                <td class="py-3 text-center ltr-nums bg-slate-100/40 dark:bg-slate-800/30">{{ num(nightTotals.receipt) }}</td>
+              <tr class="text-xs font-semibold text-slate-600">
+                <td class="py-3 pr-2">جمع کارخانه</td>
+                <td class="py-3 text-center ltr-nums">{{ num(totals.day.output_units) }}</td>
+                <td class="py-3 text-center ltr-nums">{{ num(totals.night.output_units) }}</td>
+                <td class="py-3 text-center ltr-nums font-bold text-ink border-l border-slate-100">{{ num(totals.day.output_units + totals.night.output_units) }}</td>
+                <td class="py-3 text-center ltr-nums">{{ num(totals.day.actual) }}</td>
+                <td class="py-3 text-center ltr-nums">{{ num(totals.night.actual) }}</td>
+                <td class="py-3 text-center ltr-nums font-bold text-accent-600 border-l border-slate-100">{{ num(totals.day.actual + totals.night.actual) }}</td>
+                <td class="py-3 text-center ltr-nums">{{ num(totals.day.downtime) }}</td>
+                <td class="py-3 text-center ltr-nums">{{ num(totals.night.downtime) }}</td>
               </tr>
             </tfoot>
           </table>
         </div>
       </section>
 
-      <!-- Section 2: Resources & Costs -->
-      <section
-        class="rounded-card p-5 transition-all duration-300 border shadow-soft"
-        :class="activeShift === 'night'
-          ? 'bg-slate-900 text-slate-100 border-slate-800 shadow-pop'
-          : 'bg-surface text-ink border-slate-100'"
-      >
+      <!-- Table 2: resources & costs (whole period) -->
+      <section class="bg-surface rounded-card shadow-soft p-5">
         <div class="flex items-center gap-2 mb-4">
-          <span
-            class="w-7 h-7 rounded-lg text-xs flex items-center justify-center font-bold transition-colors"
-            :class="activeShift === 'night' ? 'bg-indigo-600 text-white' : 'bg-panel text-white'"
-          >۲</span>
-          <div>
-            <h3 class="font-bold transition-colors" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">منابع و هزینه‌ها</h3>
-            <p class="text-xs transition-colors" :class="activeShift === 'night' ? 'text-slate-400' : 'text-slate-400'">
-              ثبت هزینه‌های عملیاتی و تعداد نفرروز ({{ activeShift === 'night' ? 'شیفت شب' : 'شیفت روز' }})
-            </p>
-          </div>
+          <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۲</span>
+          <h3 class="font-bold text-ink">منابع و هزینه‌ها</h3>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
           <label class="flex items-center justify-between gap-3">
-            <span class="text-sm transition-colors" :class="activeShift === 'night' ? 'text-slate-300' : 'text-slate-600'">تعداد کل نیروی انسانی (نفرروز)</span>
-            <input
-              v-model.number="data.benchmark.total_headcount"
-              type="number"
-              class="w-40 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none transition"
-              :class="activeShift === 'night'
-                ? 'bg-slate-800 text-white border border-slate-700 focus:border-indigo-500'
-                : 'bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 text-ink'"
-              @focus="selectIfZero"
-            />
+            <span class="text-sm text-slate-600">تعداد کل نیروی انسانی (نفرروز)</span>
+            <input v-model.number="data.benchmark.total_headcount" type="number" :class="FIELD" @focus="selectIfZero" />
           </label>
-          <!-- Display only visible costs (rent, production, salary excluded) -->
           <template v-for="c in visibleCosts" :key="c.category">
-            <div class="space-y-1.5" :class="isOtherCost(c) ? 'md:col-span-2' : ''">
-              <label class="flex items-center justify-between gap-3">
-                <span class="text-sm transition-colors" :class="activeShift === 'night' ? 'text-slate-300' : 'text-slate-600'">{{ c.category_name }}</span>
-                <MoneyInput
-                  v-model="c.amount_rial"
-                  class="w-40 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none transition"
-                  :class="activeShift === 'night'
-                    ? 'bg-slate-800 text-white border border-slate-700 focus:border-indigo-500'
-                    : 'bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 text-ink'"
-                />
-              </label>
-              <!-- Description input specifically for "سایر" -->
-              <div
-                v-if="isOtherCost(c)"
-                class="flex items-center gap-2 pt-1 border-t transition-colors"
-                :class="activeShift === 'night' ? 'border-slate-800' : 'border-slate-100'"
-              >
-                <span class="text-xs whitespace-nowrap transition-colors" :class="activeShift === 'night' ? 'text-slate-400' : 'text-slate-500'">توضیحات هزینه سایر:</span>
-                <input
-                  v-model="c.description"
-                  type="text"
-                  placeholder="علت یا شرح هزینه سایر را وارد کنید..."
-                  class="flex-1 rounded-lg px-3 py-1.5 text-xs outline-none transition"
-                  :class="activeShift === 'night'
-                    ? 'bg-slate-800 text-white border border-slate-700 focus:border-indigo-500 placeholder-slate-500'
-                    : 'bg-slate-50 focus:bg-surface border border-slate-200 focus:border-accent-500 text-ink'"
-                />
-              </div>
-            </div>
+            <label class="flex items-center justify-between gap-3">
+              <span class="text-sm text-slate-600">{{ c.category_name }}</span>
+              <MoneyInput v-model="c.amount_rial" :class="FIELD" />
+            </label>
+            <!-- «سایر» says what it was for -->
+            <label v-if="c.category_code === 'cost-other'" class="flex items-center justify-between gap-3">
+              <span class="text-sm text-slate-600">شرح هزینه‌ی سایر</span>
+              <input
+                v-model="c.description"
+                type="text"
+                placeholder="مثلاً خرید قطعه، خدمات بیرونی…"
+                class="flex-1 max-w-xs bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-sm outline-none transition"
+              />
+            </label>
           </template>
         </div>
-        <div
-          class="mt-4 pt-3 border-t flex justify-between text-sm transition-colors"
-          :class="activeShift === 'night' ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'"
-        >
-          <span>جمع کل هزینه</span>
-          <span class="font-bold ltr-nums transition-colors" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">{{ num(totalCost) }} ریال</span>
+        <div class="mt-4 pt-3 border-t border-slate-100 flex justify-between text-sm">
+          <span class="text-slate-500">جمع کل هزینه</span>
+          <span class="font-bold text-ink ltr-nums">{{ num(totalCost) }} ریال</span>
         </div>
       </section>
 
-      <!-- Tables 3 & 4: Print by color & Roll Counts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- Table 3: print by colour -->
-        <section
-          class="rounded-card p-5 transition-all duration-300 border shadow-soft"
-          :class="activeShift === 'night'
-            ? 'bg-slate-900 text-slate-100 border-slate-800 shadow-pop'
-            : 'bg-surface text-ink border-slate-100'"
-        >
+        <section class="bg-surface rounded-card shadow-soft p-5">
           <div class="flex items-center gap-2 mb-4">
-            <span
-              class="w-7 h-7 rounded-lg text-xs flex items-center justify-center font-bold transition-colors"
-              :class="activeShift === 'night' ? 'bg-indigo-600 text-white' : 'bg-panel text-white'"
-            >۳</span>
-            <div>
-              <h3 class="font-bold transition-colors" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">چاپ (متراژ به تفکیک رنگ)</h3>
-              <p class="text-xs transition-colors" :class="activeShift === 'night' ? 'text-slate-400' : 'text-slate-400'">
-                ثبت متراژ چاپ و شیفت دستگاه چاپ ({{ activeShift === 'night' ? 'شیفت شب' : 'شیفت روز' }})
-              </p>
-            </div>
+            <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۳</span>
+            <h3 class="font-bold text-ink">چاپ (متراژ به تفکیک رنگ)</h3>
           </div>
           <div class="space-y-2">
             <label v-for="c in data.print_colors" :key="c.color_count" class="flex items-center justify-between gap-3">
-              <span class="text-sm transition-colors" :class="activeShift === 'night' ? 'text-slate-300' : 'text-slate-600'">
-                {{ COLOR_FA[c.color_count] }} (متر مربع)
-              </span>
-              <input
-                v-model="c.area_sqm"
-                type="number" step="any"
-                class="w-40 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none transition"
-                :class="activeShift === 'night'
-                  ? 'bg-slate-800 text-white border border-slate-700 focus:border-indigo-500'
-                  : 'bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 text-ink'"
-                @focus="selectIfZero"
-              />
-            </label>
-            <label v-if="currentPrint" class="flex items-center justify-between gap-3 pt-1">
-              <span class="text-sm transition-colors" :class="activeShift === 'night' ? 'text-slate-300' : 'text-slate-600'">
-                تعداد شیفت چاپ ({{ activeShift === 'night' ? 'شیفت شب' : 'شیفت روز' }})
-              </span>
-              <input
-                v-model="currentPrint.active_shifts"
-                type="number" step="any"
-                class="w-40 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none transition"
-                :class="activeShift === 'night'
-                  ? 'bg-slate-800 text-white border border-slate-700 focus:border-indigo-500'
-                  : 'bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 text-ink'"
-                @focus="selectIfZero"
-              />
+              <span class="text-sm text-slate-600">{{ COLOR_FA[c.color_count] }} (متر مربع)</span>
+              <input v-model="c.area_sqm" type="number" step="any" :class="FIELD" @focus="selectIfZero" />
             </label>
           </div>
-          <div
-            class="mt-3 pt-3 border-t flex justify-between text-sm transition-colors"
-            :class="activeShift === 'night' ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'"
-          >
-            <span>مجموع متراژ چاپ</span>
-            <span class="font-bold ltr-nums transition-colors" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">{{ num(printTotal) }} م²</span>
+          <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
+            <span class="text-slate-500">مجموع متراژ چاپ</span>
+            <span class="font-bold text-ink ltr-nums">{{ num(printTotal) }} م²</span>
+          </div>
+          <!-- The print machine's shifts, day and night side by side -->
+          <div v-if="data.print_day || data.print_night" class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
+            <span class="text-sm text-slate-600">شیفت فعال دستگاه چاپ</span>
+            <div class="flex items-center gap-2">
+              <label v-if="data.print_day" class="flex items-center gap-1.5 text-xs text-slate-500">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>روز
+                <input v-model="data.print_day.active_shifts" type="number" step="any"
+                  class="w-16 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums text-sm outline-none transition"
+                  @focus="selectIfZero" />
+              </label>
+              <label v-if="data.print_night" class="flex items-center gap-1.5 text-xs text-slate-500">
+                <span class="w-2 h-2 rounded-full bg-indigo-500"></span>شب
+                <input v-model="data.print_night.active_shifts" type="number" step="any"
+                  class="w-16 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums text-sm outline-none transition"
+                  @focus="selectIfZero" />
+              </label>
+            </div>
           </div>
         </section>
 
         <!-- Table 4: roll counts -->
-        <section
-          class="rounded-card p-5 transition-all duration-300 border shadow-soft"
-          :class="activeShift === 'night'
-            ? 'bg-slate-900 text-slate-100 border-slate-800 shadow-pop'
-            : 'bg-surface text-ink border-slate-100'"
-        >
+        <section class="bg-surface rounded-card shadow-soft p-5">
           <div class="flex items-center gap-2 mb-4">
-            <span
-              class="w-7 h-7 rounded-lg text-xs flex items-center justify-center font-bold transition-colors"
-              :class="activeShift === 'night' ? 'bg-indigo-600 text-white' : 'bg-panel text-white'"
-            >۴</span>
-            <div>
-              <h3 class="font-bold transition-colors" :class="activeShift === 'night' ? 'text-white' : 'text-ink'">تعداد رول‌ها</h3>
-              <p class="text-xs transition-colors" :class="activeShift === 'night' ? 'text-slate-400' : 'text-slate-400'">
-                ثبت تعداد رول‌های تولیدی ({{ activeShift === 'night' ? 'شیفت شب' : 'شیفت روز' }})
-              </p>
-            </div>
+            <span class="w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold">۴</span>
+            <h3 class="font-bold text-ink">تعداد رول‌ها</h3>
           </div>
           <div class="space-y-2">
             <label v-for="r in data.rolls" :key="r.product" class="flex items-center justify-between gap-3">
-              <span class="text-sm transition-colors" :class="activeShift === 'night' ? 'text-slate-300' : 'text-slate-600'">
+              <span class="text-sm text-slate-600">
                 {{ r.product_name }}
-                <span class="text-xs ltr-nums" :class="activeShift === 'night' ? 'text-slate-500' : 'text-slate-400'">(اجرت {{ num(r.piece_rate_rial) }})</span>
+                <span class="text-xs text-slate-400 ltr-nums">(اجرت {{ num(r.piece_rate_rial) }})</span>
               </span>
-              <input
-                v-model="r.quantity"
-                type="number" step="any"
-                class="w-32 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none transition"
-                :class="activeShift === 'night'
-                  ? 'bg-slate-800 text-white border border-slate-700 focus:border-indigo-500'
-                  : 'bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 text-ink'"
-                @focus="selectIfZero"
-              />
+              <input v-model="r.quantity" type="number" step="any" :class="[FIELD, 'w-32']" @focus="selectIfZero" />
             </label>
           </div>
-          <div
-            class="mt-3 pt-3 border-t flex justify-between text-sm transition-colors"
-            :class="activeShift === 'night' ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'"
-          >
-            <span>درآمد اجرت (برآورد)</span>
-            <span class="font-bold ltr-nums transition-colors" :class="activeShift === 'night' ? 'text-emerald-400' : 'text-accent-600'">{{ num(revenueTotal) }} ریال</span>
+          <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
+            <span class="text-slate-500">درآمد اجرت (برآورد)</span>
+            <span class="font-bold text-accent-600 ltr-nums">{{ num(revenueTotal) }} ریال</span>
           </div>
         </section>
       </div>
 
       <!-- Sticky action bar -->
-      <div
-        class="sticky bottom-4 z-30 rounded-card shadow-pop p-3 flex items-center justify-between transition-colors border"
-        :class="activeShift === 'night' ? 'bg-slate-900 border-slate-800 text-white' : 'bg-panel border-transparent text-white'"
-      >
-        <span class="text-sm px-2 text-white/80">{{ submitHint() }}</span>
+      <div class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+        <span class="hidden sm:inline text-sm px-2 text-white/80">{{ submitHint() }}</span>
         <div class="flex gap-2">
-          <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm transition" @click="save(false)">
-            ذخیره پیش‌نویس
-          </button>
-          <button class="px-5 py-2 rounded-xl bg-accent-500 hover:bg-accent-600 text-sm font-medium transition" @click="save(true)">
+          <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm" @click="save(false)">ذخیره پیش‌نویس</button>
+          <button class="px-5 py-2 rounded-xl bg-accent-500 hover:bg-accent-600 text-sm font-medium" @click="save(true)">
             ذخیره و ارسال برای تایید
           </button>
         </div>
