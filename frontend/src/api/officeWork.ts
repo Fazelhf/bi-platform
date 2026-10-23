@@ -110,6 +110,12 @@ export interface ChatMessageRow {
   body: string;
   created_at: string;
   edited_at: string | null;
+  /** Withdrawn by its sender: body, files and reactions are already empty. */
+  deleted: boolean;
+  /** Whether *you* may still edit it — sender only, within 48 hours. */
+  can_edit: boolean;
+  /** Direct messages only. */
+  is_read?: boolean;
   sender: number;
   sender_detail: Person;
   reply_to: { id: number; body: string; sender_name: string } | null;
@@ -238,6 +244,19 @@ export const workApi = {
   },
   async leaveGroup(id: number): Promise<void> {
     await api.post(`/office/chat-groups/${id}/leave/`);
+  },
+  async renameGroup(id: number, title: string): Promise<ChatGroup> {
+    const { data } = await api.post(`/office/chat-groups/${id}/rename/`, { title });
+    return data;
+  },
+  /** Works for direct and group messages alike; the server checks the sender. */
+  async editMessage(id: number, body: string): Promise<ChatMessageRow> {
+    const { data } = await api.patch(`/office/chat/messages/${id}/`, { body });
+    return data;
+  },
+  async deleteMessage(id: number): Promise<ChatMessageRow> {
+    const { data } = await api.delete(`/office/chat/messages/${id}/`);
+    return data;
   },
 
   // -- workbench -------------------------------------------------------

@@ -1,4 +1,5 @@
 import api from "./client";
+import type { ChatMessageRow } from "./officeWork";
 
 export interface TeamMember {
   avatar_image?: string;
@@ -45,13 +46,13 @@ export interface Note {
   updated_at: string;
 }
 
-export interface ChatMessage {
-  id: number;
-  sender: number;
+/**
+ * A direct message — the same shape a group message has (see
+ * `ChatMessageRow`), plus the two fields only a two-person thread has.
+ */
+export interface ChatMessage extends ChatMessageRow {
   recipient: number;
-  body: string;
   is_read: boolean;
-  created_at: string;
 }
 
 function unwrap<T>(data: any): T[] {
