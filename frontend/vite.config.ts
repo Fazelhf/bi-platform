@@ -155,6 +155,7 @@ export default defineConfig({
     // of this tree while another session holds 5174. strictPort still
     // applies: an assigned port that turns out to be taken fails loudly
     // instead of drifting. Run by hand, it is 5174 as before.
+    host: "127.0.0.1",
     port: Number(process.env.PORT) || 5174,
     strictPort: true,
     proxy: {

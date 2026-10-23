@@ -16,6 +16,18 @@
       "autoPort": false
     },
     {
+      "//": "The fix/security-hardening worktree's own backend, beside the shared one: 8001 belongs to backend-django (the Vite proxy targets it), so this reviews the branch's API on 8002. Its database is C:/Users/Asus/bi-fix/backend/db.sqlite3 — a COPY of the main one (SQLite is read relative to the code): without the copy Django creates an empty file there and every login answers 500.",
+      "name": "backend-fix",
+      "runtimeExecutable": "C:/Users/Asus/bi-platform-v2/backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "C:/Users/Asus/bi-fix/backend/manage.py",
+        "runserver",
+        "127.0.0.1:8002"
+      ],
+      "port": 8002,
+      "autoPort": false
+    },
+    {
       "name": "frontend-vite",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
@@ -33,6 +45,17 @@
       "autoPort": true
     },
     {
+      "name": "thermal-roll",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "C:/Users/Asus/bi-platform-v2/thermal-roll",
+        "run",
+        "dev"
+      ],
+      "port": 5391
+    },
+    {
       "//": "Graft's interactive context-graph viewer. Read-only over graft/; not part of the app.",
       "name": "graft-viz",
       "runtimeExecutable": "graft",
@@ -44,6 +67,24 @@
         "--no-open"
       ],
       "port": 4400
+    },
+    {
+      "name": "frontend-vite-ipv4",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "C:/Users/Asus/bi-platform-v2/frontend",
+        "run",
+        "dev",
+        "--",
+        "C:/Users/Asus/bi-platform-v2/frontend",
+        "--config",
+        "C:/Users/Asus/bi-platform-v2/frontend/vite.config.ts",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 5175,
+      "autoPort": true
     }
   ]
 }
