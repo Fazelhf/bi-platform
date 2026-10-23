@@ -34,6 +34,8 @@ import QuickTaskForm from "@/components/office/QuickTaskForm.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import NavIcon from "@/components/NavIcon.vue";
+import { toast } from "@/composables/useUi";
 
 type Counts = { mine: number; today: number; overdue: number; others: number };
 
@@ -45,7 +47,13 @@ const TABS: { key: TaskBox; label: string; badge?: keyof Counts }[] = [
   { key: "done", label: "انجام شده" },
 ];
 
-const box = ref<TaskBox>("mine");
+const route = useRoute();
+const router = useRouter();
+
+/** `?box=` lets the workbench tiles land on the right tab. */
+const box = ref<TaskBox>(
+  TABS.some((t) => t.key === route.query.box) ? (route.query.box as TaskBox) : "mine",
+);
 const rows = ref<Task[]>([]);
 const counts = ref<Counts>({ mine: 0, today: 0, overdue: 0, others: 0 });
 const loading = ref(true);
@@ -53,8 +61,8 @@ const error = ref("");
 const editing = ref<Task | null>(null);
 const creating = ref(false);
 
-async function load() {
-  loading.value = true;
+async function load(quiet = false) {
+  if (!quiet) loading.value = true;
   error.value = "";
   try {
     const data = await workApi.taskBox(box.value);
@@ -66,9 +74,6 @@ async function load() {
     loading.value = false;
   }
 }
-
-const route = useRoute();
-const router = useRouter();
 
 /**
  * `?task=<id>` — a notification about one task opens it here, in its own
@@ -93,27 +98,55 @@ onMounted(() => {
   load();
   openFromQuery();
 });
-watch(box, load);
+watch(box, (b) => {
+  load();
+  router.replace({ query: { ...route.query, box: b === "mine" ? undefined : b } });
+});
 watch(() => route.query.task, (v) => { if (v) openFromQuery(); });
 
+/** The tab counts a task contributes to, so a tick can move them locally. */
+function adjustCounts(task: Task, by: number) {
+  if (box.value === "others") {
+    counts.value.others = Math.max(0, counts.value.others + by);
+    return;
+  }
+  counts.value.mine = Math.max(0, counts.value.mine + by);
+  if (task.due_on && task.due_on.slice(0, 10) <= todayIso()) {
+    counts.value.today = Math.max(0, counts.value.today + by);
+  }
+  if (task.is_overdue) counts.value.overdue = Math.max(0, counts.value.overdue + by);
+}
+
+/**
+ * Tick off or reopen — in place. The checkbox fills at once, the row then
+ * leaves this tab (it now belongs to the other one) and the tab counts move
+ * locally. The list is never reloaded, so nothing flashes or jumps; a
+ * failure puts the row back as it was.
+ */
 async function toggle(task: Task) {
   const was = task.done_at;
-  // Optimistic: a checkbox that waits for the network feels broken. The
-  // server is the only writer, so a failure just reloads the truth.
-  task.done_at = was ? null : new Date().toISOString();
+  const wasOverdue = task.is_overdue;
+  const finishing = !was;
+  task.done_at = finishing ? new Date().toISOString() : null;
   try {
-    await workApi.toggleTask(task.id);
-    await load();
+    const fresh = await workApi.toggleTask(task.id);
+    Object.assign(task, fresh);
+    window.setTimeout(() => {
+      const i = rows.value.indexOf(task);
+      if (i !== -1) rows.value.splice(i, 1);
+    }, 350);
+    if (box.value !== "done") adjustCounts({ ...task, is_overdue: wasOverdue }, finishing ? -1 : 1);
+    toast.success(finishing ? `«${task.title}» انجام شد.` : `«${task.title}» دوباره باز شد.`);
   } catch (e) {
     task.done_at = was;
-    error.value = apiError(e);
+    toast.error(apiError(e));
   }
 }
 
 function onSaved() {
   creating.value = false;
   editing.value = null;
-  load();
+  load(true);
 }
 
 // -- grouping ----------------------------------------------------------
@@ -227,29 +260,27 @@ const EDGE: Record<string, string> = {
 <template>
   <div class="space-y-4">
     <!-- Tabs + the one action, together -->
-    <div class="bg-surface rounded-card shadow-soft p-2 flex flex-wrap items-center gap-1">
-      <button
-        v-for="t in TABS" :key="t.key"
-        class="office-tab px-3.5 py-2 rounded-xl text-sm flex items-center gap-2"
-        :class="box === t.key ? 'is-active' : 'text-slate-500'"
-        @click="box = t.key"
-      >
-        {{ t.label }}
-        <span
-          v-if="t.badge && counts[t.badge]"
-          class="text-[11px] rounded-full px-1.5 py-0.5 ltr-nums"
-          :class="box === t.key
-            ? 'bg-white/25'
-            : (t.key === 'today' && counts.overdue ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-600')"
-        >{{ num(counts[t.badge]) }}</span>
-      </button>
+    <div class="office-card p-2.5 flex flex-wrap items-center gap-2">
+      <div class="office-seg overflow-x-auto no-scrollbar max-w-full">
+        <button
+          v-for="t in TABS" :key="t.key"
+          :class="{ 'is-active': box === t.key }"
+          @click="box = t.key"
+        >
+          {{ t.label }}
+          <span
+            v-if="t.badge && counts[t.badge]"
+            class="office-count ltr-nums"
+            :class="{ 'is-alert': t.key === 'today' && counts.overdue }"
+          >{{ num(counts[t.badge]) }}</span>
+        </button>
+      </div>
 
       <span class="flex-1"></span>
 
-      <button
-        class="office-btn rounded-xl px-4 py-2 text-sm"
-        @click="creating = true"
-      >+ وظیفه جدید</button>
+      <button class="office-btn" @click="creating = true">
+        <NavIcon name="plus" :size="16" /> وظیفه جدید
+      </button>
     </div>
 
     <!-- Capture is inline: a modal to write down «فردا با انبار تماس بگیر»
@@ -265,14 +296,17 @@ const EDGE: Record<string, string> = {
     </div>
 
     <!-- ===== Calendar ===== -->
-    <div v-else-if="box === 'calendar'" class="bg-surface rounded-card shadow-soft p-3 sm:p-4">
+    <div v-else-if="box === 'calendar'" class="office-card p-3 sm:p-4">
       <div class="flex items-center justify-between mb-3">
-        <button class="text-slate-400 hover:text-ink px-2 py-1" @click="monthOffset--">
-          ‹ ماه قبل
+        <button class="office-btn-ghost" @click="monthOffset--">
+          <NavIcon name="arrow-right" :size="15" /> ماه قبل
         </button>
-        <span class="text-sm font-bold text-ink">{{ calendar.title }}</span>
-        <button class="text-slate-400 hover:text-ink px-2 py-1" @click="monthOffset++">
-          ماه بعد ›
+        <span class="flex items-center gap-2">
+          <span class="text-sm font-bold text-ink">{{ calendar.title }}</span>
+          <button v-if="monthOffset" class="office-btn-ghost !h-7 text-xs" @click="monthOffset = 0">امروز</button>
+        </span>
+        <button class="office-btn-ghost" @click="monthOffset++">
+          ماه بعد <NavIcon name="arrow-left" :size="15" />
         </button>
       </div>
 
@@ -316,19 +350,21 @@ const EDGE: Record<string, string> = {
     <div v-else class="space-y-4">
       <div
         v-for="group in grouped" :key="group.label"
-        class="bg-surface rounded-card shadow-soft overflow-hidden"
+        class="office-card overflow-hidden"
       >
-        <div class="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2">
-          <h3 class="text-sm font-bold" :class="group.warn ? 'text-red-600' : 'text-ink'">
+        <div class="office-card-head">
+          <NavIcon v-if="group.warn" name="clock" :size="15" class="text-red-500" />
+          <h3 class="office-card-title" :class="group.warn ? '!text-red-600' : ''">
             {{ group.label }}
           </h3>
-          <span class="text-xs text-slate-400 ltr-nums">{{ num(group.list.length) }}</span>
+          <span class="office-count ltr-nums" :class="{ 'is-alert': group.warn }">{{ num(group.list.length) }}</span>
         </div>
 
         <div class="divide-y divide-slate-100">
           <div
             v-for="task in group.list" :key="task.id"
-            class="flex items-start gap-3 pl-4 pr-0 py-3 hover:bg-slate-50 transition-colors"
+            class="office-row flex items-start gap-3 pl-4 pr-0 py-3 transition-opacity duration-300"
+            :class="(box === 'done') !== !!task.done_at ? 'opacity-50' : ''"
           >
             <span
               class="w-1 self-stretch rounded-l-full shrink-0"
@@ -359,9 +395,10 @@ const EDGE: Record<string, string> = {
                   v-for="tag in task.tags_detail" :key="tag.id"
                   class="rounded-full px-2 py-0.5 bg-slate-100 text-slate-500"
                 >{{ tag.name_fa }}</span>
-                <span v-if="task.comment_count" class="ltr-nums">
-                  💬 {{ num(task.comment_count) }}
+                <span v-if="task.comment_count" class="flex items-center gap-0.5 ltr-nums">
+                  <NavIcon name="chat" :size="12" /> {{ num(task.comment_count) }}
                 </span>
+                <span v-if="box === 'others' && task.assignee_detail">{{ task.assignee_detail.name }}</span>
               </span>
             </button>
 
@@ -376,9 +413,8 @@ const EDGE: Record<string, string> = {
               </span>
               <UserAvatar
                 v-if="task.assignee_detail"
-                :user="task.assignee_detail as any"
+                :user="task.assignee_detail"
                 :size="26"
-                :title="task.assignee_detail.name"
               />
             </div>
           </div>

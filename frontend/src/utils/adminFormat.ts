@@ -68,7 +68,8 @@ export function duration(seconds: number | null | undefined): string {
 export function apiError(error: any, fallback = "عملیات ناموفق بود."): string {
   const data = error?.response?.data;
   if (!data) return error?.message || fallback;
-  if (typeof data === "string") return data;
+  // A server error page is HTML; printing its markup helps nobody.
+  if (typeof data === "string") return data.trimStart().startsWith("<") ? fallback : data;
   if (data.detail) return String(data.detail);
   const parts: string[] = [];
   for (const [field, value] of Object.entries(data)) {

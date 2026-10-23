@@ -121,9 +121,6 @@ async function remove() {
   }
 }
 
-const inp =
-  "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none " +
-  "focus:ring-2 focus:ring-slate-300";
 </script>
 
 <template>
@@ -138,18 +135,18 @@ const inp =
   >
     <div class="space-y-3">
       <div>
-        <label class="block text-xs text-slate-500 mb-1">عنوان</label>
-        <input v-model="form.title" :class="inp" placeholder="چه کاری باید انجام شود؟" />
+        <label class="office-label">عنوان</label>
+        <input v-model="form.title" class="office-input" placeholder="چه کاری باید انجام شود؟" />
       </div>
 
       <div>
-        <label class="block text-xs text-slate-500 mb-1">توضیح</label>
-        <textarea v-model="form.description" :class="inp" rows="3"></textarea>
+        <label class="office-label">توضیح</label>
+        <textarea v-model="form.description" class="office-input" rows="3"></textarea>
       </div>
 
       <div class="grid sm:grid-cols-2 gap-3">
         <div>
-          <label class="block text-xs text-slate-500 mb-1">مسئول</label>
+          <label class="office-label">مسئول</label>
           <PickerField
             v-model="form.assignee"
             :options="people.map((p) => ({ value: p.id, label: p.name, hint: p.job_title_fa }))"
@@ -159,7 +156,7 @@ const inp =
           />
         </div>
         <div>
-          <label class="block text-xs text-slate-500 mb-1">پروژه</label>
+          <label class="office-label">پروژه</label>
           <PickerField
             v-model="form.project"
             :options="projects.map((p) => ({ value: p.id, label: p.name }))"
@@ -170,7 +167,7 @@ const inp =
       </div>
 
       <div>
-        <label class="block text-xs text-slate-500 mb-1">برچسب‌ها</label>
+        <label class="office-label">برچسب‌ها</label>
         <div class="flex flex-wrap gap-1.5 mb-2">
           <button
             v-for="t in tags" :key="t.id"
@@ -184,19 +181,19 @@ const inp =
           >{{ t.name_fa }}</button>
         </div>
         <input
-          v-model="newTag" :class="inp" placeholder="برچسب تازه… (Enter)"
+          v-model="newTag" class="office-input" placeholder="برچسب تازه… (Enter)"
           @keydown.enter.prevent="addTag"
         />
       </div>
 
       <div class="grid sm:grid-cols-2 gap-3">
         <div>
-          <label class="block text-xs text-slate-500 mb-1">مهلت</label>
+          <label class="office-label">مهلت</label>
           <JalaliDateField v-model="form.due_on" placeholder="بدون مهلت" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500 mb-1">اولویت</label>
-          <select v-model="form.priority" :class="inp">
+          <label class="office-label">اولویت</label>
+          <select v-model="form.priority" class="office-input">
             <option v-for="p in PRIORITIES" :key="p.value" :value="p.value">
               {{ p.label }}
             </option>

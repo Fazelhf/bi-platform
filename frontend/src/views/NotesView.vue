@@ -26,6 +26,7 @@ import JalaliDateField from "@/components/JalaliDateField.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import NavIcon from "@/components/NavIcon.vue";
 
 type Tab = "all" | "reminders" | "archive";
 
@@ -141,9 +142,6 @@ function cardStyle(n: Note): Record<string, string> {
   return { background: `${n.color}1f`, borderColor: `${n.color}66` };
 }
 
-const inp =
-  "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none " +
-  "focus:ring-2 focus:ring-slate-300";
 </script>
 
 <template>
@@ -165,7 +163,7 @@ const inp =
       </button>
 
       <input
-        v-model="search" :class="inp" class="flex-1 min-w-[10rem] mx-1"
+        v-model="search" class="office-input flex-1 min-w-[10rem] mx-1"
         placeholder="جستجو در یادداشت‌ها…"
       />
       <button class="office-btn rounded-xl px-4 py-2 text-sm" @click="startNew">
@@ -188,8 +186,8 @@ const inp =
         class="bg-surface rounded-card shadow-soft p-4 space-y-3 border-2"
         :style="{ borderColor: draft.color || 'transparent' }"
       >
-        <input v-model="draft.title" :class="inp" placeholder="عنوان یادداشت" />
-        <textarea v-model="draft.body" :class="inp" rows="4" placeholder="یادداشت خود را بنویسید…"></textarea>
+        <input v-model="draft.title" class="office-input" placeholder="عنوان یادداشت" />
+        <textarea v-model="draft.body" class="office-input" rows="4" placeholder="یادداشت خود را بنویسید…"></textarea>
 
         <div class="flex flex-wrap items-center gap-2">
           <button
@@ -205,7 +203,7 @@ const inp =
         </div>
 
         <div>
-          <label class="block text-xs text-slate-500 mb-1">مربوط به چه کسانی</label>
+          <label class="office-label">مربوط به چه کسانی</label>
           <PeoplePicker v-model="draft.people" :people="people" placeholder="افزودن شخص…" />
         </div>
 
@@ -231,8 +229,8 @@ const inp =
         >
           <!-- Editing happens in the card itself. -->
           <div v-if="editingId === n.id" class="p-4 space-y-3">
-            <input v-model="draft.title" :class="inp" placeholder="عنوان" />
-            <textarea v-model="draft.body" :class="inp" rows="5"></textarea>
+            <input v-model="draft.title" class="office-input" placeholder="عنوان" />
+            <textarea v-model="draft.body" class="office-input" rows="5"></textarea>
             <div class="flex flex-wrap items-center gap-2">
               <button
                 v-for="c in PALETTE" :key="c"
@@ -270,9 +268,9 @@ const inp =
             <div class="flex flex-wrap items-center gap-2 mt-3">
               <span
                 v-if="n.remind_on"
-                class="text-[11px] rounded-full px-2 py-0.5 ltr-nums"
+                class="inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 ltr-nums"
                 :class="isDue(n) ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'"
-              >⏰ {{ faDate(n.remind_on) }}</span>
+              ><NavIcon name="clock" :size="11" /> {{ faDate(n.remind_on) }}</span>
 
               <span v-if="n.people_detail.length" class="flex -space-x-1.5 space-x-reverse">
                 <UserAvatar

@@ -142,8 +142,10 @@
 /* A tag renders in its own colour rather than the section's, so «گمرک» looks
    the same wherever it appears. Set `--tag` on the element. */
 .office-tag {
-  background: rgb(var(--tag) / var(--office-tint));
-  color: rgb(var(--tag));
+  /* `--tag` is the stored hex. color-mix rather than rgb(var()/a), which
+     cannot take a hex and left every coloured tag unstyled. */
+  background: color-mix(in srgb, var(--tag) calc(var(--office-tint) * 100%), transparent);
+  color: var(--tag);
 }
 
 /* ── Shared controls ──────────────────────────────────────────────────────
@@ -346,6 +348,8 @@ textarea.office-input {
   padding: 0 0.75rem;
   border-radius: 0.55rem;
   font-size: 0.8125rem;
+  white-space: nowrap;
+  flex-shrink: 0;
   color: rgb(var(--c-slate-500));
   transition: background-color 150ms, color 150ms;
 }
@@ -361,4 +365,31 @@ textarea.office-input {
 .office-seg > button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--sec-ring, rgb(var(--c-slate-300)));
+}
+
+/* Printing a letter prints the sheet alone, not the shell around it. The
+   class is set by LetterReader only for the duration of window.print(). */
+@media print {
+  body.printing-letter * {
+    visibility: hidden;
+  }
+  body.printing-letter .letter-sheet,
+  body.printing-letter .letter-sheet * {
+    visibility: visible;
+  }
+  body.printing-letter .letter-sheet {
+    position: absolute;
+    inset: 0 0 auto 0;
+    margin: 0;
+    border: none;
+    box-shadow: none;
+  }
+}
+
+/* A horizontally scrolling strip (mailbox tabs on narrow screens). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

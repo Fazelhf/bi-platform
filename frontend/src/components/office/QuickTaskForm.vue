@@ -112,9 +112,6 @@ async function save() {
 
 const chip =
   "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors";
-const inp =
-  "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none " +
-  "focus:ring-2 focus:ring-slate-300";
 </script>
 
 <template>
@@ -183,7 +180,7 @@ const inp =
     <!-- Only what was asked for -->
     <textarea
       v-if="open.desc"
-      v-model="form.description" :class="inp" rows="2" placeholder="توضیح بیشتر…"
+      v-model="form.description" class="office-input" rows="2" placeholder="توضیح بیشتر…"
     ></textarea>
 
     <JalaliDateField v-if="open.due" v-model="form.due_on" placeholder="مهلت" />

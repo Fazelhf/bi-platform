@@ -11,6 +11,7 @@ import { officeApi, type Letter, type LetterTag, type Person } from "@/api/offic
 import { apiError } from "@/components/crm/formError";
 import FormModal from "@/components/crm/FormModal.vue";
 import PeoplePicker from "@/components/office/PeoplePicker.vue";
+import NavIcon from "@/components/NavIcon.vue";
 
 const props = defineProps<{
   /** Editing an existing draft, or replying to a letter. */
@@ -70,6 +71,7 @@ onMounted(async () => {
 
 function pickFiles(event: Event) {
   const input = event.target as HTMLInputElement;
+  error.value = "";
   for (const file of Array.from(input.files ?? [])) {
     if (file.size > MAX_BYTES) {
       error.value = `حجم «${file.name}» بیش از ۵ مگابایت است.`;
@@ -117,9 +119,13 @@ async function save(send: boolean) {
   }
 }
 
-const inp =
-  "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none " +
-  "focus:ring-2 focus:ring-slate-300";
+/** Files dropped on the attachment zone go through the same checks. */
+const dragging = ref(false);
+function onDrop(event: DragEvent) {
+  dragging.value = false;
+  const list = event.dataTransfer?.files;
+  if (list?.length) pickFiles({ target: { files: list, value: "" } } as unknown as Event);
+}
 
 function kb(bytes: number): string {
   return bytes > 1024 * 1024
@@ -143,19 +149,19 @@ function kb(bytes: number): string {
       در حال بارگذاری…
     </div>
 
-    <div v-else class="space-y-3">
+    <div v-else class="space-y-4">
       <div>
-        <label class="block text-xs text-slate-500 mb-1">موضوع</label>
-        <input v-model="form.subject" :class="inp" placeholder="موضوع نامه" />
+        <label class="office-label">موضوع</label>
+        <input v-model="form.subject" class="office-input" placeholder="موضوع نامه" />
       </div>
 
       <div>
-        <label class="block text-xs text-slate-500 mb-1">به</label>
+        <label class="office-label">به</label>
         <PeoplePicker v-model="form.to" :people="people" :taken="form.cc" />
       </div>
 
       <div>
-        <label class="block text-xs text-slate-500 mb-1">رونوشت</label>
+        <label class="office-label">رونوشت</label>
         <PeoplePicker
           v-model="form.cc" :people="people" :taken="form.to"
           placeholder="اختیاری…"
@@ -163,19 +169,20 @@ function kb(bytes: number): string {
       </div>
 
       <div>
-        <label class="block text-xs text-slate-500 mb-1">متن</label>
-        <textarea v-model="form.body" :class="inp" rows="8" placeholder="متن نامه…"></textarea>
+        <label class="office-label">متن</label>
+        <textarea v-model="form.body" class="office-input" rows="10" placeholder="متن نامه…"></textarea>
       </div>
 
       <div v-if="tags.length">
-        <label class="block text-xs text-slate-500 mb-1">برچسب‌ها</label>
+        <label class="office-label">برچسب‌ها</label>
         <div class="flex flex-wrap gap-1.5">
           <button
             v-for="t in tags" :key="t.id"
-            class="text-xs rounded-full px-3 py-1 transition-colors"
+            type="button"
+            class="text-xs rounded-full px-3 h-7 border transition-colors"
             :class="form.tags.includes(t.id)
-              ? 'bg-panel text-white'
-              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'"
+              ? 'bg-panel text-white border-transparent'
+              : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
             @click="form.tags.includes(t.id)
               ? form.tags = form.tags.filter((x) => x !== t.id)
               : form.tags.push(t.id)"
@@ -184,28 +191,34 @@ function kb(bytes: number): string {
       </div>
 
       <div>
-        <label class="block text-xs text-slate-500 mb-1">پیوست‌ها</label>
+        <label class="office-label">پیوست‌ها</label>
         <label
-          class="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200
-                 rounded-xl px-3 py-2 text-sm text-slate-600 cursor-pointer transition-colors"
+          class="flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed
+                 px-4 py-4 text-center cursor-pointer transition-colors"
+          :class="dragging ? 'border-[var(--sec-solid)] bg-[var(--sec-soft)]' : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'"
+          @dragover.prevent="dragging = true"
+          @dragleave.prevent="dragging = false"
+          @drop.prevent="onDrop"
         >
-          + افزودن فایل
+          <NavIcon name="upload" :size="20" class="text-slate-400" />
+          <span class="text-sm text-slate-600">فایل را اینجا رها کنید یا <span class="underline">انتخاب کنید</span></span>
+          <span class="text-[11px] text-slate-400">حداکثر ۵ مگابایت برای هر فایل</span>
           <input type="file" multiple class="hidden" @change="pickFiles" />
         </label>
-        <p class="text-[11px] text-slate-400 mt-1">حداکثر ۵ مگابایت برای هر فایل.</p>
 
-        <ul v-if="files.length" class="mt-2 space-y-1">
+        <ul v-if="files.length" class="mt-2 space-y-1.5">
           <li
             v-for="(f, i) in files" :key="i"
-            class="flex items-center justify-between gap-2 bg-slate-50 rounded-lg px-3 py-1.5 text-xs"
+            class="flex items-center gap-2.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs"
           >
-            <span class="text-ink truncate">{{ f.name }}</span>
-            <span class="flex items-center gap-2 shrink-0">
-              <span class="text-slate-400 ltr-nums">{{ kb(f.size) }}</span>
-              <button class="text-slate-400 hover:text-red-500" @click="files.splice(i, 1)">
-                حذف
-              </button>
-            </span>
+            <NavIcon name="file" :size="16" class="text-slate-400 shrink-0" />
+            <span class="flex-1 text-ink truncate">{{ f.name }}</span>
+            <span class="text-slate-400 ltr-nums shrink-0">{{ kb(f.size) }}</span>
+            <button
+              class="office-icon-btn !w-6 !h-6 shrink-0"
+              :aria-label="`حذف ${f.name}`"
+              @click="files.splice(i, 1)"
+            ><NavIcon name="close" :size="13" /></button>
           </li>
         </ul>
       </div>
@@ -213,7 +226,7 @@ function kb(bytes: number): string {
 
     <template #actions>
       <button
-        class="text-sm text-slate-500 hover:text-ink px-3 py-2"
+        class="office-btn-ghost"
         :disabled="saving"
         @click="save(false)"
       >ذخیره پیش‌نویس</button>

@@ -11,6 +11,8 @@ import QuickTaskForm from "@/components/office/QuickTaskForm.vue";
 import api from "@/api/client";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
+import NavIcon from "@/components/NavIcon.vue";
+import { confirm, toast } from "@/composables/useUi";
 
 const route = useRoute();
 const router = useRouter();
@@ -71,12 +73,19 @@ async function commitRename() {
 async function removeGroup(id: number) {
   // Tasks survive: the FK is SET_NULL, so they fall back to «بدون دسته‌بندی»
   // rather than disappearing with the column.
+  const ok = await confirm({
+    title: "حذف دسته",
+    message: "دسته حذف می‌شود؛ کارهایش به «بدون دسته‌بندی» می‌روند.",
+    danger: true,
+  });
+  if (!ok) return;
   await api.delete(`/office/task-groups/${id}/`);
   await load();
 }
 
+/** Only the first load shows a skeleton; refreshes swap data in place. */
 async function load() {
-  loading.value = true;
+  if (!project.value) loading.value = true;
   try {
     const data = await workApi.board(Number(route.params.id));
     project.value = data.project;
@@ -91,12 +100,21 @@ async function load() {
 
 onMounted(load);
 
+/**
+ * Tick in place: the box fills at once and the progress bar moves with it.
+ * The board is refreshed quietly afterwards so derived numbers stay honest.
+ */
 async function toggle(task: Task) {
+  const was = task.done_at;
+  task.done_at = was ? null : new Date().toISOString();
+  if (project.value) project.value.done_count += was ? -1 : 1;
   try {
-    await workApi.toggleTask(task.id);
-    await load();
+    Object.assign(task, await workApi.toggleTask(task.id));
+    load();
   } catch (e) {
-    error.value = apiError(e);
+    task.done_at = was;
+    if (project.value) project.value.done_count += was ? 1 : -1;
+    toast.error(apiError(e));
   }
 }
 
@@ -120,7 +138,7 @@ function onSaved() {
     </p>
 
     <template v-else-if="project">
-      <div class="bg-surface rounded-card shadow-soft p-4 sm:p-5">
+      <div class="office-card p-4 sm:p-5">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <h2 class="text-lg font-bold text-ink">{{ project.name }}</h2>
@@ -129,9 +147,9 @@ function onSaved() {
             </p>
           </div>
           <button
-            class="text-sm text-slate-500 hover:text-ink px-2 py-2 shrink-0"
+            class="office-btn-ghost shrink-0"
             @click="router.push({ name: 'office-projects' })"
-          >← بازگشت</button>
+          ><NavIcon name="arrow-right" :size="15" /> پروژه‌ها</button>
         </div>
 
         <div class="mt-4">
@@ -154,7 +172,7 @@ function onSaved() {
           <div class="flex -space-x-2 space-x-reverse">
             <UserAvatar
               v-for="m in project.memberships" :key="m.id"
-              :user="m.user_detail as any" :size="28" :title="`${m.user_detail.name} — ${m.role_label}`"
+              :user="m.user_detail" :size="28" :title="`${m.user_detail.name} — ${m.role_label}`"
               class="ring-2 ring-surface rounded-full"
             />
           </div>
@@ -166,9 +184,9 @@ function onSaved() {
           </span>
           <span class="flex-1"></span>
           <button
-            class="office-btn rounded-xl px-4 py-2 text-sm"
+            class="office-btn"
             @click="composing = true"
-          >+ وظیفه</button>
+          ><NavIcon name="plus" :size="15" /> وظیفه</button>
         </div>
       </div>
 
@@ -183,9 +201,9 @@ function onSaved() {
         v-for="section in [...groups, { id: 0, name: 'بدون دسته‌بندی', tasks: ungrouped }]"
         :key="section.id"
         v-show="section.tasks.length || section.id"
-        class="bg-surface rounded-card shadow-soft overflow-hidden"
+        class="office-card overflow-hidden"
       >
-        <div class="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+        <div class="office-card-head">
           <input
             v-if="renamingId === section.id"
             v-model="renameText"
@@ -203,16 +221,16 @@ function onSaved() {
             </span>
           </h3>
           <button
-            class="text-xs text-slate-400 hover:text-ink"
+            class="office-btn-ghost !h-7 !px-2 text-xs"
             @click="addingTo = addingTo === section.id ? null : section.id"
-          >+ وظیفه</button>
+          ><NavIcon name="plus" :size="15" /> وظیفه</button>
           <template v-if="section.id">
             <button
-              class="text-xs text-slate-400 hover:text-ink"
+              class="office-btn-ghost !h-7 !px-2 text-xs"
               @click="startRename(section.id, section.name)"
             >نام</button>
             <button
-              class="text-xs text-slate-400 hover:text-red-500"
+              class="office-btn-ghost office-btn-danger !h-7 !px-2 text-xs"
               @click="removeGroup(section.id)"
             >حذف</button>
           </template>
@@ -228,7 +246,7 @@ function onSaved() {
         <div class="divide-y divide-slate-100">
           <div
             v-for="task in section.tasks" :key="task.id"
-            class="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50"
+            class="office-row px-4 py-2.5 flex items-center gap-3"
           >
             <button
               class="w-5 h-5 rounded-md border-2 shrink-0 grid place-items-center"
@@ -276,7 +294,7 @@ function onSaved() {
           @keydown.enter.prevent="addGroup"
         />
         <button
-          class="office-btn rounded-xl px-4 py-2 text-sm"
+          class="office-btn"
           :disabled="savingGroup || !newGroup.trim()"
           @click="addGroup"
         >افزودن</button>

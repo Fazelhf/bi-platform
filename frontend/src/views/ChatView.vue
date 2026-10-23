@@ -300,6 +300,20 @@ function nearBottom(): boolean {
 async function scrollDown() {
   await nextTick();
   if (threadEl.value) threadEl.value.scrollTop = threadEl.value.scrollHeight;
+  newBelow.value = 0;
+}
+
+/**
+ * Messages that arrived while you were scrolled up reading older ones. They
+ * do not yank you down; a pill says how many are waiting instead.
+ */
+const newBelow = ref(0);
+const awayFromBottom = ref(false);
+function onThreadScroll() {
+  const at = nearBottom();
+  awayFromBottom.value = !at;
+  stickOnMedia = at;
+  if (at) newBelow.value = 0;
 }
 
 async function poll() {
@@ -317,7 +331,11 @@ async function poll() {
   } catch {
     return; // a missed poll is not worth a banner; the next one retries
   }
-  if (stick && messages.value.length !== before) await scrollDown();
+  const added = messages.value.length - before;
+  if (added > 0) {
+    if (stick) await scrollDown();
+    else newBelow.value += added;
+  }
 }
 
 // ======================================================================
@@ -546,6 +564,13 @@ async function openAttachment(m: ChatMessageRow, attId: number, name: string) {
 
 /** Images are shown, not downloaded — that is the point of sending one. */
 const previews = ref<Record<number, string>>({});
+const broken = ref<Record<number, boolean>>({});
+
+/** An image growing from placeholder to full size must not push you off the bottom. */
+let stickOnMedia = true;
+function onMediaLoaded() {
+  if (stickOnMedia) scrollDown();
+}
 async function loadPreview(m: ChatMessageRow, att: { id: number; is_image: boolean }) {
   if (!att.is_image || previews.value[att.id]) return;
   try {
@@ -677,7 +702,9 @@ watch(() => route.query.group, (v) => { if (v && Number(v) !== activeGroupId.val
 </script>
 
 <template>
-  <div class="office-card overflow-hidden flex relative" style="height: calc(100vh - 8rem)">
+  <!-- Fills the viewport, but never shrinks below a usable thread — on a
+       short window the page scrolls rather than the messages vanishing. -->
+  <div class="office-card overflow-hidden flex relative h-[calc(100dvh-8rem)] min-h-[32rem]">
     <!-- ================= List ================= -->
     <aside
       class="w-full md:w-80 border-l border-slate-100 flex-col shrink-0"
@@ -826,7 +853,23 @@ watch(() => route.query.group, (v) => { if (v && Number(v) !== activeGroupId.val
         <div class="flex-1 flex min-h-0">
           <div class="flex-1 flex flex-col min-w-0">
             <!-- Messages -->
-            <div ref="threadEl" class="flex-1 overflow-y-auto px-3 sm:px-5 py-4 bg-canvas/40">
+            <div class="relative flex-1 min-h-0 flex flex-col">
+            <button
+              v-if="awayFromBottom || newBelow"
+              class="absolute bottom-3 left-3 z-20 flex items-center gap-1.5 rounded-full bg-surface shadow-pop
+                     h-9 px-3 text-xs text-ink hover:bg-slate-50"
+              :aria-label="newBelow ? `${newBelow} پیام جدید` : 'رفتن به آخرین پیام'"
+              @click="scrollDown"
+            >
+              <NavIcon name="arrow-left" :size="14" class="-rotate-90" />
+              <span v-if="newBelow" class="office-count is-alert ltr-nums">{{ newBelow }}</span>
+              <span v-else>آخرین پیام</span>
+            </button>
+            <div
+              ref="threadEl"
+              class="flex-1 overflow-y-auto px-3 sm:px-5 pt-12 sm:pt-4 pb-4 bg-canvas/40"
+              @scroll.passive="onThreadScroll"
+            >
               <div v-if="threadLoading && !messages.length" class="space-y-3">
                 <div v-for="i in 5" :key="i" class="flex" :class="i % 2 ? 'justify-start' : 'justify-end'">
                   <div class="h-10 rounded-2xl bg-slate-200/70 animate-pulse" :style="{ width: `${30 + i * 8}%` }"></div>
@@ -908,12 +951,22 @@ watch(() => route.query.group, (v) => { if (v && Number(v) !== activeGroupId.val
 
                         <div v-if="item.m.attachments?.length" class="space-y-1.5" :class="item.m.body ? 'mt-1.5' : ''">
                           <template v-for="a in item.m.attachments" :key="a.id">
-                            <img
-                              v-if="a.is_image"
-                              :src="previews[a.id]"
-                              class="rounded-xl max-h-60 min-h-[4rem] min-w-[6rem] bg-black/5 cursor-zoom-in"
-                              :alt="a.name"
+                            <!-- An image is shown; until its bytes arrive a
+                                 quiet placeholder holds its place, and one that
+                                 will not decode falls back to the file chip. -->
+                            <span
+                              v-if="a.is_image && !broken[a.id] && !previews[a.id]"
+                              class="block w-48 h-32 rounded-xl animate-pulse"
+                              :class="isMine(item.m) ? 'bg-white/10' : 'bg-slate-100'"
                               @vue:mounted="loadPreview(item.m, a)"
+                            ></span>
+                            <img
+                              v-else-if="a.is_image && !broken[a.id]"
+                              :src="previews[a.id]"
+                              class="rounded-xl max-h-64 max-w-full cursor-zoom-in"
+                              :alt="a.name"
+                              @load="onMediaLoaded"
+                              @error="broken[a.id] = true"
                               @click.stop="openAttachment(item.m, a.id, a.name)"
                             />
                             <button
@@ -965,10 +1018,16 @@ watch(() => route.query.group, (v) => { if (v && Number(v) !== activeGroupId.val
                     <!-- Action bar: on hover, or pinned open by a tap. -->
                     <div
                       v-if="!item.m.deleted"
-                      class="absolute top-0 z-10 flex items-center gap-0.5 bg-surface shadow-pop rounded-xl p-0.5
-                             transition-opacity"
+                      class="absolute z-10 flex items-center gap-0.5 bg-surface shadow-pop rounded-xl p-0.5
+                             transition-opacity bottom-full mb-1 sm:bottom-auto sm:mb-0 sm:top-0"
                       :class="[
-                        isMine(item.m) ? 'left-full ml-1' : 'right-full mr-1',
+                        /* Beside the bubble, on its inner side (towards the
+                           middle of the thread); above it on a phone, where
+                           there is no room beside. In RTL your own bubbles sit
+                           on the right, so their inner side is the left. */
+                        isMine(item.m)
+                          ? 'left-0 sm:left-auto sm:right-full sm:mr-1'
+                          : 'right-0 sm:right-auto sm:left-full sm:ml-1',
                         menuFor === item.m.id || pickerFor === item.m.id || moreFor === item.m.id
                           ? 'opacity-100'
                           : 'opacity-0 pointer-events-none group-hover/msg:opacity-100 group-hover/msg:pointer-events-auto',
@@ -994,7 +1053,7 @@ watch(() => route.query.group, (v) => { if (v && Number(v) !== activeGroupId.val
                       <div
                         v-if="pickerFor === item.m.id"
                         class="absolute top-full mt-1 grid grid-cols-6 gap-0.5 bg-surface shadow-pop rounded-xl p-1.5 w-max"
-                        :class="isMine(item.m) ? 'left-0' : 'right-0'"
+                        :class="isMine(item.m) ? 'right-0' : 'left-0'"
                       >
                         <button
                           v-for="e in EMOJI" :key="e"
@@ -1007,7 +1066,7 @@ watch(() => route.query.group, (v) => { if (v && Number(v) !== activeGroupId.val
                       <div
                         v-if="moreFor === item.m.id"
                         class="absolute top-full mt-1 bg-surface shadow-pop rounded-xl p-1 w-40 text-sm"
-                        :class="isMine(item.m) ? 'left-0' : 'right-0'"
+                        :class="isMine(item.m) ? 'right-0' : 'left-0'"
                       >
                         <button
                           class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-100 text-right"
@@ -1033,6 +1092,7 @@ watch(() => route.query.group, (v) => { if (v && Number(v) !== activeGroupId.val
                   </div>
                 </div>
               </template>
+            </div>
             </div>
 
             <!-- Composer -->

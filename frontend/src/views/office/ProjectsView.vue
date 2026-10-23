@@ -20,6 +20,7 @@ import JalaliDateField from "@/components/JalaliDateField.vue";
 import UserAvatar from "@/components/UserAvatar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import NavIcon from "@/components/NavIcon.vue";
 
 const router = useRouter();
 
@@ -117,22 +118,19 @@ function barStyle(p: Project): Record<string, string> {
   return { background: p.color || "rgb(var(--sec))" };
 }
 
-const inp =
-  "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none " +
-  "focus:ring-2 focus:ring-slate-300";
 </script>
 
 <template>
   <div class="space-y-4">
-    <div class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2">
-      <button class="office-btn rounded-xl px-4 py-2 text-sm" @click="startNew">
-        + پروژه جدید
+    <div class="office-card p-2.5 flex flex-wrap items-center gap-2">
+      <label class="office-search flex-1 min-w-[12rem]">
+        <NavIcon name="search" :size="16" />
+        <input v-model="search" class="office-input" placeholder="جستجوی نام پروژه…" />
+      </label>
+      <span class="text-xs text-slate-400 ltr-nums px-1">{{ num(shown.length) }} پروژه</span>
+      <button class="office-btn" @click="startNew">
+        <NavIcon name="plus" :size="16" /> پروژه جدید
       </button>
-      <input
-        v-model="search" :class="inp" class="flex-1 min-w-[12rem]"
-        placeholder="جستجوی نام پروژه…"
-      />
-      <span class="text-xs text-slate-400 ltr-nums">{{ num(shown.length) }} پروژه</span>
     </div>
 
     <p v-if="error" class="bg-red-50 text-red-600 text-sm rounded-xl px-4 py-3">
@@ -160,7 +158,7 @@ const inp =
       -->
       <div
         v-for="p in shown" :key="p.id"
-        class="relative bg-surface rounded-card shadow-soft hover:shadow-pop
+        class="relative office-card hover:shadow-pop
                transition-shadow"
       >
         <button
@@ -219,10 +217,11 @@ const inp =
 
         <!-- Layered over the card, so it does not open the project too. -->
         <button
-          class="absolute top-3 left-3 text-xs text-slate-400 hover:text-ink
-                 bg-surface/80 rounded-lg px-2 py-1"
+          class="office-icon-btn absolute top-2.5 left-2.5"
+          :aria-label="`ویرایش ${p.name}`"
+          title="ویرایش پروژه"
           @click.stop="startEdit(p)"
-        >ویرایش</button>
+        ><NavIcon name="pencil" :size="15" /></button>
       </div>
     </div>
 
@@ -236,16 +235,16 @@ const inp =
     >
       <div class="space-y-3">
         <div>
-          <label class="block text-xs text-slate-500 mb-1">نام پروژه</label>
-          <input v-model="form.name" :class="inp" />
+          <label class="office-label">نام پروژه</label>
+          <input v-model="form.name" class="office-input" />
         </div>
         <div>
-          <label class="block text-xs text-slate-500 mb-1">توضیح</label>
-          <textarea v-model="form.description" :class="inp" rows="3"></textarea>
+          <label class="office-label">توضیح</label>
+          <textarea v-model="form.description" class="office-input" rows="3"></textarea>
         </div>
         <div class="grid sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs text-slate-500 mb-1">مدیر پروژه</label>
+            <label class="office-label">مدیر پروژه</label>
             <PickerField
               v-model="form.owner"
               :options="people.map((p) => ({ value: p.id, label: p.name }))"
@@ -253,12 +252,12 @@ const inp =
             />
           </div>
           <div>
-            <label class="block text-xs text-slate-500 mb-1">مهلت</label>
+            <label class="office-label">مهلت</label>
             <JalaliDateField v-model="form.due_on" placeholder="بدون مهلت" />
           </div>
         </div>
         <div>
-          <label class="block text-xs text-slate-500 mb-1">رنگ پروژه</label>
+          <label class="office-label">رنگ پروژه</label>
           <div class="flex flex-wrap gap-2">
             <button
               v-for="c in COLORS" :key="c"
@@ -272,7 +271,7 @@ const inp =
         </div>
 
         <div>
-          <label class="block text-xs text-slate-500 mb-1">اعضا</label>
+          <label class="office-label">اعضا</label>
           <PeoplePicker v-model="form.member_ids" :people="people" />
           <p class="text-[11px] text-slate-400 mt-1">
             مدیر پروژه و سازنده همیشه عضو می‌مانند.
