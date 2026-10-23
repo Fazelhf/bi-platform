@@ -8,6 +8,8 @@ separators, matching how the numbers read in the app.
 """
 from io import BytesIO
 
+from django.db.models import Sum
+
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -167,25 +169,31 @@ def _production_workbook(period):
     ws = _sheet(wb, "خطوط تولید")
     facts = FactProduction.objects.filter(
         period=period, status=ApprovalStatus.APPROVED
-    ).select_related("machine").order_by("machine__sort_order")
+    ).select_related("machine").order_by("machine__sort_order", "shift")
     _write_table(
         ws,
-        ["خط تولید", "شیفت فعال", "تولید", "ضایعات (٪)", "تعمیرات",
-         "توقف خرابی", "توقف تعویض سایز", "توقف بی‌کاری"],
+        ["خط تولید", "شیفت", "شیفت فعال", "تولید (شاخص)", "واقعی: ژورنال", "واقعی: پوز",
+         "واقعی: رسید", "ضایعات (٪)", "تعمیرات", "خواب (خرابی)", "خواب (تغییر سایز)",
+         "خواب (ظرفیت خالی)"],
         [[
-            f.machine.name_fa, float(f.active_shifts), float(f.output_units),
-            float(f.waste_pct), float(f.repair_count),
+            f.machine.name_fa, f.get_shift_display(), float(f.active_shifts),
+            float(f.output_units), float(f.actual_journal), float(f.actual_pos),
+            float(f.actual_receipt), float(f.waste_pct), float(f.repair_count),
             float(f.downtime_breakdown_shifts), float(f.downtime_sizechange_shifts),
             float(f.downtime_nowork_shifts),
         ] for f in facts],
-        formats={2: RIAL_FMT, 3: PCT_FMT},
+        formats={7: PCT_FMT},
     )
 
     ws = _sheet(wb, "هزینه‌ها")
-    costs = FactProductionCost.objects.filter(
-        period=period
-    ).select_related("category").order_by("category__sort_order")
-    rows = [[c.category.name_fa, float(c.amount_rial)] for c in costs]
+    # One line per category: the day and night shifts added together.
+    costs = (
+        FactProductionCost.objects.filter(period=period)
+        .values("category__name_fa", "category__sort_order")
+        .annotate(amount=Sum("amount_rial"))
+        .order_by("category__sort_order")
+    )
+    rows = [[c["category__name_fa"], float(c["amount"] or 0)] for c in costs]
     rows.append(["جمع کل", sum(r[1] for r in rows)])
     _write_table(ws, ["دسته هزینه", "مبلغ (ریال)"], rows, formats={1: RIAL_FMT})
     return wb, "تولید"

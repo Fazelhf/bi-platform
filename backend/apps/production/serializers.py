@@ -37,6 +37,7 @@ class BenchmarkSerializer(serializers.ModelSerializer):
         fields = [
             "id", "period", "ideal_output_per_shift", "monthly_shift_capacity",
             "hours_per_shift", "full_system_staff", "total_headcount",
+            "headcount_day", "headcount_night",
             "ideal_shift_count", "days_in_month",
         ]
 
@@ -73,7 +74,7 @@ class ProductionCostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FactProductionCost
-        fields = ["id", "period", "category", "category_code", "category_name", "amount_rial", "description"]
+        fields = ["id", "period", "category", "category_code", "category_name", "amount_rial", "description", "shift"]
 
 
 class ProductionRevenueSerializer(serializers.ModelSerializer):
@@ -86,14 +87,14 @@ class ProductionRevenueSerializer(serializers.ModelSerializer):
         model = FactProductionRevenue
         fields = [
             "id", "period", "product", "product_name",
-            "quantity", "piece_rate_rial", "amount_rial",
+            "quantity", "piece_rate_rial", "amount_rial", "shift",
         ]
 
 
 class PrintColorSerializer(serializers.ModelSerializer):
     class Meta:
         model = FactPrintColor
-        fields = ["id", "period", "color_count", "area_sqm"]
+        fields = ["id", "period", "color_count", "shift", "area_sqm"]
 
 
 class MaterialBalanceSerializer(serializers.ModelSerializer):

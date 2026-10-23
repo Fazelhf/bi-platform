@@ -120,6 +120,7 @@ class Totals:
     repairs: Decimal = Decimal(0)
     downtime: Decimal = Decimal(0)
     machines: int = 0
+    shifts: int = 0  # day/night shifts the lines actually ran in
     print_area: Decimal = Decimal(0)
     per_machine: dict = field(default_factory=dict)
 
@@ -138,6 +139,7 @@ def _collect(period: DimPeriod, only_approved: bool) -> Totals:
 
     t = Totals()
     cutting_ids: set[int] = set()
+    shifts_run: set[str] = set()
     for r in rows:
         # A month recorded week by week has several rows per line: add them.
         m = t.per_machine.get(r.machine_id)
@@ -156,8 +158,11 @@ def _collect(period: DimPeriod, only_approved: bool) -> Totals:
         t.repairs += r.repair_count
         t.downtime += r.total_downtime_shifts
         cutting_ids.add(r.machine_id)
+        if r.active_shifts:
+            shifts_run.add(r.shift)
     # Lines, not rows: a day and a night shift are two rows of one line.
     t.machines = len(cutting_ids)
+    t.shifts = len(shifts_run) or 1
     return t
 
 
@@ -212,7 +217,8 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
     desired_output = per_shift * t.active_shifts
     ideal_output = per_shift * Decimal(bench.ideal_shift_count) * share
     man_hours = Decimal(bench.total_headcount) * Decimal(bench.hours_per_shift)
-    scheduled_shifts = Decimal(t.machines or 0) * days_in_period
+    # A line runs once a day per shift worked: two shifts double its schedule.
+    scheduled_shifts = Decimal(t.machines or 0) * days_in_period * t.shifts
     capacity_output = per_shift * Decimal(bench.monthly_shift_capacity) * share
 
     # --- The 7 company-level KPIs: (code, actual, desired, ideal) ---

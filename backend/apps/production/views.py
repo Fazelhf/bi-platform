@@ -1,4 +1,4 @@
-from django.db.models import Sum
+from django.db.models import F, Sum
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -16,6 +16,7 @@ from apps.production.models import (
     FactProductionCost,
     FactProductionRevenue,
     ProductionBenchmark,
+    Shift,
 )
 from apps.production.serializers import (
     BenchmarkSerializer,
@@ -205,22 +206,11 @@ class ProductionDashboardView(APIView):
             .order_by("machine__sort_order")
         )
 
-        shifts_data = list(
-            FactProduction.objects.filter(period_id__in=units, machine__kind=DimMachine.Kind.CUTTING)
-            .values("shift")
-            .annotate(
-                output_units=Sum("output_units"),
-                actual_journal=Sum("actual_journal"),
-                actual_pos=Sum("actual_pos"),
-                actual_receipt=Sum("actual_receipt"),
-                active_shifts=Sum("active_shifts"),
-            )
-            .order_by("shift")
+        cutting_rows = FactProduction.objects.filter(
+            period_id__in=units, machine__kind=DimMachine.Kind.CUTTING
         )
-
         shifts_by_machine = list(
-            FactProduction.objects.filter(period_id__in=units, machine__kind=DimMachine.Kind.CUTTING)
-            .values("machine__name_fa", "machine__sort_order", "shift")
+            cutting_rows.values("machine__name_fa", "machine__sort_order", "shift")
             .annotate(
                 output_units=Sum("output_units"),
                 actual_journal=Sum("actual_journal"),
@@ -231,42 +221,37 @@ class ProductionDashboardView(APIView):
             .order_by("machine__sort_order", "shift")
         )
 
-        costs = (
+        costs = list(
             FactProductionCost.objects.filter(period_id__in=units)
-            .select_related("category")
             .values("category__name_fa")
             .annotate(amount=Sum("amount_rial"))
             .order_by("-amount")
         )
 
-        other_cost_facts = list(
-            FactProductionCost.objects.filter(
-                period_id__in=units,
-                category__code="cost-other",
-            )
-            .exclude(description__isnull=True)
-            .exclude(description__exact="")
-        )
-        other_cost_note = None
-        if other_cost_facts:
-            notes = [f.description.strip() for f in other_cost_facts if f.description.strip()]
-            if notes:
-                other_cost_note = {
-                    "description": " - ".join(notes),
-                    "amount_rial": sum((f.amount_rial for f in other_cost_facts), 0),
-                    "notes": notes,
-                }
-
-        revenue = [
-            {
-                "product": r.product.name_fa,
-                "quantity": r.quantity,
-                "amount": r.amount_rial,
-            }
-            for r in FactProductionRevenue.objects.filter(
-                period_id__in=units
-            ).select_related("product")
+        # «سایر» says what it was for — one note per shift that wrote one.
+        other_notes = [
+            {"shift": c.shift, "shift_label": c.get_shift_display(),
+             "description": c.description.strip(), "amount_rial": c.amount_rial}
+            for c in FactProductionCost.objects.filter(
+                period_id__in=units, category__code="cost-other",
+            ).exclude(description="").order_by("shift")
+            if c.description.strip()
         ]
+
+        # Roll counts: one line per product, both shifts (and every week or
+        # day of the month) added together.
+        revenue_by_product: dict[str, dict] = {}
+        revenue_by_shift = {Shift.DAY: 0, Shift.NIGHT: 0}
+        for r in FactProductionRevenue.objects.filter(
+            period_id__in=units
+        ).select_related("product").order_by("product__sort_order"):
+            row = revenue_by_product.setdefault(
+                r.product.name_fa, {"product": r.product.name_fa, "quantity": 0, "amount": 0}
+            )
+            row["quantity"] += r.quantity
+            row["amount"] += r.amount_rial
+            revenue_by_shift[r.shift] += r.amount_rial
+        revenue = list(revenue_by_product.values())
 
         print_colors = (
             FactPrintColor.objects.filter(period_id__in=units)
@@ -274,7 +259,43 @@ class ProductionDashboardView(APIView):
             .order_by("color_count")
         )
 
+        # Day against night, section by section — the input form's four
+        # tables, summed per shift.
+        def per_shift(qs, **agg):
+            return {r["shift"]: r for r in qs.values("shift").annotate(**agg)}
+
+        cut = per_shift(
+            cutting_rows,
+            index_output=Sum("output_units"), journal=Sum("actual_journal"),
+            pos=Sum("actual_pos"), receipt=Sum("actual_receipt"),
+            active_shifts=Sum("active_shifts"),
+            downtime=Sum(F("downtime_breakdown_shifts") + F("downtime_sizechange_shifts")
+                         + F("downtime_nowork_shifts")),
+        )
+        printed = per_shift(FactPrintColor.objects.filter(period_id__in=units), area=Sum("area_sqm"))
+        spent = per_shift(FactProductionCost.objects.filter(period_id__in=units), amount=Sum("amount_rial"))
+
         bench, _ = ProductionBenchmark.objects.get_or_create(period=month_of(period))
+        shift_summary = []
+        for shift, label in Shift.choices:
+            c = cut.get(shift, {})
+            journal, pos, receipt = (c.get(k) or 0 for k in ("journal", "pos", "receipt"))
+            shift_summary.append({
+                "shift": shift,
+                "label": label,
+                "index_output": c.get("index_output") or 0,
+                "journal": journal,
+                "pos": pos,
+                "receipt": receipt,
+                "actual_total": journal + pos + receipt,
+                "active_shifts": c.get("active_shifts") or 0,
+                "downtime": c.get("downtime") or 0,
+                "print_area": printed.get(shift, {}).get("area") or 0,
+                "cost": spent.get(shift, {}).get("amount") or 0,
+                "revenue": revenue_by_shift[shift],
+                "headcount": bench.headcount_night if shift == Shift.NIGHT else bench.headcount_day,
+            })
+
         total_cost = sum((c["amount"] for c in costs), 0)
         total_revenue = sum((r["amount"] for r in revenue), 0)
 
@@ -284,10 +305,10 @@ class ProductionDashboardView(APIView):
                 "kpis": KPIResultSerializer(company_kpis, many=True).data,
                 "machine_kpis": KPIResultSerializer(machine_kpis, many=True).data,
                 "machines": list(machines),
-                "shifts_data": shifts_data,
+                "shift_summary": shift_summary,
                 "shifts_by_machine": shifts_by_machine,
-                "costs": list(costs),
-                "other_cost_note": other_cost_note,
+                "costs": costs,
+                "other_cost_notes": other_notes,
                 "revenue": revenue,
                 "print_colors": list(print_colors),
                 "days_in_month": bench.days_in_month,
@@ -343,54 +364,53 @@ class ProductionInputView(APIView):
 
     @extend_schema(parameters=[OpenApiParameter("period", int, required=True)], responses=dict)
     def get(self, request):
+        """Everything for the period, once per shift: {shifts: {day: {...}, night: {...}}}."""
+        from apps.core.periods import grain_of, is_unit
+
         period = DimPeriod.objects.get(pk=request.query_params.get("period"))
         bench = self._bench(period)
 
         machines = list(DimMachine.objects.all())
+        categories = list(DimCostCategory.objects.all())
+        products = list(DimProduct.objects.all())
         facts = {(f.machine_id, f.shift): f for f in FactProduction.objects.filter(period=period)}
+        colors = {(c.color_count, c.shift): c for c in FactPrintColor.objects.filter(period=period)}
+        costs = {(c.category_id, c.shift): c for c in FactProductionCost.objects.filter(period=period)}
+        rolls = {(r.product_id, r.shift): r for r in FactProductionRevenue.objects.filter(period=period)}
 
-        def machine_row(m, shift=FactProduction.Shift.DAY):
+        def machine_row(m, shift):
             f = facts.get((m.id, shift))
-            row = {
-                "machine": m.id,
-                "machine_name": m.name_fa,
-                "kind": m.kind,
-                "shift": shift,
-                "status": f.status if f else "draft",
-            }
+            row = {"machine": m.id, "machine_name": m.name_fa, "kind": m.kind,
+                   "status": f.status if f else "draft"}
             for fld in CUT_FIELDS:
                 row[fld] = str(getattr(f, fld)) if f else "0"
             return row
 
-        cutting_day = [machine_row(m, FactProduction.Shift.DAY) for m in machines if m.kind == DimMachine.Kind.CUTTING]
-        cutting_night = [machine_row(m, FactProduction.Shift.NIGHT) for m in machines if m.kind == DimMachine.Kind.CUTTING]
-        print_machine = next((m for m in machines if m.kind == DimMachine.Kind.PRINT), None)
-        print_day = machine_row(print_machine, FactProduction.Shift.DAY) if print_machine else None
-        print_night = machine_row(print_machine, FactProduction.Shift.NIGHT) if print_machine else None
-
-        colors = {c.color_count: c for c in FactPrintColor.objects.filter(period=period)}
-        print_colors = [
-            {"color_count": n, "area_sqm": str(colors[n].area_sqm) if n in colors else "0"}
-            for n in (1, 2, 3, 4)
-        ]
-
-        cost_rows = {c.category_id: c for c in FactProductionCost.objects.filter(period=period)}
-        costs = [
-            {"category": c.id, "category_code": c.code, "category_name": c.name_fa,
-             "amount_rial": str(cost_rows[c.id].amount_rial) if c.id in cost_rows else "0",
-             "description": cost_rows[c.id].description if c.id in cost_rows else ""}
-            for c in DimCostCategory.objects.all()
-        ]
-
-        rev_rows = {r.product_id: r for r in FactProductionRevenue.objects.filter(period=period)}
-        rolls = [
-            {"product": p.id, "product_name": p.name_fa,
-             "piece_rate_rial": str(p.piece_rate_rial),
-             "quantity": str(rev_rows[p.id].quantity) if p.id in rev_rows else "0"}
-            for p in DimProduct.objects.all()
-        ]
-
-        from apps.core.periods import grain_of, is_unit
+        def block(shift):
+            print_machine = next((m for m in machines if m.kind == DimMachine.Kind.PRINT), None)
+            return {
+                "headcount": bench.headcount_night if shift == Shift.NIGHT else bench.headcount_day,
+                "cutting": [machine_row(m, shift) for m in machines
+                            if m.kind == DimMachine.Kind.CUTTING],
+                "print": machine_row(print_machine, shift) if print_machine else None,
+                "print_colors": [
+                    {"color_count": n,
+                     "area_sqm": str(colors[(n, shift)].area_sqm) if (n, shift) in colors else "0"}
+                    for n in (1, 2, 3, 4)
+                ],
+                "costs": [
+                    {"category": c.id, "category_code": c.code, "category_name": c.name_fa,
+                     "amount_rial": str(costs[(c.id, shift)].amount_rial) if (c.id, shift) in costs else "0",
+                     "description": costs[(c.id, shift)].description if (c.id, shift) in costs else ""}
+                    for c in categories
+                ],
+                "rolls": [
+                    {"product": p.id, "product_name": p.name_fa,
+                     "piece_rate_rial": str(p.piece_rate_rial),
+                     "quantity": str(rolls[(p.id, shift)].quantity) if (p.id, shift) in rolls else "0"}
+                    for p in products
+                ],
+            }
 
         return Response({
             "period": PeriodSerializer(period).data,
@@ -399,15 +419,7 @@ class ProductionInputView(APIView):
             "grain": grain_of(period, "production"),
             "is_unit": is_unit(period, "production"),
             "benchmark": BenchmarkSerializer(bench).data,
-            "cutting": cutting_day,
-            "cutting_day": cutting_day,
-            "cutting_night": cutting_night,
-            "print": print_day,
-            "print_day": print_day,
-            "print_night": print_night,
-            "print_colors": print_colors,
-            "costs": costs,
-            "rolls": rolls,
+            "shifts": {Shift.DAY: block(Shift.DAY), Shift.NIGHT: block(Shift.NIGHT)},
         })
 
     def post(self, request):
@@ -428,73 +440,61 @@ class ProductionInputView(APIView):
         status = submission_status(user, "production", submit)
         approved = status == ApprovalStatus.APPROVED
 
-        # 1) Headcount (benchmark)
+        # {day: {...}, night: {...}}. A flat body (the pre-shift format, and
+        # what older clients still send) is the day shift's.
+        shifts = data.get("shifts") or {Shift.DAY: data}
         bench = self._bench(period)
-        if "total_headcount" in data:
-            bench.total_headcount = int(float(data["total_headcount"] or 0))
-            bench.save(update_fields=["total_headcount"])
 
-        # 2) Machines (cutting + print)
-        cutting_payload = []
-        if "cutting_day" in data or "cutting_night" in data:
-            for r in data.get("cutting_day", []):
-                cutting_payload.append({**r, "shift": FactProduction.Shift.DAY})
-            for r in data.get("cutting_night", []):
-                cutting_payload.append({**r, "shift": FactProduction.Shift.NIGHT})
-        else:
-            for r in data.get("cutting", []):
-                shift = r.get("shift") or FactProduction.Shift.DAY
-                cutting_payload.append({**r, "shift": shift})
+        for shift, block in shifts.items():
+            if shift not in Shift.values:
+                continue
 
-        if "print_day" in data or "print_night" in data:
-            if data.get("print_day"):
-                cutting_payload.append({**data["print_day"], "shift": FactProduction.Shift.DAY})
-            if data.get("print_night"):
-                cutting_payload.append({**data["print_night"], "shift": FactProduction.Shift.NIGHT})
-        elif data.get("print"):
-            print_row = data["print"]
-            cutting_payload.append({**print_row, "shift": print_row.get("shift") or FactProduction.Shift.DAY})
+            # 1) Headcount — total stays the sum the KPIs read.
+            hc = block.get("headcount", block.get("total_headcount"))
+            if hc is not None:
+                setattr(bench, f"headcount_{shift}", int(float(hc or 0)))
 
-        for row in cutting_payload:
-            machine = DimMachine.objects.get(pk=row["machine"])
-            shift = row.get("shift") or FactProduction.Shift.DAY
-            defaults = {f: (row.get(f) or 0) for f in CUT_FIELDS}
-            defaults["status"] = status
-            if submit:
-                defaults["submitted_by"] = user
-            if approved:
-                defaults["approved_by"] = user
-            obj, _ = FactProduction.objects.update_or_create(
-                period=period, machine=machine, shift=shift, defaults=defaults
-            )
-            audit_log(user, obj, AuditLog.Action.UPDATE)
+            # 2) Machines (cutting + print)
+            rows = list(block.get("cutting", [])) + ([block["print"]] if block.get("print") else [])
+            for row in rows:
+                defaults = {f: (row.get(f) or 0) for f in CUT_FIELDS}
+                defaults["status"] = status
+                if submit:
+                    defaults["submitted_by"] = user
+                if approved:
+                    defaults["approved_by"] = user
+                obj, _ = FactProduction.objects.update_or_create(
+                    period=period, machine_id=row["machine"], shift=shift, defaults=defaults
+                )
+                audit_log(user, obj, AuditLog.Action.UPDATE)
 
-        # 3) Print colours
-        for c in data.get("print_colors", []):
-            FactPrintColor.objects.update_or_create(
-                period=period, color_count=int(c["color_count"]),
-                defaults={"area_sqm": c.get("area_sqm") or 0},
-            )
+            # 3) Print colours
+            for c in block.get("print_colors", []):
+                FactPrintColor.objects.update_or_create(
+                    period=period, color_count=int(c["color_count"]), shift=shift,
+                    defaults={"area_sqm": c.get("area_sqm") or 0},
+                )
 
-        # 4) Costs
-        for c in data.get("costs", []):
-            defaults = {
-                "amount_rial": c.get("amount_rial") or 0,
-                "description": c.get("description") or "",
-            }
-            FactProductionCost.objects.update_or_create(
-                period=period, category_id=c["category"],
-                defaults=defaults,
-            )
+            # 4) Costs
+            for c in block.get("costs", []):
+                FactProductionCost.objects.update_or_create(
+                    period=period, category_id=c["category"], shift=shift,
+                    defaults={"amount_rial": c.get("amount_rial") or 0,
+                              "description": c.get("description") or ""},
+                )
 
-        # 5) Roll counts (revenue)
-        for r in data.get("rolls", []):
-            product = DimProduct.objects.get(pk=r["product"])
-            FactProductionRevenue.objects.update_or_create(
-                period=period, product=product,
-                defaults={"quantity": r.get("quantity") or 0,
-                          "piece_rate_rial": product.piece_rate_rial},
-            )
+            # 5) Roll counts (revenue)
+            for r in block.get("rolls", []):
+                product = DimProduct.objects.get(pk=r["product"])
+                FactProductionRevenue.objects.update_or_create(
+                    period=period, product=product, shift=shift,
+                    defaults={"quantity": r.get("quantity") or 0,
+                              "piece_rate_rial": product.piece_rate_rial},
+                )
+
+        if bench.headcount_day or bench.headcount_night:
+            bench.total_headcount = bench.headcount_day + bench.headcount_night
+        bench.save(update_fields=["headcount_day", "headcount_night", "total_headcount"])
 
         # Material balance from paper weights (optional inputs)
         if "input_weight" in data or "output_weight" in data:

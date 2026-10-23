@@ -212,7 +212,7 @@ class Command(BaseCommand):
                 for field, row in CUT_ROWS.items()
             }
             FactProduction.objects.update_or_create(
-                period=period, machine=machine,
+                period=period, shift="day", machine=machine,
                 defaults={**values, "status": status},
             )
             n_machines += 1
@@ -224,7 +224,7 @@ class Command(BaseCommand):
                 for field, row in PRINT_ROWS.items()
             }
             FactProduction.objects.update_or_create(
-                period=period, machine=machines["print"],
+                period=period, shift="day", machine=machines["print"],
                 defaults={**values, "repair_count": 0, "status": status},
             )
             n_machines += 1
@@ -236,7 +236,7 @@ class Command(BaseCommand):
             if not area:
                 continue
             FactPrintColor.objects.update_or_create(
-                period=period, color_count=colors, defaults={"area_sqm": area}
+                period=period, shift="day", color_count=colors, defaults={"area_sqm": area}
             )
             n_colors += 1
 
@@ -249,7 +249,7 @@ class Command(BaseCommand):
             if category is None:
                 continue
             FactProductionCost.objects.update_or_create(
-                period=period, category=category,
+                period=period, shift="day", category=category,
                 defaults={"amount_rial": _num(sheets[sheet_name].cell(row, col).value)},
             )
             n_costs += 1
@@ -263,7 +263,7 @@ class Command(BaseCommand):
                 continue
             rate = _num(wsrev.cell(rate_row, 4).value) or product.piece_rate_rial
             FactProductionRevenue.objects.update_or_create(
-                period=period, product=product,
+                period=period, shift="day", product=product,
                 defaults={
                     "quantity": _num(wsin.cell(qty_row, 10).value),
                     "piece_rate_rial": rate,

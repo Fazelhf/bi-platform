@@ -3,7 +3,10 @@ import { computed, ref } from "vue";
 import type { EChartsOption } from "echarts";
 import { useChart } from "@/composables/useChart";
 import { num } from "@/utils/format";
-import { AXIS, COLORS, TOOLTIP, compact, mutedColor } from "./theme";
+import { AXIS, TOOLTIP, barGradient, barRadius, compact, mutedColor } from "./theme";
+
+const DAY = "#f59e0b";
+const NIGHT = "#6366f1";
 
 const props = defineProps<{
   title: string;
@@ -39,20 +42,15 @@ const option = computed<EChartsOption>(() => ({
       type: "bar",
       barMaxWidth: 24,
       data: props.dayValues,
-      itemStyle: {
-        color: COLORS.actual,
-        borderRadius: [4, 4, 0, 0],
-      },
+      // The input form's shift colours: amber day, indigo night.
+      itemStyle: { color: barGradient(DAY), borderRadius: [barRadius(), barRadius(), 0, 0] },
     },
     {
       name: "شیفت شب",
       type: "bar",
       barMaxWidth: 24,
       data: props.nightValues,
-      itemStyle: {
-        color: COLORS.slate,
-        borderRadius: [4, 4, 0, 0],
-      },
+      itemStyle: { color: barGradient(NIGHT), borderRadius: [barRadius(), barRadius(), 0, 0] },
     },
   ],
 }));

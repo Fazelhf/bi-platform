@@ -140,21 +140,57 @@ class ProductionShiftInputTests(TestCase):
             "prod_mgr_shift", password="Pass-12345!", role="manager", department="production",
         ))
 
-    def test_day_and_night_are_saved_and_read_back_separately(self):
+    def test_every_section_is_saved_and_read_back_per_shift(self):
+        from apps.production.models import (
+            DimCostCategory, DimProduct, FactPrintColor, FactProductionCost,
+            FactProductionRevenue, ProductionBenchmark,
+        )
+
+        cat = DimCostCategory.objects.create(code="cost-x", name_fa="هزینه آزمایشی")
+        prod = DimProduct.objects.create(code="p-x", name_fa="محصول", piece_rate_rial=10)
+
+        def block(output, journal, area, cost, qty, headcount):
+            return {
+                "headcount": headcount,
+                "cutting": [{"machine": self.line.id, "output_units": output, "actual_journal": journal}],
+                "print_colors": [{"color_count": 1, "area_sqm": area}],
+                "costs": [{"category": cat.id, "amount_rial": cost}],
+                "rolls": [{"product": prod.id, "quantity": qty}],
+            }
+
         res = self.client.post("/api/production/input/", {
             "period": self.period.id, "submit": False,
-            "cutting_day": [{"machine": self.line.id, "output_units": "100", "actual_journal": "60"}],
-            "cutting_night": [{"machine": self.line.id, "output_units": "80", "actual_pos": "25"}],
+            "shifts": {"day": block("100", "60", "50", "1000", "5", 30),
+                       "night": block("80", "40", "20", "700", "3", 20)},
         }, format="json")
         self.assertEqual(res.status_code, 200, res.data)
-        rows = {f.shift: f for f in FactProduction.objects.filter(period=self.period)}
-        self.assertEqual(set(rows), {"day", "night"})
-        self.assertEqual(rows["day"].actual_journal, Decimal("60"))
-        self.assertEqual(rows["night"].actual_pos, Decimal("25"))
 
-        got = self.client.get(f"/api/production/input/?period={self.period.id}").data
-        self.assertEqual(got["cutting_day"][0]["output_units"], "100.00")
-        self.assertEqual(got["cutting_night"][0]["output_units"], "80.00")
+        rows = {f.shift: f for f in FactProduction.objects.filter(period=self.period)}
+        self.assertEqual(rows["day"].actual_journal, Decimal("60"))
+        self.assertEqual(rows["night"].output_units, Decimal("80"))
+        area = dict(FactPrintColor.objects.filter(period=self.period).values_list("shift", "area_sqm"))
+        self.assertEqual(area, {"day": Decimal("50"), "night": Decimal("20")})
+        cost = dict(FactProductionCost.objects.filter(period=self.period).values_list("shift", "amount_rial"))
+        self.assertEqual(cost, {"day": Decimal("1000"), "night": Decimal("700")})
+        qty = dict(FactProductionRevenue.objects.filter(period=self.period).values_list("shift", "quantity"))
+        self.assertEqual(qty, {"day": Decimal("5"), "night": Decimal("3")})
+        bench = ProductionBenchmark.objects.get(period=self.period)
+        self.assertEqual((bench.headcount_day, bench.headcount_night, bench.total_headcount), (30, 20, 50))
+
+        got = self.client.get(f"/api/production/input/?period={self.period.id}").data["shifts"]
+        self.assertEqual(got["day"]["cutting"][0]["output_units"], "100.00")
+        self.assertEqual(got["night"]["costs"][0]["amount_rial"], "700")
+        self.assertEqual(got["night"]["print_colors"][0]["area_sqm"], "20.00")
+        self.assertEqual(got["night"]["headcount"], 20)
+
+        dash = self.client.get(f"/api/production/dashboard/summary/?period={self.period.id}").data
+        summary = {s["shift"]: s for s in dash["shift_summary"]}
+        self.assertEqual(summary["night"]["actual_total"], Decimal("40"))
+        self.assertEqual(summary["day"]["cost"], Decimal("1000"))
+        self.assertEqual(summary["night"]["revenue"], Decimal("30"))
+        # Both shifts' rolls add up to one line per product.
+        self.assertEqual([(r["quantity"], r["amount"]) for r in dash["revenue"]],
+                         [(Decimal("8"), Decimal("80"))])
 
     def test_two_shifts_count_as_one_line(self):
         from apps.production.services.kpi import _collect
@@ -163,4 +199,9 @@ class ProductionShiftInputTests(TestCase):
             FactProduction.objects.create(
                 period=self.period, machine=self.line, shift=shift, output_units=10,
             )
-        self.assertEqual(_collect(self.period, only_approved=False).machines, 1)
+        t = _collect(self.period, only_approved=False)
+        self.assertEqual(t.machines, 1)
+        self.assertEqual(t.shifts, 1)  # neither row ran a shift yet
+
+        FactProduction.objects.filter(period=self.period).update(active_shifts=1)
+        self.assertEqual(_collect(self.period, only_approved=False).shifts, 2)

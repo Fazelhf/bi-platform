@@ -17,6 +17,20 @@ from apps.core.models import DimPeriod, TimeStampedModel
 from apps.sales.models import ApprovalStatus
 
 
+class Shift(models.TextChoices):
+    """The two shifts every production day is recorded in."""
+
+    DAY = "day", "شیفت روز"
+    NIGHT = "night", "شیفت شب"
+
+
+def shift_field():
+    return models.CharField(
+        max_length=10, choices=Shift.choices, default=Shift.DAY,
+        help_text="شیفت کاری: روز یا شب",
+    )
+
+
 # --------------------------------------------------------------------------
 # Dimensions
 # --------------------------------------------------------------------------
@@ -106,8 +120,11 @@ class ProductionBenchmark(TimeStampedModel):
         default=33, help_text="مجموع!H6 — staff needed to run the full system."
     )
     total_headcount = models.PositiveIntegerField(
-        default=675, help_text="ورودی!K2 — total man-days excluding Fridays."
+        default=675, help_text="ورودی!K2 — total man-days excluding Fridays. "
+        "Kept as headcount_day + headcount_night once those are entered.",
     )
+    headcount_day = models.PositiveIntegerField(default=0, help_text="نفرروز شیفت روز")
+    headcount_night = models.PositiveIntegerField(default=0, help_text="نفرروز شیفت شب")
     ideal_shift_count = models.PositiveIntegerField(
         default=155, help_text="KPI!E3 uses 155 shifts for the ideal case."
     )
@@ -137,14 +154,8 @@ class FactProduction(TimeStampedModel):
         DimMachine, on_delete=models.PROTECT, related_name="production"
     )
 
-    class Shift(models.TextChoices):
-        DAY = "day", "شیفت روز"
-        NIGHT = "night", "شیفت شب"
-
-    shift = models.CharField(
-        max_length=10, choices=Shift.choices, default=Shift.DAY,
-        help_text="شیفت کاری: روز یا شب"
-    )
+    Shift = Shift
+    shift = shift_field()
 
     active_shifts = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     output_units = models.DecimalField(
@@ -213,7 +224,7 @@ class FactProduction(TimeStampedModel):
 
 class FactPrintColor(TimeStampedModel):
     """
-    Grain: colour-count x period. The چاپ breakdown (تک‌رنگ … چهاررنگ) in
+    Grain: colour-count x period x shift. The چاپ breakdown (تک‌رنگ … چهاررنگ) in
     ورودی rows 11-13 — printed area by number of colours.
     """
 
@@ -221,18 +232,19 @@ class FactPrintColor(TimeStampedModel):
         DimPeriod, on_delete=models.PROTECT, related_name="print_colors"
     )
     color_count = models.PositiveSmallIntegerField()  # 1..4
+    shift = shift_field()
     area_sqm = models.DecimalField(max_digits=16, decimal_places=2, default=0)
 
     class Meta:
-        unique_together = ("period", "color_count")
-        ordering = ("period", "color_count")
+        unique_together = ("period", "color_count", "shift")
+        ordering = ("period", "color_count", "shift")
 
     def __str__(self) -> str:
         return f"{self.color_count}-colour · {self.period}"
 
 
 class FactProductionCost(TimeStampedModel):
-    """Grain: cost category x period — the منابع block."""
+    """Grain: cost category x period x shift — the منابع block."""
 
     period = models.ForeignKey(
         DimPeriod, on_delete=models.PROTECT, related_name="production_costs"
@@ -240,9 +252,10 @@ class FactProductionCost(TimeStampedModel):
     category = models.ForeignKey(DimCostCategory, on_delete=models.PROTECT)
     amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     description = models.TextField(blank=True, default="", help_text="توضیحات هزینه")
+    shift = shift_field()
 
     class Meta:
-        unique_together = ("period", "category")
+        unique_together = ("period", "category", "shift")
 
     def __str__(self) -> str:
         return f"{self.category} · {self.period}"
@@ -250,7 +263,7 @@ class FactProductionCost(TimeStampedModel):
 
 class FactProductionRevenue(TimeStampedModel):
     """
-    Grain: product x period — the درامد sheet.
+    Grain: product x period x shift — the درامد sheet.
 
     NOTE: this is *piece-rate earnings* (اجرت × quantity), an internal
     valuation of manufacturing output. It is NOT the same thing as the sales
@@ -267,9 +280,10 @@ class FactProductionRevenue(TimeStampedModel):
         max_digits=18, decimal_places=0, default=0,
         help_text="Snapshot of the rate used for this period.",
     )
+    shift = shift_field()
 
     class Meta:
-        unique_together = ("period", "product")
+        unique_together = ("period", "product", "shift")
 
     @property
     def amount_rial(self):

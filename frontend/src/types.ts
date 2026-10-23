@@ -350,15 +350,23 @@ export interface ProductionDashboard {
     downtime_sizechange_shifts: number;
     downtime_nowork_shifts: number;
   }[];
-  shifts_data?: {
+  /** Day against night across the whole input form. */
+  shift_summary: {
     shift: "day" | "night";
-    output_units: number;
-    actual_journal: number;
-    actual_pos: number;
-    actual_receipt: number;
+    label: string;
+    index_output: number;
+    journal: number;
+    pos: number;
+    receipt: number;
+    actual_total: number;
     active_shifts: number;
+    downtime: number;
+    print_area: number;
+    cost: number;
+    revenue: number;
+    headcount: number;
   }[];
-  shifts_by_machine?: {
+  shifts_by_machine: {
     machine__name_fa: string;
     machine__sort_order: number;
     shift: "day" | "night";
@@ -369,7 +377,7 @@ export interface ProductionDashboard {
     active_shifts: number;
   }[];
   costs: { category__name_fa: string; amount: number }[];
-  other_cost_note?: { description: string; amount_rial?: number | string; notes?: string[] } | null;
+  other_cost_notes: { shift: "day" | "night"; shift_label: string; description: string; amount_rial: number }[];
   revenue: { product: string; quantity: number; amount: number }[];
   print_colors: { color_count: number; area_sqm: number }[];
   days_in_month: number;

@@ -29,67 +29,66 @@ const n = (v: string | number | null | undefined) => (v == null ? null : Number(
 // Per-machine (cutting lines only) for the machine charts.
 const cutting = computed(() => (data.value?.machines ?? []).filter((m) => m.machine__kind === "cutting"));
 const machineNames = computed(() => cutting.value.map((m) => m.machine__name_fa));
-const machineOutput = computed(() => cutting.value.map((m) => m.output_units));
 const machineAvg = computed(() =>
   cutting.value.map((m) => (m.active_shifts ? Math.round(m.output_units / m.active_shifts) : 0)),
 );
 const days = computed(() => data.value?.days_in_month ?? 30);
+
+// Day and night, from the server's per-shift summary.
+type ShiftKey = "index_output" | "journal" | "pos" | "receipt" | "actual_total" | "active_shifts"
+  | "downtime" | "print_area" | "cost" | "revenue" | "headcount";
+const EMPTY: Record<ShiftKey, number> = { index_output: 0, journal: 0, pos: 0, receipt: 0, actual_total: 0,
+  active_shifts: 0, downtime: 0, print_area: 0, cost: 0, revenue: 0, headcount: 0 };
+const shiftOf = (s: "day" | "night") =>
+  computed<Record<ShiftKey, number>>(() => data.value?.shift_summary?.find((r) => r.shift === s) ?? EMPTY);
+const day = shiftOf("day");
+const night = shiftOf("night");
+const total = (k: ShiftKey) => Number(day.value[k]) + Number(night.value[k]);
+
+/** A line has as many shifts a month as there are shifts with figures in it. */
+const shiftsRun = computed(() => (night.value.active_shifts > 0 ? 2 : 1));
 const activeShifts = computed(() => cutting.value.map((m) => m.active_shifts));
-const inactiveShifts = computed(() => cutting.value.map((m) => Math.max(0, days.value - m.active_shifts)));
-
-// Production Index vs Actual Totals
-const totalIndexOutput = computed(() =>
-  cutting.value.reduce((s, m) => s + (Number(m.output_units) || 0), 0),
-);
-const totalJournal = computed(() =>
-  cutting.value.reduce((s, m) => s + (Number(m.actual_journal) || 0), 0),
-);
-const totalPos = computed(() =>
-  cutting.value.reduce((s, m) => s + (Number(m.actual_pos) || 0), 0),
-);
-const totalReceipt = computed(() =>
-  cutting.value.reduce((s, m) => s + (Number(m.actual_receipt) || 0), 0),
-);
-const totalActualOutput = computed(() =>
-  totalJournal.value + totalPos.value + totalReceipt.value,
+const inactiveShifts = computed(() =>
+  cutting.value.map((m) => Math.max(0, days.value * shiftsRun.value - m.active_shifts)),
 );
 
-// Shifts breakdown
-const dayShiftData = computed(() =>
-  data.value?.shifts_data?.find((s) => s.shift === "day"),
-);
-const nightShiftData = computed(() =>
-  data.value?.shifts_data?.find((s) => s.shift === "night"),
-);
+// The comparison table: every section of the input form, day against night.
+const SHIFT_ROWS: { key: ShiftKey; label: string; rial?: boolean }[] = [
+  { key: "index_output", label: "تولید (شاخص)" },
+  { key: "actual_total", label: "تولید واقعی" },
+  { key: "active_shifts", label: "شیفت فعال خطوط برش" },
+  { key: "downtime", label: "خواب خطوط (شیفت)" },
+  { key: "print_area", label: "متراژ چاپ (م²)" },
+  { key: "headcount", label: "نیروی انسانی (نفرروز)" },
+  { key: "cost", label: "هزینه‌ها", rial: true },
+  { key: "revenue", label: "درآمد اجرت", rial: true },
+];
+const nightShare = (k: ShiftKey) => {
+  const t = total(k);
+  return t ? (100 * Number(night.value[k])) / t : 0;
+};
+const fmt = (v: number, isRial?: boolean) => (isRial ? rial(v) : num(v));
 
-const dayOutput = computed(() => Number(dayShiftData.value?.output_units || 0));
-const nightOutput = computed(() => Number(nightShiftData.value?.output_units || 0));
-
-// Per-machine Day vs Night output
-const machineDayOutput = computed(() => {
-  const byMachine = data.value?.shifts_by_machine ?? [];
-  return cutting.value.map((m) => {
-    const found = byMachine.find(
-      (b) => b.machine__name_fa === m.machine__name_fa && b.shift === "day",
-    );
-    return Number(found?.output_units || 0);
-  });
+// Per line: day vs night actual output, and its three branches.
+const byMachine = computed(() => {
+  const map = new Map<string, number>();
+  for (const b of data.value?.shifts_by_machine ?? []) {
+    map.set(`${b.machine__name_fa}|${b.shift}`,
+      Number(b.actual_journal) + Number(b.actual_pos) + Number(b.actual_receipt));
+  }
+  return map;
 });
-
-const machineNightOutput = computed(() => {
-  const byMachine = data.value?.shifts_by_machine ?? [];
-  return cutting.value.map((m) => {
-    const found = byMachine.find(
-      (b) => b.machine__name_fa === m.machine__name_fa && b.shift === "night",
-    );
-    return Number(found?.output_units || 0);
-  });
-});
-
-// Per-machine actual sub-branches
+const machineActual = (s: "day" | "night") =>
+  computed(() => machineNames.value.map((name) => byMachine.value.get(`${name}|${s}`) ?? 0));
+const machineDayActual = machineActual("day");
+const machineNightActual = machineActual("night");
 const machineJournal = computed(() => cutting.value.map((m) => Number(m.actual_journal || 0)));
 const machinePos = computed(() => cutting.value.map((m) => Number(m.actual_pos || 0)));
 const machineReceipt = computed(() => cutting.value.map((m) => Number(m.actual_receipt || 0)));
+const efficiency = computed(() => {
+  const v = kpi("prod_productivity")?.efficiency_pct;
+  return v == null ? "—" : Number(v).toFixed(1) + "٪";
+});
 
 // The 7-row KPI comparison table
 const KPI_ORDER = [
@@ -115,6 +114,7 @@ async function load() {
 }
 onMounted(async () => {
   periods.value = await salesApi.periods();
+  // Setting the period *is* the load: the watcher below fires on it.
   selectedPeriod.value = defaultPeriodId(periods.value);
 });
 watch(selectedPeriod, load);
@@ -139,115 +139,142 @@ function fmtCell(v: string | null, unit: string) {
     <DashboardSkeleton v-if="loading || !data" :cards="3" :charts="4" />
 
     <template v-else>
-      <!-- Production & Shift Summary Cards -->
+      <!-- Headline figures -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="bg-surface rounded-card shadow-soft p-4 border border-slate-100">
-          <div class="text-sm text-slate-500 mb-1">تولید (شاخص) کل</div>
-          <div class="text-2xl font-bold ltr-nums text-ink">{{ num(totalIndexOutput) }}</div>
-          <div class="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>شیفت روز: <strong class="text-ink font-semibold ltr-nums">{{ num(dayOutput) }}</strong></span>
-            <span>شیفت شب: <strong class="text-ink font-semibold ltr-nums">{{ num(nightOutput) }}</strong></span>
+        <div class="bg-surface rounded-card shadow-soft p-4">
+          <div class="text-xs text-slate-400 mb-1">تولید (شاخص)</div>
+          <div class="text-2xl font-bold ltr-nums text-ink">{{ num(total('index_output')) }}</div>
+          <div class="mt-2 pt-2 border-t border-slate-100 flex justify-between gap-2 text-xs text-slate-500">
+            <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>روز <b class="text-ink ltr-nums">{{ num(day.index_output) }}</b></span>
+            <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>شب <b class="text-ink ltr-nums">{{ num(night.index_output) }}</b></span>
           </div>
         </div>
-
-        <div class="bg-surface rounded-card shadow-soft p-4 border border-slate-100">
-          <div class="text-sm text-slate-500 mb-1">تولید واقعی کل</div>
-          <div class="text-2xl font-bold ltr-nums text-ink">{{ num(totalActualOutput) }}</div>
-          <div class="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>ژورنال: <strong class="text-ink font-semibold ltr-nums">{{ num(totalJournal) }}</strong></span>
-            <span>پوز: <strong class="text-ink font-semibold ltr-nums">{{ num(totalPos) }}</strong></span>
-            <span>رسید: <strong class="text-ink font-semibold ltr-nums">{{ num(totalReceipt) }}</strong></span>
+        <div class="bg-surface rounded-card shadow-soft p-4">
+          <div class="text-xs text-slate-400 mb-1">تولید واقعی</div>
+          <div class="text-2xl font-bold ltr-nums text-ink">{{ num(total('actual_total')) }}</div>
+          <div class="mt-2 pt-2 border-t border-slate-100 flex justify-between gap-2 text-xs text-slate-500">
+            <span>ژورنال <b class="text-ink ltr-nums">{{ num(total('journal')) }}</b></span>
+            <span>پوز <b class="text-ink ltr-nums">{{ num(total('pos')) }}</b></span>
+            <span>رسید <b class="text-ink ltr-nums">{{ num(total('receipt')) }}</b></span>
           </div>
         </div>
-
-        <div class="bg-surface rounded-card shadow-soft p-4 border border-slate-100">
-          <div class="text-sm text-slate-500 mb-1">درآمد اجرت</div>
+        <div class="bg-surface rounded-card shadow-soft p-4">
+          <div class="text-xs text-slate-400 mb-1">درآمد اجرت</div>
           <div class="text-2xl font-bold ltr-nums text-accent-600">{{ rial(data.financials.revenue) }}</div>
           <div class="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
-            هزینه کل: <strong class="text-ink font-semibold ltr-nums">{{ rial(data.financials.cost) }}</strong>
+            هزینه <b class="text-ink ltr-nums">{{ rial(data.financials.cost) }}</b>
           </div>
         </div>
-
-        <div class="bg-surface rounded-card shadow-soft p-4 border border-slate-100">
-          <div class="text-sm text-slate-500 mb-1">کارکرد خالص (سود تولید)</div>
+        <div class="bg-surface rounded-card shadow-soft p-4">
+          <div class="text-xs text-slate-400 mb-1">کارکرد خالص (سود تولید)</div>
           <div class="text-2xl font-bold ltr-nums" :class="data.financials.net >= 0 ? 'text-accent-600' : 'text-red-600'">
             {{ rial(data.financials.net) }}
           </div>
           <div class="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
-            درصد بهره‌وری: <strong class="text-ink font-semibold ltr-nums">{{ Number(kpi('prod_productivity')?.efficiency_pct || 0).toFixed(1) }}٪</strong>
+            درصد بهره‌وری <b class="text-ink ltr-nums">{{ efficiency }}</b>
           </div>
         </div>
       </div>
 
-      <!-- Note for "سایر" cost if filled -->
-      <div
-        v-if="data.other_cost_note?.description"
-        class="bg-surface rounded-card shadow-soft p-4 border border-slate-100 flex items-start gap-3 transition-all"
-      >
-        <div class="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 mt-0.5">
-          <svg class="w-4 h-4 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-            <polyline points="10 9 9 9 8 9" />
-          </svg>
+      <!-- Day against night: every section of the input form, then line by line -->
+      <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+        <div class="xl:col-span-3 bg-surface rounded-card shadow-soft p-5 overflow-x-auto">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-bold text-ink">شیفت روز در برابر شیفت شب</h3>
+            <div class="flex items-center gap-3 text-xs text-slate-400">
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span>روز</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-indigo-500"></span>شب</span>
+            </div>
+          </div>
+          <table class="w-full text-sm min-w-[520px]">
+            <thead>
+              <tr class="text-slate-400 border-b border-slate-100 text-xs">
+                <th class="text-right font-medium py-2"></th>
+                <th class="font-medium py-2 px-2 text-center">روز</th>
+                <th class="font-medium py-2 px-2 text-center">شب</th>
+                <th class="font-medium py-2 px-2 text-center">جمع</th>
+                <th class="font-medium py-2 px-2 text-right w-1/4">سهم شب</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in SHIFT_ROWS" :key="r.key" class="border-b border-slate-50">
+                <td class="py-2 font-medium text-ink whitespace-nowrap">{{ r.label }}</td>
+                <td class="py-2 px-2 text-center ltr-nums text-slate-600">{{ fmt(day[r.key], r.rial) }}</td>
+                <td class="py-2 px-2 text-center ltr-nums text-slate-600">{{ fmt(night[r.key], r.rial) }}</td>
+                <td class="py-2 px-2 text-center ltr-nums font-bold text-ink">{{ fmt(total(r.key), r.rial) }}</td>
+                <td class="py-2 px-2">
+                  <div class="flex items-center gap-2">
+                    <div class="flex-1 h-1.5 rounded-full bg-amber-500/70 overflow-hidden">
+                      <div class="h-full bg-indigo-500 rounded-full" :style="{ width: nightShare(r.key) + '%' }"></div>
+                    </div>
+                    <span class="text-[11px] text-slate-400 ltr-nums w-8 text-left">{{ total(r.key) ? Math.round(nightShare(r.key)) + '٪' : '—' }}</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center justify-between gap-2 flex-wrap mb-1">
-            <h4 class="text-sm font-bold text-ink">توضیحات هزینه سایر</h4>
-            <span v-if="data.other_cost_note.amount_rial" class="text-xs text-slate-500 font-medium">
-              مبلغ: <strong class="text-ink ltr-nums">{{ rial(data.other_cost_note.amount_rial) }}</strong>
+        <div class="xl:col-span-2">
+          <ShiftComparisonBar
+            title="تولید واقعی هر خط — روز و شب"
+            :categories="machineNames"
+            :dayValues="machineDayActual"
+            :nightValues="machineNightActual"
+          />
+        </div>
+      </div>
+
+      <!-- «سایر» costs, as each shift explained them -->
+      <div v-if="data.other_cost_notes?.length" class="bg-surface rounded-card shadow-soft p-4">
+        <h4 class="text-sm font-bold text-ink mb-2">شرح هزینه‌های سایر</h4>
+        <ul class="space-y-1.5">
+          <li v-for="(note, i) in data.other_cost_notes" :key="i" class="flex items-start justify-between gap-3 text-xs">
+            <span class="text-slate-600 leading-relaxed">
+              <span class="inline-flex items-center gap-1 ml-1.5 font-medium text-slate-500">
+                <span class="w-1.5 h-1.5 rounded-full" :class="note.shift === 'night' ? 'bg-indigo-500' : 'bg-amber-500'"></span>{{ note.shift_label }}:
+              </span>{{ note.description }}
             </span>
-          </div>
-          <p class="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
-            {{ data.other_cost_note.description }}
-          </p>
-        </div>
+            <b class="text-ink ltr-nums whitespace-nowrap">{{ rial(note.amount_rial) }}</b>
+          </li>
+        </ul>
       </div>
 
-      <!-- Row 1: Shift Comparison & Actual Production Breakdown Charts -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ShiftComparisonBar
-          title="مقایسه تولید شیفت روز و شب (بر اساس خطوط برش)"
-          :categories="machineNames"
-          :dayValues="machineDayOutput"
-          :nightValues="machineNightOutput"
-        />
-        <ActualProductionBar
-          title="تفکیک تولید واقعی به زیرشاخه‌ها (ژورنال / پوز / رسید)"
-          :categories="machineNames"
-          :journal="machineJournal"
-          :pos="machinePos"
-          :receipt="machineReceipt"
-        />
-      </div>
-
-      <!-- Row 2: productivity, labour, efficiency donut, production per machine -->
+      <!-- Actual output by line, and productivity -->
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="md:col-span-2">
+          <ActualProductionBar
+            title="تولید واقعی هر خط (ژورنال / پوز / رسید)"
+            :categories="machineNames"
+            :journal="machineJournal"
+            :pos="machinePos"
+            :receipt="machineReceipt"
+          />
+        </div>
         <ComparisonBar title="بهره‌وری تولید"
           :actual="n(kpi('prod_productivity')?.actual)" :target="n(kpi('prod_productivity')?.target)" :ideal="n(kpi('prod_productivity')?.ideal)" />
+        <DonutChart title="درصد بهره‌وری" :value="n(kpi('prod_productivity')?.efficiency_pct)" />
+      </div>
+
+      <!-- Labour, average per shift, waste, machine utilisation -->
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <ComparisonBar title="بهره‌وری نیروی انسانی"
           :actual="n(kpi('labor_productivity')?.actual)" :target="n(kpi('labor_productivity')?.target)" :ideal="n(kpi('labor_productivity')?.ideal)" />
-        <DonutChart title="درصد بهره‌وری" :value="n(kpi('prod_productivity')?.efficiency_pct)" />
-        <BarChart title="تولید (شاخص) بر اساس خط" :categories="machineNames" :values="machineOutput" color="#3b6fed" />
-      </div>
-
-      <!-- Row 3: avg per shift, waste, machine utilization, cost per roll -->
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <BarChart title="میانگین تولید در شیفت" :categories="machineNames" :values="machineAvg" color="#8b7cf6" />
+        <BarChart title="میانگین تولید هر شیفت" :categories="machineNames" :values="machineAvg" color="#8b7cf6" />
         <ComparisonBar title="نرخ ضایعات"
           :actual="n(kpi('waste_rate')?.actual)" :target="n(kpi('waste_rate')?.target)" :ideal="n(kpi('waste_rate')?.ideal)" />
-        <StackedMachineBar title="عملکرد دستگاه‌ها" :categories="machineNames" :active="activeShifts" :inactive="inactiveShifts" />
-        <ComparisonBar title="هزینه تولید به ازای هر رول"
-          :actual="n(kpi('cost_per_roll')?.actual)" :target="n(kpi('cost_per_roll')?.target)" :ideal="n(kpi('cost_per_roll')?.ideal)" />
+        <StackedMachineBar title="عملکرد دستگاه‌ها (فعال / خواب)" :categories="machineNames" :active="activeShifts" :inactive="inactiveShifts" />
       </div>
 
-      <!-- Profit / loss -->
-      <ProfitLossBar :revenue="data.financials.revenue" :cost="data.financials.cost" />
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <ComparisonBar title="هزینه تولید به ازای هر رول"
+          :actual="n(kpi('cost_per_roll')?.actual)" :target="n(kpi('cost_per_roll')?.target)" :ideal="n(kpi('cost_per_roll')?.ideal)" />
+        <div class="lg:col-span-2">
+          <ProfitLossBar :revenue="data.financials.revenue" :cost="data.financials.cost" />
+        </div>
+      </div>
 
       <!-- The KPI comparison table -->
-      <div class="bg-surface rounded-card shadow-soft p-5 overflow-x-auto border border-slate-100">
+      <div class="bg-surface rounded-card shadow-soft p-5 overflow-x-auto">
         <h3 class="font-bold text-ink mb-3">جدول شاخص‌های تولید</h3>
         <table class="w-full text-sm min-w-[640px]">
           <thead>

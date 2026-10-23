@@ -125,6 +125,8 @@ class Command(BaseCommand):
                     "hours_per_shift": 8,
                     "full_system_staff": 33,
                     "total_headcount": 675,
+                    "headcount_day": 370,
+                    "headcount_night": 305,
                     "ideal_shift_count": 155,
                     "days_in_month": 31 if (period.jalali_month and period.jalali_month <= 6) else 30,
                 },
@@ -213,21 +215,9 @@ class Command(BaseCommand):
                     },
                 )
 
-            # Print colors
-            FactPrintColor.objects.update_or_create(
-                period=period, color_count=1, defaults={"area_sqm": Decimal("14500")}
-            )
-            FactPrintColor.objects.update_or_create(
-                period=period, color_count=2, defaults={"area_sqm": Decimal("23800")}
-            )
-            FactPrintColor.objects.update_or_create(
-                period=period, color_count=3, defaults={"area_sqm": Decimal("9200")}
-            )
-            FactPrintColor.objects.update_or_create(
-                period=period, color_count=4, defaults={"area_sqm": Decimal("6100")}
-            )
-
-            # Costs (including description on 'cost-other')
+            # Print colours, costs and rolls: each shift its own share.
+            split = {FactProduction.Shift.DAY: Decimal("0.55"), FactProduction.Shift.NIGHT: Decimal("0.45")}
+            print_map = {1: Decimal("14500"), 2: Decimal("23800"), 3: Decimal("9200"), 4: Decimal("6100")}
             cost_map = {
                 "cost-production": Decimal(320000000 + p_idx * 15000000),
                 "cost-rent": Decimal(180000000),
@@ -237,27 +227,33 @@ class Command(BaseCommand):
                 "cost-transport": Decimal(35000000 + p_idx * 1800000),
                 "cost-other": Decimal(28500000 + p_idx * 1200000),
             }
-            for code, amount in cost_map.items():
-                if code in cost_cats:
-                    desc = OTHER_NOTES[p_idx % len(OTHER_NOTES)] if code == "cost-other" else ""
-                    FactProductionCost.objects.update_or_create(
-                        period=period, category=cost_cats[code],
-                        defaults={"amount_rial": amount, "description": desc},
-                    )
-
-            # Product revenue
             rev_map = {
                 "prod-57": Decimal(42000 + p_idx * 1200),
                 "prod-79": Decimal(34000 + p_idx * 900),
                 "prod-receipt": Decimal(18500 + p_idx * 600),
                 "prod-print": Decimal(12000 + p_idx * 400),
             }
-            for p in products:
-                if p.code in rev_map:
-                    FactProductionRevenue.objects.update_or_create(
-                        period=period, product=p,
-                        defaults={"quantity": rev_map[p.code], "piece_rate_rial": p.piece_rate_rial},
+            for shift, share in split.items():
+                for colors, area in print_map.items():
+                    FactPrintColor.objects.update_or_create(
+                        period=period, color_count=colors, shift=shift,
+                        defaults={"area_sqm": (area * share).quantize(Decimal("1"))},
                     )
+                for code, amount in cost_map.items():
+                    if code in cost_cats:
+                        desc = OTHER_NOTES[p_idx % len(OTHER_NOTES)] if code == "cost-other" else ""
+                        FactProductionCost.objects.update_or_create(
+                            period=period, category=cost_cats[code], shift=shift,
+                            defaults={"amount_rial": (amount * share).quantize(Decimal("1")),
+                                      "description": desc},
+                        )
+                for p in products:
+                    if p.code in rev_map:
+                        FactProductionRevenue.objects.update_or_create(
+                            period=period, product=p, shift=shift,
+                            defaults={"quantity": (rev_map[p.code] * share).quantize(Decimal("1")),
+                                      "piece_rate_rial": p.piece_rate_rial},
+                        )
 
             # Material balance
             FactMaterialBalance.objects.update_or_create(
