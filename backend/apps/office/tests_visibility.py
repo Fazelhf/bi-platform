@@ -184,3 +184,51 @@ class ModelLevelTests(VisibilityTestCase):
         self.assertTrue(act.visible_to(self.boss))
         self.assertTrue(act.visible_to(self.clerk))
         self.assertFalse(act.visible_to(self.late))
+
+
+class DraftAndReplyLeakTests(VisibilityTestCase):
+    def test_a_named_recipient_cannot_open_a_draft_or_its_attachment(self):
+        self.client.force_authenticate(self.clerk)
+        res = self.client.post("/api/office/letters/", {
+            "subject": "نیمه‌کاره", "body": "هنوز نهایی نیست",
+            "to": [self.boss.pk], "send": False,
+            "attachments": [{"name": "a.txt", "mime": "text/plain",
+                             "content": "data:text/plain;base64,eA=="}],
+        }, format="json")
+        draft = Letter.objects.get(pk=res.data["id"])
+        att = draft.attachments.get()
+
+        self.client.force_authenticate(self.boss)
+        self.assertEqual(
+            self.client.get(f"/api/office/letters/{draft.pk}/").status_code, 404
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/office/letters/{draft.pk}/attachments/{att.pk}/"
+            ).status_code, 404,
+        )
+
+        # Once sent, it is theirs to read.
+        self.client.force_authenticate(self.clerk)
+        self.client.post(f"/api/office/letters/{draft.pk}/send/")
+        self.client.force_authenticate(self.boss)
+        self.assertEqual(
+            self.client.get(f"/api/office/letters/{draft.pk}/").status_code, 200
+        )
+
+    def test_replying_to_a_letter_one_was_not_sent_is_refused(self):
+        self.client.force_authenticate(self.late)
+        res = self.client.post("/api/office/letters/", {
+            "subject": "پاسخ", "to": [self.boss.pk],
+            "in_reply_to": self.letter.pk,
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("in_reply_to", res.data)
+
+    def test_the_recipient_may_still_reply(self):
+        self.client.force_authenticate(self.boss)
+        res = self.client.post("/api/office/letters/", {
+            "subject": "پاسخ", "to": [self.clerk.pk],
+            "in_reply_to": self.letter.pk,
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)

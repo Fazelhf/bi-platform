@@ -376,7 +376,14 @@ class Message(models.Model):
     #: ChatGroupMember, one row per person.
     is_read = models.BooleanField(default=False)
     edited_at = models.DateTimeField(null=True, blank=True)
+    #: Set when the sender withdraws it. The row stays so the thread keeps its
+    #: shape — a reply to it still has something to point at — but its words,
+    #: files and reactions are gone; «این پیام حذف شد» is all anyone sees.
+    deleted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    #: How long the sender may still correct a message.
+    EDIT_WINDOW_HOURS = 48
 
     class Meta:
         ordering = ("created_at",)
@@ -384,6 +391,34 @@ class Message(models.Model):
             models.Index(fields=["group", "created_at"]),
             models.Index(fields=["recipient", "is_read"]),
         ]
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
+
+    def can_edit(self, user) -> bool:
+        """Only the sender, only a live message, only inside the window."""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        return (
+            user is not None
+            and self.sender_id == user.pk
+            and not self.is_deleted
+            and timezone.now() - self.created_at
+            < timedelta(hours=self.EDIT_WINDOW_HOURS)
+        )
+
+    def withdraw(self) -> None:
+        """Delete for everyone: keep the row, drop what it said."""
+        from django.utils import timezone
+
+        self.body = ""
+        self.deleted_at = timezone.now()
+        self.save(update_fields=["body", "deleted_at"])
+        self.attachments.all().delete()
+        self.reactions.all().delete()
 
     def __str__(self) -> str:
         return f"{self.sender} → {self.recipient or self.group}: {self.body[:30]}"

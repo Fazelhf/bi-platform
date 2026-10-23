@@ -114,6 +114,35 @@ class MessageSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["sender", "is_read"]
 
+    def validate(self, attrs):
+        # A reply quotes its parent, so the parent must belong to this same
+        # two-person thread — otherwise quoting is a way to read someone
+        # else's conversation by guessing ids.
+        parent = attrs.get("reply_to")
+        if parent is not None:
+            me = self.context["request"].user
+            other = attrs.get("recipient")
+            pair = {me.pk, getattr(other, "pk", None)}
+            if parent.group_id or {parent.sender_id, parent.recipient_id} != pair:
+                raise serializers.ValidationError(
+                    {"reply_to": "پیامی که به آن پاسخ می‌دهید در این گفتگو نیست."}
+                )
+        return attrs
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        me = getattr(self.context.get("request"), "user", None)
+        # Same shape group messages have: `reply_to` is the quoted strip, not
+        # a bare id — the thread UI draws one component for both.
+        data["reply_to"] = data.get("reply_to_detail")
+        data["deleted"] = obj.is_deleted
+        data["can_edit"] = obj.can_edit(me)
+        if obj.is_deleted:
+            data["body"] = ""
+            data["attachments"] = []
+            data["reactions"] = []
+        return data
+
     def get_sender_detail(self, obj) -> dict:
         return {
             "id": obj.sender_id,
@@ -128,7 +157,7 @@ class MessageSerializer(serializers.ModelSerializer):
             return None
         return {
             "id": parent.id,
-            "body": parent.body[:120],
+            "body": "پیام حذف شد" if parent.is_deleted else parent.body[:120],
             "sender_name": (
                 parent.sender.display_name_fa or parent.sender.get_username()
             ),

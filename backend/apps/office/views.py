@@ -65,7 +65,11 @@ class LetterViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return (
             Letter.objects.filter(
-                Q(sender=user) | Q(recipients__user=user)
+                # A draft is the author's alone until it is sent. Naming
+                # someone as recipient while writing must not let them open
+                # the half-written text — or its attachments — by id.
+                Q(sender=user)
+                | Q(recipients__user=user, status=Letter.Status.SENT)
             )
             .distinct()
             .select_related("sender")

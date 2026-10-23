@@ -182,6 +182,19 @@ class LetterWriteSerializer(serializers.ModelSerializer):
             "to", "cc", "attachments", "send",
         ]
 
+    def validate_in_reply_to(self, parent):
+        # The reply shows its parent's number and subject, so answering a
+        # letter you were never sent would be a way to read its subject.
+        if parent is None:
+            return parent
+        user = self.context["request"].user
+        visible = parent.sender_id == user.pk or (
+            parent.is_sent and parent.recipients.filter(user=user).exists()
+        )
+        if not visible:
+            raise serializers.ValidationError("نامه‌ای که به آن پاسخ می‌دهید پیدا نشد.")
+        return parent
+
     def validate(self, attrs):
         sending = attrs.get("send")
         # Only checked on send. A draft with no recipient yet is a normal

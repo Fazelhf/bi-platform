@@ -51,6 +51,19 @@ def _reaction_summary(message, me) -> list[dict]:
     return list(out.values())
 
 
+#: What a withdrawn message reads as, wherever its text would have been.
+DELETED_TEXT = "پیام حذف شد"
+
+
+def _preview(message) -> str:
+    """The one-line summary a conversation list shows for its last message."""
+    if message is None:
+        return ""
+    if message.is_deleted:
+        return DELETED_TEXT
+    return message.body[:80] or "پیوست"
+
+
 def _message_rows(qs, me=None) -> list[dict]:
     rows = []
     for m in qs.select_related("sender", "reply_to", "reply_to__sender").prefetch_related(
@@ -61,6 +74,8 @@ def _message_rows(qs, me=None) -> list[dict]:
             "body": m.body,
             "created_at": m.created_at,
             "edited_at": m.edited_at,
+            "deleted": m.is_deleted,
+            "can_edit": m.can_edit(me),
             "sender": m.sender_id,
             "sender_detail": PersonSerializer(m.sender).data,
             # Enough of the parent to draw the quoted strip — not the whole
@@ -68,7 +83,10 @@ def _message_rows(qs, me=None) -> list[dict]:
             "reply_to": (
                 {
                     "id": m.reply_to.id,
-                    "body": m.reply_to.body[:120],
+                    "body": (
+                        DELETED_TEXT if m.reply_to.is_deleted
+                        else m.reply_to.body[:120]
+                    ),
                     "sender_name": (
                         m.reply_to.sender.display_name_fa
                         or m.reply_to.sender.get_username()
@@ -132,7 +150,7 @@ class ChatGroupViewSet(viewsets.ViewSet):
                 [m.user for m in group.memberships.all()], many=True
             ).data,
             "unread": unread.count(),
-            "last_message": last.body[:80] if last else "",
+            "last_message": _preview(last),
             "last_at": last.created_at if last else None,
         }
 
@@ -185,9 +203,16 @@ class ChatGroupViewSet(viewsets.ViewSet):
                 {"detail": "پیام خالی است."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # The quoted parent must be in this same group, or a reply would be a
+        # way to read another conversation by guessing its ids.
+        parent_id = request.data.get("reply_to") or None
+        if parent_id and not group.messages.filter(pk=parent_id).exists():
+            return Response(
+                {"detail": "پیامی که به آن پاسخ می‌دهید در این گروه نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         msg = Message.objects.create(
-            sender=request.user, group=group, body=body,
-            reply_to_id=request.data.get("reply_to") or None,
+            sender=request.user, group=group, body=body, reply_to_id=parent_id,
         )
         try:
             _attach(msg, files)
@@ -215,6 +240,21 @@ class ChatGroupViewSet(viewsets.ViewSet):
             group.memberships.filter(user_id__in=remove).exclude(
                 user_id=group.created_by_id
             ).delete()
+        return Response(self._row(group))
+
+    @action(detail=True, methods=["post"])
+    def rename(self, request, pk=None):
+        group = self._mine().filter(pk=pk).first()
+        if not group:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        title = (request.data.get("title") or "").strip()[:120]
+        if not title:
+            return Response(
+                {"detail": "نام گروه را بنویسید."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        group.title = title
+        group.save(update_fields=["title"])
         return Response(self._row(group))
 
     @action(detail=True, methods=["post"])
@@ -255,6 +295,11 @@ class MessageExtrasView(APIView):
         msg = self._visible(request, pk)
         if not msg:
             return Response(status=status.HTTP_404_NOT_FOUND)
+        if msg.is_deleted:
+            return Response(
+                {"detail": "این پیام حذف شده است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         emoji = (request.data.get("emoji") or "").strip()[:8]
         if not emoji:
             return Response(
@@ -271,6 +316,53 @@ class MessageExtrasView(APIView):
                 message=msg, user=request.user, emoji=emoji
             )
         return Response({"reactions": _reaction_summary(msg, request.user)})
+
+    def patch(self, request, pk=None):
+        """Correct one's own message, within the edit window."""
+        msg = self._visible(request, pk)
+        if not msg:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if msg.sender_id != request.user.pk:
+            return Response(
+                {"detail": "فقط فرستنده می‌تواند پیام را ویرایش کند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not msg.can_edit(request.user):
+            return Response(
+                {"detail": (
+                    "این پیام حذف شده است." if msg.is_deleted else
+                    f"پیام را فقط تا {Message.EDIT_WINDOW_HOURS} ساعت پس از ارسال "
+                    "می‌توان ویرایش کرد."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        body = (request.data.get("body") or "").strip()
+        # A file with no words is a normal message; words removed from a
+        # message with no file leaves nothing, which is a delete, not an edit.
+        if not body and not msg.attachments.exists():
+            return Response(
+                {"detail": "پیام خالی است. برای حذف، «حذف» را بزنید."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if body != msg.body:
+            msg.body = body
+            msg.edited_at = timezone.now()
+            msg.save(update_fields=["body", "edited_at"])
+        return Response(_message_rows(Message.objects.filter(pk=msg.pk), request.user)[0])
+
+    def delete(self, request, pk=None):
+        """Withdraw one's own message for everyone."""
+        msg = self._visible(request, pk)
+        if not msg:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if msg.sender_id != request.user.pk:
+            return Response(
+                {"detail": "فقط فرستنده می‌تواند پیام را حذف کند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not msg.is_deleted:
+            msg.withdraw()
+        return Response(_message_rows(Message.objects.filter(pk=msg.pk), request.user)[0])
 
     def get(self, request, pk=None):
         """One attachment's bytes, by `?attachment=<id>`."""
@@ -312,7 +404,7 @@ class ChatOverviewView(APIView):
                 continue
             threads[other.pk] = {
                 "user": PersonSerializer(other).data,
-                "last_message": m.body[:80],
+                "last_message": _preview(m),
                 "last_at": m.created_at,
                 "unread": Message.objects.filter(
                     sender=other, recipient=me, is_read=False
@@ -335,7 +427,7 @@ class ChatOverviewView(APIView):
                 "title": g.title,
                 "member_count": g.member_count,
                 "unread": unread.count(),
-                "last_message": last.body[:80] if last else "",
+                "last_message": _preview(last),
                 "last_at": last.created_at if last else None,
             })
 
