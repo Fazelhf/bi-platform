@@ -11,6 +11,7 @@ router.register("messages", views.MessageViewSet, basename="message")
 
 urlpatterns = [
     path("me/", views.MeView.as_view(), name="me"),
+    path("me/password/", views.MePasswordView.as_view(), name="me-password"),
     path("heartbeat/", views.HeartbeatView.as_view(), name="heartbeat"),
     # --- Two-step login (ورود دو مرحله‌ای) ---
     # `verify` and `resend` are open by design: the caller has passed the

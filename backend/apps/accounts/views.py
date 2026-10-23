@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.models import Message, MessageAttachment, Note, User
@@ -55,6 +56,58 @@ class UserViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("حذف ادمین سیستم مجاز نیست.")
         audit_log(self.request.user, instance, AuditLog.Action.DELETE)
         instance.delete()
+
+
+class MePasswordView(APIView):
+    """
+    A signed-in user changes their own password: the current one, then the
+    new one. Until this existed the only ways were an administrator's reset
+    or «فراموشی رمز» by SMS — and SMS is off on servers without a panel.
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"  # each try checks a password: rate it like a login
+
+    def post(self, request):
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from django.utils import translation
+
+        from apps.adminpanel.models import PasswordPolicy, UserSecurity
+
+        user = request.user
+        current = request.data.get("current_password") or ""
+        new = request.data.get("new_password") or ""
+
+        if not user.check_password(current):
+            raise ValidationError({"current_password": ["رمز عبور فعلی درست نیست."]})
+        if not new:
+            raise ValidationError({"new_password": ["رمز عبور جدید را وارد کنید."]})
+        if new == current:
+            raise ValidationError({"new_password": ["رمز جدید باید با رمز فعلی فرق داشته باشد."]})
+        errors = PasswordPolicy.get().validate(new)
+        try:
+            # Django's validators speak English unless asked; the platform
+            # locale stays en-us, so switch just for this check.
+            with translation.override("fa"):
+                validate_password(new, user)
+        except DjangoValidationError as exc:
+            errors += list(exc.messages)
+        if errors:
+            raise ValidationError({"new_password": errors})
+
+        user.set_password(new)
+        user.save(update_fields=["password"])
+        state = UserSecurity.get(user)
+        state.password_changed_at = timezone.now()
+        state.must_change_password = False
+        state.save(update_fields=["password_changed_at", "must_change_password", "updated_at"])
+        audit_log(user, user, AuditLog.Action.UPDATE,
+                  {"password": {"before": "—", "after": "تغییر توسط خود کاربر"}})
+        # The JWT this request came with stays valid: changing your own
+        # password does not sign you out of the device you did it on.
+        return Response({"ok": True, "detail": "رمز عبور تغییر کرد."})
 
 
 class MeView(APIView):

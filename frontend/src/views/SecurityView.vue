@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * امنیت حساب — where a user turns two-step login on or off for themselves.
+ * امنیت حساب — where a user changes their own password and turns two-step
+ * login on or off for themselves.
  *
  * Enrolment is a possession check, not a checkbox: the number is typed here,
  * a code goes to it, and 2FA only switches on once that code comes back. That
@@ -13,6 +14,7 @@ import { apiMessage, securityApi } from "@/api/security";
 import { useAuthStore } from "@/stores/auth";
 import { toast } from "@/composables/useUi";
 import OtpForm from "@/components/OtpForm.vue";
+import ChangePasswordCard from "@/components/ChangePasswordCard.vue";
 import type { OtpChallenge, TwoFactorStatus } from "@/types";
 
 const auth = useAuthStore();
@@ -114,6 +116,8 @@ onMounted(load);
         پیامک می‌شود و ورود فقط با آن کامل می‌گردد.
       </p>
     </div>
+
+    <ChangePasswordCard />
 
     <div v-if="loading" class="bg-surface rounded-card shadow-soft p-5 text-sm text-slate-400">
       در حال بارگذاری…

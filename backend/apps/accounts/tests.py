@@ -555,3 +555,54 @@ class OtpCodeTests(APITestCase):
         self.assertRegex(code, r"^\d{6}$")
         self.assertNotIn(code, challenge.code_hash)
         self.assertEqual(challenge.code_hash, otp.hash_code(challenge.token, code))
+
+
+class OwnPasswordChangeTests(APITestCase):
+    """Any signed-in user changes their own password from the profile."""
+
+    URL = "/api/auth/me/password/"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "self_pw", password="Old-pass-123", role="operator", department="production",
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_changes_the_password_and_clears_must_change(self):
+        from apps.adminpanel.models import UserSecurity
+
+        state = UserSecurity.get(self.user)
+        state.must_change_password = True
+        state.save()
+
+        res = self.client.post(self.URL, {
+            "current_password": "Old-pass-123", "new_password": "Brand-new-456",
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("Brand-new-456"))
+        state.refresh_from_db()
+        self.assertFalse(state.must_change_password)
+        self.assertIsNotNone(state.password_changed_at)
+
+    def test_wrong_current_password_is_refused(self):
+        res = self.client.post(self.URL, {
+            "current_password": "nope", "new_password": "Brand-new-456",
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("current_password", res.data)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("Old-pass-123"))
+
+    def test_weak_or_unchanged_password_is_refused(self):
+        for new in ("123", "Old-pass-123", "12345678"):
+            res = self.client.post(self.URL, {
+                "current_password": "Old-pass-123", "new_password": new,
+            }, format="json")
+            self.assertEqual(res.status_code, 400, new)
+            self.assertIn("new_password", res.data)
+
+    def test_requires_sign_in(self):
+        self.client.force_authenticate(None)
+        res = self.client.post(self.URL, {"current_password": "x", "new_password": "y"}, format="json")
+        self.assertEqual(res.status_code, 401)

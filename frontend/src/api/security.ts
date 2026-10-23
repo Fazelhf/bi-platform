@@ -33,6 +33,14 @@ export const securityApi = {
     const { data } = await api.post("/auth/2fa/disable/", { password });
     return data;
   },
+  /** The signed-in user changes their own password. */
+  async changePassword(currentPassword: string, newPassword: string) {
+    const { data } = await api.post("/auth/me/password/", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    return data as { ok: boolean; detail: string };
+  },
 };
 
 /**
