@@ -12,7 +12,7 @@ import { officeApi, type Person } from "@/api/office";
 import { workApi, type Project } from "@/api/officeWork";
 import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
-import { faDate } from "@/utils/adminFormat";
+import { faDate, timeAgo } from "@/utils/adminFormat";
 import FormModal from "@/components/crm/FormModal.vue";
 import PeoplePicker from "@/components/office/PeoplePicker.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -147,77 +147,89 @@ function barStyle(p: Project): Record<string, string> {
       hint="با «پروژه جدید» اولین پروژه را بسازید."
     />
 
-    <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      <!--
-        The whole card opens the project.
-
-        Before this, only the title text was a button — about a fifth of a
-        151px card — so clicking anywhere else did nothing and the project
-        «could not be opened». A card that looks like one target must be one
-        target; ویرایش sits above it and stops the click from reaching it.
-      -->
+    <!--
+      The whole card opens the project; ویرایش sits above it and stops the
+      click. Each card leads with the project's own colour and initials, the
+      way people recognise a project before they read its name.
+    -->
+    <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
       <div
         v-for="p in shown" :key="p.id"
-        class="relative office-card hover:shadow-pop
-               transition-shadow"
+        class="group relative office-card hover:shadow-pop hover:-translate-y-0.5 transition-all overflow-hidden"
       >
+        <span
+          class="absolute inset-x-0 top-0 h-1"
+          :style="{ background: p.color || 'rgb(var(--sec))' }"
+        ></span>
         <button
-          class="w-full text-right p-4 flex flex-col gap-3 rounded-card"
+          class="w-full text-right p-5 flex flex-col items-center gap-3"
           @click="router.push({ name: 'office-project', params: { id: p.id } })"
         >
-          <span class="block min-w-0 w-full pl-14 flex items-center gap-2">
-            <span
-              class="w-2.5 h-2.5 rounded-full shrink-0"
-              :style="{ background: p.color || 'rgb(var(--sec))' }"
-            ></span>
-            <span class="block font-bold text-ink text-sm truncate">{{ p.name }}</span>
+          <span
+            class="w-16 h-16 rounded-full grid place-items-center text-white text-xl font-bold shadow-soft
+                   transition-transform group-hover:scale-105"
+            :style="{ background: p.color || 'rgb(var(--sec))' }"
+          >{{ p.name.trim().slice(0, 2) }}</span>
+          <span class="flex items-center gap-1.5 max-w-full">
+            <NavIcon
+              v-if="p.progress_pct >= 100"
+              name="check" :size="15"
+              class="text-white bg-emerald-500 rounded-full p-0.5 shrink-0"
+            />
+            <span class="font-bold text-ink truncate">{{ p.name }}</span>
           </span>
-          <span v-if="p.due_on" class="block text-[11px] text-slate-400 ltr-nums">
-            مهلت {{ faDate(p.due_on) }}
+          <span v-if="p.due_on" class="text-[11px] text-slate-400 ltr-nums -mt-2 flex items-center gap-1">
+            <NavIcon name="calendar" :size="11" /> مهلت {{ faDate(p.due_on) }}
           </span>
 
-        <span class="block w-full">
-          <span class="flex items-baseline justify-between text-xs mb-1">
-            <span class="text-slate-500">وضعیت کل پروژه</span>
-            <span class="text-ink ltr-nums">{{ num(p.progress_pct) }}٪</span>
-          </span>
-          <span class="block h-2 bg-slate-100 rounded-full overflow-hidden">
-            <span
-              class="block h-full rounded-full transition-all"
-              :style="{ width: `${Math.max(p.progress_pct, 1)}%`, ...barStyle(p) }"
-            ></span>
-          </span>
-          <span class="block text-[11px] text-slate-400 mt-1 ltr-nums">
-            {{ num(p.done_count) }} از {{ num(p.task_count) }} وظیفه
-            <span v-if="p.overdue_count" class="text-amber-600">
-              · {{ num(p.overdue_count) }} عقب‌افتاده
+          <span class="block w-full mt-1">
+            <span class="flex items-baseline justify-between text-[11px] mb-1">
+              <span class="text-slate-500">وضعیت کل پروژه</span>
+              <span class="text-ink font-semibold ltr-nums">{{ num(Math.round(p.progress_pct)) }}٪</span>
+            </span>
+            <span class="block h-2 bg-slate-100 rounded-full overflow-hidden">
+              <span
+                class="block h-full rounded-full transition-all duration-500"
+                :style="{ width: `${Math.max(p.progress_pct, 1)}%`, ...barStyle(p) }"
+              ></span>
             </span>
           </span>
-        </span>
 
-        <span class="flex items-center justify-between gap-2 w-full mt-auto">
-          <span class="flex -space-x-2 space-x-reverse">
-            <UserAvatar
-              v-for="m in p.memberships.slice(0, 5)" :key="m.id"
-              :user="m.user_detail as any" :size="26" :title="m.user_detail.name"
-              class="ring-2 ring-surface rounded-full"
-            />
-            <span
-              v-if="p.memberships.length > 5"
-              class="w-[26px] h-[26px] rounded-full bg-slate-100 text-[10px] text-slate-500
-                     grid place-items-center ring-2 ring-surface ltr-nums"
-            >+{{ num(p.memberships.length - 5) }}</span>
+          <span class="flex items-center justify-between w-full text-[11px]">
+            <span class="text-slate-400 ltr-nums">
+              {{ num(p.done_count) }} از {{ num(p.task_count) }} وظیفه
+            </span>
+            <span v-if="p.overdue_count" class="text-amber-600 ltr-nums flex items-center gap-0.5">
+              <NavIcon name="clock" :size="11" /> {{ num(p.overdue_count) }} عقب‌افتاده
+            </span>
           </span>
-          <span
-            class="text-[11px] rounded-full px-2 py-1 ltr-nums"
-            :class="p.my_open_count ? 'bg-slate-100 text-slate-600' : 'text-slate-300'"
-          >{{ num(p.my_open_count) }} کار من</span>
-        </span>
+
+          <span class="flex items-center justify-between gap-2 w-full pt-3 border-t border-slate-100">
+            <span class="flex -space-x-2 space-x-reverse">
+              <UserAvatar
+                v-for="m in p.memberships.slice(0, 5)" :key="m.id"
+                :user="m.user_detail" :size="26"
+                class="ring-2 ring-surface rounded-full"
+              />
+              <span
+                v-if="p.memberships.length > 5"
+                class="w-[26px] h-[26px] rounded-full bg-slate-100 text-[10px] text-slate-500
+                       grid place-items-center ring-2 ring-surface ltr-nums"
+              >+{{ num(p.memberships.length - 5) }}</span>
+            </span>
+            <span
+              class="text-[11px] rounded-full px-2 py-0.5 ltr-nums"
+              :class="p.my_open_count ? 'office-chip font-medium' : 'text-slate-300'"
+            >{{ num(p.my_open_count) }} کار من</span>
+          </span>
+          <span v-if="p.last_done_at" class="text-[10px] text-slate-400 w-full -mt-1">
+            آخرین کار انجام‌شده: {{ timeAgo(p.last_done_at) }}
+          </span>
         </button>
 
         <!-- Layered over the card, so it does not open the project too. -->
         <button
-          class="office-icon-btn absolute top-2.5 left-2.5"
+          class="office-icon-btn absolute top-3 left-3 opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100"
           :aria-label="`ویرایش ${p.name}`"
           title="ویرایش پروژه"
           @click.stop="startEdit(p)"
