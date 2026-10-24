@@ -7,6 +7,18 @@
         "@nanonets/graft",
         "mcp"
       ]
+    },
+    "code-review-graph": {
+      "command": "C:/Users/User/AppData/Roaming/Python/Python314/Scripts/code-review-graph.exe",
+      "args": [
+        "serve",
+        "--repo",
+        "C:/Users/User/Projects/bi-platform"
+      ],
+      "env": {
+        "PYTHONUTF8": "1"
+      },
+      "type": "stdio"
     }
   }
 }

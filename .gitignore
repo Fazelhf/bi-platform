@@ -36,3 +36,5 @@ backend/data/arpa/*
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
+# Added by code-review-graph
+.code-review-graph/
