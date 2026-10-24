@@ -16,11 +16,11 @@ Structure:
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
 from django.db.models import (
-    Avg, Case, Count, DecimalField, F, IntegerField, Q, Sum, Value, When,
+    Avg, Case, Count, DecimalField, F, IntegerField, Max, Q, Sum, Value, When,
 )
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -1411,34 +1411,138 @@ def run_report(key: str, f: Filters, axis: str) -> dict:
 # --------------------------------------------------------------------------
 # Dashboard (داشبورد) — the widget set, in one round-trip
 # --------------------------------------------------------------------------
+def _shift_months(jy: int, jm: int, n: int) -> tuple[int, int]:
+    total = jy * 12 + (jm - 1) + n
+    return total // 12, total % 12 + 1
+
+
+def previous_window(f: Filters) -> Filters | None:
+    """
+    The window a KPI is compared against: the one just before, equally long.
+
+    Whole Jalali months shift by whole months, so «۳ ماه اخیر» is compared
+    with the three months before it and not with 90 days that start on the
+    20th of something. A window still running — «ماه جاری» on the 12th — is
+    compared with the same number of days into the previous one; against a
+    whole finished month every current month would read as a collapse.
+    """
+    if not f.start or not f.end:
+        return None
+    tomorrow = timezone.localdate() + dt.timedelta(days=1)
+    eff_end = min(f.end, tomorrow)
+    if eff_end <= f.start:
+        return None
+    elapsed = eff_end - f.start
+
+    sy, sm = jalali_month_of(f.start)
+    ey, em = jalali_month_of(f.end - dt.timedelta(days=1))
+    aligned = (
+        month_bounds(sy, sm)[0] == f.start and month_bounds(ey, em)[1] == f.end
+    )
+    if aligned:
+        n = (ey * 12 + em) - (sy * 12 + sm) + 1
+        prev_start = month_bounds(*_shift_months(sy, sm, -n))[0]
+    else:
+        prev_start = f.start - (f.end - f.start)
+    prev_end = min(prev_start + elapsed, f.start)
+    return replace(f, start=prev_start, end=prev_end)
+
+
+def _headline(f: Filters) -> dict:
+    """The comparable figures behind the KPI tiles, for one window."""
+    opened = f.deals("opened_at").aggregate(
+        n=Count("id", distinct=True), amount=_money(Sum("amount_rial"))
+    )
+    closed = f.deals("closed_at")
+    won = closed.filter(status=Deal.Status.WON)
+    won_agg = won.aggregate(
+        n=Count("id", distinct=True),
+        amount=_money(Sum("amount_rial")),
+        profit=_money(Sum("profit_rial")),
+    )
+    lost_agg = closed.filter(status=Deal.Status.LOST).aggregate(
+        n=Count("id", distinct=True), amount=_money(Sum("amount_rial"))
+    )
+    sales_agg = f.invoices().aggregate(
+        n=Count("id", distinct=True),
+        amount=_money(Sum("amount_rial")),
+        unsettled=_money(Sum("unsettled_rial")),
+    )
+    calls = f.activities().filter(
+        kind__in=[Activity.Kind.CALL_OUT, Activity.Kind.CALL_IN]
+    ).aggregate(n=Count("id"), success=Count("id", filter=Q(result="success")))
+    win_days = [(d.closed_at - d.opened_at).days for d in won.only("closed_at", "opened_at")]
+    closed_n = _num(won_agg["n"]) + _num(lost_agg["n"])
+    return {
+        "incoming": _num(opened["n"]),
+        "incoming_amount": _num(opened["amount"]),
+        "sales": _num(sales_agg["amount"]),
+        "sales_count": _num(sales_agg["n"]),
+        "unsettled": _num(sales_agg["unsettled"]),
+        "won": _num(won_agg["n"]),
+        "won_amount": _num(won_agg["amount"]),
+        "profit": _num(won_agg["profit"]),
+        "lost": _num(lost_agg["n"]),
+        "lost_amount": _num(lost_agg["amount"]),
+        "closed": closed_n,
+        "conversion": _pct(won_agg["n"], closed_n),
+        "velocity": round(sum(win_days) / len(win_days), 1) if win_days else 0,
+        "new_customers": f.customers("first_deal_won_at").count(),
+        "calls_n": _num(calls["n"]),
+        "calls_success": _num(calls["success"]),
+        "calls": _pct(calls["success"], calls["n"]),
+    }
+
+
+def sales_target(f: Filters) -> float:
+    """
+    The CEO's plan for the window, from `SalesTarget` — the same number the
+    sales dashboards use, so CRM and BI cannot disagree about the goal.
+
+    Plans are set per salesperson, so a slice the plan was never cut along
+    (a customer group, a lead source) has no target: 0, not a misleading one.
+    """
+    if f.blind or any((f.group, f.source, f.province, f.customer, f.product, f.tag)):
+        return 0.0
+    months = Q(pk__in=[])
+    for jy, jm, _, _ in _time_buckets(f):
+        months |= Q(jalali_year=jy, jalali_month=jm)
+    qs = SalesTarget.objects.filter(
+        employee__isnull=False,
+        period__in=DimPeriod.objects.filter(months, kind=PeriodKind.MONTH),
+    )
+    qs = f.by_channel(qs)
+    if f.owner:
+        qs = qs.filter(employee_id=f.owner)
+    return _num(qs.aggregate(t=Sum("target_rial"))["t"])
+
+
+def _elapsed_pct(f: Filters) -> float:
+    """How much of the window has already happened — the pace line."""
+    if not f.start or not f.end:
+        return 100.0
+    tomorrow = timezone.localdate() + dt.timedelta(days=1)
+    eff_end = min(max(f.start, tomorrow), f.end)
+    return round(100 * (eff_end - f.start).days / max(1, (f.end - f.start).days), 1)
+
+
 def dashboard(f: Filters) -> dict:
     """
     Everything the CRM home screen shows. One endpoint on purpose: twelve
     widgets meant twelve requests in Didar, and the page felt it.
     """
-    opened = f.deals("opened_at")
+    cur = _headline(f)
+    pf = previous_window(f)
+    prev = _headline(pf) if pf else None
+
     closed = f.deals("closed_at")
     won = closed.filter(status=Deal.Status.WON)
-    lost = closed.filter(status=Deal.Status.LOST)
-
-    won_agg = won.aggregate(
-        n=Count("id", distinct=True),
-        amount=_money(Sum("amount_rial")),
-        profit=_money(Sum("profit_rial")),
-        cost=_money(Sum("cost_rial")),
-    )
-    lost_agg = lost.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
 
     # Sales: the invoices. One figure, reconciled to آرپا — the card's sub
     # line carries the two amounts that stand between آرپا's own total and
     # this one, so a manager holding the accounting report can see the gap
     # is accounted for rather than wonder about it.
     sales = f.invoices()
-    sales_agg = sales.aggregate(
-        n=Count("id", distinct=True),
-        amount=_money(Sum("amount_rial")),
-        unsettled=_money(Sum("unsettled_rial")),
-    )
     intercompany = f.invoices(include_intercompany=True).filter(
         is_intercompany=True
     ).aggregate(amount=_money(Sum("amount_rial")))
@@ -1452,82 +1556,87 @@ def dashboard(f: Filters) -> dict:
     unbilled = Deal.objects.filter(
         pk__in=won.filter(invoices__isnull=True).values("pk")
     ).aggregate(n=Count("id"), amount=_money(Sum("amount_rial")))
-    in_agg = opened.aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
 
     open_now = f.by_channel(
         Deal.objects.filter(status=Deal.Status.OPEN, dataset=f.dataset)
     )
     if f.owner:
         open_now = open_now.filter(owner_id=f.owner)
+    if f.blind:
+        open_now = open_now.none()
     pipeline_agg = open_now.aggregate(
         n=Count("id", distinct=True), amount=_money(Sum("amount_rial"))
     )
     weighted = sum(d.weighted_rial for d in open_now.select_related("stage"))
 
-    closed_n = _num(won_agg["n"]) + _num(lost_agg["n"])
-    win_days = [(d.closed_at - d.opened_at).days for d in won.only("closed_at", "opened_at")]
-
-    calls = f.activities().filter(
-        kind__in=[Activity.Kind.CALL_OUT, Activity.Kind.CALL_IN]
-    )
-    call_agg = calls.aggregate(
-        n=Count("id"), success=Count("id", filter=Q(result="success"))
-    )
-
-    new_customers = f.customers("first_deal_won_at").count()
-    overdue = 0
     from apps.crm.models import Task as CrmTask
     overdue_qs = CrmTask.objects.filter(
         done_at__isnull=True, due_at__lt=timezone.now(), dataset=f.dataset
     )
     if f.owner:
         overdue_qs = overdue_qs.filter(owner_id=f.owner)
-    overdue = overdue_qs.count()
+    overdue = 0 if f.blind else overdue_qs.count()
 
+    target = sales_target(f)
     base = f.drill_base()
 
-    def card(key, label, value, unit, drill_kind=None, drill_extra=None, sub=None):
+    def card(key, label, value, unit, drill_kind=None, drill_extra=None, sub=None,
+             compare: str | None = None):
         d = dict(base)
         if drill_extra:
             d.update(drill_extra)
+        # `prev` is the same figure one window earlier (see previous_window);
+        # snapshots like «فروش در جریان» have no earlier value to carry.
+        prev_value = prev[compare] if prev is not None and compare else None
         return {
             "key": key, "label": label, "value": value, "unit": unit, "sub": sub,
+            "prev": prev_value,
             "drill": {"kind": drill_kind, "params": d} if drill_kind else None,
         }
 
     cards = [
-        card("incoming", "فرصت‌های جدید", _num(in_agg["n"]), "count", "deals",
-             {"date_basis": "opened"}, {"amount": _num(in_agg["amount"])}),
-        card("sales", "فروش", _num(sales_agg["amount"]), "rial", "invoices", {},
-             {"count": _num(sales_agg["n"]),
-              "unsettled": _num(sales_agg["unsettled"]),
+        card("sales", "فروش", cur["sales"], "rial", "invoices", {},
+             {"count": cur["sales_count"],
+              "unsettled": cur["unsettled"],
               "intercompany": _num(intercompany["amount"]),
               "unmatched": _num(unmatched["amount"]),
-              "unmatched_count": _num(unmatched["n"])}),
-        card("unbilled", "موفق، فاکتورنشده", _num(unbilled["amount"]), "rial", "deals",
-             {"status": "won", "invoiced": "0"},
-             {"count": _num(unbilled["n"])}),
-        card("lost", "معاملات شکست خورده", _num(lost_agg["n"]), "count", "deals",
-             {"status": "lost"}, {"amount": _num(lost_agg["amount"])}),
-        card("profit", "سود معاملات", _num(won_agg["profit"]), "rial", "deals",
+              "unmatched_count": _num(unmatched["n"]),
+              "target": target,
+              "achievement_pct": _pct(cur["sales"], target) if target else 0.0,
+              "elapsed_pct": _elapsed_pct(f)},
+             compare="sales"),
+        card("profit", "سود معاملات", cur["profit"], "rial", "deals",
              {"status": "won"},
-             {"margin_pct": _pct(won_agg["profit"], won_agg["amount"])}),
+             {"margin_pct": _pct(cur["profit"], cur["won_amount"])},
+             compare="profit"),
         card("pipeline", "فروش در جریان", _num(pipeline_agg["amount"]), "rial", "deals",
              {"status": "open"},
              {"count": _num(pipeline_agg["n"]), "weighted": float(weighted)}),
-        card("conversion", "نرخ تبدیل", _pct(won_agg["n"], closed_n), "percent", None, None,
-             {"won": _num(won_agg["n"]), "closed": closed_n}),
-        card("velocity", "چرخه فروش",
-             round(sum(win_days) / len(win_days), 1) if win_days else 0, "days"),
-        card("new_customers", "مشتریان جدید", new_customers, "count", "customers",
-             {"date_basis": "first_won"}),
-        card("calls", "نرخ تماس موفق", _pct(call_agg["success"], call_agg["n"]), "percent",
+        card("conversion", "نرخ تبدیل", cur["conversion"], "percent", None, None,
+             {"won": cur["won"], "closed": cur["closed"]}, compare="conversion"),
+        card("incoming", "فرصت‌های جدید", cur["incoming"], "count", "deals",
+             {"date_basis": "opened"}, {"amount": cur["incoming_amount"]},
+             compare="incoming"),
+        card("new_customers", "مشتریان جدید", cur["new_customers"], "count", "customers",
+             {"date_basis": "first_won"}, compare="new_customers"),
+        card("lost", "معاملات شکست خورده", cur["lost"], "count", "deals",
+             {"status": "lost"}, {"amount": cur["lost_amount"]}, compare="lost"),
+        card("velocity", "چرخه فروش", cur["velocity"], "days", compare="velocity"),
+        card("calls", "نرخ تماس موفق", cur["calls"], "percent",
              "activities", {"kind": "call", "result": "success"},
-             {"calls": _num(call_agg["n"]), "success": _num(call_agg["success"])}),
+             {"calls": cur["calls_n"], "success": cur["calls_success"]},
+             compare="calls"),
+        card("unbilled", "موفق، فاکتورنشده", _num(unbilled["amount"]), "rial", "deals",
+             {"status": "won", "invoiced": "0"},
+             {"count": _num(unbilled["n"])}),
         card("overdue", "کارهای عقب‌افتاده", overdue, "count"),
     ]
 
     return {
+        "comparison": {
+            "start": pf.start.isoformat() if pf and pf.start else None,
+            "end": (pf.end - dt.timedelta(days=1)).isoformat() if pf and pf.end else None,
+        },
         "cards": cards,
         "top_sellers": report_sales(f, "user")["rows"][:8],
         "funnel": report_funnel(f)["rows"],
@@ -1541,4 +1650,206 @@ def dashboard(f: Filters) -> dict:
         "new_customers_by_user": report_new_customers(f, "user")["rows"][:8],
         "satisfaction": report_satisfaction(f)["rows"][:6],
         "provinces": report_provinces(f)["rows"][:8],
+    }
+
+
+# --------------------------------------------------------------------------
+# فروش جغرافیایی — the map
+# --------------------------------------------------------------------------
+def geo_overview(f: Filters) -> dict:
+    """
+    Every province on one map: sales, customers and target, plus the share of
+    the country each one is. Unlike the dashboard's province table this keeps
+    every province, so a province with no sales at all still has a row and
+    the map can paint it as the blank it is.
+
+    Sales are placed by the *customer's* province — an invoice whose party is
+    not matched to a customer yet has no place on a map, and is reported as
+    `unplaced` beside it rather than silently dropped.
+    """
+    from apps.sales.models import DimProvince
+
+    by_id = {r["id"]: r for r in report_provinces(f)["rows"] if r["id"]}
+    sales = f.invoices()
+    unplaced = sales.filter(
+        Q(customer__isnull=True) | Q(customer__province__isnull=True)
+    ).aggregate(n=Count("id", distinct=True), amount=_money(Sum("amount_rial")))
+
+    customers = f.by_channel(
+        Customer.objects.filter(dataset=f.dataset, merged_into__isnull=True)
+    )
+    if f.owner:
+        customers = customers.filter(owner_id=f.owner)
+    if f.blind:
+        customers = customers.none()
+    base_by_province = dict(
+        customers.values("province_id").annotate(n=Count("id")).order_by()
+        .values_list("province_id", "n")
+    )
+
+    rows = []
+    for p in DimProvince.objects.order_by("name_fa"):
+        r = by_id.get(p.id, {})
+        d = dict(f.drill_base())
+        d["province"] = p.id
+        rows.append({
+            "id": p.id,
+            "label": p.name_fa,
+            "amount": r.get("amount", 0.0),
+            "profit": r.get("profit", 0.0),
+            "count": r.get("count", 0),
+            "customers": r.get("customers", 0),
+            "customer_base": base_by_province.get(p.id, 0),
+            "target": r.get("target", 0.0),
+            "achievement_pct": r.get("achievement_pct", 0.0),
+            "owner_label": r.get("owner_label", "—"),
+            "drill": {"kind": "invoices", "params": d},
+        })
+    total = sum(r["amount"] for r in rows)
+    for r in rows:
+        r["share_pct"] = _pct(r["amount"], total)
+    rows.sort(key=lambda r: r["amount"], reverse=True)
+    return {
+        "rows": rows,
+        "total": total,
+        "unplaced": {"count": _num(unplaced["n"]), "amount": _num(unplaced["amount"])},
+    }
+
+
+def geo_province(f: Filters, province_id: int) -> dict | None:
+    """
+    One province, zoomed in: who buys there and what they bought.
+
+    The customer list is the province's whole book in this scope, buyers
+    first — a customer who bought nothing in the window is still a customer
+    someone should be calling, and showing only buyers would hide them.
+    """
+    from apps.crm.models import SalesInvoiceItem
+    from apps.sales.models import DimEmployee, DimProvince
+
+    province = DimProvince.objects.filter(pk=province_id).first()
+    if province is None:
+        return None
+    pf = replace(f, province=province_id)
+    sales = pf.invoices()
+
+    agg = sales.aggregate(
+        n=Count("id", distinct=True),
+        amount=_money(Sum("amount_rial")),
+        unsettled=_money(Sum("unsettled_rial")),
+        buyers=Count("customer_id", distinct=True),
+    )
+    prev_f = previous_window(pf)
+    prev_amount = (
+        _num(prev_f.invoices().aggregate(a=_money(Sum("amount_rial")))["a"])
+        if prev_f else None
+    )
+
+    bought = {
+        r["customer_id"]: r
+        for r in sales.values("customer_id").annotate(
+            amount=_money(Sum("amount_rial")),
+            count=Count("id", distinct=True),
+            unsettled=_money(Sum("unsettled_rial")),
+            last=Max("issued_at"),
+        ).order_by()
+    }
+    book = f.by_channel(Customer.objects.filter(
+        dataset=f.dataset, merged_into__isnull=True, province_id=province_id,
+    ))
+    if f.owner:
+        book = book.filter(Q(owner_id=f.owner) | Q(pk__in=list(bought)))
+    if f.blind:
+        book = book.none()
+    customers = []
+    for c in book.select_related("owner", "group").only(
+        "id", "name_fa", "city", "status", "owner__full_name_fa", "group__name_fa",
+        "last_activity_at",
+    ):
+        b = bought.get(c.id, {})
+        customers.append({
+            "id": c.id,
+            "label": c.name_fa,
+            "city": c.city or "",
+            "status": c.status,
+            "owner": c.owner.full_name_fa if c.owner else "",
+            "group": c.group.name_fa if c.group else "",
+            "amount": _num(b.get("amount")),
+            "count": b.get("count", 0),
+            "unsettled": _num(b.get("unsettled")),
+            "last_purchase": b["last"].isoformat() if b.get("last") else None,
+            "last_activity": c.last_activity_at.date().isoformat() if c.last_activity_at else None,
+        })
+    customers.sort(key=lambda r: (-r["amount"], r["label"]))
+
+    cities = []
+    for r in sales.values("customer__city").annotate(
+        amount=_money(Sum("amount_rial")), buyers=Count("customer_id", distinct=True),
+    ).order_by("-amount")[:10]:
+        cities.append({
+            "label": r["customer__city"] or "شهر نامشخص",
+            "amount": _num(r["amount"]),
+            "buyers": r["buyers"],
+        })
+
+    products = []
+    for r in (
+        SalesInvoiceItem.objects.filter(invoice__in=sales.values("pk"))
+        .values("product_name")
+        .annotate(amount=_money(Sum("amount_rial")), qty=Sum("quantity"))
+        .order_by("-amount")[:8]
+    ):
+        products.append({
+            "label": r["product_name"] or "بدون نام",
+            "amount": _num(r["amount"]),
+            "quantity": _num(r["qty"]),
+        })
+
+    recent = []
+    for inv in sales.select_related("customer").order_by("-issued_at", "-number")[:12]:
+        recent.append({
+            "id": inv.id,
+            "number": inv.number,
+            "kind": inv.kind,
+            "date": inv.issued_at.isoformat(),
+            "customer_id": inv.customer_id,
+            "customer": inv.customer.name_fa if inv.customer else inv.party_name,
+            "amount": _num(inv.amount_rial),
+            "unsettled": _num(inv.unsettled_rial),
+        })
+
+    reps = []
+    rep_rows = list(
+        sales.values("rep_id").annotate(amount=_money(Sum("amount_rial"))).order_by("-amount")[:6]
+    )
+    names = dict(DimEmployee.objects.filter(
+        pk__in=[r["rep_id"] for r in rep_rows if r["rep_id"]]
+    ).values_list("pk", "full_name_fa"))
+    for r in rep_rows:
+        reps.append({
+            "id": r["rep_id"],
+            "label": names.get(r["rep_id"]) or UNATTRIBUTED["user"],
+            "amount": _num(r["amount"]),
+        })
+
+    drill = dict(pf.drill_base())
+    return {
+        "id": province.id,
+        "label": province.name_fa,
+        "amount": _num(agg["amount"]),
+        "prev_amount": prev_amount,
+        "count": _num(agg["n"]),
+        "unsettled": _num(agg["unsettled"]),
+        "buyers": _num(agg["buyers"]),
+        "customer_base": len(customers),
+        "target": next(
+            (r["target"] for r in report_provinces(pf)["rows"] if r["id"] == province_id), 0.0
+        ),
+        "trend": report_sales(pf, "time")["rows"],
+        "customers": customers,
+        "cities": cities,
+        "products": products,
+        "recent": recent,
+        "reps": reps,
+        "drill": {"kind": "invoices", "params": drill},
     }

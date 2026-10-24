@@ -53,7 +53,67 @@ export interface DashCard {
   value: number;
   unit: "count" | "rial" | "percent" | "days";
   sub?: Record<string, number> | null;
+  /** The same figure one window earlier; null for a snapshot with no past. */
+  prev?: number | null;
   drill?: Drill | null;
+}
+
+/** فروش جغرافیایی — one province on the country map. */
+export interface GeoProvinceRow extends ReportRow {
+  id: number;
+  amount: number;
+  count: number;
+  customers: number;
+  customer_base: number;
+  target: number;
+  achievement_pct: number;
+  share_pct: number;
+  owner_label: string;
+}
+
+export interface GeoOverview {
+  rows: GeoProvinceRow[];
+  total: number;
+  unplaced: { count: number; amount: number };
+  window: { start: string | null; end: string | null };
+}
+
+export interface GeoCustomer {
+  id: number;
+  label: string;
+  city: string;
+  status: string;
+  owner: string;
+  group: string;
+  amount: number;
+  count: number;
+  unsettled: number;
+  last_purchase: string | null;
+  last_activity: string | null;
+}
+
+/** One province, zoomed in. */
+export interface GeoProvince {
+  id: number;
+  label: string;
+  amount: number;
+  prev_amount: number | null;
+  count: number;
+  unsettled: number;
+  buyers: number;
+  customer_base: number;
+  target: number;
+  trend: ReportRow[];
+  customers: GeoCustomer[];
+  cities: { label: string; amount: number; buyers: number }[];
+  products: { label: string; amount: number; quantity: number }[];
+  recent: {
+    id: number; number: string; kind: string; date: string;
+    customer_id: number | null; customer: string; amount: number; unsettled: number;
+  }[];
+  reps: { id: number | null; label: string; amount: number }[];
+  drill: Drill;
+  window: { start: string | null; end: string | null };
 }
 
 export interface CrmDashboard {
@@ -71,6 +131,7 @@ export interface CrmDashboard {
   satisfaction: ReportRow[];
   provinces: ReportRow[];
   window: { start: string | null; end: string | null };
+  comparison?: { start: string | null; end: string | null };
 }
 
 export interface Deal {
@@ -197,6 +258,8 @@ export interface CrmOptions {
   /** Jalali months, newest first — computed server-side so the calendar
    *  conversion exists in exactly one implementation. */
   months: CrmMonth[];
+  /** Sample rows from `seed_crm_sample` are loaded; every screen says so. */
+  sample_data?: boolean;
   provinces: { id: number; name_fa: string }[];
   employees: { id: number; name: string; team: string }[];
   groups: { id: number; name_fa: string }[];
@@ -432,6 +495,16 @@ export const crmApi = {
 
   async dashboard(params: Params = {}): Promise<CrmDashboard> {
     const { data } = await api.get("/crm/dashboard/", { params: clean(params) });
+    return data;
+  },
+
+  async geo(params: Params = {}): Promise<GeoOverview> {
+    const { data } = await api.get("/crm/geo/", { params: clean(params) });
+    return data;
+  },
+
+  async geoProvince(province: number, params: Params = {}): Promise<GeoProvince> {
+    const { data } = await api.get("/crm/geo/", { params: clean({ ...params, province }) });
     return data;
   },
 

@@ -14,6 +14,7 @@ Two families of endpoints:
 Write access follows the platform rule already in place for فروش همکار: the
 sales_team department owns the data, the CEO reads everything.
 """
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
@@ -1407,6 +1408,35 @@ class CrmDashboardView(GatedAPIView):
         return Response(data)
 
 
+class CrmGeoView(GatedAPIView):
+    """
+    فروش جغرافیایی — the map. Without `province`, every province on it; with
+    one, that province zoomed in: its customers, purchases, cities, products.
+    """
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("province", int), OpenApiParameter("owner", int),
+            OpenApiParameter("date_from", str), OpenApiParameter("date_to", str),
+        ]
+    )
+    def get(self, request):
+        f = query_filters(request)
+        pid = f.province
+        if pid:
+            # The province is the zoom, not a filter on the overview.
+            data = rpt.geo_province(replace(f, province=None), pid)
+            if data is None:
+                return Response({"detail": "استان پیدا نشد."}, status=404)
+        else:
+            data = rpt.geo_overview(f)
+        data["window"] = {
+            "start": f.start.isoformat() if f.start else None,
+            "end": f.end.isoformat() if f.end else None,
+        }
+        return Response(data)
+
+
 class CrmReportView(GatedAPIView):
     """گزارش‌ها — /api/crm/reports/<key>/?axis=time|user|product|…"""
 
@@ -2008,6 +2038,11 @@ class CrmMeView(GatedAPIView):
         })
 
 
+def has_sample_data() -> bool:
+    """Whether `seed_crm_sample` rows are loaded — the screen must say so."""
+    return Customer.objects.filter(code__startswith="seed-").exists()
+
+
 class CrmOptionsView(GatedAPIView):
     """Every filter dropdown the CRM UI needs, in one request."""
 
@@ -2031,6 +2066,7 @@ class CrmOptionsView(GatedAPIView):
 
         return Response({
             "months": months,
+            "sample_data": has_sample_data(),
             "provinces": [
                 {"id": p.id, "name_fa": p.name_fa}
                 for p in DimProvince.objects.all()

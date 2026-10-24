@@ -112,6 +112,71 @@ const CARD_TARGET: Record<string, { name: string; query?: Record<string, string>
   overdue: { name: "crm-activities", query: { tab: "tasks" } },
 };
 
+/**
+ * Which way is good. A fall in «معاملات شکست خورده» or «چرخه فروش» is the
+ * news a manager wants, so the chip turns green going down for those.
+ */
+const LOWER_IS_BETTER = new Set(["lost", "velocity", "overdue", "unbilled"]);
+
+/** The four that answer «how are we doing»; the rest are the detail. */
+const HERO = ["sales", "profit", "pipeline", "conversion"];
+const heroCards = computed(() =>
+  HERO.map((k) => data.value?.cards.find((c) => c.key === k)).filter(Boolean) as DashCard[],
+);
+const minorCards = computed(() => data.value?.cards.filter((c) => !HERO.includes(c.key)) ?? []);
+
+interface Delta { text: string; good: boolean; flat: boolean }
+function delta(c: DashCard): Delta | null {
+  if (c.prev === null || c.prev === undefined) return null;
+  const now = Number(c.value), before = Number(c.prev);
+  // A rate is compared in points; «۱۲٪ ← ۲۰٪» is +8 points, not +67%.
+  if (c.unit === "percent") {
+    const d = now - before;
+    return {
+      text: `${d >= 0 ? "+" : "−"}${num(Math.abs(Math.round(d * 10) / 10))} واحد`,
+      good: (d >= 0) !== LOWER_IS_BETTER.has(c.key),
+      flat: Math.abs(d) < 0.05,
+    };
+  }
+  if (!before) return now ? { text: "جدید", good: !LOWER_IS_BETTER.has(c.key), flat: false } : null;
+  const d = ((now - before) / Math.abs(before)) * 100;
+  return {
+    text: `${d >= 0 ? "▲" : "▼"} ${pct(Math.abs(d), Math.abs(d) >= 10 ? 0 : 1)}`,
+    good: (d >= 0) !== LOWER_IS_BETTER.has(c.key),
+    flat: Math.abs(d) < 0.5,
+  };
+}
+
+function prevText(c: DashCard): string {
+  if (c.prev === null || c.prev === undefined) return "";
+  return `دوره قبل: ${cardValue({ ...c, value: c.prev })}`;
+}
+
+/** A tiny trend under a headline figure — the shape, not the numbers. */
+const SPARK: Record<string, () => number[]> = {
+  sales: () => data.value?.trend.map((r) => Number(r.amount) || 0) ?? [],
+  profit: () => data.value?.trend.map((r) => Number(r.profit) || 0) ?? [],
+};
+function spark(key: string): string {
+  const v = SPARK[key]?.() ?? [];
+  if (v.length < 2 || v.every((x) => !x)) return "";
+  const max = Math.max(...v), min = Math.min(...v, 0), span = max - min || 1;
+  return v.map((x, i) => `${(i / (v.length - 1)) * 100},${28 - ((x - min) / span) * 26}`).join(" ");
+}
+
+const target = computed(() => {
+  const s = data.value?.cards.find((c) => c.key === "sales")?.sub;
+  if (!s?.target) return null;
+  return { target: s.target, achieved: s.achievement_pct ?? 0, elapsed: s.elapsed_pct ?? 100 };
+});
+
+const comparisonLabel = computed(() => {
+  const c = data.value?.comparison;
+  if (!c?.start || !c?.end) return "";
+  const f = (iso: string) => new Date(iso).toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" });
+  return `مقایسه با ${f(c.start)} تا ${f(c.end)}`;
+});
+
 function openCard(c: DashCard) {
   if (c.drill?.kind) crm.openDrill(c.drill, c.label);
   else if (CARD_TARGET[c.key]) router.push(CARD_TARGET[c.key]);
@@ -237,32 +302,88 @@ async function onSaved(id?: number) {
 
     <CrmFilterBar />
 
-    <!-- ============ KPI tiles ============ -->
-    <div v-if="loading" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-      <Skeleton v-for="i in 10" :key="i" class="h-24 rounded-card" />
+    <!-- ============ Headline KPIs ============ -->
+    <div class="flex items-baseline justify-between gap-2 px-1">
+      <h2 class="section-title">نمای کلی</h2>
+      <p v-if="comparisonLabel" class="text-[11px] text-slate-400">{{ comparisonLabel }}</p>
     </div>
-    <div v-else class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+    <div v-if="loading" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      <Skeleton v-for="i in 4" :key="i" class="h-36 rounded-card" />
+    </div>
+    <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
       <button
-        v-for="c in data?.cards" :key="c.key"
-        class="bg-surface rounded-card shadow-soft p-4 text-right transition hover:shadow-pop hover:-translate-y-0.5 group"
+        v-for="c in heroCards" :key="c.key"
+        class="kpi bg-surface rounded-card shadow-soft p-4 text-right flex flex-col"
         :class="c.drill?.kind || CARD_TARGET[c.key] ? 'cursor-pointer' : 'cursor-default'"
         @click="openCard(c)"
       >
-        <div class="flex items-start justify-between gap-2">
-          <p class="text-xs text-slate-400">{{ c.label }}</p>
-          <svg
-            class="w-4 h-4 shrink-0 opacity-60" :class="CARD_STYLE[c.key]?.accent"
-            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round"
-          ><path :d="CARD_STYLE[c.key]?.icon" /></svg>
+        <div class="flex items-center justify-between gap-2 w-full">
+          <span class="flex items-center gap-2 text-xs text-slate-500">
+            <span class="w-7 h-7 rounded-xl grid place-items-center kpi-icon" :class="CARD_STYLE[c.key]?.accent">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path :d="CARD_STYLE[c.key]?.icon" /></svg>
+            </span>
+            {{ c.label }}
+          </span>
+          <span
+            v-if="delta(c)"
+            class="text-[11px] font-medium rounded-full px-2 py-0.5 whitespace-nowrap"
+            :class="delta(c)!.flat ? 'bg-slate-100 text-slate-500' : delta(c)!.good ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'"
+            :title="prevText(c)"
+          >{{ delta(c)!.text }}</span>
         </div>
-        <p class="text-xl font-bold mt-1.5" :class="CARD_STYLE[c.key]?.accent ?? 'text-ink'">
-          {{ cardValue(c) }}
-        </p>
-        <p class="text-[11px] text-slate-400 mt-0.5 truncate">{{ cardSub(c) }}</p>
+        <p class="text-2xl font-bold text-ink mt-3 tracking-tight">{{ cardValue(c) }}</p>
+        <p class="text-[11px] text-slate-400 mt-1 truncate w-full">{{ cardSub(c) }}</p>
+
+        <!-- Sales carries its plan: how far along, and where it should be by now. -->
+        <div v-if="c.key === 'sales' && target" class="mt-auto pt-3 w-full">
+          <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+            <span>تحقق تارگت {{ pct(target.achieved) }}</span>
+            <span>{{ rial(target.target) }}</span>
+          </div>
+          <div class="relative h-1.5 rounded-full bg-slate-100">
+            <div
+              class="absolute inset-y-0 right-0 rounded-full transition-all duration-700"
+              :class="target.achieved >= target.elapsed ? 'bg-emerald-500' : 'bg-amber-500'"
+              :style="{ width: `${Math.min(100, target.achieved)}%` }"
+            ></div>
+            <span
+              v-if="target.elapsed < 100"
+              class="absolute -top-1 w-0.5 h-3.5 bg-slate-400 rounded"
+              :style="{ right: `${target.elapsed}%` }"
+              :title="`${pct(target.elapsed, 0)} از بازه گذشته است`"
+            ></span>
+          </div>
+        </div>
+        <svg v-else-if="spark(c.key)" class="mt-auto pt-3 w-full h-9" viewBox="0 0 100 30" preserveAspectRatio="none">
+          <polyline :points="spark(c.key)" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke" :class="CARD_STYLE[c.key]?.accent" />
+        </svg>
+        <p v-else class="mt-auto pt-3 text-[11px] text-slate-400 truncate w-full">{{ prevText(c) }}</p>
       </button>
     </div>
 
+    <!-- ============ Secondary KPIs ============ -->
+    <div v-if="!loading" class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">
+      <button
+        v-for="c in minorCards" :key="c.key"
+        class="kpi bg-surface rounded-card shadow-soft px-3.5 py-3 text-right"
+        :class="c.drill?.kind || CARD_TARGET[c.key] ? 'cursor-pointer' : 'cursor-default'"
+        :title="prevText(c)"
+        @click="openCard(c)"
+      >
+        <p class="text-[11px] text-slate-400 truncate">{{ c.label }}</p>
+        <div class="flex items-baseline justify-between gap-1 mt-1">
+          <p class="text-base font-bold" :class="CARD_STYLE[c.key]?.accent ?? 'text-ink'">{{ cardValue(c) }}</p>
+          <span
+            v-if="delta(c) && !delta(c)!.flat"
+            class="text-[10px] font-medium whitespace-nowrap"
+            :class="delta(c)!.good ? 'text-emerald-600' : 'text-red-500'"
+          >{{ delta(c)!.text }}</span>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-0.5 truncate">{{ cardSub(c) }}</p>
+      </button>
+    </div>
+
+    <h2 class="section-title px-1 pt-2">روند و کاریز</h2>
     <!-- ============ Trend + incoming ============ -->
     <div class="grid lg:grid-cols-2 gap-4">
       <div :class="card">
@@ -307,6 +428,7 @@ async function onSaved(id?: number) {
       </div>
     </div>
 
+    <h2 class="section-title px-1 pt-2">کیفیت فروش و منابع</h2>
     <!-- ============ Lost reasons / activities / sources ============ -->
     <div class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
@@ -355,6 +477,7 @@ async function onSaved(id?: number) {
     </div>
 
     <!-- ============ People ============ -->
+    <h2 v-if="crm.seesAll" class="section-title px-1 pt-2">تیم فروش</h2>
     <div v-if="crm.seesAll" class="grid lg:grid-cols-3 gap-4">
       <div :class="card">
         <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('activities', 'user')">فعال‌ترین کارشناسان</button>
@@ -399,10 +522,11 @@ async function onSaved(id?: number) {
       </div>
     </div>
 
+    <h2 class="section-title px-1 pt-2">بازار و مشتری</h2>
     <!-- ============ Geography + segments ============ -->
     <div class="grid lg:grid-cols-2 gap-4">
       <div :class="card">
-        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('provinces')">فروش و تارگت استان‌ها</button>
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="router.push({ name: 'crm-geo' })">فروش و تارگت استان‌ها · نقشه</button>
         <div class="overflow-x-auto">
           <table class="w-full text-xs min-w-[420px]">
             <thead>
@@ -457,6 +581,10 @@ async function onSaved(id?: number) {
   border-radius: 0.375rem;
 }
 .widget-title { transition: color 0.15s; }
+.section-title { font-size: 0.8rem; font-weight: 700; color: rgb(100 116 139); letter-spacing: 0.01em; }
+.kpi { transition: box-shadow 0.2s, transform 0.2s; }
+.kpi:hover { transform: translateY(-2px); }
+.kpi-icon { background: color-mix(in srgb, currentColor 12%, transparent); }
 .widget-title:hover { color: rgb(100 116 139); }
 .widget-title:focus-visible { outline: 2px solid rgb(148 163 184); outline-offset: 3px; }
 </style>

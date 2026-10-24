@@ -17,12 +17,14 @@
       "autoPort": false
     },
     {
+      "//": "--host 0.0.0.0 so colleagues on the office LAN can open it at http://192.168.100.137:5176. Only Vite is exposed: Django stays on 127.0.0.1 and is reached through Vite's /api proxy.",
       "name": "frontend-local",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "--prefix", "C:/Users/User/Projects/bi-platform/frontend", "run", "dev", "--",
         "C:/Users/User/Projects/bi-platform/frontend",
-        "--config", "C:/Users/User/Projects/bi-platform/frontend/vite.config.ts"
+        "--config", "C:/Users/User/Projects/bi-platform/frontend/vite.config.ts",
+        "--host", "0.0.0.0"
       ],
       "env": { "PORT": "5176", "API_TARGET": "http://127.0.0.1:8003" },
       "port": 5176,

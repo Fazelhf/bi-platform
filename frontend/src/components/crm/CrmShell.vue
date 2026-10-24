@@ -58,6 +58,7 @@ const NAV = [
   { name: "crm-deals", label: "معامله‌ها", icon: "box" },
   { name: "crm-pipeline", label: "کاریز فروش", icon: "target" },
   { name: "crm-activities", label: "پیگیری‌ها", icon: "notes" },
+  { name: "crm-geo", label: "فروش جغرافیایی", icon: "globe" },
   { name: "crm-reports", label: "گزارش‌ها", icon: "chart" },
   { name: "crm-match-review", label: "بازبینی تطبیق", icon: "check", managerOnly: true },
 ] as { name: string; label: string; icon: string; managerOnly?: boolean }[];
@@ -201,7 +202,7 @@ const ui = useUiStore();
           @click="mobileOpen = true"
         ><NavIcon name="grid" :size="22" /></button>
 
-        <h1 class="font-bold text-ink">{{ pageTitle }}</h1>
+        <h1 class="font-bold text-ink whitespace-nowrap truncate min-w-0">{{ pageTitle }}</h1>
 
         <!-- Whose book. Three departments share these screens now, and a
              page of customers that does not say which file it is showing
@@ -258,6 +259,16 @@ const ui = useUiStore();
       >
         این حساب هنوز به هیچ کارشناس فروشی وصل نشده است، بنابراین رکوردی برای
         نمایش ندارد. از مدیر فروش بخواهید حساب شما را به کارشناس مربوطه متصل کند.
+      </p>
+
+      <!-- seed_crm_sample rows are on screen. A sample that looks like the
+           customer file must never be read as one. -->
+      <p
+        v-if="crm.options?.sample_data"
+        class="bg-amber-50 text-amber-800 text-sm rounded-xl px-4 py-2.5 mb-4 flex items-center gap-2"
+      >
+        <NavIcon name="alert" :size="16" />
+        داده نمونه: ارقام این صفحه‌ها برای نمایش ساخته شده‌اند و فروش واقعی شرکت نیستند.
       </p>
 
       <RouterView />

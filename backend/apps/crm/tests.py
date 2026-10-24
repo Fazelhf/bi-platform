@@ -2152,3 +2152,156 @@ class WorkScreensTests(APITestCase):
         self.client.force_authenticate(self.boss)
         res = self.client.get("/api/crm/deals/", {"status": "open", "ordering": "owner__user__password"})
         self.assertEqual(res.status_code, 200)
+
+
+class GeoAndComparisonTests(APITestCase):
+    """
+    فروش جغرافیایی and the dashboard's «نسبت به دوره قبل».
+
+    The map places a sale by the customer's province, so the two failures
+    worth guarding are a sale on the wrong province and a rep zooming into a
+    province and seeing a colleague's customers there.
+    """
+
+    def setUp(self):
+        from apps.crm.jalali import jalali_month_of, month_bounds
+        from apps.sales.models import DimProvince
+
+        self.tehran = DimProvince.objects.create(code="t-teh", name_fa="تهران")
+        self.fars = DimProvince.objects.create(code="t-fars", name_fa="فارس")
+        self.mine = DimEmployee.objects.create(code="g-mine", full_name_fa="کارشناس من")
+        self.theirs = DimEmployee.objects.create(code="g-theirs", full_name_fa="کارشناس دیگر")
+        self.rep = _user("geo-rep", "operator", "sales_team")
+        self.mine.user = self.rep
+        self.mine.save(update_fields=["user"])
+        self.ceo = _user("geo-ceo", "executive")
+
+        now = timezone.now()
+        jy, jm = jalali_month_of(timezone.localdate())
+        self.month_start, self.month_end = month_bounds(jy, jm)
+        self.a = Customer.objects.create(
+            code="g-a", name_fa="مشتری تهران من", province=self.tehran, city="تهران",
+            owner=self.mine, dataset=Dataset.REAL, first_contact_at=now,
+        )
+        self.b = Customer.objects.create(
+            code="g-b", name_fa="مشتری تهران دیگری", province=self.tehran,
+            owner=self.theirs, dataset=Dataset.REAL, first_contact_at=now,
+        )
+        self.c = Customer.objects.create(
+            code="g-c", name_fa="مشتری فارس", province=self.fars,
+            owner=self.theirs, dataset=Dataset.REAL, first_contact_at=now,
+        )
+        self.idle = Customer.objects.create(
+            code="g-idle", name_fa="مشتری بی‌خرید", province=self.tehran,
+            owner=self.mine, dataset=Dataset.REAL, first_contact_at=now,
+        )
+        day = self.month_start
+        for n, (cust, amount) in enumerate(((self.a, 300), (self.b, 500), (self.c, 200)), 1):
+            inv = SalesInvoice.objects.create(
+                code=f"g-inv-{n}", number=str(n), customer=cust, issued_at=day,
+                amount_rial=amount, owner=cust.owner, dataset=Dataset.REAL,
+                channel=SalesChannel.TEAM,
+            )
+            SalesInvoiceItem.objects.create(
+                invoice=inv, product_name="رول حرارتی", quantity=1,
+                amount_rial=amount, dataset=Dataset.REAL,
+            )
+        # Last month's sale, for the comparison.
+        prev_start, _ = month_bounds(*( (jy, jm - 1) if jm > 1 else (jy - 1, 12) ))
+        SalesInvoice.objects.create(
+            code="g-inv-prev", number="99", customer=self.a, issued_at=prev_start,
+            amount_rial=100, owner=self.mine, dataset=Dataset.REAL,
+            channel=SalesChannel.TEAM,
+        )
+
+    def _window(self):
+        return {
+            "date_from": self.month_start.isoformat(),
+            "date_to": (self.month_end - timedelta(days=1)).isoformat(),
+        }
+
+    def test_overview_places_sales_by_customer_province(self):
+        self.client.force_authenticate(self.ceo)
+        res = self.client.get("/api/crm/geo/", self._window())
+        self.assertEqual(res.status_code, 200)
+        rows = {r["label"]: r for r in res.data["rows"]}
+        self.assertEqual(rows["تهران"]["amount"], 800)
+        self.assertEqual(rows["فارس"]["amount"], 200)
+        self.assertEqual(rows["تهران"]["share_pct"], 80)
+        self.assertEqual(res.data["total"], 1000)
+
+    def test_zoom_lists_the_whole_book_buyers_first(self):
+        self.client.force_authenticate(self.ceo)
+        res = self.client.get("/api/crm/geo/", {**self._window(), "province": self.tehran.id})
+        self.assertEqual(res.status_code, 200)
+        names = [c["label"] for c in res.data["customers"]]
+        self.assertEqual(names[:2], ["مشتری تهران دیگری", "مشتری تهران من"])
+        self.assertIn("مشتری بی‌خرید", names)
+        self.assertNotIn("مشتری فارس", names)
+        self.assertEqual(res.data["amount"], 800)
+        self.assertEqual(res.data["products"][0]["amount"], 800)
+
+    def test_rep_zooms_into_their_own_customers_only(self):
+        self.client.force_authenticate(self.rep)
+        res = self.client.get("/api/crm/geo/", {**self._window(), "province": self.tehran.id})
+        self.assertEqual(res.status_code, 200)
+        names = {c["label"] for c in res.data["customers"]}
+        self.assertEqual(names, {"مشتری تهران من", "مشتری بی‌خرید"})
+        self.assertEqual(res.data["amount"], 300)
+
+    def test_unknown_province_is_404(self):
+        self.client.force_authenticate(self.ceo)
+        res = self.client.get("/api/crm/geo/", {"province": 99999})
+        self.assertEqual(res.status_code, 404)
+
+    def test_previous_window_is_the_month_before(self):
+        f = rpt.Filters.from_query(self._window())
+        pf = rpt.previous_window(f)
+        from apps.crm.jalali import jalali_month_of, month_bounds
+        jy, jm = jalali_month_of(f.start - timedelta(days=1))
+        self.assertEqual(pf.start, month_bounds(jy, jm)[0])
+        # The month is still running, so only as many days of the last one.
+        elapsed = timezone.localdate() + timedelta(days=1) - f.start
+        self.assertEqual(pf.end - pf.start, elapsed)
+
+    def test_dashboard_sales_card_carries_previous_value(self):
+        self.client.force_authenticate(self.ceo)
+        res = self.client.get("/api/crm/dashboard/", self._window())
+        sales = next(c for c in res.data["cards"] if c["key"] == "sales")
+        self.assertEqual(sales["value"], 1000)
+        # Running month: compared with the same number of days last month,
+        # and the old sale is on day one of it.
+        self.assertEqual(sales["prev"], 100)
+        pipeline = next(c for c in res.data["cards"] if c["key"] == "pipeline")
+        self.assertIsNone(pipeline["prev"])
+
+
+class SampleSeedTests(APITestCase):
+    """`seed_crm_sample` must be visible as a sample and removable without residue."""
+
+    def setUp(self):
+        from apps.sales.models import DimProvince
+
+        for i, name in enumerate(("تهران", "اصفهان", "فارس")):
+            DimProvince.objects.create(code=f"s-p{i}", name_fa=name)
+        e = DimEmployee.objects.create(code="s-rep", full_name_fa="کارشناس نمونه")
+        EmployeeChannel.objects.create(employee=e, channel=SalesChannel.TEAM)
+        self.ceo = _user("seed-ceo", "executive")
+
+    def test_seed_is_flagged_and_clear_removes_every_row(self):
+        from django.core.management import call_command
+
+        real = Customer.objects.create(
+            code="keep-me", name_fa="مشتری واقعی", first_contact_at=timezone.now(),
+        )
+        call_command("seed_crm_sample", customers=15, months=3, stdout=open(__import__("os").devnull, "w"))
+        self.assertTrue(Customer.objects.filter(code__startswith="seed-").exists())
+        self.client.force_authenticate(self.ceo)
+        self.assertTrue(self.client.get("/api/crm/options/").data["sample_data"])
+
+        call_command("seed_crm_sample", clear=True, stdout=open(__import__("os").devnull, "w"))
+        self.assertFalse(Customer.objects.filter(code__startswith="seed-").exists())
+        self.assertFalse(SalesInvoice.objects.filter(code__startswith="seed-").exists())
+        self.assertFalse(Deal.objects.filter(code__startswith="seed-").exists())
+        self.assertTrue(Customer.objects.filter(pk=real.pk).exists())
+        self.assertFalse(self.client.get("/api/crm/options/").data["sample_data"])
