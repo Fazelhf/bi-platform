@@ -9,8 +9,8 @@
 #   bash ~/bi-platform/sync-sales2.sh --dry-run          # report, write nothing
 #   bash ~/bi-platform/sync-sales2.sh --undo             # take it all back out
 #
-# If fresh آرپا exports sit in backend/data/arpa, CRM is refreshed from them
-# first; otherwise the invoices CRM already has are used as they are.
+# It uses the invoices CRM already holds. Fresh آرپا invoices reach CRM only
+# through the site's «ورود از آرپا» page — upload there first.
 #
 # Separate from deploy.sh for the same reason as import-data.sh: loading
 # accounting data is a decision, not a side effect of shipping code.
@@ -22,7 +22,6 @@ set -e
 
 VENV="/home/ntpbiir/virtualenv/bi-platform/backend/3.12/bin/activate"
 APP_DIR="$HOME/bi-platform"
-ARPA_DIR="data/arpa"
 
 FROM="1405/01/01"
 DRY_RUN=""
@@ -61,19 +60,7 @@ echo "▸ قبل:"
 count_rows
 echo ""
 
-# --- 1. CRM from the آرپا exports, when there are any -----------------------
-if ls "$ARPA_DIR"/*.xlsx >/dev/null 2>&1; then
-  CHECK=""
-  [ -n "$DRY_RUN" ] && CHECK="--check"
-  echo "▸ خروجی آرپا پیدا شد؛ به‌روزرسانی CRM…"
-  python manage.py import_arpa_parties  --dir "$ARPA_DIR" $CHECK
-  python manage.py import_arpa_invoices --dir "$ARPA_DIR" $CHECK
-else
-  echo "▸ خروجی آرپا در backend/$ARPA_DIR نیست؛ فاکتورهای فعلی CRM به کار می‌روند."
-fi
-echo ""
-
-# --- 2. CRM into فروش ۲ ------------------------------------------------------
+# --- CRM into فروش ۲ ------------------------------------------------------
 echo "▸ انتقال به فروش ۲ از $FROM…"
 if [ -n "$DRY_RUN" ]; then
   python manage.py sales2_cutover --from "$FROM" --dry-run

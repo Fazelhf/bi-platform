@@ -18,6 +18,7 @@ So the guard is tested by its real question — «did *this command* write
 anything?» — and the answer keys on the «didar-» codes only the importer
 mints.
 """
+import re
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
@@ -30,16 +31,14 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.crm import matching, merge as crm_merge, reports as rpt
-from apps.crm.management.commands.import_arpa_invoices import (
-    Command as InvoiceCommand, dec as inv_dec,
-)
-from apps.crm.invoice_link import WINDOW_DAYS, link_invoices
+from apps.crm.arpa_import import dec as inv_dec, invoice_code
 from apps.crm.matching import CustomerIndex, Method
-from apps.crm.management.commands.import_didar_crm import Command as ImportCommand, fit
+from apps.crm.didar_import import Importer as DidarImporter, fit
+from apps.crm.people import RepMatcher
 from apps.crm.models import (
     Activity, Customer, CustomerExternalRef, CustomerMatchCandidate, Dataset,
     Deal, DealItem, ExternalSource, PipelineStage, Product, SalesInvoice,
-    SalesInvoiceItem,
+    SalesInvoiceItem, Task,
     DismissedParty,
 )
 from apps.sales.models import DimEmployee, EmployeeChannel, SalesChannel
@@ -131,39 +130,6 @@ class DatasetIsolationTests(DatasetTestCase):
         self.assertEqual([r["label"] for r in rows], ["ارتباط مشتری"])
 
 
-class ImportGuardTests(DatasetTestCase):
-    """
-    `--if-empty` is what lets deploy.sh call the importer on every deploy.
-    Wrong in either direction it is dangerous: too eager and it wipes the
-    sales team's work, too shy and the real data never arrives.
-    """
-
-    def test_guard_sees_imported_rows(self):
-        self.assertTrue(ImportCommand()._already_imported())
-
-    def test_guard_ignores_rows_it_did_not_write(self):
-        """
-        The production bug. A demo customer tagged «real» by the migration
-        default is not evidence that the import has run — asking «are there
-        real rows?» is what made the importer skip itself in silence.
-        """
-        Customer.objects.filter(code__startswith="didar-").delete()
-        Customer.objects.filter(code="cust-2082").update(dataset=Dataset.REAL)
-
-        self.assertTrue(Customer.objects.filter(dataset=Dataset.REAL).exists())
-        self.assertFalse(ImportCommand()._already_imported())
-
-    def test_first_import_clears_the_mislabelled_seed(self):
-        Customer.objects.filter(code__startswith="didar-").delete()
-        Customer.objects.filter(code="cust-2082").update(dataset=Dataset.REAL)
-
-        cmd = ImportCommand()
-        cmd.stdout = type("_S", (), {"write": lambda self, *a, **k: None})()
-        cmd.style = type("_T", (), {"WARNING": staticmethod(lambda s: s)})()
-        cmd._clear_mislabelled()
-
-        self.assertFalse(Customer.objects.filter(dataset=Dataset.REAL).exists())
-
 
 class ColumnWidthTests(APITestCase):
     """
@@ -212,10 +178,10 @@ class IdentityLayerTests(DatasetTestCase):
     def test_the_importer_files_the_didar_id_where_a_second_source_can_look(self):
         """
         The id has to end up somewhere queryable — not only inside `code`.
-        Derived from `code` so it matches, row for row, what migration 0006
-        backfilled onto the customers already in the production database.
+        Same «pe-…» / «co-…» form migration 0006 backfilled onto the
+        customers already in the production database.
         """
-        ImportCommand._link(self.real_customer)
+        DidarImporter()._link("pe-1759", self.real_customer, self.real_customer.name_fa)
 
         ref = self.real_customer.external_refs.get(source=ExternalSource.DIDAR)
         self.assertEqual(ref.external_id, "pe-1759")
@@ -227,10 +193,10 @@ class IdentityLayerTests(DatasetTestCase):
         run must update the row it already wrote, not add a second id — and a
         company renamed in دیدار must keep its id rather than fork.
         """
-        ImportCommand._link(self.real_customer)
+        DidarImporter()._link("pe-1759", self.real_customer, self.real_customer.name_fa)
         self.real_customer.name_fa = "نام تازه"
         self.real_customer.save(update_fields=["name_fa", "updated_at"])
-        ImportCommand._link(self.real_customer)
+        DidarImporter()._link("pe-1759", self.real_customer, self.real_customer.name_fa)
 
         self.assertEqual(self.real_customer.external_refs.count(), 1)
         ref = self.real_customer.external_refs.get(source=ExternalSource.DIDAR)
@@ -542,8 +508,8 @@ class InvoiceImportUnitTests(APITestCase):
         is unique on all of them, so the code carries the date.
         """
         from datetime import date
-        code_1404 = InvoiceCommand._code("sale", "241", date(2025, 6, 15))
-        code_1405 = InvoiceCommand._code("sale", "241", date(2026, 6, 15))
+        code_1404 = invoice_code("main", "sale", "241", date(2025, 6, 15))
+        code_1405 = invoice_code("main", "sale", "241", date(2026, 6, 15))
         self.assertNotEqual(code_1404, code_1405)
         self.assertLessEqual(len(code_1404), 50)
 
@@ -577,25 +543,21 @@ class InvoiceRepMappingTests(APITestCase):
     """
 
     def setUp(self):
-        self.cmd = InvoiceCommand()
-        self.cmd.unknown_reps = defaultdict(int)
-        self.cmd.employees = {
-            matching.name_key(n): n for n in (
-                "هانیه منزه", "حامد بهشتی", "بهلول", "مهدیس مومنی",
-                "سارا مسگرچیان", "پیام بوساک", "صبا موسوی",
-            )
-        }
+        self.cmd = RepMatcher([
+            "هانیه منزه", "حامد بهشتی", "بهلول", "مهدیس مومنی",
+            "سارا مسگرچیان", "پیام بوساک", "صبا موسوی",
+        ])
 
     def test_an_extra_name_part_is_the_same_person(self):
         """«هانیه خواجه منزه» in آرپا is «هانیه منزه» in the CRM."""
-        self.assertEqual(self.cmd._rep("هانیه خواجه منزه"), "هانیه منزه")
-        self.assertEqual(self.cmd._rep("حامد بهشتی زواره"), "حامد بهشتی")
+        self.assertEqual(self.cmd.match("هانیه خواجه منزه"), "هانیه منزه")
+        self.assertEqual(self.cmd.match("حامد بهشتی زواره"), "حامد بهشتی")
 
     def test_a_surname_only_colleague_still_matches(self):
-        self.assertEqual(self.cmd._rep("عاطفه بهلول"), "بهلول")
+        self.assertEqual(self.cmd.match("عاطفه بهلول"), "بهلول")
 
     def test_hamza_is_not_a_different_person(self):
-        self.assertEqual(self.cmd._rep("مهدیس موءمنی"), "مهدیس مومنی")
+        self.assertEqual(self.cmd.match("مهدیس موءمنی"), "مهدیس مومنی")
 
     def test_a_different_surname_is_never_inferred(self):
         """
@@ -604,9 +566,9 @@ class InvoiceRepMappingTests(APITestCase):
         colleague halves a real person's numbers wherever they are reported.
         So the rule refuses, and the invoice is left unowned — visibly.
         """
-        self.assertIsNone(self.cmd._rep("سارا مسگری"))
-        self.assertIsNone(self.cmd._rep("کاوه بهشتی"))
-        self.assertEqual(set(self.cmd.unknown_reps), {"سارا مسگری", "کاوه بهشتی"})
+        self.assertIsNone(self.cmd.match("سارا مسگری"))
+        self.assertIsNone(self.cmd.match("کاوه بهشتی"))
+        self.assertEqual(set(self.cmd.unknown), {"سارا مسگری", "کاوه بهشتی"})
 
     def test_a_confirmed_pair_is_written_down_not_derived(self):
         """
@@ -615,14 +577,14 @@ class InvoiceRepMappingTests(APITestCase):
         name that differs rather than its spelling. Listing them by hand is
         what keeps the general rule tight.
         """
-        self.assertEqual(self.cmd._rep("محسن بوساک"), "پیام بوساک")
-        self.assertEqual(self.cmd._rep("سارا مسگرقمی"), "سارا مسگرچیان")
-        self.assertFalse(self.cmd.unknown_reps)
+        self.assertEqual(self.cmd.match("محسن بوساک"), "پیام بوساک")
+        self.assertEqual(self.cmd.match("سارا مسگرقمی"), "سارا مسگرچیان")
+        self.assertFalse(self.cmd.unknown)
 
     def test_the_placeholder_is_not_a_colleague(self):
         """425 of 1,098 invoices carry «بازاریاب بدون پورسانت»."""
-        self.assertIsNone(self.cmd._rep("بازاریاب بدون پورسانت"))
-        self.assertNotIn("بازاریاب بدون پورسانت", self.cmd.unknown_reps)
+        self.assertIsNone(self.cmd.match("بازاریاب بدون پورسانت"))
+        self.assertNotIn("بازاریاب بدون پورسانت", self.cmd.unknown)
 
 
 class MergeReviewTests(APITestCase):
@@ -760,9 +722,16 @@ class MergeReviewApiTests(DatasetTestCase):
             method="phone", score=Decimal("0.5"),
             payload={"کد": "400900", "نام": "شرکت آزمایشی", "نوع": "حقوقی"},
         )
+        # بازبینی تطبیق belongs to the system admin alone.
+        self.reviewer = _user("reviewer", "admin")
+
+    def test_the_ceo_and_managers_are_refused(self):
+        for user in (self.ceo, self.rep):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 403)
 
     def test_the_queue_lists_both_sides_in_one_request(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         res = self.client.get("/api/crm/match-candidates/")
         self.assertEqual(res.status_code, 200)
         row = res.data["results"][0]
@@ -774,14 +743,14 @@ class MergeReviewApiTests(DatasetTestCase):
     def test_an_old_demo_preference_does_not_hide_the_queue(self):
         """The showroom is gone; an account that last looked at it must still
         see the real queue rather than an empty one."""
-        self.client.force_authenticate(self.ceo)
-        self.ceo.crm_dataset = "demo"
-        self.ceo.save(update_fields=["crm_dataset"])
+        self.client.force_authenticate(self.reviewer)
+        self.reviewer.crm_dataset = "demo"
+        self.reviewer.save(update_fields=["crm_dataset"])
         res = self.client.get("/api/crm/match-candidates/")
         self.assertEqual(res.data["count"], 1)
 
     def test_accepting_over_http_links_the_party(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         res = self.client.post(f"/api/crm/match-candidates/{self.candidate.pk}/accept/")
         self.assertEqual(res.status_code, 200, res.data)
         self.assertTrue(
@@ -789,13 +758,13 @@ class MergeReviewApiTests(DatasetTestCase):
         )
 
     def test_a_second_decision_is_refused_not_silently_applied(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         self.client.post(f"/api/crm/match-candidates/{self.candidate.pk}/accept/")
         res = self.client.post(f"/api/crm/match-candidates/{self.candidate.pk}/reject/")
         self.assertEqual(res.status_code, 409)
 
     def test_summary_counts_what_is_still_open(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         res = self.client.get("/api/crm/match-candidates/summary/")
         self.assertEqual(res.data["pending"], 1)
 
@@ -969,6 +938,8 @@ class BulkReviewTests(APITestCase):
             format="json",
         )
         candidate = CustomerMatchCandidate.objects.get(source=ExternalSource.CRM)
+        # Queued by the manager; ruled on by the system admin.
+        self.client.force_authenticate(_user("bulk-admin", "admin"))
         res = self.client.post(f"/api/crm/match-candidates/{candidate.pk}/accept/")
         self.assertEqual(res.status_code, 200, res.data)
 
@@ -984,6 +955,7 @@ class BulkReviewTests(APITestCase):
         )
         before = Customer.objects.count()
         candidate = CustomerMatchCandidate.objects.get(source=ExternalSource.CRM)
+        self.client.force_authenticate(_user("bulk-admin", "admin"))
         self.client.post(f"/api/crm/match-candidates/{candidate.pk}/reject/")
 
         self.assertEqual(Customer.objects.count(), before)
@@ -1234,10 +1206,11 @@ class ScopeTests(APITestCase):
         self.assertEqual(res.status_code, 201)
         self.assertEqual(Customer.objects.get(name_fa="ثبت مدیر").owner_id, self.theirs.id)
 
-    def test_merge_queue_is_for_managers_only(self):
-        self.client.force_authenticate(self.rep)
-        self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 403)
-        self.client.force_authenticate(self.boss)
+    def test_merge_queue_is_for_the_system_admin_only(self):
+        for user in (self.rep, self.boss):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 403)
+        self.client.force_authenticate(_user("scope-admin", "admin"))
         self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 200)
 
 
@@ -1431,165 +1404,19 @@ class RosterScopeTests(APITestCase):
         self.assertIn("کارشناس همکار", names)
 
 
-class ReimportRespectsTheAppTests(APITestCase):
-    """
-    What a second accounting import may and may not undo.
-
-    The failure these pin down was measured, not imagined: deploy re-ran the
-    import on every release, 18 of 20 customers deleted in the app came back
-    after one run, and ~1,800 accounts were rewritten from the workbook over
-    whatever the team had corrected by hand.
-    """
-
-    HEADER = [
-        "کد", "نام", "نام گروه", "شماره تلفن", "موبایل", "کد ملی",
-        "کد اقتصادی", "نوع", "غیر فعال", "خوش حساب", "شرایط تسویه پیش فرض",
-    ]
-
-    def setUp(self):
-        import tempfile
-        self.dir = tempfile.mkdtemp()
-        self.user = _user("reimporter", "manager", "sales_team")
-        self.client.force_authenticate(self.user)
-
-    def tearDown(self):
-        import shutil
-        shutil.rmtree(self.dir, ignore_errors=True)
-
-    def _workbook(self, parties, buyers=()):
-        import openpyxl
-        from pathlib import Path
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.append(self.HEADER)
-        for p in parties:
-            ws.append([p.get(h, "") for h in self.HEADER])
-        wb.save(Path(self.dir, "اشخاص کلی.xlsx"))
-
-        sales = openpyxl.Workbook()
-        ws = sales.active
-        ws.append(["کد طرف حساب", "نوع برگه"])
-        for code in buyers:
-            ws.append([code, "فاکتور فروش"])
-        sales.save(Path(self.dir, "فروش کل.xlsx"))
-
-    def _import(self):
-        from io import StringIO
-        from django.core.management import call_command
-        call_command("import_arpa_parties", dir=self.dir, stdout=StringIO())
-
-    PARTY = {
-        "کد": "555001", "نام": "کاغذ پردازان البرز", "نام گروه": "سایر طرف حسابها",
-        "شماره تلفن": "02633334444", "کد ملی": "10101010101",
-        "کد اقتصادی": "411111111111", "نوع": "حقوقی", "غیر فعال": "False",
-        "خوش حساب": "False", "شرایط تسویه پیش فرض": "نقدی",
-    }
-
-    def _customer(self):
-        return Customer.objects.get(code="arpa-555001")
-
-    def test_a_deleted_customer_stays_deleted(self):
-        self._workbook([self.PARTY])
-        self._import()
-        customer = self._customer()
-
-        res = self.client.delete(f"/api/crm/customers/{customer.pk}/")
-        self.assertIn(res.status_code, (200, 204), getattr(res, "data", None))
-        self._import()
-
-        self.assertFalse(Customer.objects.filter(code="arpa-555001").exists())
-        self.assertTrue(DismissedParty.objects.filter(
-            source=ExternalSource.ARPA, external_id="555001"
-        ).exists())
-
-    def test_a_bulk_deleted_customer_stays_deleted(self):
-        self._workbook([self.PARTY])
-        self._import()
-        customer = self._customer()
-
-        self.client.post(
-            "/api/crm/customers/bulk-delete/", {"ids": [customer.pk]}, format="json"
-        )
-        self._import()
-
-        self.assertFalse(Customer.objects.filter(code="arpa-555001").exists())
-
-    def test_a_hand_corrected_field_survives_the_next_import(self):
-        self._workbook([self.PARTY], buyers=["555001"])
-        self._import()
-        customer = self._customer()
-
-        res = self.client.patch(
-            f"/api/crm/customers/{customer.pk}/",
-            {"phone": "02699998888", "national_id": "20202020202"}, format="json",
-        )
-        self.assertEqual(res.status_code, 200, res.data)
-        self._import()
-
-        customer.refresh_from_db()
-        self.assertEqual(customer.phone, "02699998888")
-        self.assertEqual(customer.national_id, "20202020202")
-
-    def test_an_accounting_only_field_still_follows_accounting(self):
-        """Payment terms cannot be edited in the CRM, so nobody's work is
-        overwritten by keeping them current — and a stale term is wrong."""
-        self._workbook([self.PARTY], buyers=["555001"])
-        self._import()
-        self._workbook([{**self.PARTY, "شرایط تسویه پیش فرض": "30روزه"}], buyers=["555001"])
-        self._import()
-
-        self.assertEqual(self._customer().payment_terms, "30روزه")
-
-    def test_an_account_the_team_reopened_is_not_closed_again(self):
-        """
-        A party with no invoices arrives closed. If a rep reopens it — they
-        are about to sell to it — the next import used to close it again,
-        because «no invoices in the file» was re-derived on every run.
-        """
-        self._workbook([self.PARTY])
-        self._import()
-        customer = self._customer()
-        self.assertFalse(customer.is_active)
-
-        customer.is_active = True
-        customer.save(update_fields=["is_active"])
-        self._import()
-
-        customer.refresh_from_db()
-        self.assertTrue(customer.is_active)
-
-    def test_an_account_that_starts_buying_is_opened(self):
-        self._workbook([self.PARTY])
-        self._import()
-        self.assertFalse(self._customer().is_active)
-
-        self._workbook([self.PARTY], buyers=["555001"])
-        self._import()
-        self.assertTrue(self._customer().is_active)
-
-    def test_a_reviewer_created_account_arrives_open(self):
-        """
-        «Reject» on the review screen creates the account without the invoice
-        workbooks at hand. Unknown sales used to read as «no sales» and the
-        account was created closed — hidden from the list the reviewer had
-        just added it to.
-        """
-        someone = Customer.objects.create(
-            code="didar-co-555", name_fa="کاغذ پردازان", dataset=Dataset.REAL,
-            first_contact_at=timezone.now(),
-        )
-        candidate = CustomerMatchCandidate.objects.create(
-            source=ExternalSource.ARPA, external_id="555001",
-            external_name=self.PARTY["نام"], customer=someone,
-            method="fuzzy", score=Decimal("0.9"), payload=self.PARTY,
-        )
-        created = crm_merge.reject(candidate, self.user)
-        self.assertTrue(created.is_active)
-
 
 class DeployDoesNotLoadDataTests(APITestCase):
-    """The deploy script must not run the accounting import on its own."""
+    """
+    Data reaches CRM through «ورود از آرپا» and «ورود از دیدار» and nothing
+    else — never as a side effect of shipping code.
+    """
+
+    def test_the_old_loaders_are_gone(self):
+        from django.core.management import get_commands
+
+        for name in ("import_didar_crm", "import_arpa_invoices", "import_arpa_parties",
+                     "link_invoices", "reset_crm"):
+            self.assertNotIn(name, get_commands())
 
     def test_deploy_script_does_not_call_the_arpa_importers(self):
         from pathlib import Path
@@ -1601,103 +1428,11 @@ class DeployDoesNotLoadDataTests(APITestCase):
             if not line.lstrip().startswith("#")
         ]
         self.assertFalse(
-            any("import_arpa_" in line for line in commands),
-            "deploy.sh runs an آرپا import again — every release would undo "
-            "deletes and hand edits made in the app since the last one.",
+            any(re.search(r"manage\.py\s+(import_|reset_crm|link_invoices)", line) for line in commands),
+            "deploy.sh loads data again — every release would undo deletes and "
+            "hand edits made in the app since the last one.",
         )
 
-
-class InvoiceLinkTests(APITestCase):
-    """
-    Attaching an invoice to the deal it billed — and refusing to guess.
-
-    The 30-day window is measured, not chosen: gaps to the nearest won deal
-    cluster within a month and then spread evenly to 90 days and beyond.
-    Linking past that would attach invoices to whichever deal was least far
-    away, and every per-deal figure built on it would be precise and wrong.
-    """
-
-    def setUp(self):
-        from datetime import date
-        self.day = date(2025, 10, 1)
-        self.customer = Customer.objects.create(
-            code="didar-co-l1", name_fa="مشتری لینک", dataset=Dataset.REAL,
-            first_contact_at=timezone.now() - timedelta(days=500),
-        )
-
-    def _deal(self, code, days_from_invoice, amount=1_000_000, status="won"):
-        closed = timezone.make_aware(
-            timezone.datetime.combine(self.day + timedelta(days=days_from_invoice),
-                                      timezone.datetime.min.time())
-        )
-        return Deal.objects.create(
-            code=code, title=code, customer=self.customer, dataset=Dataset.REAL,
-            status=status, opened_at=closed - timedelta(days=30), closed_at=closed,
-            amount_rial=amount,
-        )
-
-    def _invoice(self, number, amount=1_000_000, customer=None):
-        return SalesInvoice.objects.create(
-            code=f"arpa-inv-l-{number}", number=number,
-            customer=customer or self.customer, issued_at=self.day,
-            amount_rial=amount, dataset=Dataset.REAL,
-        )
-
-    def test_the_nearest_won_deal_inside_the_window_is_linked(self):
-        near = self._deal("d-near", 10)
-        self._deal("d-far", 25)
-        inv = self._invoice("1")
-
-        stats = link_invoices()
-
-        inv.refresh_from_db()
-        self.assertEqual(inv.deal_id, near.pk)
-        self.assertEqual(stats.linked, 1)
-
-    def test_a_deal_outside_the_window_is_not_guessed(self):
-        self._deal("d-old", -(WINDOW_DAYS + 5))
-        inv = self._invoice("2")
-
-        stats = link_invoices()
-
-        inv.refresh_from_db()
-        self.assertIsNone(inv.deal_id)
-        self.assertEqual(stats.out_of_window, 1)
-
-    def test_an_open_or_lost_deal_is_not_what_an_invoice_bills(self):
-        self._deal("d-open", 2, status="open")
-        self._deal("d-lost", 2, status="lost")
-        inv = self._invoice("3")
-
-        stats = link_invoices()
-
-        inv.refresh_from_db()
-        self.assertIsNone(inv.deal_id)
-        self.assertEqual(stats.no_won_deal, 1)
-
-    def test_on_a_tie_the_closer_amount_wins(self):
-        """Two deals won the same day for one customer are two orders; the
-        amount is what tells them apart."""
-        self._deal("d-small", 5, amount=1_000_000)
-        big = self._deal("d-big", 5, amount=90_000_000)
-        inv = self._invoice("4", amount=88_000_000)
-
-        link_invoices()
-
-        inv.refresh_from_db()
-        self.assertEqual(inv.deal_id, big.pk)
-
-    def test_an_existing_link_is_never_replaced(self):
-        first = self._deal("d-first", 20)
-        inv = self._invoice("5")
-        SalesInvoice.objects.filter(pk=inv.pk).update(deal=first)
-        self._deal("d-closer", 1)
-
-        stats = link_invoices()
-
-        inv.refresh_from_db()
-        self.assertEqual(inv.deal_id, first.pk)
-        self.assertEqual(stats.already, 1)
 
 
 class MergedSalesTests(APITestCase):
@@ -2305,3 +2040,329 @@ class SampleSeedTests(APITestCase):
         self.assertFalse(Deal.objects.filter(code__startswith="seed-").exists())
         self.assertTrue(Customer.objects.filter(pk=real.pk).exists())
         self.assertFalse(self.client.get("/api/crm/options/").data["sample_data"])
+
+
+class ArpaUploadTests(APITestCase):
+    """«ورود از آرپا»: decode, import idempotently, hold فروش سوری out."""
+
+    HEAD = [
+        "کد طرف حساب", "نام طرف حساب", "گروه طرف حساب", "نوع برگه", "تاریخ برگه",
+        "شماره برگه", "مبلغ فروش", "مبلغ برگه", "مبلغ تسویه نشده", "نام بازاریاب",
+        "مسوول فروش", None, "آدرس",
+    ]
+    SUB = [None] * 10 + ["نام", "کد", None]
+
+    def setUp(self):
+        self.rep = DimEmployee.objects.create(code="u-rep", full_name_fa="صبا موسوی")
+        self.boss = _user("u-boss", "manager", "sales_team")
+        self.admin = _user("u-admin", "admin")
+        self.rep_user = _user("u-rep", "operator", "sales_team")
+
+    def _xlsx(self, rows) -> bytes:
+        import io
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(self.HEAD)
+        ws.append(self.SUB)
+        for r in rows:
+            ws.append(r)
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def _row(self, number, amount, responsible="گروه فروش همکار", code="400822", date="1405/07/11"):
+        return [code, "شرکت نمونه", "سایر طرف حسابها", "فاکتور فروش", date, number,
+                amount, amount, amount, "صبا موسوی", responsible,
+                "310408" if responsible else "", "قم خیابان امام"]
+
+    def test_sylk_escapes_decode_to_persian(self):
+        from apps.crm.arpa_file import read_sylk
+
+        # «کد طرف حساب» exactly as آرپا writes it.
+        cell = '\x1b)8\x1bNHI \x1bNi\x1bNDN\x1b-= \x1bNBI\x1bNBO\x1bNKC\x1bNAE'
+        data = f'ID;PWXL;N;E\r\nC;Y1;X1;K"{cell}"\r\nC;X2;K948000000\r\nE\r\n'.encode("latin-1")
+        self.assertEqual(read_sylk(data), [["کد طرف حساب", 948000000]])
+
+    def test_import_twice_reports_nothing_new(self):
+        from apps.crm.arpa_import import run
+
+        data = self._xlsx([self._row("352", 948000000), self._row("353", 100, responsible="")])
+        first = run(data, "a.xlsx", "main", commit=True)
+        self.assertEqual((first["created"], first["suspect"], first["customers_created"]), (2, 1, 1))
+        inv = SalesInvoice.objects.get(number="352")
+        self.assertEqual(inv.channel, "team")
+        self.assertEqual(inv.arpa_row["مسوول فروش نام"], "گروه فروش همکار")
+        self.assertEqual(inv.arpa_row["مسوول فروش کد"], "310408")
+        # The province is not guessed from «قم …»: a person fills it in.
+        self.assertIsNone(inv.customer.province_id)
+
+        again = run(data, "a.xlsx", "main", commit=True)
+        self.assertTrue(again["nothing_new"])
+        self.assertEqual((again["created"], again["updated"], again["unchanged"]), (0, 0, 2))
+        self.assertIsNotNone(again["previous"])
+        self.assertEqual(SalesInvoice.objects.count(), 2)
+
+    def test_changed_row_updates_and_preview_writes_nothing(self):
+        from apps.crm.arpa_import import run
+
+        run(self._xlsx([self._row("352", 1000)]), "a.xlsx", "main", commit=True)
+        preview = run(self._xlsx([self._row("352", 1500)]), "b.xlsx", "main", commit=False)
+        self.assertEqual(preview["updated"], 1)
+        self.assertEqual(SalesInvoice.objects.get(number="352").amount_rial, 1000)
+        run(self._xlsx([self._row("352", 1500)]), "b.xlsx", "main", commit=True)
+        self.assertEqual(SalesInvoice.objects.get(number="352").amount_rial, 1500)
+
+    def test_books_keep_their_own_numbers(self):
+        from apps.crm.arpa_import import run
+
+        run(self._xlsx([self._row("352", 1000)]), "a.xlsx", "main", commit=True)
+        run(self._xlsx([self._row("352", 2000)]), "b.xlsx", "rollmarket", commit=True)
+        self.assertEqual(SalesInvoice.objects.filter(number="352").count(), 2)
+        # Same party code in both books is the same customer.
+        self.assertEqual(Customer.objects.filter(code="arpa-400822").count(), 1)
+
+    def test_suspect_is_out_of_reports_until_ruled_real(self):
+        from apps.crm.arpa_import import run
+
+        run(self._xlsx([self._row("352", 1000), self._row("353", 500, responsible="")]),
+            "a.xlsx", "main", commit=True)
+        f = rpt.Filters.from_query({"date_from": "2026-01-01", "date_to": "2026-12-31"})
+        self.assertEqual(f.invoices().aggregate(s=Sum("amount_rial"))["s"], 1000)
+
+        self.client.force_authenticate(self.admin)
+        sid = SalesInvoice.objects.get(number="353").pk
+        bad = self.client.post("/api/crm/suspect-invoices/", {"ids": [sid], "decision": "real"}, format="json")
+        self.assertEqual(bad.status_code, 400)  # «real» needs the sales group
+        ok = self.client.post("/api/crm/suspect-invoices/",
+                              {"ids": [sid], "decision": "real", "channel": "b2b"}, format="json")
+        self.assertEqual(ok.data["updated"], 1)
+        self.assertEqual(f.invoices().aggregate(s=Sum("amount_rial"))["s"], 1500)
+
+        # A re-upload keeps the ruling.
+        run(self._xlsx([self._row("353", 600, responsible="")]), "b.xlsx", "main", commit=True)
+        inv = SalesInvoice.objects.get(number="353")
+        self.assertEqual((inv.review, inv.channel), ("real", "b2b"))
+
+    def test_only_the_system_admin_imports_or_rules(self):
+        # A sales manager is not enough: these write the sales record.
+        for user in (self.rep_user, self.boss):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/crm/arpa-import/").status_code, 403)
+            self.assertEqual(self.client.get("/api/crm/suspect-invoices/").status_code, 403)
+        self.client.force_authenticate(self.admin)
+        self.assertEqual(self.client.get("/api/crm/arpa-import/").status_code, 200)
+
+    def test_not_an_invoice_export_is_refused(self):
+        import io
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        wb.active.append(["نام", "مبلغ"])
+        wb.active.append(["x", 1])
+        buf = io.BytesIO()
+        wb.save(buf)
+        self.client.force_authenticate(self.admin)
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        res = self.client.post("/api/crm/arpa-import/", {
+            "file": SimpleUploadedFile("x.xlsx", buf.getvalue()), "book": "main",
+        }, format="multipart")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("فاکتور فروش", res.data["detail"])
+
+
+class DidarUploadTests(APITestCase):
+    """«ورود از دیدار»: content decides the file, re-uploads are no-ops, no invoices."""
+
+    def setUp(self):
+        self.rep = DimEmployee.objects.create(code="d-rep", full_name_fa="هانیه منزه")
+        self.admin = _user("d-admin", "admin")
+        self.boss = _user("d-boss", "manager", "sales_team")
+
+    @staticmethod
+    def _book(type_, header, rows) -> bytes:
+        import io
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["_type", *header])
+        for r in rows:
+            ws.append([type_, *r])
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def _files(self, done="انجام نشده", done_at=None):
+        co = self._book("Company", ["کد دیدار شرکت", "نام شرکت", "مسئول شرکت", "شناسه ملی"],
+                        [["10", "بانک نمونه", "هانیه منزه", ""]])
+        pe = self._book("Contact", ["کد دیدار مشتری", "نام مشتری", "نام خانوادگی مشتری", "کد دیدار شرکت", "مسئول مشتری"],
+                        [["20", "علی", "رضایی", "10", "هانیه منزه"], ["21", "سارا", "کریمی", "0", "نفر ناشناس"]])
+        de = self._book("Deal", ["کد دیدار معامله", "عنوان معامله", "ارزش معامله", "وضعیت معامله",
+                                 "تاریخ ایجاد معامله", "کد دیدار شخص معامله", "کد دیدار شرکت معامله", "مسئول معامله"],
+                        [["30", "معامله بانک", "1000", "جاری", "1405/03/01", "0", "10", "هانیه منزه"]])
+        ac = self._book("Activity", ["نوع فعالیت", "عنوان فعالیت", "متن فعالیت", "مسئول اجرا فعالیت",
+                                     "تاریخ برنامه ریزی شده اجرا فعالیت", "زمان برنامه ریزی شده اجرا فعالیت",
+                                     "وضعیت اجرای فعالیت", "تاریخ انجام شدن فعالیت", "زمان انجام شدن فعالیت",
+                                     "کد اشخاص فعالیت", "کد شرکت های فعالیت", "کد معامله فعالیت"],
+                        [["تماس پیگیری", "تماس پیگیری", "", "هانیه منزه", "1405/03/02", " 10:00",
+                          done, done_at, " 10:05" if done_at else None, "20", "10", "30"],
+                         ["تماس پیگیری", "تماس پیگیری", "صحبت شد", "هانیه منزه", "1405/03/01", " 09:00",
+                          "انجام شده", "1405/03/01", " 09:10", "21", "", ""]])
+        # Deliberately misleading names: the content says what each file is.
+        return [("کارت ها.xlsx", co), ("a.xlsx", pe), ("b.xlsx", de), ("یاداشت ها.xlsx", ac)]
+
+    def test_import_then_nothing_new_and_no_invoices(self):
+        from apps.crm.didar_import import run
+
+        employees = DimEmployee.objects.count()
+        first = run(self._files(), commit=True)
+        k = first["kinds"]
+        self.assertEqual((k["companies"]["created"], k["contacts"]["created"], k["contacts"]["merged"]), (1, 1, 1))
+        self.assertEqual(k["deals"]["created"], 1)
+        self.assertEqual(Activity.objects.count(), 1)
+        self.assertEqual(Task.objects.exclude(external_key="").count(), 1)
+        self.assertEqual(SalesInvoice.objects.count(), 0)
+        # An unknown name is reported and left blank — no employee invented.
+        self.assertEqual(DimEmployee.objects.count(), employees)
+        self.assertIn("نفر ناشناس", [r["name"] for r in first["unknown_reps"]])
+        self.assertIsNone(Customer.objects.get(code="didar-pe-21").owner_id)
+
+        again = run(self._files(), commit=True)
+        self.assertTrue(again["nothing_new"])
+        self.assertEqual(Activity.objects.count(), 1)
+
+    def test_planned_call_done_later_becomes_an_activity(self):
+        from apps.crm.didar_import import run
+
+        run(self._files(), commit=True)
+        res = run(self._files(done="انجام شده", done_at="1405/03/02"), commit=True)
+        self.assertEqual(res["kinds"]["activities"]["updated"], 1)
+        self.assertEqual(Activity.objects.count(), 2)
+        self.assertEqual(Task.objects.exclude(external_key="").count(), 0)
+
+    def test_existing_customer_is_filled_not_overwritten(self):
+        from apps.crm.didar_import import run
+
+        run(self._files(), commit=True)
+        c = Customer.objects.get(code="didar-co-10")
+        c.name_fa, c.phone = "نام دستی", "021-1"
+        c.save()
+        run(self._files(), commit=True)
+        c.refresh_from_db()
+        self.assertEqual((c.name_fa, c.phone), ("نام دستی", "021-1"))
+
+    def test_only_the_system_admin(self):
+        self.client.force_authenticate(self.boss)
+        self.assertEqual(self.client.get("/api/crm/didar-import/").status_code, 403)
+        self.client.force_authenticate(self.admin)
+        self.assertEqual(self.client.get("/api/crm/didar-import/").status_code, 200)
+
+    def test_not_a_didar_file_is_refused(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        import io
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        wb.active.append(["نام", "مبلغ"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        self.client.force_authenticate(self.admin)
+        res = self.client.post("/api/crm/didar-import/", {
+            "files": [SimpleUploadedFile("x.xlsx", buf.getvalue())],
+        }, format="multipart")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("دیدار", res.data["detail"])
+
+
+class CrmWipeTests(APITestCase):
+    """پاک‌سازی داده: everything an upload brings back goes; customers and products stay."""
+
+    def setUp(self):
+        from datetime import date
+
+        self.admin = _user("w-admin", "admin")
+        self.boss = _user("w-boss", "manager", "sales_team")
+        now = timezone.now()
+        self.customer = Customer.objects.create(
+            code="w-c", name_fa="مشتری بماند", first_contact_at=now,
+            last_activity_at=now, first_deal_won_at=now,
+        )
+        self.product = Product.objects.create(code="w-p", name_fa="کالا بماند")
+        deal = Deal.objects.create(code="w-d", title="معامله", customer=self.customer, opened_at=now)
+        DealItem.objects.create(deal=deal, product=self.product)
+        Activity.objects.create(kind="call_out", customer=self.customer, at=now)
+        Task.objects.create(title="کار", customer=self.customer, due_at=now)
+        SalesInvoice.objects.create(code="w-i", number="1", customer=self.customer,
+                                    issued_at=date(2026, 1, 1), amount_rial=10)
+
+    def test_wipes_all_but_customers_and_products(self):
+        self.client.force_authenticate(self.admin)
+        refused = self.client.post("/api/crm/wipe/", {"confirm": "بله"}, format="json")
+        self.assertEqual(refused.status_code, 400)
+        self.assertEqual(Deal.objects.count(), 1)
+
+        res = self.client.post("/api/crm/wipe/", {"confirm": "پاک شود"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        for model in (Deal, DealItem, Activity, Task, SalesInvoice):
+            self.assertEqual(model.objects.count(), 0, model.__name__)
+        self.customer.refresh_from_db()
+        self.assertIsNone(self.customer.last_activity_at)
+        self.assertTrue(Product.objects.filter(pk=self.product.pk).exists())
+
+    def test_only_the_system_admin(self):
+        self.client.force_authenticate(self.boss)
+        self.assertEqual(self.client.get("/api/crm/wipe/").status_code, 403)
+        self.assertEqual(self.client.post("/api/crm/wipe/", {"confirm": "پاک شود"}, format="json").status_code, 403)
+        self.assertEqual(Deal.objects.count(), 1)
+
+
+class InvoiceIsTheWonDealTests(ArpaUploadTests):
+    """Each counted آرپا invoice is one won deal; دیدار brings no won deals."""
+
+    def test_counted_invoice_has_a_won_deal_suspect_has_none(self):
+        from apps.crm.arpa_import import run
+
+        run(self._xlsx([self._row("352", 1000), self._row("353", 500, responsible="")]),
+            "a.xlsx", "main", commit=True)
+        sale = SalesInvoice.objects.get(number="352")
+        self.assertEqual((sale.deal.status, sale.deal.amount_rial), ("won", 1000))
+        self.assertEqual(sale.deal.owner, self.rep)
+        self.assertIsNone(SalesInvoice.objects.get(number="353").deal_id)
+        self.assertIsNotNone(sale.customer.first_deal_won_at)
+
+        # Uploading again does not add a second deal.
+        run(self._xlsx([self._row("352", 1000), self._row("353", 500, responsible="")]),
+            "a.xlsx", "main", commit=True)
+        self.assertEqual(Deal.objects.count(), 1)
+
+    def test_ruling_adds_and_removes_the_deal(self):
+        from apps.crm.arpa_import import run
+
+        run(self._xlsx([self._row("353", 500, responsible="")]), "a.xlsx", "main", commit=True)
+        sid = SalesInvoice.objects.get(number="353").pk
+        self.client.force_authenticate(self.admin)
+        self.client.post("/api/crm/suspect-invoices/", {"ids": [sid], "decision": "real", "channel": "b2b"}, format="json")
+        deal = SalesInvoice.objects.get(pk=sid).deal
+        self.assertEqual((deal.status, deal.channel), ("won", "b2b"))
+        self.client.post("/api/crm/suspect-invoices/", {"ids": [sid], "decision": "fake"}, format="json")
+        self.assertEqual(Deal.objects.count(), 0)
+
+
+class DidarWonDealTests(DidarUploadTests):
+    def test_a_won_didar_deal_is_not_imported(self):
+        from apps.crm.didar_import import run
+
+        files = self._files()
+        files[2] = ("b.xlsx", self._book(
+            "Deal", ["کد دیدار معامله", "عنوان معامله", "ارزش معامله", "وضعیت معامله",
+                     "تاریخ ایجاد معامله", "کد دیدار شخص معامله", "کد دیدار شرکت معامله"],
+            [["30", "جاری", "1000", "جاری", "1405/03/01", "0", "10"],
+             ["31", "موفق", "5000", "موفق", "1405/03/01", "0", "10"],
+             ["32", "ناموفق", "700", "ناموفق", "1405/03/01", "0", "10"]],
+        ))
+        res = run(files, commit=True)
+        self.assertEqual(res["kinds"]["deals"]["created"], 2)
+        self.assertEqual(res["kinds"]["deals"]["skipped"], {"موفق — از فاکتور آرپا می‌آید": 1})
+        self.assertFalse(Deal.objects.filter(status="won").exists())

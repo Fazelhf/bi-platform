@@ -20,8 +20,8 @@
 #   4. The live site has to answer. If it does not, the live folder goes back
 #      to the previous commit on its own, restarts, and the log is printed.
 #
-# Data loads (CRM / آرپا) run last and can never block or undo a deploy: a
-# failed import is reported, the site stays up.
+# A deploy never loads data: CRM's آرپا and دیدار data come in through the
+# site's own upload pages, by the system admin.
 
 set -uo pipefail
 
@@ -188,24 +188,11 @@ restart_app
 say "بررسی سایت زنده…"
 site_is_up || rollback "سایت بعد از ری‌استارت جواب نداد"
 
-# --- 3. data loads: reported, never fatal ------------------------------------------------
-# Both importers are idempotent by key and no-ops once their data exists; the
-# workbooks are uploaded by hand and may not be there. A failure here says so
-# and leaves the (already healthy) site alone.
-say "بارگذاری داده‌ی CRM (فقط بار اول)…"
-python manage.py import_didar_crm --if-empty || echo "⚠️ بارگذاری CRM خطا داد — سایت سالم است."
-
-# آرپا is deliberately NOT loaded here any more.
-#
-# It used to be, on the theory that both importers are idempotent. They are
-# idempotent against the *workbook* — not against what people do in the app
-# between two deploys. Every deploy re-read the same export and so:
-#   * brought back customers the team had deleted (18 of 20 in a test: the
-#     delete takes the آرپا id with it, so the party looks new again);
-#   * rewrote ~1,800 customers from the file, undoing hand edits;
-# and did it on a schedule set by code changes, which has nothing to do with
-# when accounting data changes. Loading accounting data is its own act, run
-# when a fresh export has been uploaded — see backend/data/arpa/README.md.
+# --- 3. no data loads ----------------------------------------------------------------------
+# A deploy ships code and nothing else. CRM data comes in only through the
+# site — «ورود از آرپا» and «ورود از دیدار» — when the system admin uploads an
+# export. Loading data here used to undo deletes and hand edits made in the
+# app on every release, on a schedule set by code changes.
 
 echo
 echo "✅ به‌روزرسانی انجام شد و سایت جواب می‌دهد: $SITE_URL"

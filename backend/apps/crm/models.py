@@ -640,6 +640,9 @@ class Activity(DatasetModel):
         DimPeriod, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="crm_activities",
     )
+    #: Identity of an activity brought in from دیدار, which gives activities
+    #: no id of its own — see `apps.crm.didar_import`. Blank for one typed here.
+    external_key = models.CharField(max_length=64, blank=True, db_index=True)
 
     class Meta:
         ordering = ("-at",)
@@ -683,6 +686,8 @@ class Task(DatasetModel):
     due_at = models.DateTimeField()
     done_at = models.DateTimeField(null=True, blank=True)
     note = models.CharField(max_length=500, blank=True)
+    #: As on Activity: a دیدار row's identity, so a re-upload finds it.
+    external_key = models.CharField(max_length=64, blank=True, db_index=True)
 
     class Meta:
         ordering = ("due_at",)
@@ -886,6 +891,71 @@ class CustomerMatchCandidate(TimeStampedModel):
 # One invoice → one customer → optionally one deal. The link to Deal is what
 # eventually answers «چقدر از کاریز واقعاً فاکتور شد».
 # --------------------------------------------------------------------------
+class Book(models.TextChoices):
+    """The آرپا ledger an invoice was billed in."""
+
+    MAIN = "main", "دفتر اصلی"
+    ROLLMARKET = "rollmarket", "رول مارکت"
+
+
+class Review(models.TextChoices):
+    """
+    فروش سوری. Blank is an ordinary sale; the other three are the states of
+    one whose «مسوول فروش» was not a sales group.
+    """
+
+    SUSPECT = "suspect", "سوری — در انتظار بررسی"
+    REAL = "real", "تأیید شد: فروش واقعی"
+    FAKE = "fake", "تأیید شد: سوری"
+
+
+#: Not counted anywhere: still waiting, or confirmed fake.
+NOT_COUNTED = (Review.SUSPECT, Review.FAKE)
+
+
+class SalesInvoiceQuerySet(models.QuerySet):
+    def counted(self):
+        """The invoices that are sales — every report reads through this."""
+        return self.exclude(review__in=NOT_COUNTED)
+
+
+class ImportBatch(TimeStampedModel):
+    """
+    One upload on «ورود از آرپا» or «ورود از دیدار»: which file, by whom, and
+    what it did. The file's SHA-256 is what lets a second upload of the same
+    export say so.
+    """
+
+    class Source(models.TextChoices):
+        ARPA = "arpa", "آرپا"
+        DIDAR = "didar", "دیدار"
+
+    source = models.CharField(max_length=8, choices=Source.choices, default=Source.ARPA)
+    file_name = models.CharField(max_length=255)
+    file_sha256 = models.CharField(max_length=64, db_index=True)
+    book = models.CharField(max_length=12, choices=Book.choices, default=Book.MAIN)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    rows = models.PositiveIntegerField(default=0)
+    created = models.PositiveIntegerField(default=0)
+    updated = models.PositiveIntegerField(default=0)
+    unchanged = models.PositiveIntegerField(default=0)
+    skipped = models.PositiveIntegerField(default=0)
+    suspect = models.PositiveIntegerField(default=0)
+    customers_created = models.PositiveIntegerField(default=0)
+    amount_rial = models.DecimalField(max_digits=22, decimal_places=0, default=0)
+    date_from = models.DateField(null=True, blank=True)
+    date_to = models.DateField(null=True, blank=True)
+    #: Warnings worth reading later — unknown salespeople, skipped rows.
+    notes = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        verbose_name = "ورود فایل"
+
+
 class SalesInvoice(DatasetModel):
     """
     فاکتور فروش یا مرجوعی، از نرم‌افزار حسابداری.
@@ -965,6 +1035,35 @@ class SalesInvoice(DatasetModel):
     tax_ref = models.CharField(max_length=40, blank=True)  # شناسه سامانه مودیان
     note = models.CharField(max_length=400, blank=True)
 
+    # ---- Where it came from (the «ورود از آرپا» upload) ---------------------
+    # The company keeps two آرپا books with their own invoice numbering, so
+    # «فاکتور 352 of 1405/07/11» exists in both and means two sales.
+    book = models.CharField(max_length=12, choices=Book.choices, default=Book.MAIN)
+    #: «مسوول فروش» as آرپا wrote it — name and code — before any decision.
+    sales_responsible = models.CharField(max_length=60, blank=True)
+    sales_responsible_code = models.CharField(max_length=20, blank=True)
+    #: Every one of the export's columns, exactly as read, keyed by header.
+    arpa_row = models.JSONField(default=dict, blank=True)
+    #: Fingerprint of `arpa_row`: how a re-upload tells «already read» from
+    #: «changed in آرپا since» without comparing 52 fields.
+    row_hash = models.CharField(max_length=64, blank=True)
+    import_batch = models.ForeignKey(
+        "ImportBatch", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="invoices",
+    )
+
+    # ---- فروش سوری ----------------------------------------------------------
+    # An invoice whose «مسوول فروش» is not one of the three sales groups is
+    # held out of every report until a manager rules on it.
+    review = models.CharField(max_length=8, choices=Review.choices, blank=True, default="")
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = SalesInvoiceQuerySet.as_manager()
+
     class Meta:
         ordering = ("-issued_at", "-number")
         verbose_name = "فاکتور فروش"
@@ -972,6 +1071,7 @@ class SalesInvoice(DatasetModel):
             models.Index(fields=["customer", "issued_at"]),
             models.Index(fields=["period", "kind"]),
             models.Index(fields=["owner", "issued_at"]),
+            models.Index(fields=["review"]),
         ]
 
     @property
