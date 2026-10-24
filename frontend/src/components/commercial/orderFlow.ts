@@ -21,6 +21,10 @@ export const ORDER_STATUS_CLASS: Record<string, string> = {
   cancelled: "bg-slate-100 text-slate-500",
 };
 
+/** Position on the ORDER_STEPS bar; -1 for a cancelled order. */
+export const orderStepIndex = (status: OrderStatus) =>
+  ORDER_STEPS.findIndex((s) => s.status === status);
+
 /** The step after this one, or null when there is nothing left to do. */
 export function nextOrderStep(status: OrderStatus) {
   const i = ORDER_STEPS.findIndex((s) => s.status === status);

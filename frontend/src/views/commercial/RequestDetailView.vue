@@ -23,7 +23,7 @@ import SampleForm from "@/components/commercial/SampleForm.vue";
 import SampleVerdictDialog from "@/components/commercial/SampleVerdictDialog.vue";
 import OrderAdvanceDialog from "@/components/commercial/OrderAdvanceDialog.vue";
 import {
-  ORDER_STATUS_CLASS, isLiveOrder, nextOrderStep,
+  ORDER_STATUS_CLASS, ORDER_STEPS, isLiveOrder, nextOrderStep, orderStepIndex,
 } from "@/components/commercial/orderFlow";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -224,7 +224,9 @@ const FA = new Intl.NumberFormat("fa-IR");
 </script>
 
 <template>
-  <div class="space-y-4">
+  <!-- A flex column rather than space-y, so a cancelled order can drop to the
+       bottom (order-last) without a second copy of its card template. -->
+  <div class="flex flex-col gap-4">
     <div v-if="loading" class="space-y-2">
       <Skeleton class="h-24 rounded-card" />
       <Skeleton class="h-64 rounded-card" />
@@ -260,41 +262,43 @@ const FA = new Intl.NumberFormat("fa-IR");
               @click="showEditRequest = true"
             >ویرایش درخواست</button>
             <button
-              v-if="canEdit && !locked"
-              class="bg-slate-100 text-ink rounded-xl px-4 py-2 text-sm"
-              @click="openQuote(null)"
-            >+ استعلام</button>
-            <button
-              v-if="canEdit && quotes.length && !locked"
-              class="rounded-xl px-4 py-2 text-sm"
-              :class="winner ? 'border border-slate-200 text-ink' : 'bg-panel text-white'"
-              @click="awardFrom(null)"
-            >{{ winner ? "تغییر انتخاب" : "انتخاب تامین‌کننده" }}</button>
-            <button
-              v-if="canEdit && winner && !locked"
-              class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
-              @click="openOrder(null)"
-            >ثبت سفارش خرید</button>
-            <button
               v-if="canEdit && !cancelled && !liveOrders.length"
               class="text-sm text-slate-400 hover:text-red-500 px-2 py-2"
               @click="cancelRequest"
             >لغو درخواست</button>
-            <button
-              v-if="canEdit && cancelled"
-              class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
-              @click="reopenRequest"
-            >بازگشایی درخواست</button>
           </div>
         </div>
 
         <!-- Where the request stands, and the one thing left to do on it -->
         <div
           v-if="cancelled"
-          class="mt-4 bg-slate-100 text-slate-500 rounded-xl px-3 py-2 text-sm"
-        >این درخواست لغو شده است.</div>
+          class="mt-4 bg-slate-100 rounded-xl px-3 py-2.5 flex flex-wrap items-center justify-between gap-2"
+        >
+          <span class="text-sm text-slate-500">این درخواست لغو شده است.</span>
+          <button
+            v-if="canEdit"
+            class="border border-slate-200 bg-surface text-ink rounded-xl px-4 py-2 text-sm"
+            @click="reopenRequest"
+          >بازگشایی درخواست</button>
+        </div>
         <template v-else>
-          <ol class="mt-4 flex items-center gap-1 overflow-x-auto pb-1">
+          <!-- Phone: five chips do not fit, so the current step by name and a bar -->
+          <div class="sm:hidden mt-4">
+            <p class="text-xs text-slate-500">
+              مرحله {{ FA.format(Math.min(stepIndex + 1, STEPS.length)) }} از {{ FA.format(STEPS.length) }}:
+              <span class="text-ink font-medium">
+                {{ STEPS[Math.min(stepIndex, STEPS.length - 1)]?.label }}
+              </span>
+            </p>
+            <div class="mt-1.5 grid grid-cols-5 gap-1">
+              <div
+                v-for="(step, i) in STEPS" :key="step.status"
+                class="h-1.5 rounded-full"
+                :class="i < stepIndex ? 'bg-emerald-500' : i === stepIndex ? 'bg-panel' : 'bg-slate-200'"
+              />
+            </div>
+          </div>
+          <ol class="hidden sm:flex mt-4 items-center gap-1 overflow-x-auto pb-1">
             <li
               v-for="(step, i) in STEPS" :key="step.status"
               class="flex items-center gap-1 shrink-0"
@@ -313,9 +317,35 @@ const FA = new Intl.NumberFormat("fa-IR");
               <span v-if="i < STEPS.length - 1" class="w-4 h-px bg-slate-200" />
             </li>
           </ol>
-          <p v-if="request.next_step" class="text-xs text-slate-500 mt-2">
-            قدم بعد: <span class="text-ink font-medium">{{ request.next_step }}</span>
-          </p>
+          <!-- The guidance and the button that acts on it, in one place -->
+          <div
+            v-if="request.next_step"
+            class="mt-3 bg-slate-50 rounded-xl px-3 py-2.5 flex flex-wrap items-center justify-between gap-3"
+          >
+            <p class="text-sm">
+              <span class="text-slate-400">قدم بعد:&nbsp;</span>
+              <span class="text-ink font-medium">{{ request.next_step }}</span>
+            </p>
+            <!-- The primary action first, so on a phone it is the one on top -->
+            <div v-if="canEdit && !locked" class="flex flex-wrap gap-2">
+              <button
+                v-if="winner"
+                class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
+                @click="openOrder(null)"
+              >ثبت سفارش خرید</button>
+              <button
+                v-if="quotes.length"
+                class="rounded-xl px-4 py-2 text-sm"
+                :class="winner ? 'border border-slate-200 bg-surface text-ink' : 'bg-panel text-white'"
+                @click="awardFrom(null)"
+              >{{ winner ? "تغییر برنده" : "انتخاب تامین‌کننده" }}</button>
+              <button
+                class="rounded-xl px-4 py-2 text-sm"
+                :class="quotes.length ? 'border border-slate-200 bg-surface text-ink' : 'bg-panel text-white'"
+                @click="openQuote(null)"
+              >+ استعلام</button>
+            </div>
+          </div>
         </template>
       </div>
 
@@ -323,6 +353,83 @@ const FA = new Intl.NumberFormat("fa-IR");
         v-if="error"
         class="bg-red-50 text-red-600 text-sm rounded-xl px-3 py-2 whitespace-pre-line"
       >{{ error }}</p>
+
+      <!-- Orders come first once there are any: after the award, following
+           the order is the work, and the quotes are only the record of why. -->
+      <div
+        v-for="o in orders" :key="o.id"
+        class="bg-surface rounded-card shadow-soft p-4"
+        :class="o.status === 'cancelled' ? 'opacity-60 order-last' : ''"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-xs text-slate-400">
+              سفارش خرید <span class="ltr-nums">{{ o.order_no }}</span>
+              · {{ faDate(o.ordered_on) }}
+            </p>
+            <p class="font-bold text-ink mt-0.5">
+              {{ o.supplier_name }}
+              <span class="font-normal text-slate-400 ltr-nums">
+                · {{ num(o.quantity) }} {{ o.material_unit }}
+              </span>
+            </p>
+            <p class="text-sm text-ink ltr-nums mt-0.5">
+              {{ exact(o.grand_total_rial, true) }}
+              <span v-if="o.is_official" class="text-xs text-slate-400">با ارزش افزوده</span>
+            </p>
+          </div>
+          <span
+            class="text-xs rounded-full px-2.5 py-1 shrink-0"
+            :class="ORDER_STATUS_CLASS[o.status]"
+          >{{ o.status_label }}</span>
+        </div>
+
+        <!-- Where the order is on its way -->
+        <ol v-if="o.status !== 'cancelled'" class="mt-4 grid grid-cols-4 gap-1.5">
+          <li v-for="(s, i) in ORDER_STEPS" :key="s.status">
+            <div
+              class="h-1.5 rounded-full"
+              :class="i <= orderStepIndex(o.status) ? 'bg-emerald-500' : 'bg-slate-200'"
+            />
+            <p
+              class="text-xs mt-1.5 truncate"
+              :class="i === orderStepIndex(o.status)
+                ? 'text-ink font-medium'
+                : i < orderStepIndex(o.status) ? 'text-emerald-700' : 'text-slate-400'"
+            >{{ s.label }}</p>
+          </li>
+        </ol>
+        <p v-if="o.delivered_on" class="text-xs text-slate-500 mt-2">
+          تحویل {{ faDate(o.delivered_on) }}
+          <span v-if="o.delivery_days !== null">— {{ num(o.delivery_days) }} روز پس از سفارش</span>
+        </p>
+
+        <div v-if="canEdit" class="mt-4 flex flex-wrap items-center gap-2">
+          <template v-if="isLiveOrder(o.status)">
+            <button
+              v-if="nextOrderStep(o.status)"
+              class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
+              @click="advancing = { order: o, target: nextOrderStep(o.status)!.status }"
+            >{{ nextOrderStep(o.status)!.action }}</button>
+            <button
+              v-if="nextOrderStep(o.status)?.status !== 'delivered'"
+              class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
+              title="بدون مرحله‌ی ارسال، مستقیم تحویل شد"
+              @click="advancing = { order: o, target: 'delivered' }"
+            >مستقیم تحویل شد</button>
+          </template>
+          <span class="flex-1" />
+          <button
+            class="text-xs text-slate-400 hover:text-ink px-2 py-1"
+            @click="openOrder(o)"
+          >ویرایش سفارش</button>
+          <button
+            v-if="isLiveOrder(o.status)"
+            class="text-xs text-slate-400 hover:text-red-500 px-2 py-1"
+            @click="advancing = { order: o, target: 'cancelled' }"
+          >لغو سفارش</button>
+        </div>
+      </div>
 
       <!-- The comparison table -->
       <div class="bg-surface rounded-card shadow-soft overflow-hidden">
@@ -469,8 +576,10 @@ const FA = new Intl.NumberFormat("fa-IR");
       </div>
 
       <!-- Samples: what arrived before anyone committed to buying -->
+      <!-- Only while it can still matter: once goods are ordered an empty
+           «نمونه‌ها» box is a screenful of nothing between the user and the page. -->
       <div
-        v-if="samples.length || canEdit"
+        v-if="samples.length || (canEdit && !locked)"
         class="bg-surface rounded-card shadow-soft overflow-hidden"
       >
         <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -487,11 +596,9 @@ const FA = new Intl.NumberFormat("fa-IR");
           >+ درخواست نمونه</button>
         </div>
 
-        <EmptyState
-          v-if="!samples.length"
-          title="نمونه‌ای برای این درخواست ثبت نشده"
-          hint="پیش از خرید از تامین‌کننده‌ای که سابقه ندارد، نمونه بخواهید."
-        />
+        <p v-if="!samples.length" class="px-4 py-3 text-xs text-slate-400">
+          نمونه‌ای ثبت نشده. پیش از خرید از تامین‌کننده‌ی بی‌سابقه، نمونه بخواهید.
+        </p>
 
         <table v-else class="w-full text-sm">
           <tbody>
@@ -534,67 +641,6 @@ const FA = new Intl.NumberFormat("fa-IR");
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <!-- Orders raised from this request -->
-      <div v-if="orders.length" class="bg-surface rounded-card shadow-soft overflow-hidden">
-        <h3 class="px-4 py-3 border-b border-slate-100 font-bold text-ink text-sm">
-          سفارش‌های خرید
-        </h3>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm min-w-[760px]">
-            <tbody>
-              <tr v-for="o in orders" :key="o.id" class="border-t border-slate-100">
-                <td class="px-4 py-2.5">
-                  <p class="ltr-nums text-ink font-medium">{{ o.order_no }}</p>
-                  <p class="text-xs text-slate-400">سفارش {{ faDate(o.ordered_on) }}</p>
-                </td>
-                <td class="px-3 text-slate-500">{{ o.supplier_name }}</td>
-                <td class="px-3 ltr-nums text-slate-500">
-                  {{ num(o.quantity) }} {{ o.material_unit }}
-                </td>
-                <td class="px-3 ltr-nums text-ink">
-                  {{ exact(o.grand_total_rial, true) }}
-                  <span v-if="o.is_official" class="text-xs text-slate-400">با ارزش افزوده</span>
-                </td>
-                <td class="px-3 whitespace-nowrap">
-                  <span
-                    class="text-xs rounded-full px-2 py-0.5"
-                    :class="ORDER_STATUS_CLASS[o.status]"
-                  >{{ o.status_label }}</span>
-                  <p v-if="o.delivered_on" class="text-xs text-slate-400 mt-0.5">
-                    {{ faDate(o.delivered_on) }}
-                    <span v-if="o.delivery_days !== null">· {{ num(o.delivery_days) }} روز</span>
-                  </p>
-                </td>
-                <td class="px-4 text-left whitespace-nowrap">
-                  <template v-if="canEdit && isLiveOrder(o.status)">
-                    <button
-                      v-if="nextOrderStep(o.status)"
-                      class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg px-2 py-1 ml-1"
-                      @click="advancing = { order: o, target: nextOrderStep(o.status)!.status }"
-                    >{{ nextOrderStep(o.status)!.action }}</button>
-                    <button
-                      v-if="o.status !== 'shipped'"
-                      class="text-xs text-slate-500 hover:text-ink px-1.5"
-                      title="بدون مرحله‌ی ارسال، مستقیم تحویل شد"
-                      @click="advancing = { order: o, target: 'delivered' }"
-                    >تحویل شد</button>
-                    <button
-                      class="text-xs text-slate-400 hover:text-red-500 px-1.5"
-                      @click="advancing = { order: o, target: 'cancelled' }"
-                    >لغو</button>
-                  </template>
-                  <button
-                    v-if="canEdit"
-                    class="text-xs text-slate-400 hover:text-ink px-1.5"
-                    @click="openOrder(o)"
-                  >ویرایش</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
       </div>
 
       <RequestForm
