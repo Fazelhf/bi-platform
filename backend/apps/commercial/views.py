@@ -33,6 +33,7 @@ from apps.commercial.permissions import (
 )
 from apps.commercial.serializers import (
     AwardSerializer,
+    OrderAdvanceSerializer,
     MaterialCategorySerializer,
     MaterialSerializer,
     PaymentTermSerializer,
@@ -41,6 +42,7 @@ from apps.commercial.serializers import (
     PurchaseRequestSerializer,
     QuoteReasonSerializer,
     QuoteSerializer,
+    RequestCancelSerializer,
     SampleSerializer,
     SampleVerdictSerializer,
     SupplierSerializer,
@@ -302,6 +304,16 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
             raise ValidationError({"detail": "فقط واحد بازرگانی می‌تواند ثبت کند."})
 
         purchase_request = self.get_object()
+        if purchase_request.status == PurchaseRequest.Status.CANCELLED:
+            raise ValidationError({"detail": "این درخواست لغو شده است."})
+        if purchase_request.live_orders.exists():
+            # The winner is who the goods were ordered from. Changing it under
+            # a live order would leave the file naming one supplier and the
+            # purchase another; the order has to be cancelled first.
+            raise ValidationError({
+                "detail": "برای این درخواست سفارش خرید ثبت شده؛ "
+                          "برای تغییر برنده، اول سفارش را لغو کنید."
+            })
         payload = AwardSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         winner = payload.validated_data["quote"]
@@ -343,12 +355,60 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
                     quote.decision_note = str(item.get("decision_note", ""))[:300]
             quote.save(update_fields=["is_selected", "reason", "decision_note"])
 
-        purchase_request.status = PurchaseRequest.Status.AWARDED
-        purchase_request.save(update_fields=["status", "updated_at"])
+        purchase_request.sync_status()
 
         audit_log(request.user, purchase_request, AuditLog.Action.UPDATE,
                   {"award": {"before": None, "after": winner.supplier.name_fa}})
 
+        return Response(PurchaseRequestSerializer(purchase_request).data)
+
+    @extend_schema(request=RequestCancelSerializer, responses=PurchaseRequestSerializer)
+    @action(detail=True, methods=["post"])
+    @transaction.atomic
+    def cancel(self, request, pk=None):
+        """
+        لغو درخواست — the need went away, or was met some other way.
+
+        Refused while an order is live: the goods are on their way, and a
+        request marked «لغو شده» over a real purchase hides it from the
+        open-requests count without taking it out of the spend.
+        """
+        if not is_commercial(request.user):
+            raise ValidationError({"detail": "فقط واحد بازرگانی می‌تواند ثبت کند."})
+        purchase_request = self.get_object()
+        if purchase_request.live_orders.exists():
+            raise ValidationError({
+                "detail": "این درخواست سفارش فعال دارد؛ اول سفارش را لغو کنید."
+            })
+        payload = RequestCancelSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        before = purchase_request.status
+        purchase_request.status = PurchaseRequest.Status.CANCELLED
+        note = payload.validated_data.get("note", "").strip()
+        if note:
+            purchase_request.note = (
+                f"{purchase_request.note}\nعلت لغو: {note}".strip()
+            )
+        purchase_request.save(update_fields=["status", "note", "updated_at"])
+        audit_log(request.user, purchase_request, AuditLog.Action.UPDATE,
+                  {"status": {"before": before, "after": purchase_request.status}})
+        return Response(PurchaseRequestSerializer(purchase_request).data)
+
+    @extend_schema(request=None, responses=PurchaseRequestSerializer)
+    @action(detail=True, methods=["post"])
+    @transaction.atomic
+    def reopen(self, request, pk=None):
+        """Undo a cancellation; the request returns to wherever its quotes left it."""
+        if not is_commercial(request.user):
+            raise ValidationError({"detail": "فقط واحد بازرگانی می‌تواند ثبت کند."})
+        purchase_request = self.get_object()
+        if purchase_request.status != PurchaseRequest.Status.CANCELLED:
+            raise ValidationError({"detail": "این درخواست لغو نشده است."})
+        purchase_request.status = PurchaseRequest.Status.OPEN
+        purchase_request.save(update_fields=["status", "updated_at"])
+        after = purchase_request.sync_status()
+        audit_log(request.user, purchase_request, AuditLog.Action.UPDATE,
+                  {"status": {"before": "cancelled", "after": after}})
         return Response(PurchaseRequestSerializer(purchase_request).data)
 
 
@@ -365,9 +425,16 @@ class QuoteViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         quote = serializer.save()
         # A request that has drawn its first price is no longer merely "open".
-        if quote.request.status == PurchaseRequest.Status.OPEN:
-            quote.request.status = PurchaseRequest.Status.QUOTING
-            quote.request.save(update_fields=["status", "updated_at"])
+        quote.request.sync_status()
+
+    def perform_destroy(self, instance):
+        if instance.is_selected and instance.request.live_orders.exists():
+            raise ValidationError({
+                "detail": "از این استعلام سفارش خرید ثبت شده و حذف نمی‌شود."
+            })
+        purchase_request = instance.request
+        instance.delete()
+        purchase_request.sync_status()
 
     @extend_schema(request=QuoteSerializer, responses=QuoteSerializer)
     @action(detail=False, methods=["post"])
@@ -514,14 +581,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
             created_by=self.request.user,
             period=serializer.validated_data.get("period") or _month_period(ordered_on),
         )
-        if order.request and order.request.status != PurchaseRequest.Status.CANCELLED:
-            order.request.status = PurchaseRequest.Status.ORDERED
-            order.request.save(update_fields=["status", "updated_at"])
+        if order.request:
+            order.request.sync_status()
         audit_log(self.request.user, order, AuditLog.Action.CREATE,
                   {"total": {"before": None, "after": str(order.total_rial)}})
 
     def perform_update(self, serializer):
         before = serializer.instance.status
+        old_request = serializer.instance.request
         order = serializer.save()
         if order.period_id is None:
             order.period = _month_period(order.ordered_on)
@@ -529,10 +596,68 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if before != order.status:
             audit_log(self.request.user, order, AuditLog.Action.UPDATE,
                       {"status": {"before": before, "after": order.status}})
+        for req in {old_request, order.request} - {None}:
+            req.sync_status()
 
     def perform_destroy(self, instance):
         audit_log(self.request.user, instance, AuditLog.Action.DELETE)
+        purchase_request = instance.request
         instance.delete()
+        if purchase_request:
+            purchase_request.sync_status()
+
+    @extend_schema(request=OrderAdvanceSerializer, responses=PurchaseOrderSerializer)
+    @action(detail=True, methods=["post"])
+    @transaction.atomic
+    def advance(self, request, pk=None):
+        """
+        یک قدم جلو در جریان سفارش: در انتظار تایید ← در حال خرید ← ارسال شده ← تحویل شد.
+
+        The edit form can still set any status, for correcting a mistake. This
+        is the everyday path, and it only moves forward: a step skipped is
+        allowed (a supplier who delivers the same day never «ships»), a step
+        back is not, and a delivered order cannot be cancelled.
+        """
+        if not is_commercial(request.user):
+            raise ValidationError({"detail": "فقط واحد بازرگانی می‌تواند ثبت کند."})
+        order = self.get_object()
+        payload = OrderAdvanceSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        target = payload.validated_data["status"]
+        before = order.status
+        flow = PurchaseOrder.FLOW
+
+        if before == PurchaseOrder.Status.CANCELLED:
+            raise ValidationError({"status": "این سفارش لغو شده است."})
+        if target == PurchaseOrder.Status.CANCELLED:
+            if before == PurchaseOrder.Status.DELIVERED:
+                raise ValidationError({
+                    "status": "سفارشی که تحویل شده لغو نمی‌شود."
+                })
+        elif flow.index(target) <= flow.index(before):
+            raise ValidationError({
+                "status": f"سفارش در وضعیت «{order.get_status_display()}» است "
+                          "و به عقب برنمی‌گردد."
+            })
+
+        order.status = target
+        if target == PurchaseOrder.Status.DELIVERED:
+            delivered = payload.validated_data.get("delivered_on") or date.today()
+            if delivered < order.ordered_on:
+                raise ValidationError({
+                    "delivered_on": "تاریخ تحویل نمی‌تواند پیش از تاریخ سفارش باشد."
+                })
+            order.delivered_on = delivered
+        note = payload.validated_data.get("note", "").strip()
+        if note:
+            label = dict(PurchaseOrder.Status.choices)[target]
+            order.note = f"{order.note}\n{label}: {note}".strip()
+        order.save(update_fields=["status", "delivered_on", "note", "updated_at"])
+        audit_log(request.user, order, AuditLog.Action.UPDATE,
+                  {"status": {"before": before, "after": target}})
+        if order.request:
+            order.request.sync_status()
+        return Response(PurchaseOrderSerializer(order).data)
 
 
 class DashboardView(APIView):

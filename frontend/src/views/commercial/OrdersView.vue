@@ -8,6 +8,11 @@ import { apiError } from "@/components/crm/formError";
 import { num } from "@/utils/format";
 import { faDate } from "@/utils/adminFormat";
 import OrderForm from "@/components/commercial/OrderForm.vue";
+import OrderAdvanceDialog from "@/components/commercial/OrderAdvanceDialog.vue";
+import {
+  ORDER_STATUS_CLASS as STATUS_CLASS, isLiveOrder, nextOrderStep,
+} from "@/components/commercial/orderFlow";
+import type { OrderStatus } from "@/api/commercial";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -25,13 +30,12 @@ const canEdit = computed(
   () => auth.department === "commercial" || !!auth.me?.is_superuser,
 );
 
-const STATUS_CLASS: Record<string, string> = {
-  pending: "bg-sky-100 text-sky-700",
-  buying: "bg-amber-100 text-amber-700",
-  shipped: "bg-violet-100 text-violet-700",
-  delivered: "bg-emerald-100 text-emerald-700",
-  cancelled: "bg-slate-100 text-slate-500",
-};
+const advancing = ref<{ order: PurchaseOrder; target: OrderStatus } | null>(null);
+
+function advance(order: PurchaseOrder) {
+  const step = nextOrderStep(order.status);
+  if (step) advancing.value = { order, target: step.status };
+}
 
 const filtered = computed(() => {
   const q = search.value.trim();
@@ -126,6 +130,10 @@ async function remove(order: PurchaseOrder) {
       v-if="showForm" :order="editing"
       @close="showForm = false" @saved="onSaved"
     />
+    <OrderAdvanceDialog
+      v-if="advancing" :order="advancing.order" :target="advancing.target"
+      @close="advancing = null" @saved="advancing = null; load()"
+    />
 
     <div v-if="loading" class="space-y-2">
       <Skeleton v-for="i in 8" :key="i" class="h-12 rounded-xl" />
@@ -170,7 +178,12 @@ async function remove(order: PurchaseOrder) {
             <span v-if="o.delivery_days !== null">تحویل در {{ num(o.delivery_days) }} روز</span>
           </div>
 
-          <div v-if="canEdit" class="flex gap-2 mt-3">
+          <div v-if="canEdit" class="flex flex-wrap gap-2 mt-3">
+            <button
+              v-if="isLiveOrder(o.status) && nextOrderStep(o.status)"
+              class="text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700"
+              @click="advance(o)"
+            >{{ nextOrderStep(o.status)!.action }}</button>
             <button class="text-xs px-3 py-2 rounded-lg bg-slate-100 text-slate-600" @click="open(o)">ویرایش</button>
             <button class="text-xs px-3 py-2 rounded-lg bg-red-50 text-red-500" @click="remove(o)">حذف</button>
           </div>
@@ -222,6 +235,16 @@ async function remove(order: PurchaseOrder) {
                 </span>
               </td>
               <td class="px-4 text-left whitespace-nowrap">
+                <button
+                  v-if="canEdit && isLiveOrder(o.status) && nextOrderStep(o.status)"
+                  class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg px-2 py-1 ml-1"
+                  @click="advance(o)"
+                >{{ nextOrderStep(o.status)!.action }}</button>
+                <button
+                  v-if="canEdit && isLiveOrder(o.status)"
+                  class="text-xs text-slate-400 hover:text-red-500 px-1.5"
+                  @click="advancing = { order: o, target: 'cancelled' }"
+                >لغو</button>
                 <button
                   v-if="canEdit"
                   class="text-xs text-slate-400 hover:text-ink px-1.5"

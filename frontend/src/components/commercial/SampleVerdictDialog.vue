@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { todayIso } from "@/utils/jalali";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -36,7 +38,7 @@ const error = ref("");
 
 const approve = ref(props.sample.status !== "rejected");
 const decidedOn = ref(
-  props.sample.decided_on ?? new Date().toISOString().slice(0, 10),
+  props.sample.decided_on ?? todayIso(),
 );
 const reason = ref<number | null>(props.sample.reason);
 const labNote = ref(props.sample.lab_note);
@@ -116,7 +118,7 @@ async function save() {
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
         <label :class="lbl">تاریخ تصمیم *</label>
-        <input v-model="decidedOn" :class="inp" type="date" dir="ltr" />
+        <JalaliDateField v-model="decidedOn" />
       </div>
       <div v-if="!approve">
         <label :class="lbl">دلیل رد *</label>

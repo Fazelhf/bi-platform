@@ -14,6 +14,7 @@ import PageHeader from "@/components/admin/PageHeader.vue";
 import StatCard from "@/components/admin/StatCard.vue";
 import Badge from "@/components/admin/Badge.vue";
 import Toggle from "@/components/admin/Toggle.vue";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import type {
   AdminUser, ApiTokenRow, IPRule, LoginEventRow,
   PasswordPolicy, SecurityOverview, SessionRow,
@@ -549,10 +550,7 @@ const loginColumns: Column[] = [
         </label>
         <label class="block">
           <span class="text-xs text-slate-500">تاریخ انقضا (اختیاری)</span>
-          <input
-            v-model="tokenForm.expires_at" type="date"
-            class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface ltr-nums"
-          />
+          <JalaliDateField v-model="tokenForm.expires_at" class="mt-1" />
         </label>
       </div>
       <template #footer>

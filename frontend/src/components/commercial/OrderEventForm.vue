@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { todayIso } from "@/utils/jalali";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -39,7 +41,7 @@ const error = ref("");
 const isBlocked = ref(false);
 
 const form = ref({
-  at: new Date().toISOString().slice(0, 10),
+  at: todayIso(),
   title: "",
   blocked_reason: "",
   note: "",
@@ -79,7 +81,7 @@ async function save() {
     <div class="grid sm:grid-cols-3 gap-3">
       <div>
         <label :class="lbl">تاریخ</label>
-        <input v-model="form.at" :class="inp" type="date" dir="ltr" />
+        <JalaliDateField v-model="form.at" />
       </div>
       <div class="sm:col-span-2">
         <label :class="lbl">شرح اقدام *</label>

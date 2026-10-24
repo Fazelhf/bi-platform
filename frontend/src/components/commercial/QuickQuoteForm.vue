@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { todayIso } from "@/utils/jalali";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -44,7 +46,7 @@ const error = ref("");
 
 const VAT_PCT = 10;
 const NEW_REQUEST = 0;
-const today = new Date().toISOString().slice(0, 10);
+const today = todayIso();
 
 const form = ref({
   supplier: props.supplierId ?? (null as number | null),
@@ -246,7 +248,7 @@ async function save() {
       </div>
       <div>
         <label :class="lbl">تاریخ استعلام</label>
-        <input v-model="form.quoted_on" :class="inp" type="date" dir="ltr" />
+        <JalaliDateField v-model="form.quoted_on" />
       </div>
     </div>
 

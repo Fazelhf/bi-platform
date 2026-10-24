@@ -27,7 +27,8 @@ const STATUS_CLASS: Record<string, string> = {
   open: "bg-sky-100 text-sky-700",
   quoting: "bg-amber-100 text-amber-700",
   awarded: "bg-violet-100 text-violet-700",
-  ordered: "bg-emerald-100 text-emerald-700",
+  ordered: "bg-teal-100 text-teal-700",
+  delivered: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-slate-100 text-slate-500",
 };
 
@@ -75,6 +76,7 @@ function onSaved(saved: PurchaseRequest) {
         <option value="quoting">در حال استعلام</option>
         <option value="awarded">تامین‌کننده انتخاب شد</option>
         <option value="ordered">سفارش ثبت شد</option>
+        <option value="delivered">تحویل شد</option>
         <option value="cancelled">لغو شده</option>
       </select>
       <span class="text-xs text-slate-400 px-2">{{ num(filtered.length) }} درخواست</span>

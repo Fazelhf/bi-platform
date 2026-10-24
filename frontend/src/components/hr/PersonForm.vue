@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -93,7 +94,7 @@ async function save(force = false) {
       </div>
       <div>
         <label :class="lbl">تاریخ شروع همکاری</label>
-        <input v-model="form.hired_on" :class="inp" type="date" dir="ltr" />
+        <JalaliDateField v-model="form.hired_on" />
       </div>
     </div>
 

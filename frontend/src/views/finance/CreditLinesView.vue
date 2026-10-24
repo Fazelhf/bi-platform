@@ -9,6 +9,7 @@ import { computed, onMounted, ref } from "vue";
 import { financeApi, type CreditLine } from "@/api/finance";
 import { confirm, toast } from "@/composables/useUi";
 import { num, rial } from "@/utils/format";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 
 /** Rendered as a tab inside نقدینگی, so the page heading is dropped there. */
 withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
@@ -288,11 +289,11 @@ async function openLedger(row: CreditLine) {
           </label>
           <label class="block">
             <span class="text-xs text-slate-500">تاریخ شروع</span>
-            <input v-model="form.opened_on" type="date" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface ltr-nums" />
+            <JalaliDateField v-model="form.opened_on" class="mt-1" />
           </label>
           <label class="block">
             <span class="text-xs text-slate-500">سررسید</span>
-            <input v-model="form.due_on" type="date" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface ltr-nums" />
+            <JalaliDateField v-model="form.due_on" class="mt-1" />
           </label>
           <label class="block">
             <span class="text-xs text-slate-500">تعداد اقساط</span>

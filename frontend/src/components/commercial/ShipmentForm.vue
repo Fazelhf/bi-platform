@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { todayIso } from "@/utils/jalali";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -77,10 +79,10 @@ const needsArrival = computed(
 // day-count and every Rial of demurrage is measured from it.
 watch(() => form.value.status, (status) => {
   if ((status === "at_port" || status === "customs") && !form.value.arrived_on) {
-    form.value.arrived_on = new Date().toISOString().slice(0, 10);
+    form.value.arrived_on = todayIso();
   }
   if (status === "cleared" && !form.value.cleared_on) {
-    form.value.cleared_on = new Date().toISOString().slice(0, 10);
+    form.value.cleared_on = todayIso();
   }
 });
 
@@ -194,30 +196,30 @@ async function save() {
       <div class="grid sm:grid-cols-3 gap-3">
         <div>
           <label :class="lbl">ETD — حرکت از مبدأ</label>
-          <input v-model="form.etd" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.etd" />
         </div>
         <div>
           <label :class="lbl">ETA — رسیدن تخمینی</label>
-          <input v-model="form.eta" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.eta" />
         </div>
         <div>
           <label :class="lbl">
             رسیدن واقعی به بندر
             <span v-if="needsArrival" class="text-red-500">*</span>
           </label>
-          <input v-model="form.arrived_on" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.arrived_on" />
         </div>
         <div>
           <label :class="lbl">آزادسازی بار</label>
-          <input v-model="form.released_on" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.released_on" />
         </div>
         <div>
           <label :class="lbl">اظهار گمرکی</label>
-          <input v-model="form.declared_on" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.declared_on" />
         </div>
         <div>
           <label :class="lbl">ترخیص</label>
-          <input v-model="form.cleared_on" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.cleared_on" />
         </div>
       </div>
       <p v-if="needsArrival" class="text-xs text-slate-400 mt-1">

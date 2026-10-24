@@ -304,9 +304,26 @@ class PurchaseRequestSerializer(serializers.ModelSerializer):
             "quantity", "requester_unit", "requested_on", "needed_by",
             "period", "period_label", "status", "status_label", "note",
             "quote_count", "best_price_rial", "selected_supplier", "quotes",
-            "created_at",
+            "created_at", "next_step",
         ]
-        read_only_fields = ["request_no"]
+        # The status is derived from the quotes and orders (see
+        # PurchaseRequest.derived_status); «لغو» has its own endpoint. Left
+        # writable, the edit form could set «سفارش ثبت شد» on a request with
+        # no order and every report would believe it.
+        read_only_fields = ["request_no", "status"]
+
+    next_step = serializers.SerializerMethodField()
+
+    def get_next_step(self, obj) -> str:
+        """The one thing the department has to do next on this request."""
+        return {
+            PurchaseRequest.Status.OPEN: "از تامین‌کننده‌ها قیمت بگیرید",
+            PurchaseRequest.Status.QUOTING: "تامین‌کننده برنده را انتخاب کنید",
+            PurchaseRequest.Status.AWARDED: "سفارش خرید را ثبت کنید",
+            PurchaseRequest.Status.ORDERED: "پیگیری سفارش تا تحویل",
+            PurchaseRequest.Status.DELIVERED: "",
+            PurchaseRequest.Status.CANCELLED: "",
+        }.get(obj.status, "")
 
     def get_best_price_rial(self, obj) -> str:
         return str(obj.best_price_rial)
@@ -390,6 +407,32 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "delivered_on": "برای وضعیت «تحویل شد» تاریخ تحویل لازم است."
             })
+        ordered = attrs.get("ordered_on", getattr(self.instance, "ordered_on", None))
+        if delivered and ordered and delivered < ordered:
+            raise serializers.ValidationError({
+                "delivered_on": "تاریخ تحویل نمی‌تواند پیش از تاریخ سفارش باشد."
+            })
+
+        request = attrs.get("request", getattr(self.instance, "request", None))
+        quote = attrs.get("quote", getattr(self.instance, "quote", None))
+        if request and request.status == PurchaseRequest.Status.CANCELLED and (
+            self.instance is None or "request" in attrs
+        ):
+            raise serializers.ValidationError({
+                "request": "این درخواست لغو شده؛ برای آن سفارش ثبت نمی‌شود."
+            })
+        if quote and self.instance is None:
+            # An order placed from an استعلام buys from the supplier that won
+            # it. Ordering from a loser leaves the file saying one thing and
+            # the purchase another — the gap the price file exists to close.
+            if request and quote.request_id != request.id:
+                raise serializers.ValidationError({
+                    "quote": "این استعلام متعلق به درخواست دیگری است."
+                })
+            if not quote.is_selected:
+                raise serializers.ValidationError({
+                    "quote": "سفارش فقط از تامین‌کننده‌ی برنده ثبت می‌شود."
+                })
         return attrs
 
 
@@ -409,6 +452,18 @@ class AwardSerializer(serializers.Serializer):
         required=False, allow_blank=True, max_length=300
     )
     rejections = serializers.ListField(child=serializers.DictField(), required=False)
+
+
+class OrderAdvanceSerializer(serializers.Serializer):
+    """One step forward in a purchase order's life, or its cancellation."""
+
+    status = serializers.ChoiceField(choices=PurchaseOrder.Status.choices)
+    delivered_on = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+class RequestCancelSerializer(serializers.Serializer):
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500)
 
 
 class UnitChoiceSerializer(serializers.Serializer):

@@ -160,7 +160,12 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       // Dev: proxy API to Django so there are no CORS surprises.
-      "/api": { target: "http://127.0.0.1:8001", changeOrigin: true },
+      // `API_TARGET` points it at a Django on another port, for when 8001
+      // belongs to a different project running on the same machine.
+      "/api": {
+        target: process.env.API_TARGET || "http://127.0.0.1:8001",
+        changeOrigin: true,
+      },
     },
   },
 });

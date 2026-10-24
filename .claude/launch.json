@@ -4,6 +4,31 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "//": "This checkout (C:/Users/User/Projects/bi-platform) on a machine where the C:/Users/Asus paths below do not exist and 8001/5174 are held by the mittel-erp project — so 8003/5176, with the vite proxy pointed at 8003 through API_TARGET.",
+      "name": "backend-local",
+      "runtimeExecutable": "C:/Users/User/Projects/bi-platform/backend/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "C:/Users/User/Projects/bi-platform/backend/manage.py",
+        "runserver",
+        "127.0.0.1:8003"
+      ],
+      "env": { "PYTHONUTF8": "1" },
+      "port": 8003,
+      "autoPort": false
+    },
+    {
+      "name": "frontend-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix", "C:/Users/User/Projects/bi-platform/frontend", "run", "dev", "--",
+        "C:/Users/User/Projects/bi-platform/frontend",
+        "--config", "C:/Users/User/Projects/bi-platform/frontend/vite.config.ts"
+      ],
+      "env": { "PORT": "5176", "API_TARGET": "http://127.0.0.1:8003" },
+      "port": 5176,
+      "autoPort": false
+    },
+    {
       "name": "backend-django",
       "runtimeExecutable": "C:/Users/Asus/bi-platform-v2/backend/.venv/Scripts/python.exe",
       "runtimeArgs": [

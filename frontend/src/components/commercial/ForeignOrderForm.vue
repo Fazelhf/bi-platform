@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { todayIso } from "@/utils/jalali";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -48,7 +50,7 @@ const form = ref({
   currency: props.order?.currency ?? "USD",
   amount: props.order?.amount ?? "",
   bank: props.order?.bank ?? (null as number | null),
-  registered_on: props.order?.registered_on ?? new Date().toISOString().slice(0, 10),
+  registered_on: props.order?.registered_on ?? todayIso(),
   valid_until: props.order?.valid_until ?? "",
   queued_on: props.order?.queued_on ?? "",
   allocated_on: props.order?.allocated_on ?? "",
@@ -243,23 +245,23 @@ async function save() {
       <div class="grid sm:grid-cols-2 gap-3">
         <div>
           <label :class="lbl">تاریخ ثبت سفارش</label>
-          <input v-model="form.registered_on" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.registered_on" />
         </div>
         <div>
           <label :class="lbl">اعتبار ثبت سفارش</label>
-          <input v-model="form.valid_until" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.valid_until" />
         </div>
         <div>
           <label :class="lbl">ورود به صف تخصیص ارز</label>
-          <input v-model="form.queued_on" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.queued_on" />
         </div>
         <div>
           <label :class="lbl">تایید تخصیص ارز</label>
-          <input v-model="form.allocated_on" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.allocated_on" />
         </div>
         <div>
           <label :class="lbl">مهلت خرید ارز</label>
-          <input v-model="form.purchase_deadline" :class="inp" type="date" dir="ltr" />
+          <JalaliDateField v-model="form.purchase_deadline" />
         </div>
         <div>
           <label :class="lbl">

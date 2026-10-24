@@ -304,6 +304,114 @@ class OrderTests(CommercialTestCase):
         self.assertEqual(response.status_code, 400)
 
 
+class PurchaseFlowTests(CommercialTestCase):
+    """
+    What happens after a winner is chosen: order, follow-up, delivery.
+
+    The request's status is derived from its quotes and orders, so every path
+    has to land it in the same place — a delivered purchase must not sit at
+    «سفارش ثبت شد», and a cancelled order must not leave one claimed.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.req = self._request()
+        self.win = Quote.objects.create(
+            request=self.req, supplier=self.a, unit_price_rial=Decimal(950_000),
+        )
+        self.lose = Quote.objects.create(
+            request=self.req, supplier=self.b, unit_price_rial=Decimal(990_000),
+        )
+        self.client.force_authenticate(self.manager)
+        self.client.post(
+            f"/api/commercial/requests/{self.req.id}/award/",
+            {"quote": self.win.id}, format="json",
+        )
+
+    def _place(self, quote=None):
+        quote = quote or self.win
+        return self.client.post("/api/commercial/orders/", {
+            "request": self.req.id, "quote": quote.id,
+            "supplier": quote.supplier_id, "material": self.shrink.id,
+            "quantity": "20", "unit_price_rial": str(quote.unit_price_rial),
+            "ordered_on": "2026-07-26",
+        })
+
+    def _advance(self, order_id, status, **extra):
+        return self.client.post(
+            f"/api/commercial/orders/{order_id}/advance/",
+            {"status": status, **extra}, format="json",
+        )
+
+    def _status(self):
+        self.req.refresh_from_db()
+        return self.req.status
+
+    def test_the_whole_way_to_delivery(self):
+        self.assertEqual(self._status(), "awarded")
+        order = self._place().data
+        self.assertEqual(self._status(), "ordered")
+        self.assertEqual(self._advance(order["id"], "buying").status_code, 200)
+        self.assertEqual(self._advance(order["id"], "shipped").status_code, 200)
+        done = self._advance(order["id"], "delivered", delivered_on="2026-07-29")
+        self.assertEqual(done.status_code, 200)
+        self.assertEqual(done.data["delivery_days"], 3)
+        self.assertEqual(self._status(), "delivered")
+
+    def test_steps_do_not_go_back(self):
+        order = self._place().data
+        self._advance(order["id"], "shipped")
+        response = self._advance(order["id"], "buying")
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_delivered_order_cannot_be_cancelled(self):
+        order = self._place().data
+        self._advance(order["id"], "delivered")
+        self.assertEqual(self._advance(order["id"], "cancelled").status_code, 400)
+
+    def test_cancelling_the_order_returns_the_request_to_awarded(self):
+        order = self._place().data
+        self._advance(order["id"], "cancelled")
+        self.assertEqual(self._status(), "awarded")
+
+    def test_the_winner_cannot_change_under_a_live_order(self):
+        self._place()
+        response = self.client.post(
+            f"/api/commercial/requests/{self.req.id}/award/",
+            {"quote": self.lose.id}, format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.win.refresh_from_db()
+        self.assertTrue(self.win.is_selected)
+
+    def test_an_order_cannot_be_placed_with_the_loser(self):
+        response = self._place(self.lose)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("quote", response.data)
+
+    def test_cancel_and_reopen(self):
+        response = self.client.post(
+            f"/api/commercial/requests/{self.req.id}/cancel/",
+            {"note": "نیاز برطرف شد"}, format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._status(), "cancelled")
+        self.assertEqual(self._place().status_code, 400)
+        self.client.post(f"/api/commercial/requests/{self.req.id}/reopen/")
+        self.assertEqual(self._status(), "awarded")
+
+    def test_a_request_with_a_live_order_cannot_be_cancelled(self):
+        self._place()
+        response = self.client.post(f"/api/commercial/requests/{self.req.id}/cancel/")
+        self.assertEqual(response.status_code, 400)
+
+    def test_status_is_not_writable_from_the_edit_form(self):
+        self.client.patch(
+            f"/api/commercial/requests/{self.req.id}/", {"status": "ordered"}
+        )
+        self.assertEqual(self._status(), "awarded")
+
+
 class PriceHistoryTests(CommercialTestCase):
     def test_price_change_is_reported_between_the_last_two_months(self):
         self._order(date(2026, 6, 25), 10, 940_000)   # تیر

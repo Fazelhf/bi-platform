@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   commercialApi,
+  type OrderStatus,
   type PurchaseOrder,
   type PurchaseRequest,
   type Quote,
@@ -20,6 +21,10 @@ import AwardDialog from "@/components/commercial/AwardDialog.vue";
 import OrderForm from "@/components/commercial/OrderForm.vue";
 import SampleForm from "@/components/commercial/SampleForm.vue";
 import SampleVerdictDialog from "@/components/commercial/SampleVerdictDialog.vue";
+import OrderAdvanceDialog from "@/components/commercial/OrderAdvanceDialog.vue";
+import {
+  ORDER_STATUS_CLASS, isLiveOrder, nextOrderStep,
+} from "@/components/commercial/orderFlow";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -59,6 +64,28 @@ const fastest = computed(() => {
   return withDays.reduce((a, b) => (a.delivery_days <= b.delivery_days ? a : b));
 });
 const winner = computed(() => quotes.value.find((q) => q.is_selected) ?? null);
+const liveOrders = computed(() => orders.value.filter((o) => o.status !== "cancelled"));
+const cancelled = computed(() => request.value?.status === "cancelled");
+/** Once goods are ordered the winner is fixed — the server refuses a change. */
+const locked = computed(() => cancelled.value || liveOrders.value.length > 0);
+
+/**
+ * The path a request walks. The current step comes from the server's status,
+ * which is derived from the quotes and orders, so this bar cannot disagree
+ * with what actually happened.
+ */
+const STEPS = [
+  { status: "open", label: "ثبت درخواست" },
+  { status: "quoting", label: "استعلام قیمت" },
+  { status: "awarded", label: "انتخاب برنده" },
+  { status: "ordered", label: "سفارش و پیگیری" },
+  { status: "delivered", label: "تحویل" },
+];
+const stepIndex = computed(() => {
+  const i = STEPS.findIndex((s) => s.status === request.value?.status);
+  // Delivered is the end of the road: every step done, none still current.
+  return request.value?.status === "delivered" ? STEPS.length : i;
+});
 
 async function load() {
   loading.value = true;
@@ -104,6 +131,39 @@ function awardFrom(quote: Quote | null) {
   showAward.value = true;
 }
 
+const advancing = ref<{ order: PurchaseOrder; target: OrderStatus } | null>(null);
+const editingOrder = ref<PurchaseOrder | null>(null);
+
+function openOrder(order: PurchaseOrder | null) {
+  editingOrder.value = order;
+  showOrder.value = true;
+}
+
+async function cancelRequest() {
+  const ok = await confirm({
+    title: "لغو درخواست",
+    message: `درخواست ${request.value?.request_no} لغو شود؟ استعلام‌ها و دلیل‌ها می‌مانند.`,
+    danger: true,
+  });
+  if (!ok || !request.value) return;
+  try {
+    await commercialApi.cancelRequest(request.value.id);
+    load();
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
+
+async function reopenRequest() {
+  if (!request.value) return;
+  try {
+    await commercialApi.reopenRequest(request.value.id);
+    load();
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
+
 const showSample = ref(false);
 const sampleQuote = ref<Quote | null>(null);
 const editingSample = ref<Sample | null>(null);
@@ -132,6 +192,8 @@ function afterChange() {
   sampleQuote.value = null;
   decidingSample.value = null;
   preselect.value = null;
+  advancing.value = null;
+  editingOrder.value = null;
   load();
 }
 
@@ -198,22 +260,63 @@ const FA = new Intl.NumberFormat("fa-IR");
               @click="showEditRequest = true"
             >ویرایش درخواست</button>
             <button
-              v-if="canEdit && request.status !== 'cancelled'"
+              v-if="canEdit && !locked"
               class="bg-slate-100 text-ink rounded-xl px-4 py-2 text-sm"
               @click="openQuote(null)"
             >+ استعلام</button>
             <button
-              v-if="canEdit && quotes.length"
-              class="bg-panel text-white rounded-xl px-4 py-2 text-sm"
+              v-if="canEdit && quotes.length && !locked"
+              class="rounded-xl px-4 py-2 text-sm"
+              :class="winner ? 'border border-slate-200 text-ink' : 'bg-panel text-white'"
               @click="awardFrom(null)"
             >{{ winner ? "تغییر انتخاب" : "انتخاب تامین‌کننده" }}</button>
             <button
-              v-if="canEdit && winner"
+              v-if="canEdit && winner && !locked"
               class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
-              @click="showOrder = true"
+              @click="openOrder(null)"
             >ثبت سفارش خرید</button>
+            <button
+              v-if="canEdit && !cancelled && !liveOrders.length"
+              class="text-sm text-slate-400 hover:text-red-500 px-2 py-2"
+              @click="cancelRequest"
+            >لغو درخواست</button>
+            <button
+              v-if="canEdit && cancelled"
+              class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
+              @click="reopenRequest"
+            >بازگشایی درخواست</button>
           </div>
         </div>
+
+        <!-- Where the request stands, and the one thing left to do on it -->
+        <div
+          v-if="cancelled"
+          class="mt-4 bg-slate-100 text-slate-500 rounded-xl px-3 py-2 text-sm"
+        >این درخواست لغو شده است.</div>
+        <template v-else>
+          <ol class="mt-4 flex items-center gap-1 overflow-x-auto pb-1">
+            <li
+              v-for="(step, i) in STEPS" :key="step.status"
+              class="flex items-center gap-1 shrink-0"
+            >
+              <span
+                class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs"
+                :class="i < stepIndex
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : i === stepIndex
+                    ? 'bg-panel text-white'
+                    : 'bg-slate-50 text-slate-400'"
+              >
+                <span>{{ i < stepIndex ? "✔" : FA.format(i + 1) }}</span>
+                {{ step.label }}
+              </span>
+              <span v-if="i < STEPS.length - 1" class="w-4 h-px bg-slate-200" />
+            </li>
+          </ol>
+          <p v-if="request.next_step" class="text-xs text-slate-500 mt-2">
+            قدم بعد: <span class="text-ink font-medium">{{ request.next_step }}</span>
+          </p>
+        </template>
       </div>
 
       <p
@@ -261,7 +364,7 @@ const FA = new Intl.NumberFormat("fa-IR");
                 <td class="px-4 py-2.5">
                   <p class="text-ink font-medium">
                     {{ q.supplier_name }}
-                    <span v-if="q.is_selected" class="text-emerald-600 text-xs">✔ خرید شد</span>
+                    <span v-if="q.is_selected" class="text-emerald-600 text-xs">✔ برنده</span>
                   </p>
                   <p v-if="q.note" class="text-xs text-slate-400">{{ q.note }}</p>
                 </td>
@@ -343,7 +446,7 @@ const FA = new Intl.NumberFormat("fa-IR");
                 </td>
                 <td class="px-4 text-left whitespace-nowrap">
                   <button
-                    v-if="canEdit && !q.is_selected"
+                    v-if="canEdit && !q.is_selected && !locked"
                     class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg px-2 py-1 ml-1"
                     :title="`${q.supplier_name} برنده این استعلام شود`"
                     @click="awardFrom(q)"
@@ -438,22 +541,60 @@ const FA = new Intl.NumberFormat("fa-IR");
         <h3 class="px-4 py-3 border-b border-slate-100 font-bold text-ink text-sm">
           سفارش‌های خرید
         </h3>
-        <table class="w-full text-sm">
-          <tbody>
-            <tr v-for="o in orders" :key="o.id" class="border-t border-slate-100">
-              <td class="px-4 py-2.5 ltr-nums text-ink font-medium">{{ o.order_no }}</td>
-              <td class="px-3 text-slate-500">{{ o.supplier_name }}</td>
-              <td class="px-3 ltr-nums text-slate-500">
-                {{ num(o.quantity) }} {{ o.material_unit }}
-              </td>
-              <td class="px-3 ltr-nums text-ink">
-                {{ exact(o.grand_total_rial, true) }}
-                <span v-if="o.is_official" class="text-xs text-slate-400">با ارزش افزوده</span>
-              </td>
-              <td class="px-4 text-xs text-slate-500">{{ o.status_label }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm min-w-[760px]">
+            <tbody>
+              <tr v-for="o in orders" :key="o.id" class="border-t border-slate-100">
+                <td class="px-4 py-2.5">
+                  <p class="ltr-nums text-ink font-medium">{{ o.order_no }}</p>
+                  <p class="text-xs text-slate-400">سفارش {{ faDate(o.ordered_on) }}</p>
+                </td>
+                <td class="px-3 text-slate-500">{{ o.supplier_name }}</td>
+                <td class="px-3 ltr-nums text-slate-500">
+                  {{ num(o.quantity) }} {{ o.material_unit }}
+                </td>
+                <td class="px-3 ltr-nums text-ink">
+                  {{ exact(o.grand_total_rial, true) }}
+                  <span v-if="o.is_official" class="text-xs text-slate-400">با ارزش افزوده</span>
+                </td>
+                <td class="px-3 whitespace-nowrap">
+                  <span
+                    class="text-xs rounded-full px-2 py-0.5"
+                    :class="ORDER_STATUS_CLASS[o.status]"
+                  >{{ o.status_label }}</span>
+                  <p v-if="o.delivered_on" class="text-xs text-slate-400 mt-0.5">
+                    {{ faDate(o.delivered_on) }}
+                    <span v-if="o.delivery_days !== null">· {{ num(o.delivery_days) }} روز</span>
+                  </p>
+                </td>
+                <td class="px-4 text-left whitespace-nowrap">
+                  <template v-if="canEdit && isLiveOrder(o.status)">
+                    <button
+                      v-if="nextOrderStep(o.status)"
+                      class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg px-2 py-1 ml-1"
+                      @click="advancing = { order: o, target: nextOrderStep(o.status)!.status }"
+                    >{{ nextOrderStep(o.status)!.action }}</button>
+                    <button
+                      v-if="o.status !== 'shipped'"
+                      class="text-xs text-slate-500 hover:text-ink px-1.5"
+                      title="بدون مرحله‌ی ارسال، مستقیم تحویل شد"
+                      @click="advancing = { order: o, target: 'delivered' }"
+                    >تحویل شد</button>
+                    <button
+                      class="text-xs text-slate-400 hover:text-red-500 px-1.5"
+                      @click="advancing = { order: o, target: 'cancelled' }"
+                    >لغو</button>
+                  </template>
+                  <button
+                    v-if="canEdit"
+                    class="text-xs text-slate-400 hover:text-ink px-1.5"
+                    @click="openOrder(o)"
+                  >ویرایش</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <RequestForm
@@ -473,8 +614,13 @@ const FA = new Intl.NumberFormat("fa-IR");
       />
       <OrderForm
         v-if="showOrder"
-        :request="request" :quote="winner"
+        :order="editingOrder" :request="request" :quote="winner"
         @close="showOrder = false" @saved="afterChange"
+      />
+      <OrderAdvanceDialog
+        v-if="advancing"
+        :order="advancing.order" :target="advancing.target"
+        @close="advancing = null" @saved="afterChange"
       />
       <SampleForm
         v-if="showSample"

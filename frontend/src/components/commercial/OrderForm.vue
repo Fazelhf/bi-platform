@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { todayIso } from "@/utils/jalali";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -53,7 +55,7 @@ const STATUSES = [
   { value: "cancelled", label: "لغو شد" },
 ];
 
-const today = new Date().toISOString().slice(0, 10);
+const today = todayIso();
 
 const form = ref({
   material: props.order?.material ?? props.request?.material
@@ -223,7 +225,7 @@ async function save() {
     <div class="grid sm:grid-cols-3 gap-3">
       <div>
         <label class="text-xs text-slate-500 mb-1 block">تاریخ سفارش</label>
-        <input v-model="form.ordered_on" :class="inp" type="date" dir="ltr" />
+        <JalaliDateField v-model="form.ordered_on" />
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">وضعیت</label>
@@ -236,7 +238,7 @@ async function save() {
           تاریخ تحویل
           <span v-if="form.status === 'delivered'" class="text-red-500">*</span>
         </label>
-        <input v-model="form.delivered_on" :class="inp" type="date" dir="ltr" />
+        <JalaliDateField v-model="form.delivered_on" />
       </div>
     </div>
 

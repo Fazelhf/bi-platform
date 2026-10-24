@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { todayIso } from "@/utils/jalali";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import { computed, onMounted, ref } from "vue";
 import FormModal from "@/components/crm/FormModal.vue";
 import PickerField from "@/components/PickerField.vue";
@@ -30,7 +32,7 @@ const error = ref("");
 const form = ref({
   currency: props.currency ?? "USD",
   kind: (props.kind ?? "centre") as RateKind,
-  on_date: new Date().toISOString().slice(0, 10),
+  on_date: todayIso(),
   rate_rial: "",
   note: "",
 });
@@ -85,7 +87,7 @@ async function save() {
       </div>
       <div>
         <label :class="lbl">تاریخ</label>
-        <input v-model="form.on_date" :class="inp" type="date" dir="ltr" />
+        <JalaliDateField v-model="form.on_date" />
       </div>
       <div>
         <label :class="lbl">نرخ (ریال)</label>

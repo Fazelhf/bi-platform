@@ -252,6 +252,7 @@ class PurchaseRequest(TimeStampedModel):
         QUOTING = "quoting", "در حال استعلام"
         AWARDED = "awarded", "تامین‌کننده انتخاب شد"
         ORDERED = "ordered", "سفارش ثبت شد"
+        DELIVERED = "delivered", "تحویل شد"
         CANCELLED = "cancelled", "لغو شده"
 
     request_no = models.CharField(max_length=24, unique=True, blank=True)
@@ -301,6 +302,42 @@ class PurchaseRequest(TimeStampedModel):
         """The cheapest quote received — not necessarily the chosen one."""
         low = self.quotes.aggregate(v=models.Min("unit_price_rial"))["v"]
         return low if low is not None else ZERO
+
+    @property
+    def live_orders(self):
+        """Orders that still mean a purchase — a cancelled one bought nothing."""
+        return self.orders.exclude(status=PurchaseOrder.Status.CANCELLED)
+
+    def derived_status(self) -> str:
+        """
+        Where this request stands, read off what has actually happened to it.
+
+        The status used to be written by whichever step happened last, so it
+        never moved past «سفارش ثبت شد»: delivering the goods left the request
+        open forever, and cancelling the order left it claiming an order it no
+        longer had. Deriving it means every path — award, order, delivery,
+        cancellation — lands on the same answer. «لغو شده» is the one state a
+        person sets; nothing underneath can contradict it.
+        """
+        if self.status == self.Status.CANCELLED:
+            return self.Status.CANCELLED
+        live = list(self.live_orders.values_list("status", flat=True))
+        if live:
+            if all(s == PurchaseOrder.Status.DELIVERED for s in live):
+                return self.Status.DELIVERED
+            return self.Status.ORDERED
+        if self.quotes.filter(is_selected=True).exists():
+            return self.Status.AWARDED
+        if self.quotes.exists():
+            return self.Status.QUOTING
+        return self.Status.OPEN
+
+    def sync_status(self) -> str:
+        status = self.derived_status()
+        if status != self.status:
+            self.status = status
+            self.save(update_fields=["status", "updated_at"])
+        return status
 
     def save(self, *args, **kwargs):
         if not self.request_no:
@@ -414,6 +451,11 @@ class PurchaseOrder(TimeStampedModel):
         SHIPPED = "shipped", "ارسال شده"
         DELIVERED = "delivered", "تحویل شد"
         CANCELLED = "cancelled", "لغو شد"
+
+    #: The order a purchase moves through. Each step may only go forward, and
+    #: «لغو» is allowed from anywhere but «تحویل شد» — goods that arrived were
+    #: bought, and a cancellation would erase a real purchase from the reports.
+    FLOW = ["pending", "buying", "shipped", "delivered"]
 
     order_no = models.CharField(max_length=24, unique=True, blank=True)
     request = models.ForeignKey(

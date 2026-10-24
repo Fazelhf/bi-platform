@@ -195,7 +195,7 @@ export interface Quote {
 }
 
 export type RequestStatus =
-  | "open" | "quoting" | "awarded" | "ordered" | "cancelled";
+  | "open" | "quoting" | "awarded" | "ordered" | "delivered" | "cancelled";
 
 export interface PurchaseRequest {
   id: number;
@@ -215,6 +215,8 @@ export interface PurchaseRequest {
   quote_count: number;
   best_price_rial: string;
   selected_supplier: string;
+  /** What the department has to do next; empty once delivered or cancelled. */
+  next_step: string;
   quotes?: Quote[];
 }
 
@@ -567,6 +569,14 @@ export const commercialApi = {
   async removeRequest(id: number) {
     await api.delete(`/commercial/requests/${id}/`);
   },
+  async cancelRequest(id: number, note = ""): Promise<PurchaseRequest> {
+    const { data } = await api.post(`/commercial/requests/${id}/cancel/`, { note });
+    return data;
+  },
+  async reopenRequest(id: number): Promise<PurchaseRequest> {
+    const { data } = await api.post(`/commercial/requests/${id}/reopen/`);
+    return data;
+  },
   async award(requestId: number, payload: AwardPayload): Promise<PurchaseRequest> {
     const { data } = await api.post(
       `/commercial/requests/${requestId}/award/`, payload,
@@ -639,6 +649,14 @@ export const commercialApi = {
   },
   async removeOrder(id: number) {
     await api.delete(`/commercial/orders/${id}/`);
+  },
+  /** One step forward (or cancellation) — the server refuses a step back. */
+  async advanceOrder(
+    id: number,
+    payload: { status: OrderStatus; delivered_on?: string | null; note?: string },
+  ): Promise<PurchaseOrder> {
+    const { data } = await api.post(`/commercial/orders/${id}/advance/`, payload);
+    return data;
   },
 
   // -- dashboard and reports -------------------------------------------
