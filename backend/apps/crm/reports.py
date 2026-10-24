@@ -303,7 +303,9 @@ class Filters:
         """
         if self.blind:
             return SalesInvoice.objects.none()
-        qs = SalesInvoice.objects.filter(dataset=self.dataset).annotate(
+        # `counted()`: فروش سوری — waiting for a ruling, or ruled fake — is not
+        # a sale, and nothing summed from here may include it.
+        qs = SalesInvoice.objects.counted().filter(dataset=self.dataset).annotate(
             rep_id=Coalesce(
                 "owner_id", "deal__owner_id", "customer__owner_id",
                 output_field=IntegerField(),

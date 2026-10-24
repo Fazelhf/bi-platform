@@ -18,6 +18,7 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Count, DecimalField, F, Max, OuterRef, Q, Subquery, Sum, Value
 from django.http import HttpResponse
 from django.utils import timezone
@@ -25,6 +26,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -119,6 +121,14 @@ def is_crm_manager(user) -> bool:
     )
 
 
+def is_system_admin(user) -> bool:
+    """مدیر سیستم: a superuser or the `admin` role. Runs the imports."""
+    return bool(
+        user and user.is_authenticated
+        and (user.is_superuser or getattr(user, "role", "") == "admin")
+    )
+
+
 def crm_scope(user) -> rpt.Scope:
     """
     Which records this account may see at all.
@@ -208,6 +218,18 @@ class CrmAccess(BasePermission):
 
     def has_permission(self, request, view):
         return can_read_crm(request.user)
+
+
+class SystemAdminOnly(BasePermission):
+    """
+    ورود از آرپا: it writes the company's sales record and rules on فروش
+    سوری, so it belongs to the system admin alone — not to every manager.
+    """
+
+    message = "این بخش فقط برای مدیر سیستم است."
+
+    def has_permission(self, request, view):
+        return is_system_admin(request.user)
 
 
 class GatedAPIView(APIView):
@@ -807,7 +829,7 @@ def customer_insights(customer) -> dict:
     now = timezone.now()
     today = now.date()
 
-    invoices = SalesInvoice.objects.filter(customer=customer, is_intercompany=False)
+    invoices = SalesInvoice.objects.counted().filter(customer=customer, is_intercompany=False)
     inv = invoices.aggregate(
         count=Count("id"),
         amount=Sum("amount_rial"),
@@ -2128,7 +2150,7 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
 
     pagination_class = CrmPagination
 
-    permission_classes = [CrmManagerOnly, CrmWritePermission]
+    permission_classes = [SystemAdminOnly]
     serializer_class = MatchCandidateSerializer
     queryset = CustomerMatchCandidate.objects.select_related(
         "customer", "customer__province", "customer__owner", "decided_by"
@@ -2281,3 +2303,207 @@ class SalesInvoiceViewSet(viewsets.ReadOnlyModelViewSet):
                 | Q(party_name__icontains=search)
             )
         return qs.order_by("-issued_at", "-number")
+
+
+# --------------------------------------------------------------------------
+# ورود از آرپا — upload an export, and rule on فروش سوری
+# --------------------------------------------------------------------------
+MAX_UPLOAD = 25 * 1024 * 1024
+
+
+class ArpaImportView(GatedAPIView):
+    """
+    GET  — the upload history.
+    POST — `file`, `book`, `commit`. Without `commit=1` it is a preview: the
+    import runs and is rolled back, so the counts shown before «ثبت» are
+    exactly what «ثبت» does.
+    """
+
+    permission_classes = [SystemAdminOnly]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        from apps.crm.models import ImportBatch, Review
+
+        rows = [
+            {
+                "id": b.pk, "file_name": b.file_name, "book": b.book,
+                "book_display": b.get_book_display(), "at": b.created_at.isoformat(),
+                "by": getattr(b.uploaded_by, "display_name_fa", "") or getattr(b.uploaded_by, "username", ""),
+                "rows": b.rows, "created": b.created, "updated": b.updated,
+                "unchanged": b.unchanged, "skipped": b.skipped, "suspect": b.suspect,
+                "customers_created": b.customers_created, "amount": float(b.amount_rial),
+                "date_from": jalali_str(b.date_from) if b.date_from else "",
+                "date_to": jalali_str(b.date_to) if b.date_to else "",
+            }
+            for b in ImportBatch.objects.filter(source=ImportBatch.Source.ARPA).select_related("uploaded_by")[:40]
+        ]
+        return Response({
+            "imports": rows,
+            "pending_suspect": SalesInvoice.objects.filter(review=Review.SUSPECT).count(),
+        })
+
+    def post(self, request):
+        from apps.crm.arpa_file import ArpaFileError
+        from apps.crm.arpa_import import run
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "فایلی انتخاب نشده است."}, status=400)
+        if upload.size > MAX_UPLOAD:
+            return Response({"detail": "حجم فایل بیش از ۲۵ مگابایت است."}, status=400)
+        commit = str(request.data.get("commit", "")).lower() in {"1", "true", "yes"}
+        try:
+            result = run(
+                upload.read(), upload.name, request.data.get("book") or "main",
+                user=request.user, commit=commit,
+            )
+        except ArpaFileError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(result)
+
+
+class SuspectInvoiceView(GatedAPIView):
+    """
+    فروش سوری: invoices whose «مسوول فروش» was not a sales group.
+
+    GET  — `state` = suspect (default) | real | fake, optional `search`.
+    POST — `ids`, `decision` = real | fake | suspect, and `channel` when
+    ruling real: the sales group is what was missing, so the person who
+    says «it is real» also says whose.
+    """
+
+    permission_classes = [SystemAdminOnly]
+    VALID_CHANNELS = {"team", "organizational", "b2b"}
+
+    def get(self, request):
+        from apps.crm.models import Review
+
+        state = request.query_params.get("state") or Review.SUSPECT
+        qs = SalesInvoice.objects.filter(review=state).select_related(
+            "customer", "owner", "reviewed_by",
+        )
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(number__icontains=search) | Q(party_name__icontains=search)
+                | Q(customer__name_fa__icontains=search)
+            )
+        counts = {
+            r["review"]: {"count": r["n"], "amount": float(r["a"] or 0)}
+            for r in SalesInvoice.objects.exclude(review="").values("review")
+            .annotate(n=Count("id"), a=Sum("amount_rial")).order_by()
+        }
+        rows = [
+            {
+                "id": i.pk, "number": i.number, "kind": i.kind,
+                "book": i.book, "book_display": i.get_book_display(),
+                "issued_jalali": jalali_str(i.issued_at),
+                "customer_id": i.customer_id,
+                "customer": i.customer.name_fa if i.customer_id else i.party_name,
+                "amount": float(i.amount_rial),
+                "owner": i.owner.full_name_fa if i.owner_id else "",
+                "created_by": i.created_by_name,
+                "responsible": i.sales_responsible,
+                "payment_terms": i.payment_terms,
+                "channel": i.channel,
+                "reviewed_by": getattr(i.reviewed_by, "username", "") if i.reviewed_by_id else "",
+                "reviewed_at": i.reviewed_at.isoformat() if i.reviewed_at else None,
+            }
+            for i in qs.order_by("-issued_at", "-number")[:500]
+        ]
+        return Response({"state": state, "rows": rows, "counts": counts})
+
+    def post(self, request):
+        from apps.crm.models import Review
+
+        ids = [int(x) for x in request.data.get("ids") or [] if str(x).isdigit()]
+        decision = request.data.get("decision")
+        channel = request.data.get("channel") or ""
+        if not ids or decision not in Review.values:
+            return Response({"detail": "فاکتور و تصمیم را مشخص کنید."}, status=400)
+        if decision == Review.REAL and channel not in self.VALID_CHANNELS:
+            return Response({"detail": "برای فروش واقعی، گروه فروش را انتخاب کنید."}, status=400)
+        # Only invoices that came in as suspect can be ruled on here; an
+        # ordinary sale is not turned into a «سوری» one through this door.
+        qs = SalesInvoice.objects.filter(pk__in=ids).exclude(review="")
+        update = {"review": decision, "reviewed_by": request.user, "reviewed_at": timezone.now()}
+        if decision == Review.REAL:
+            update["channel"] = channel
+        elif decision == Review.SUSPECT:
+            update.update(reviewed_by=None, reviewed_at=None, channel="")
+        from apps.crm.arpa_import import sync_deal
+
+        targets = list(qs)
+        with transaction.atomic():
+            done = qs.update(**update)
+            # «واقعی» gives the invoice its won deal; «سوری» takes it away.
+            for invoice in SalesInvoice.objects.filter(pk__in=[i.pk for i in targets]):
+                sync_deal(invoice)
+        return Response({"updated": done})
+
+
+class DidarImportView(GatedAPIView):
+    """
+    ورود از دیدار — people, companies, deals, activities, notes; never
+    invoices. GET is the history; POST takes any number of `files` and
+    `commit` (without it, a preview that is rolled back).
+    """
+
+    permission_classes = [SystemAdminOnly]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        from apps.crm.models import ImportBatch
+
+        return Response({"imports": [
+            {
+                "id": b.pk, "file_name": b.file_name, "at": b.created_at.isoformat(),
+                "by": getattr(b.uploaded_by, "username", ""), "rows": b.rows,
+                "created": b.created, "updated": b.updated, "unchanged": b.unchanged,
+                "skipped": b.skipped, "customers_created": b.customers_created,
+            }
+            for b in ImportBatch.objects.filter(source=ImportBatch.Source.DIDAR)
+            .select_related("uploaded_by")[:40]
+        ]})
+
+    def post(self, request):
+        from apps.crm.arpa_file import ArpaFileError
+        from apps.crm.didar_import import run
+
+        uploads = request.FILES.getlist("files")
+        if not uploads:
+            return Response({"detail": "فایلی انتخاب نشده است."}, status=400)
+        if sum(u.size for u in uploads) > MAX_UPLOAD * 2:
+            return Response({"detail": "حجم فایل‌ها بیش از ۵۰ مگابایت است."}, status=400)
+        commit = str(request.data.get("commit", "")).lower() in {"1", "true", "yes"}
+        try:
+            result = run([(u.name, u.read()) for u in uploads], user=request.user, commit=commit)
+        except ArpaFileError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(result)
+
+
+class CrmWipeView(GatedAPIView):
+    """
+    پاک‌سازی داده. GET — what would go and what stays. POST with
+    `confirm` equal to the phrase — do it. Customers and products stay; see
+    `apps.crm.wipe`.
+    """
+
+    permission_classes = [SystemAdminOnly]
+
+    def get(self, request):
+        from apps.crm import wipe
+
+        return Response(wipe.counts())
+
+    def post(self, request):
+        from apps.crm import wipe
+
+        if (request.data.get("confirm") or "").strip() != wipe.CONFIRM:
+            return Response(
+                {"detail": f"برای تأیید، عبارت «{wipe.CONFIRM}» را دقیق بنویسید."}, status=400,
+            )
+        removed = wipe.wipe()
+        return Response({"removed": removed, **wipe.counts()})

@@ -715,6 +715,58 @@ export const crmApi = {
     };
   },
 
+  // ---- پاک‌سازی داده --------------------------------------------------------
+  async wipeInfo(): Promise<WipeInfo> {
+    const { data } = await api.get("/crm/wipe/");
+    return data;
+  },
+
+  async wipe(confirm: string): Promise<WipeInfo & { removed: Record<string, number> }> {
+    const { data } = await api.post("/crm/wipe/", { confirm });
+    return data;
+  },
+
+  // ---- ورود از دیدار -----------------------------------------------------
+  /** Preview (rolled back) or import any number of دیدار exports at once. */
+  async didarImport(files: File[], commit: boolean): Promise<DidarImportResult> {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    fd.append("commit", commit ? "1" : "0");
+    const { data } = await api.post("/crm/didar-import/", fd, { timeout: 0 });
+    return data;
+  },
+
+  async didarImports(): Promise<{ imports: DidarImportRow[] }> {
+    const { data } = await api.get("/crm/didar-import/");
+    return data;
+  },
+
+  // ---- ورود از آرپا ------------------------------------------------------
+  /** Preview (commit=false: run and roll back) or import one آرپا export. */
+  async arpaImport(file: File, book: ArpaBook, commit: boolean): Promise<ArpaImportResult> {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("book", book);
+    fd.append("commit", commit ? "1" : "0");
+    const { data } = await api.post("/crm/arpa-import/", fd);
+    return data;
+  },
+
+  async arpaImports(): Promise<{ imports: ArpaImportRow[]; pending_suspect: number }> {
+    const { data } = await api.get("/crm/arpa-import/");
+    return data;
+  },
+
+  async suspectInvoices(params: Params = {}): Promise<SuspectList> {
+    const { data } = await api.get("/crm/suspect-invoices/", { params: clean(params) });
+    return data;
+  },
+
+  async decideSuspect(ids: number[], decision: SuspectState, channel = ""): Promise<{ updated: number }> {
+    const { data } = await api.post("/crm/suspect-invoices/", { ids, decision, channel });
+    return data;
+  },
+
   // ---- merge review ------------------------------------------------------
   async matchCandidates(params: Params = {}) {
     const { data } = await api.get("/crm/match-candidates/", { params: clean(params) });
@@ -744,3 +796,118 @@ export const crmApi = {
     return data as { state: string; created: { id: number; name_fa: string } };
   },
 };
+
+// ---- ورود از آرپا -----------------------------------------------------------
+export type ArpaBook = "main" | "rollmarket";
+export type SuspectState = "suspect" | "real" | "fake";
+
+export interface ArpaImportResult {
+  rows: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: { number: string; reason: string }[];
+  suspect: number;
+  suspect_amount: number;
+  customers_created: number;
+  amount: number;
+  by_channel: Record<string, number>;
+  by_kind: Record<string, { count: number; amount: number }>;
+  unknown_reps: { name: string; count: number }[];
+  date_from: string | null;
+  date_to: string | null;
+  columns: number;
+  /** Every row was already in, unchanged — the file was imported before. */
+  nothing_new: boolean;
+  committed: boolean;
+  book: ArpaBook;
+  file_name: string;
+  previous: { at: string; by: string } | null;
+}
+
+export interface ArpaImportRow {
+  id: number;
+  file_name: string;
+  book: ArpaBook;
+  book_display: string;
+  at: string;
+  by: string;
+  rows: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  suspect: number;
+  customers_created: number;
+  amount: number;
+  date_from: string;
+  date_to: string;
+}
+
+export interface SuspectInvoice {
+  id: number;
+  number: string;
+  kind: string;
+  book: ArpaBook;
+  book_display: string;
+  issued_jalali: string;
+  customer_id: number | null;
+  customer: string;
+  amount: number;
+  owner: string;
+  created_by: string;
+  responsible: string;
+  payment_terms: string;
+  channel: string;
+  reviewed_by: string;
+  reviewed_at: string | null;
+}
+
+export interface SuspectList {
+  state: SuspectState;
+  rows: SuspectInvoice[];
+  counts: Partial<Record<SuspectState, { count: number; amount: number }>>;
+}
+
+// ---- ورود از دیدار ---------------------------------------------------------
+export interface DidarKindResult {
+  label: string;
+  rows: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  merged: number;
+  skipped: Record<string, number>;
+}
+
+export interface DidarImportResult {
+  files: { file: string; sheets: { kind: string; label: string; rows: number }[] }[];
+  kinds: Record<string, DidarKindResult>;
+  created: number;
+  updated: number;
+  customers_created: number;
+  unknown_reps: { name: string; count: number }[];
+  nothing_new: boolean;
+  committed: boolean;
+  previous: { at: string; by: string } | null;
+}
+
+export interface DidarImportRow {
+  id: number;
+  file_name: string;
+  at: string;
+  by: string;
+  rows: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  customers_created: number;
+}
+
+// ---- پاک‌سازی داده -----------------------------------------------------------
+export interface WipeInfo {
+  remove: { key: string; label: string; count: number }[];
+  keep: { customers: number };
+  confirm: string;
+}
