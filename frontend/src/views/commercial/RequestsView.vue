@@ -34,13 +34,41 @@ const STATUS_CLASS: Record<string, string> = {
 
 const filtered = computed(() => {
   const q = search.value.trim();
-  return rows.value.filter((r) => {
+  const hits = rows.value.filter((r) => {
     if (status.value && r.status !== status.value) return false;
-    if (q && !`${r.request_no} ${r.material_name} ${r.requester_unit} ${r.note}`.includes(q))
-      return false;
+    // The supplier names are in the haystack: «چه چیزهایی از آنی چسب
+    // استعلام گرفتیم؟» is a question asked by supplier, not by request number.
+    const hay = `${r.request_no} ${r.material_name} ${r.requester_unit} ${r.note} ${r.supplier_names.join(" ")}`;
+    if (q && !hay.includes(q)) return false;
     return true;
   });
+  // Items of one پیش‌فاکتور stay together, at the place of the first of them.
+  const order = new Map<number, number>();
+  hits.forEach((r, i) => {
+    const key = r.group ?? r.id;
+    if (!order.has(key)) order.set(key, i);
+  });
+  return [...hits].sort((a, b) =>
+    order.get(a.group ?? a.id)! - order.get(b.group ?? b.id)!
+    || (a.group ? 1 : 0) - (b.group ? 1 : 0)
+    || a.id - b.id,
+  );
 });
+
+/** «قلم ۲ از ۳» for a row that is one item of a پیش‌فاکتور. */
+function itemLabel(r: PurchaseRequest): string {
+  if (!r.group_items.length) return "";
+  const i = r.group_items.findIndex((g) => g.id === r.id);
+  return `قلم ${FA.format(i + 1)} از ${FA.format(r.group_items.length)}`;
+}
+
+const FA = new Intl.NumberFormat("fa-IR");
+
+/** Which supplier names matched the search — shown so a hit explains itself. */
+function matchedSuppliers(r: PurchaseRequest): string[] {
+  const q = search.value.trim();
+  return q ? r.supplier_names.filter((n) => n.includes(q)) : [];
+}
 
 async function load() {
   loading.value = true;
@@ -67,7 +95,7 @@ function onSaved(saved: PurchaseRequest) {
   <div class="space-y-4">
     <div class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2">
       <input
-        v-model="search" placeholder="جستجوی شماره، کالا یا واحد…"
+        v-model="search" placeholder="جستجوی شماره، کالا، واحد یا تامین‌کننده…"
         class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-slate-300 flex-1 min-w-[200px]"
       />
       <select v-model="status" class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none">
@@ -127,8 +155,21 @@ function onSaved(saved: PurchaseRequest) {
               class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
               @click="router.push({ name: 'commercial-request', params: { id: r.id } })"
             >
-              <td class="px-4 py-2.5 text-ink font-medium ltr-nums">{{ r.request_no }}</td>
-              <td class="px-3 text-ink">{{ r.material_name }}</td>
+              <td
+                class="px-4 py-2.5 text-ink font-medium ltr-nums"
+                :class="r.group ? 'border-r-2 border-panel/30' : ''"
+              >
+                {{ r.request_no }}
+                <p v-if="itemLabel(r)" class="text-[11px] text-slate-400 font-normal">
+                  {{ itemLabel(r) }}
+                </p>
+              </td>
+              <td class="px-3 text-ink">
+                {{ r.material_name }}
+                <p v-if="matchedSuppliers(r).length" class="text-[11px] text-emerald-700">
+                  استعلام از {{ matchedSuppliers(r).join("، ") }}
+                </p>
+              </td>
               <td class="px-3 text-slate-500 ltr-nums">
                 {{ num(r.quantity) }} {{ r.material_unit }}
               </td>

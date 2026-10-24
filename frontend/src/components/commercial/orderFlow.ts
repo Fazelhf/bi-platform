@@ -9,6 +9,7 @@ import type { OrderStatus } from "@/api/commercial";
 export const ORDER_STEPS: { status: OrderStatus; label: string; action: string }[] = [
   { status: "pending", label: "در انتظار تایید", action: "" },
   { status: "buying", label: "در حال خرید", action: "تایید شد، خرید انجام شود" },
+  { status: "producing", label: "در مرحله تولید", action: "وارد مرحله‌ی تولید شد" },
   { status: "shipped", label: "ارسال شده", action: "تامین‌کننده ارسال کرد" },
   { status: "delivered", label: "تحویل شد", action: "تحویل انبار شد" },
 ];
@@ -16,7 +17,18 @@ export const ORDER_STEPS: { status: OrderStatus; label: string; action: string }
 export const ORDER_STATUS_CLASS: Record<string, string> = {
   pending: "bg-amber-100 text-amber-700",
   buying: "bg-sky-100 text-sky-700",
+  producing: "bg-orange-100 text-orange-700",
   shipped: "bg-violet-100 text-violet-700",
+  delivered: "bg-emerald-100 text-emerald-700",
+  cancelled: "bg-slate-100 text-slate-500",
+};
+
+/** A purchase request's status chip — the list, the item tabs. */
+export const REQUEST_STATUS_CLASS: Record<string, string> = {
+  open: "bg-sky-100 text-sky-700",
+  quoting: "bg-amber-100 text-amber-700",
+  awarded: "bg-violet-100 text-violet-700",
+  ordered: "bg-teal-100 text-teal-700",
   delivered: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-slate-100 text-slate-500",
 };

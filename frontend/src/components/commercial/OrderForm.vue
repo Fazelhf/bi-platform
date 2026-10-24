@@ -16,7 +16,8 @@ import {
   type Quote,
   type Supplier,
 } from "@/api/commercial";
-import { PAYMENT_METHODS } from "@/components/commercial/payment";
+import { DELIVERY_TERMS, PAYMENT_METHODS, withSeen } from "@/components/commercial/payment";
+import PaymentTermField from "@/components/commercial/PaymentTermField.vue";
 
 /**
  * ثبت سفارش خرید.
@@ -50,6 +51,7 @@ const error = ref("");
 const STATUSES = [
   { value: "pending", label: "در انتظار تایید" },
   { value: "buying", label: "در حال خرید" },
+  { value: "producing", label: "در مرحله تولید" },
   { value: "shipped", label: "ارسال شده" },
   { value: "delivered", label: "تحویل شد" },
   { value: "cancelled", label: "لغو شد" },
@@ -72,19 +74,20 @@ const form = ref({
   payment_term: props.order?.payment_term ?? props.quote?.payment_term ?? (null as number | null),
   payment_method: props.order?.payment_method ?? props.quote?.payment_method ?? "",
   payment_note: props.order?.payment_note ?? props.quote?.payment_note ?? "",
+  delivery_terms: props.order?.delivery_terms ?? props.quote?.delivery_terms ?? "",
+  split_delivery: props.order?.split_delivery ?? false,
   is_official: props.order?.is_official ?? props.quote?.is_official ?? false,
   note: props.order?.note ?? "",
 });
 
 const vatPct = Number(props.order?.vat_pct ?? props.quote?.vat_pct ?? 10);
 
-const termOptions = computed(() => terms.value.map((t) => ({
-  value: t.id,
-  label: t.name_fa,
-  hint: Number(t.advance_pct)
-    ? `${t.advance_pct}٪ پیش‌پرداخت${t.days ? ` · مابقی ${t.days} روز` : ""}`
-    : (t.days ? `${t.days} روز پس از تحویل` : "بدون مهلت"),
-})));
+/** Typed before into the two free-text fields, offered after the defaults. */
+const seen = ref({ payment_methods: [] as string[], delivery_terms: [] as string[] });
+const methodOptions = computed(() => withSeen(PAYMENT_METHODS, seen.value.payment_methods));
+const deliveryOptions = computed(() => withSeen(DELIVERY_TERMS, seen.value.delivery_terms));
+/** Parts already recorded fix the choice: they would be orphaned by «یکجا». */
+const hasParts = computed(() => !!props.order?.parts?.length);
 
 const amounts = computed(() => {
   const total = Math.round(
@@ -113,7 +116,13 @@ const supplierOptions = computed(() => suppliers.value.map((s) => ({
   keywords: `${s.code} ${s.contact_name} ${s.mobile}`,
 })));
 
-const statusOptions = STATUSES.map((s) => ({ value: s.value, label: s.label }));
+// In حمل به دفعات, «ارسال شده» and «تحویل شد» come from the parts, so they
+// are not offered here (the server refuses them too) — unless already set.
+const statusOptions = computed(() => STATUSES
+  .filter((s) => !form.value.split_delivery
+    || !["shipped", "delivered"].includes(s.value)
+    || s.value === props.order?.status)
+  .map((s) => ({ value: s.value, label: s.label })));
 
 // «تحویل شد» without a date is a status the reports cannot use — every lead
 // time would skip it — so the field fills itself the moment it is needed.
@@ -124,6 +133,8 @@ watch(() => form.value.status, (status) => {
 });
 
 onMounted(async () => {
+  // Suggestions are a convenience, never a gate.
+  commercialApi.suggestions().then((s) => { seen.value = s; }).catch(() => {});
   [materials.value, suppliers.value, terms.value] = await Promise.all([
     commercialApi.materials({ is_active: true }),
     commercialApi.suppliers({ is_active: true }),
@@ -233,7 +244,7 @@ async function save() {
           v-model="form.status" :options="statusOptions" :clearable="false"
         />
       </div>
-      <div>
+      <div v-if="!form.split_delivery">
         <label class="text-xs text-slate-500 mb-1 block">
           تاریخ تحویل
           <span v-if="form.status === 'delivered'" class="text-red-500">*</span>
@@ -242,21 +253,55 @@ async function save() {
       </div>
     </div>
 
+    <!-- حمل: one load or several. Two cards rather than a checkbox, because
+         the choice changes how the rest of the order is followed. -->
+    <div class="border-t border-slate-100 pt-3">
+      <p class="text-xs text-slate-400 mb-2">نحوه‌ی حمل</p>
+      <div class="grid grid-cols-2 gap-2">
+        <button
+          v-for="opt in [
+            { split: false, title: 'یکجا', hint: 'همه‌ی کالا در یک بار می‌رسد' },
+            { split: true, title: 'به دفعات', hint: 'در چند پارت؛ باقی‌مانده نشان داده می‌شود' },
+          ]"
+          :key="String(opt.split)"
+          type="button"
+          :disabled="hasParts && !opt.split"
+          class="text-right rounded-xl border px-3 py-2.5 transition-colors disabled:opacity-40"
+          :class="form.split_delivery === opt.split
+            ? 'border-emerald-400 bg-emerald-50'
+            : 'border-slate-200 hover:bg-slate-50'"
+          @click="form.split_delivery = opt.split"
+        >
+          <span class="block text-sm font-medium text-ink">{{ opt.title }}</span>
+          <span class="block text-xs text-slate-400 mt-0.5">{{ opt.hint }}</span>
+        </button>
+      </div>
+      <p v-if="hasParts" class="text-xs text-slate-400 mt-1">
+        این سفارش پارت ثبت‌شده دارد؛ برای «یکجا» اول پارت‌ها را حذف کنید.
+      </p>
+      <div class="mt-3">
+        <label class="text-xs text-slate-500 mb-1 block">شرایط تحویل</label>
+        <PickerField
+          v-model="form.delivery_terms" :options="deliveryOptions" creatable
+          placeholder="درب کارخانه، درب انبار فروشنده… یا هر شرط دیگر"
+        />
+      </div>
+    </div>
+
     <div class="border-t border-slate-100 pt-3">
       <p class="text-xs text-slate-400 mb-2">شرایط پرداخت</p>
       <div class="grid sm:grid-cols-2 gap-3">
         <div>
           <label class="text-xs text-slate-500 mb-1 block">زمان‌بندی</label>
-          <PickerField
-            v-model="form.payment_term" :options="termOptions"
-            placeholder="مثلاً ۶۰ روزه…"
+          <PaymentTermField
+            v-model="form.payment_term" :terms="terms" @added="terms.push($event)"
           />
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-1 block">روش پرداخت</label>
           <PickerField
-            v-model="form.payment_method" :options="PAYMENT_METHODS"
-            placeholder="نقدی، چک، حواله…"
+            v-model="form.payment_method" :options="methodOptions" creatable
+            placeholder="نقدی، چک… یا هر روش دیگر"
           />
         </div>
       </div>

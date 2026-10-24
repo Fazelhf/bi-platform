@@ -1,4 +1,4 @@
-import type { PaymentMethodCode } from "@/api/commercial";
+import type { PickerOption } from "@/components/picker";
 
 /**
  * روش پرداخت — *how* the money moves, kept apart from *when* it moves.
@@ -6,18 +6,33 @@ import type { PaymentMethodCode } from "@/api/commercial";
  * The two are genuinely independent: «۶۰ روزه» can be settled by cheque or by
  * transfer, and folding them into one list would produce a dropdown with
  * every combination in it. The server keeps the same split.
+ *
+ * The field is free text: these are suggestions, and anything typed that is
+ * not here («تهاتر»، «چک ۳ ماهه») is saved as written and offered next time.
  */
-export const PAYMENT_METHODS: {
-  value: PaymentMethodCode;
-  label: string;
-  hint?: string;
-}[] = [
-  { value: "cash", label: "نقدی", hint: "وجه نقد یا کارت" },
-  { value: "cheque", label: "چک", hint: "سررسید روی خود چک" },
-  { value: "transfer", label: "حواله بانکی", hint: "ساتنا / پایا" },
-  { value: "lc", label: "اعتبار اسنادی داخلی", hint: "LC ریالی" },
-  { value: "other", label: "سایر", hint: "در توضیحات بنویسید" },
+export const PAYMENT_METHODS: PickerOption[] = [
+  { value: "نقدی", label: "نقدی", hint: "وجه نقد یا کارت" },
+  { value: "چک", label: "چک", hint: "سررسید روی خود چک" },
+  { value: "حواله بانکی", label: "حواله بانکی", hint: "ساتنا / پایا" },
+  { value: "اعتبار اسنادی داخلی", label: "اعتبار اسنادی داخلی", hint: "LC ریالی" },
 ];
+
+/** شرایط تحویل — where the goods are handed over, and at whose cost. */
+export const DELIVERY_TERMS: PickerOption[] = [
+  { value: "درب کارخانه", label: "درب کارخانه", hint: "حمل با فروشنده" },
+  { value: "درب انبار فروشنده", label: "درب انبار فروشنده", hint: "حمل با ما" },
+  { value: "باربری با هزینه فروشنده", label: "باربری با هزینه فروشنده" },
+  { value: "باربری با هزینه خریدار", label: "باربری با هزینه خریدار" },
+];
+
+/** The defaults followed by whatever else has been typed before. */
+export function withSeen(defaults: PickerOption[], seen: string[] = []): PickerOption[] {
+  const known = new Set(defaults.map((o) => String(o.value)));
+  return [
+    ...defaults,
+    ...seen.filter((v) => v && !known.has(v)).map((v) => ({ value: v, label: v })),
+  ];
+}
 
 /**
  * A one-line summary of terms for a table cell.

@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.commercial.models import (
+    DeliveryPart,
     Material,
     MaterialCategory,
     PaymentTerm,
@@ -33,6 +34,7 @@ from apps.commercial.permissions import (
 )
 from apps.commercial.serializers import (
     AwardSerializer,
+    DeliveryPartSerializer,
     OrderAdvanceSerializer,
     MaterialCategorySerializer,
     MaterialSerializer,
@@ -248,7 +250,10 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [CommercialAccess]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["status", "material", "period"]
-    search_fields = ["request_no", "requester_unit", "note", "material__name_fa"]
+    search_fields = [
+        "request_no", "requester_unit", "note", "material__name_fa",
+        "quotes__supplier__name_fa",
+    ]
     ordering_fields = ["requested_on", "needed_by", "created_at"]
 
     def get_serializer_class(self):
@@ -266,10 +271,16 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
             # The annotation adds a GROUP BY, and Django drops the model's
             # own ordering when it does — which left the list in whatever
             # order the database felt like and made page 2 overlap page 1.
-            return qs.annotate(quotes_n=Count("quotes")).order_by(
+            return qs.annotate(quotes_n=Count("quotes", distinct=True)).order_by(
                 "-requested_on", "-id"
-            )
-        return qs.prefetch_related("quotes__supplier", "quotes__reason")
+            ).prefetch_related(
+                "quotes__supplier", "group_items__material",
+                "group__material", "group__group_items__material",
+            ).distinct()
+        return qs.prefetch_related(
+            "quotes__supplier", "quotes__reason", "quotes__reasons",
+            "group_items__material", "group__group_items__material",
+        )
 
     def perform_create(self, serializer):
         requested_on = serializer.validated_data.get("requested_on")
@@ -280,13 +291,29 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
         )
         audit_log(self.request.user, instance, AuditLog.Action.CREATE)
 
+    @transaction.atomic
     def perform_destroy(self, instance):
-        if instance.orders.exists():
+        """
+        حذف کامل — only a cancelled request, and only by whoever raised it.
+
+        Cancelled first, so a live purchase is never one click from gone; the
+        creator, because a request someone else is working on is theirs to
+        drop. Its cancelled orders go with it: they bought nothing, and left
+        behind they would be orders pointing at a request that no longer is.
+        """
+        user = self.request.user
+        if instance.status != PurchaseRequest.Status.CANCELLED:
             raise ValidationError({
-                "detail": "این درخواست سفارش خرید دارد؛ "
-                          "وضعیتش را «لغو شده» کنید."
+                "detail": "فقط درخواست لغوشده حذف می‌شود؛ اول آن را لغو کنید."
             })
-        audit_log(self.request.user, instance, AuditLog.Action.DELETE)
+        if instance.created_by_id != user.id and not user.is_superuser:
+            raise ValidationError({
+                "detail": "این درخواست را کس دیگری ثبت کرده؛ فقط خودش می‌تواند حذفش کند."
+            })
+        if instance.live_orders.exists():
+            raise ValidationError({"detail": "این درخواست سفارش فعال دارد."})
+        audit_log(user, instance, AuditLog.Action.DELETE)
+        instance.orders.all().delete()
         instance.delete()
 
     @extend_schema(request=AwardSerializer, responses=PurchaseRequestSerializer)
@@ -306,17 +333,24 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
         purchase_request = self.get_object()
         if purchase_request.status == PurchaseRequest.Status.CANCELLED:
             raise ValidationError({"detail": "این درخواست لغو شده است."})
-        if purchase_request.live_orders.exists():
+        payload = AwardSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        winner = payload.validated_data["quote"]
+
+        current = purchase_request.quotes.filter(is_selected=True).first()
+        if purchase_request.live_orders.exists() and winner != current:
             # The winner is who the goods were ordered from. Changing it under
             # a live order would leave the file naming one supplier and the
-            # purchase another; the order has to be cancelled first.
+            # purchase another; the order has to be cancelled first. Saving
+            # the same winner again is fine — that is how its reasons are
+            # corrected after the fact.
             raise ValidationError({
                 "detail": "برای این درخواست سفارش خرید ثبت شده؛ "
                           "برای تغییر برنده، اول سفارش را لغو کنید."
             })
-        payload = AwardSerializer(data=request.data)
-        payload.is_valid(raise_exception=True)
-        winner = payload.validated_data["quote"]
+        win_reasons = list(payload.validated_data.get("reasons") or [])
+        if not win_reasons and payload.validated_data.get("reason"):
+            win_reasons = [payload.validated_data["reason"]]
 
         if winner.request_id != purchase_request.id:
             raise ValidationError({
@@ -333,8 +367,11 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
         for quote in purchase_request.quotes.all():
             if quote.id == winner.id:
                 quote.is_selected = True
-                quote.reason = payload.validated_data.get("reason")
+                quote.reason = win_reasons[0] if win_reasons else None
                 quote.decision_note = payload.validated_data.get("decision_note", "")
+                quote.save(update_fields=["is_selected", "reason", "decision_note"])
+                quote.reasons.set(win_reasons)
+                continue
             else:
                 quote.is_selected = False
                 # Re-awarding used to leave the previous winner holding its
@@ -354,6 +391,7 @@ class PurchaseRequestViewSet(viewsets.ModelViewSet):
                     )
                     quote.decision_note = str(item.get("decision_note", ""))[:300]
             quote.save(update_fields=["is_selected", "reason", "decision_note"])
+            quote.reasons.set([quote.reason] if quote.reason_id else [])
 
         purchase_request.sync_status()
 
@@ -461,9 +499,13 @@ class QuoteViewSet(viewsets.ModelViewSet):
             if quantity <= 0:
                 raise ValidationError({"quantity": "مقدار را وارد کنید."})
             on = _as_date(data.get("quoted_on")) or date.today()
+            # «کالای بعدی همین پیش‌فاکتور»: the new item joins the group of
+            # the request it was added from.
+            group = PurchaseRequest.objects.filter(pk=_int(data.get("group")) or 0).first()
             purchase_request = PurchaseRequest.objects.create(
                 material=material, quantity=quantity, requested_on=on,
                 period=_month_period(on), created_by=request.user,
+                group=group.group_root if group else None,
             )
             audit_log(request.user, purchase_request, AuditLog.Action.CREATE)
             data["request"] = purchase_request.id
@@ -564,7 +606,7 @@ class SampleViewSet(viewsets.ModelViewSet):
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     queryset = PurchaseOrder.objects.select_related(
         "supplier", "material", "request", "period"
-    )
+    ).prefetch_related("parts")
     serializer_class = PurchaseOrderSerializer
     permission_classes = [CommercialAccess]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -596,6 +638,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if before != order.status:
             audit_log(self.request.user, order, AuditLog.Action.UPDATE,
                       {"status": {"before": before, "after": order.status}})
+        order.sync_from_parts()
         for req in {old_request, order.request} - {None}:
             req.sync_status()
 
@@ -629,6 +672,13 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
 
         if before == PurchaseOrder.Status.CANCELLED:
             raise ValidationError({"status": "این سفارش لغو شده است."})
+        if order.split_delivery and target in (
+            PurchaseOrder.Status.SHIPPED, PurchaseOrder.Status.DELIVERED,
+        ):
+            raise ValidationError({
+                "status": "این سفارش به دفعات حمل می‌شود؛ ارسال و تحویل را "
+                          "با «ثبت پارت» وارد کنید."
+            })
         if target == PurchaseOrder.Status.CANCELLED:
             if before == PurchaseOrder.Status.DELIVERED:
                 raise ValidationError({
@@ -658,6 +708,46 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         if order.request:
             order.request.sync_status()
         return Response(PurchaseOrderSerializer(order).data)
+
+
+class DeliveryPartViewSet(viewsets.ModelViewSet):
+    """
+    پارت‌های ارسال یک سفارش «حمل به دفعات».
+
+    Every write re-reads the order's status from its parts and then the
+    request's from its orders, so «۴ تن باقی‌مانده» and «ارسال شده» on screen
+    always come from the same rows.
+    """
+
+    queryset = DeliveryPart.objects.select_related("order", "order__request")
+    serializer_class = DeliveryPartSerializer
+    permission_classes = [CommercialAccess]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["order"]
+
+    def _resync(self, order):
+        order.sync_from_parts()
+        if order.request:
+            order.request.sync_status()
+
+    def perform_create(self, serializer):
+        if not is_commercial(self.request.user):
+            raise ValidationError({"detail": "فقط واحد بازرگانی می‌تواند ثبت کند."})
+        part = serializer.save()
+        audit_log(self.request.user, part.order, AuditLog.Action.UPDATE,
+                  {"part": {"before": None, "after": str(part.quantity)}})
+        self._resync(part.order)
+
+    def perform_update(self, serializer):
+        part = serializer.save()
+        self._resync(part.order)
+
+    def perform_destroy(self, instance):
+        order = instance.order
+        audit_log(self.request.user, order, AuditLog.Action.UPDATE,
+                  {"part": {"before": str(instance.quantity), "after": None}})
+        instance.delete()
+        self._resync(order)
 
 
 class DashboardView(APIView):
@@ -807,6 +897,14 @@ class SuggestionsView(APIView):
             "carriers": _seen_values(Shipment, "carrier"),
             "origin_ports": _seen_values(Shipment, "origin_port"),
             "destination_ports": _seen_values(Shipment, "destination_port"),
+            "payment_methods": sorted(set(
+                _seen_values(Quote, "payment_method")
+                + _seen_values(PurchaseOrder, "payment_method")
+            )),
+            "delivery_terms": sorted(set(
+                _seen_values(Quote, "delivery_terms")
+                + _seen_values(PurchaseOrder, "delivery_terms")
+            )),
         })
 
 

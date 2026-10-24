@@ -21,6 +21,7 @@ router.register("samples", views.SampleViewSet, basename="sample")
 router.register("requests", views.PurchaseRequestViewSet, basename="purchase-request")
 router.register("quotes", views.QuoteViewSet, basename="quote")
 router.register("orders", views.PurchaseOrderViewSet, basename="purchase-order")
+router.register("order-parts", views.DeliveryPartViewSet, basename="delivery-part")
 
 foreign = DefaultRouter()
 foreign.register("banks", views_foreign.BankViewSet, basename="bank")

@@ -14,7 +14,8 @@ import {
   type Quote,
   type Supplier,
 } from "@/api/commercial";
-import { PAYMENT_METHODS } from "@/components/commercial/payment";
+import { DELIVERY_TERMS, PAYMENT_METHODS, withSeen } from "@/components/commercial/payment";
+import PaymentTermField from "@/components/commercial/PaymentTermField.vue";
 
 /** ثبت قیمت یک تامین‌کننده برای یک استعلام. */
 const props = defineProps<{
@@ -23,7 +24,7 @@ const props = defineProps<{
   /** Suppliers that already priced this request — they cannot quote twice. */
   takenSupplierIds: number[];
 }>();
-const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
+const emit = defineEmits<{ (e: "close"): void; (e: "saved", q: Quote): void }>();
 
 const inp =
   "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none " +
@@ -44,22 +45,18 @@ const form = ref({
   payment_term: props.quote?.payment_term ?? (null as number | null),
   payment_method: props.quote?.payment_method ?? "",
   payment_note: props.quote?.payment_note ?? "",
+  delivery_terms: props.quote?.delivery_terms ?? "",
   is_official: props.quote?.is_official ?? false,
   note: props.quote?.note ?? "",
 });
 
+/** Typed before into the two free-text fields, offered after the defaults. */
+const seen = ref({ payment_methods: [] as string[], delivery_terms: [] as string[] });
+const methodOptions = computed(() => withSeen(PAYMENT_METHODS, seen.value.payment_methods));
+const deliveryOptions = computed(() => withSeen(DELIVERY_TERMS, seen.value.delivery_terms));
+
 /** The rate this quote carries — an existing one keeps its own. */
 const vatPct = Number(props.quote?.vat_pct ?? 10);
-
-/** The schedule is the hint, so «۶۰ روزه» and «۵۰٪ پیش‌پرداخت» are comparable
- *  in the dropdown itself rather than only after both are chosen. */
-const termOptions = computed(() => terms.value.map((t) => ({
-  value: t.id,
-  label: t.name_fa,
-  hint: Number(t.advance_pct)
-    ? `${t.advance_pct}٪ پیش‌پرداخت${t.days ? ` · مابقی ${t.days} روز` : ""}`
-    : (t.days ? `${t.days} روز پس از تحویل` : "بدون مهلت"),
-})));
 
 /**
  * One price per supplier per استعلام.
@@ -91,6 +88,8 @@ const amounts = computed(() => {
 });
 
 onMounted(async () => {
+  // Suggestions are a convenience, never a gate.
+  commercialApi.suggestions().then((s) => { seen.value = s; }).catch(() => {});
   [suppliers.value, terms.value] = await Promise.all([
     commercialApi.suppliers({ is_active: true }),
     commercialApi.paymentTerms({ is_active: true }),
@@ -111,8 +110,7 @@ async function save() {
       unit_price_rial: form.value.unit_price_rial || 0,
     };
     if (!payload.quoted_on) payload.quoted_on = null;
-    await commercialApi.saveQuote(payload, props.quote?.id);
-    emit("saved");
+    emit("saved", await commercialApi.saveQuote(payload, props.quote?.id));
   } catch (e) {
     error.value = apiError(e);
   } finally {
@@ -199,16 +197,22 @@ async function save() {
       <div class="grid sm:grid-cols-2 gap-3">
         <div>
           <label class="text-xs text-slate-500 mb-1 block">زمان‌بندی</label>
-          <PickerField
-            v-model="form.payment_term" :options="termOptions"
-            placeholder="مثلاً ۶۰ روزه…"
+          <PaymentTermField
+            v-model="form.payment_term" :terms="terms" @added="terms.push($event)"
           />
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-1 block">روش پرداخت</label>
           <PickerField
-            v-model="form.payment_method" :options="PAYMENT_METHODS"
-            placeholder="نقدی، چک، حواله…"
+            v-model="form.payment_method" :options="methodOptions" creatable
+            placeholder="نقدی، چک… یا هر روش دیگر"
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="text-xs text-slate-500 mb-1 block">شرایط تحویل</label>
+          <PickerField
+            v-model="form.delivery_terms" :options="deliveryOptions" creatable
+            placeholder="درب کارخانه، درب انبار فروشنده… یا هر شرط دیگر"
           />
         </div>
       </div>

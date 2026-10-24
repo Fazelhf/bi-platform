@@ -405,6 +405,135 @@ class PurchaseFlowTests(CommercialTestCase):
         response = self.client.post(f"/api/commercial/requests/{self.req.id}/cancel/")
         self.assertEqual(response.status_code, 400)
 
+    def test_production_is_a_step_between_buying_and_shipping(self):
+        order = self._place().data
+        self.assertEqual(self._advance(order["id"], "producing").status_code, 200)
+        self.assertEqual(self._advance(order["id"], "buying").status_code, 400)
+        self.assertEqual(self._advance(order["id"], "shipped").status_code, 200)
+
+    # -- حمل به دفعات --------------------------------------------------------
+    def _split_order(self):
+        order = self._place().data
+        self.client.patch(
+            f"/api/commercial/orders/{order['id']}/", {"split_delivery": True}
+        )
+        return order["id"]
+
+    def _part(self, order_id, qty, delivered_on=None):
+        return self.client.post("/api/commercial/order-parts/", {
+            "order": order_id, "quantity": str(qty),
+            "shipped_on": "2026-07-27", "delivered_on": delivered_on,
+        }, format="json")
+
+    def _order_data(self, order_id):
+        return self.client.get(f"/api/commercial/orders/{order_id}/").data
+
+    def test_parts_carry_the_order_to_delivery(self):
+        order_id = self._split_order()
+        self.assertEqual(self._part(order_id, 8).status_code, 201)
+        data = self._order_data(order_id)
+        self.assertEqual(data["status"], "shipped")
+        self.assertEqual(Decimal(data["remaining_qty"]), 20)
+
+        part = data["parts"][0]["id"]
+        self.client.patch(
+            f"/api/commercial/order-parts/{part}/",
+            {"delivered_on": "2026-07-29"}, format="json",
+        )
+        self.assertEqual(Decimal(self._order_data(order_id)["remaining_qty"]), 12)
+        self.assertEqual(self._status(), "ordered")
+
+        self._part(order_id, 12, delivered_on="2026-07-30")
+        data = self._order_data(order_id)
+        self.assertEqual(data["status"], "delivered")
+        self.assertEqual(data["delivered_on"], "2026-07-30")
+        self.assertEqual(self._status(), "delivered")
+
+    def test_parts_cannot_exceed_the_order(self):
+        order_id = self._split_order()
+        self._part(order_id, 15)
+        response = self._part(order_id, 6)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("quantity", response.data)
+
+    def test_a_split_order_does_not_jump_to_delivered(self):
+        order_id = self._split_order()
+        self.assertEqual(self._advance(order_id, "delivered").status_code, 400)
+
+    def test_a_single_shipment_order_takes_no_parts(self):
+        order = self._place().data
+        self.assertEqual(self._part(order["id"], 5).status_code, 400)
+
+    def test_removing_the_last_part_takes_the_order_back(self):
+        order_id = self._split_order()
+        part = self._part(order_id, 20, delivered_on="2026-07-28").data["id"]
+        self.assertEqual(self._status(), "delivered")
+        self.client.delete(f"/api/commercial/order-parts/{part}/")
+        self.assertEqual(self._order_data(order_id)["status"], "producing")
+        self.assertEqual(self._status(), "ordered")
+
+    # -- دلیل‌های برنده --------------------------------------------------------
+    def test_several_win_reasons_and_editable_under_an_order(self):
+        price = QuoteReason.objects.filter(kind="win")[0]
+        speed = QuoteReason.objects.filter(kind="win")[1]
+        self._place()
+        response = self.client.post(
+            f"/api/commercial/requests/{self.req.id}/award/",
+            {"quote": self.win.id, "reasons": [price.id, speed.id]},
+            format="json",
+        )
+        # Same winner: allowed even with a live order — only the reasons change.
+        self.assertEqual(response.status_code, 200)
+        self.win.refresh_from_db()
+        self.assertEqual(set(self.win.reasons.all()), {price, speed})
+        self.assertEqual(self.win.reason, price)
+
+    # -- روش پرداخت آزاد --------------------------------------------------------
+    def test_payment_method_takes_any_words(self):
+        response = self.client.patch(
+            f"/api/commercial/quotes/{self.win.id}/",
+            {"payment_method": "تهاتر با محصول", "delivery_terms": "درب کارخانه"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["payment_method_label"], "تهاتر با محصول")
+        self.assertEqual(response.data["delivery_terms"], "درب کارخانه")
+
+    # -- حذف درخواست لغوشده --------------------------------------------------------
+    def test_only_the_creator_deletes_and_only_when_cancelled(self):
+        self.req.created_by = self.manager
+        self.req.save()
+        url = f"/api/commercial/requests/{self.req.id}/"
+        self.assertEqual(self.client.delete(url).status_code, 400)  # not cancelled
+        self.client.post(f"{url}cancel/")
+        other = _user("other", "manager", "commercial")
+        self.client.force_authenticate(other)
+        self.assertEqual(self.client.delete(url).status_code, 400)  # not theirs
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.delete(url).status_code, 204)
+        self.assertFalse(PurchaseRequest.objects.filter(pk=self.req.id).exists())
+
+    # -- چند قلم در یک پیش‌فاکتور -------------------------------------------------
+    def test_next_item_joins_the_group_and_shows_in_it(self):
+        other = Material.objects.create(
+            code="glue", name_fa="چسب", category=self.packaging, unit=MaterialUnit.ROLL,
+        )
+        response = self.client.post("/api/commercial/quotes/quick/", {
+            "supplier": self.a.id, "material": other.id, "quantity": "5",
+            "unit_price_rial": "200000", "group": self.req.id,
+        })
+        self.assertEqual(response.status_code, 201)
+        item = PurchaseRequest.objects.get(pk=response.data["request"])
+        self.assertEqual(item.group_id, self.req.id)
+        tabs = self.client.get(f"/api/commercial/requests/{item.id}/").data["group_items"]
+        self.assertEqual([t["id"] for t in tabs], [self.req.id, item.id])
+
+    def test_requests_are_found_by_supplier_name(self):
+        rows = self.client.get(
+            "/api/commercial/requests/", {"search": "شرکت ب"}
+        ).data["results"]
+        self.assertEqual([r["id"] for r in rows], [self.req.id])
+        self.assertIn("شرکت ب", rows[0]["supplier_names"])
+
     def test_status_is_not_writable_from_the_edit_form(self):
         self.client.patch(
             f"/api/commercial/requests/{self.req.id}/", {"status": "ordered"}

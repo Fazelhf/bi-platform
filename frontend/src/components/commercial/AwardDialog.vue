@@ -23,6 +23,8 @@ const props = defineProps<{
   quotes: Quote[];
   /** Opened from a «برنده» button on one row — start with that one chosen. */
   preselect?: number | null;
+  /** After an order: the winner is fixed, only the reasons are edited. */
+  reasonsOnly?: boolean;
 }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
@@ -32,7 +34,7 @@ const inp =
 
 const { exact, unitLabel } = useMoney();
 
-const winReasons = ref<QuoteReason[]>([]);
+const winReasonList = ref<QuoteReason[]>([]);
 const loseReasons = ref<QuoteReason[]>([]);
 const saving = ref(false);
 const error = ref("");
@@ -43,18 +45,32 @@ const opening = props.preselect
   : current;
 
 const winner = ref<number | null>(opening?.id ?? null);
-const winReason = ref<number | null>(
-  // Only carry a reason over when the same quote is still the winner — the
+/** Several at once: a winner is rarely chosen for one thing alone. */
+const winReasons = ref<number[]>(
+  // Only carry reasons over when the same quote is still the winner — the
   // reason «قیمت مناسب» belonged to the old choice, not to this one.
-  opening && opening.id === current?.id ? opening.reason : null,
+  opening && opening.id === current?.id
+    ? (opening.reasons?.length ? [...opening.reasons] : opening.reason ? [opening.reason] : [])
+    : [],
 );
+
+function toggleReason(id: number) {
+  const i = winReasons.value.indexOf(id);
+  if (i >= 0) winReasons.value.splice(i, 1);
+  else winReasons.value.push(id);
+}
+
+/** Changing the winner starts its reasons afresh. */
+function pick(id: number) {
+  if (props.reasonsOnly || winner.value === id) return;
+  winner.value = id;
+  winReasons.value = [];
+  winNote.value = "";
+}
 const winNote = ref(
   opening && opening.id === current?.id ? opening.decision_note : "",
 );
 
-const winReasonOptions = computed(
-  () => winReasons.value.map((r) => ({ value: r.id, label: r.name_fa })),
-);
 const loseReasonOptions = computed(
   () => loseReasons.value.map((r) => ({ value: r.id, label: r.name_fa })),
 );
@@ -70,7 +86,7 @@ const rejections = ref<Record<number, { reason: number | null; note: string }>>(
 );
 
 onMounted(async () => {
-  [winReasons.value, loseReasons.value] = await Promise.all([
+  [winReasonList.value, loseReasons.value] = await Promise.all([
     commercialApi.reasons("win"),
     commercialApi.reasons("lose"),
   ]);
@@ -86,7 +102,7 @@ async function save() {
   try {
     await commercialApi.award(props.request.id, {
       quote: winner.value,
-      reason: winReason.value,
+      reasons: winReasons.value,
       decision_note: winNote.value,
       rejections: props.quotes
         .filter((q) => q.id !== winner.value)
@@ -107,7 +123,7 @@ async function save() {
 
 <template>
   <FormModal
-    title="انتخاب تامین‌کننده"
+    :title="reasonsOnly ? 'دلیل‌های انتخاب برنده' : 'انتخاب تامین‌کننده'"
     :subtitle="`${request.request_no} · ${request.material_name} × ${request.quantity} ${request.material_unit}`"
     :saving="saving"
     :error="error"
@@ -117,20 +133,28 @@ async function save() {
     @save="save"
   >
     <p class="text-xs text-slate-400">
-      یکی را برنده کنید و برای بقیه دلیل رد را ثبت کنید. همین دلیل‌ها هستند که
-      دفعه بعد قیمت‌گیری را آسان می‌کنند.
+      <template v-if="reasonsOnly">
+        سفارش ثبت شده و برنده ثابت است؛ دلیل‌ها را می‌توانید اصلاح کنید.
+      </template>
+      <template v-else>
+        یکی را برنده کنید و برای بقیه دلیل رد را ثبت کنید. همین دلیل‌ها هستند که
+        دفعه بعد قیمت‌گیری را آسان می‌کنند.
+      </template>
     </p>
 
     <div class="space-y-2">
       <label
         v-for="q in quotes" :key="q.id"
-        class="block rounded-xl border p-3 cursor-pointer transition-colors"
+        class="block rounded-xl border p-3 transition-colors"
         :class="winner === q.id
           ? 'border-emerald-400 bg-emerald-50'
-          : 'border-slate-200 hover:bg-slate-50'"
+          : reasonsOnly ? 'border-slate-200' : 'border-slate-200 hover:bg-slate-50 cursor-pointer'"
       >
         <div class="flex items-start gap-3">
-          <input v-model="winner" type="radio" :value="q.id" class="mt-1 shrink-0" />
+          <input
+            type="radio" :checked="winner === q.id" :disabled="reasonsOnly && winner !== q.id"
+            class="mt-1 shrink-0" @change="pick(q.id)"
+          />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span class="font-medium text-ink">{{ q.supplier_name }}</span>
@@ -149,11 +173,21 @@ async function save() {
             </p>
 
             <!-- The winner names why it was chosen; everyone else why not. -->
-            <div v-if="winner === q.id" class="mt-2 grid sm:grid-cols-2 gap-2" @click.stop>
-              <PickerField
-                v-model="winReason" :options="winReasonOptions"
-                placeholder="دلیل انتخاب…"
-              />
+            <div v-if="winner === q.id" class="mt-2 space-y-2" @click.prevent.stop>
+              <p class="text-xs text-slate-500">چرا این تامین‌کننده؟ (هر چند تا که درست است)</p>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="r in winReasonList" :key="r.id"
+                  type="button"
+                  class="text-xs rounded-full px-3 py-1.5 border transition-colors"
+                  :class="winReasons.includes(r.id)
+                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                    : 'bg-surface border-slate-200 text-slate-600 hover:border-emerald-300'"
+                  @click="toggleReason(r.id)"
+                >
+                  <span v-if="winReasons.includes(r.id)">✓ </span>{{ r.name_fa }}
+                </button>
+              </div>
               <input v-model="winNote" :class="inp" placeholder="توضیح (اختیاری)" />
             </div>
             <div
