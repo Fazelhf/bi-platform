@@ -591,31 +591,18 @@ const router = createRouter({
           component: () => import("@/views/crm/GeoSalesView.vue"),
         },
         {
-          // Sales invoices come in from آرپا here, and فروش سوری is ruled on.
-          path: "arpa-import",
-          name: "crm-arpa-import",
+          // تنظیمات CRM: the imports, کنترل داده, بازبینی تطبیق and پاک‌سازی —
+          // one page for the system admin, the section in `?section=`.
+          path: "settings",
+          name: "crm-settings",
           meta: { crmAdmin: true },
-          component: () => import("@/views/crm/ArpaImportView.vue"),
+          component: () => import("@/views/crm/CrmSettingsView.vue"),
         },
-        {
-          // People, deals and activities from دیدار — never invoices.
-          path: "didar-import",
-          name: "crm-didar-import",
-          meta: { crmAdmin: true },
-          component: () => import("@/views/crm/DidarImportView.vue"),
-        },
-        {
-          path: "data-reset",
-          name: "crm-data-reset",
-          meta: { crmAdmin: true },
-          component: () => import("@/views/crm/DataResetView.vue"),
-        },
-        {
-          path: "match-review",
-          name: "crm-match-review",
-          meta: { crmAdmin: true },
-          component: () => import("@/views/crm/MatchReviewView.vue"),
-        },
+        // The pages that used to stand alone now open their tab there.
+        { path: "arpa-import", name: "crm-arpa-import", meta: { crmAdmin: true }, redirect: (to) => ({ name: "crm-settings", query: { ...to.query, section: "arpa" } }) },
+        { path: "didar-import", name: "crm-didar-import", meta: { crmAdmin: true }, redirect: { name: "crm-settings", query: { section: "didar" } } },
+        { path: "data-reset", name: "crm-data-reset", meta: { crmAdmin: true }, redirect: { name: "crm-settings", query: { section: "reset" } } },
+        { path: "match-review", name: "crm-match-review", meta: { crmAdmin: true }, redirect: { name: "crm-settings", query: { section: "match" } } },
       ],
     },
 

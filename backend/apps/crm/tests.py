@@ -2366,3 +2366,87 @@ class DidarWonDealTests(DidarUploadTests):
         self.assertEqual(res["kinds"]["deals"]["created"], 2)
         self.assertEqual(res["kinds"]["deals"]["skipped"], {"موفق — از فاکتور آرپا می‌آید": 1})
         self.assertFalse(Deal.objects.filter(status="won").exists())
+
+
+class TeamyarCustomerImportTests(APITestCase):
+    """ورود مشتریان: codes decide the match, never names; fill-only; idempotent."""
+
+    HEAD = ["شناسه", "نام", "نام خانوادگی", "کد ملی", "مدیر عامل", "کد اقتصادی", "حقیقی / حقوقی",
+            "شماره پاسپورت", "شماره موبایل", "فکس", "ایمیل", "وب سایت", "کشور", "استان", "شهر",
+            "کدپستی", "آدرس", "تعداد پرسنل", "برچسب", "شماره پروانه کسب", "تلفن محل کار",
+            "آخرین توضیحات", "تلفن منزل", "طبقه بندی"]
+    CODES = ["ID", "NAME", "LAST_NAME", "NATIONAL_CODE", "TITLE", "TIN", "ACCOUNT", "KPP", "PHONE",
+             "FAX", "EMAIL", "WEB", "COUNTRY", "STATE", "CITY", "ZIP", "ADDRESS", "NUMBER_PERSONNEL",
+             "LABLE", "PROPERTY_CODE", "WORK_PHONE", "LAST_COMMENT", "HOME_PHONE", None]
+
+    def setUp(self):
+        from apps.sales.models import DimProvince
+
+        DimProvince.objects.create(code="ty-teh", name_fa="تهران")
+        now = timezone.now()
+        self.arpa_c = Customer.objects.create(code="arpa-101003", name_fa="فرهاد خان محمدی", first_contact_at=now)
+        CustomerExternalRef.objects.create(source=ExternalSource.ARPA, external_id="101003", customer=self.arpa_c)
+        self.didar_c = Customer.objects.create(code="didar-pe-1132", name_fa="اقای پورمند", phone="021-1",
+                                               first_contact_at=now)
+        CustomerExternalRef.objects.create(source=ExternalSource.DIDAR, external_id="pe-1132", customer=self.didar_c)
+
+    def _row(self, **kw):
+        base = {c: None for c in self.CODES if c}
+        base.update(ACCOUNT="حقیقی", LABLE="مشتری")
+        base.update(kw)
+        return [base.get(c) if c else kw.get("CLASS") for c in self.CODES]
+
+    def _book(self, rows) -> bytes:
+        import io
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "حقیقی"
+        ws.append(self.HEAD)
+        ws.append(self.CODES)
+        for r in rows:
+            ws.append(r)
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def _files(self):
+        return [("Teamyar_Client12.xlsx", self._book([
+            self._row(ID="101003", NAME="فرهاد", LAST_NAME="خان محمدی", PHONE="09128015754",
+                      STATE="تهران", LAST_COMMENT="منبع: آرپا کد 101003 | گروه آرپا: سایر"),
+            self._row(ID="9", NAME="اقای پورمند", WORK_PHONE="021-999",
+                      LAST_COMMENT="منبع: دیدار کد 1132 | مسئول در دیدار: کسی"),
+            self._row(ID="10", NAME="تامین‌کننده‌ای", LABLE="تامین کننده"),
+            self._row(ID="11", NAME="بانک ملی شعبه الف", ACCOUNT="حقوقی", NATIONAL_CODE="10100834460"),
+            self._row(ID="12", NAME="بانک ملی شعبه ب", ACCOUNT="حقوقی", NATIONAL_CODE="10100834460"),
+        ]))]
+
+    def test_codes_merge_and_only_fill_blanks(self):
+        from apps.crm.teamyar_import import run
+
+        res = run(self._files(), commit=True)
+        self.assertEqual(res["matched_by"], {"کد آرپا": 1, "کد دیدار": 1})
+        self.assertEqual(res["skipped"], {"تامین‌کننده است، نه مشتری": 1})
+        self.arpa_c.refresh_from_db()
+        self.didar_c.refresh_from_db()
+        self.assertEqual((self.arpa_c.mobile, self.arpa_c.province.name_fa), ("09128015754", "تهران"))
+        self.assertEqual(self.didar_c.phone, "021-1")  # typed by hand, not overwritten
+        # Two branches sharing a bank's national id stay two customers.
+        self.assertEqual(Customer.objects.filter(name_fa__startswith="بانک ملی").count(), 2)
+
+        again = run(self._files(), commit=True)
+        self.assertTrue(again["nothing_new"])
+        self.assertEqual(Customer.objects.filter(name_fa__startswith="بانک ملی").count(), 2)
+
+    def test_checks_find_a_deal_on_the_wrong_customer(self):
+        from datetime import date
+        from apps.crm import checks
+
+        now = timezone.now()
+        deal = Deal.objects.create(code="ck-d", title="معامله", customer=self.arpa_c, opened_at=now)
+        SalesInvoice.objects.create(code="ck-i", number="1", customer=self.didar_c, deal=deal,
+                                    issued_at=date(2026, 1, 1), amount_rial=10)
+        found = {c["key"]: c for c in checks.run()["checks"]}
+        self.assertEqual(found["invoice_deal_customer"]["count"], 1)
+        self.assertEqual(found["invoice_deal_customer"]["rows"][0]["id"], deal.pk)
