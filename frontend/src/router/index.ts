@@ -581,6 +581,11 @@ const router = createRouter({
           component: () => import("@/views/crm/CrmReportsView.vue"),
         },
         {
+          path: "geo",
+          name: "crm-geo",
+          component: () => import("@/views/crm/GeoSalesView.vue"),
+        },
+        {
           path: "match-review",
           name: "crm-match-review",
           meta: { crmManager: true },
