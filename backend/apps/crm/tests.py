@@ -722,9 +722,16 @@ class MergeReviewApiTests(DatasetTestCase):
             method="phone", score=Decimal("0.5"),
             payload={"کد": "400900", "نام": "شرکت آزمایشی", "نوع": "حقوقی"},
         )
+        # بازبینی تطبیق belongs to the system admin alone.
+        self.reviewer = _user("reviewer", "admin")
+
+    def test_the_ceo_and_managers_are_refused(self):
+        for user in (self.ceo, self.rep):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 403)
 
     def test_the_queue_lists_both_sides_in_one_request(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         res = self.client.get("/api/crm/match-candidates/")
         self.assertEqual(res.status_code, 200)
         row = res.data["results"][0]
@@ -736,14 +743,14 @@ class MergeReviewApiTests(DatasetTestCase):
     def test_an_old_demo_preference_does_not_hide_the_queue(self):
         """The showroom is gone; an account that last looked at it must still
         see the real queue rather than an empty one."""
-        self.client.force_authenticate(self.ceo)
-        self.ceo.crm_dataset = "demo"
-        self.ceo.save(update_fields=["crm_dataset"])
+        self.client.force_authenticate(self.reviewer)
+        self.reviewer.crm_dataset = "demo"
+        self.reviewer.save(update_fields=["crm_dataset"])
         res = self.client.get("/api/crm/match-candidates/")
         self.assertEqual(res.data["count"], 1)
 
     def test_accepting_over_http_links_the_party(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         res = self.client.post(f"/api/crm/match-candidates/{self.candidate.pk}/accept/")
         self.assertEqual(res.status_code, 200, res.data)
         self.assertTrue(
@@ -751,13 +758,13 @@ class MergeReviewApiTests(DatasetTestCase):
         )
 
     def test_a_second_decision_is_refused_not_silently_applied(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         self.client.post(f"/api/crm/match-candidates/{self.candidate.pk}/accept/")
         res = self.client.post(f"/api/crm/match-candidates/{self.candidate.pk}/reject/")
         self.assertEqual(res.status_code, 409)
 
     def test_summary_counts_what_is_still_open(self):
-        self.client.force_authenticate(self.ceo)
+        self.client.force_authenticate(self.reviewer)
         res = self.client.get("/api/crm/match-candidates/summary/")
         self.assertEqual(res.data["pending"], 1)
 
@@ -931,6 +938,8 @@ class BulkReviewTests(APITestCase):
             format="json",
         )
         candidate = CustomerMatchCandidate.objects.get(source=ExternalSource.CRM)
+        # Queued by the manager; ruled on by the system admin.
+        self.client.force_authenticate(_user("bulk-admin", "admin"))
         res = self.client.post(f"/api/crm/match-candidates/{candidate.pk}/accept/")
         self.assertEqual(res.status_code, 200, res.data)
 
@@ -946,6 +955,7 @@ class BulkReviewTests(APITestCase):
         )
         before = Customer.objects.count()
         candidate = CustomerMatchCandidate.objects.get(source=ExternalSource.CRM)
+        self.client.force_authenticate(_user("bulk-admin", "admin"))
         self.client.post(f"/api/crm/match-candidates/{candidate.pk}/reject/")
 
         self.assertEqual(Customer.objects.count(), before)
@@ -1196,10 +1206,11 @@ class ScopeTests(APITestCase):
         self.assertEqual(res.status_code, 201)
         self.assertEqual(Customer.objects.get(name_fa="ثبت مدیر").owner_id, self.theirs.id)
 
-    def test_merge_queue_is_for_managers_only(self):
-        self.client.force_authenticate(self.rep)
-        self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 403)
-        self.client.force_authenticate(self.boss)
+    def test_merge_queue_is_for_the_system_admin_only(self):
+        for user in (self.rep, self.boss):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 403)
+        self.client.force_authenticate(_user("scope-admin", "admin"))
         self.assertEqual(self.client.get("/api/crm/match-candidates/").status_code, 200)
 
 
