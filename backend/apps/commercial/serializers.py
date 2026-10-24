@@ -5,9 +5,12 @@ Money is serialised as a string, like the finance section does, so a Rial
 figure never passes through a float on its way to the browser. Quantities are
 decimals too — a رول is whole, but a کیلوگرم is not.
 """
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.commercial.models import (
+    DeliveryPart,
     Material,
     MaterialCategory,
     MaterialUnit,
@@ -18,6 +21,7 @@ from apps.commercial.models import (
     QuoteReason,
     Sample,
     Supplier,
+    payment_method_label,
 )
 
 
@@ -120,9 +124,7 @@ class QuoteSerializer(serializers.ModelSerializer):
     payment_term_name = serializers.CharField(
         source="payment_term.name_fa", read_only=True, default=""
     )
-    payment_method_label = serializers.CharField(
-        source="get_payment_method_display", read_only=True, default=""
-    )
+    payment_method_label = serializers.SerializerMethodField()
     advance_pct = serializers.DecimalField(
         source="payment_term.advance_pct", max_digits=5, decimal_places=2,
         read_only=True, default=None,
@@ -143,15 +145,28 @@ class QuoteSerializer(serializers.ModelSerializer):
             "delivery_days", "validity_days", "payment_term",
             "payment_term_name", "advance_pct", "payment_days",
             "payment_method", "payment_method_label", "payment_note",
+            "delivery_terms",
             "is_official", "vat_pct", "vat_rial", "grand_total_rial",
             "unit_price_with_vat_rial",
-            "sample_status", "is_selected", "reason",
+            "sample_status", "is_selected", "reason", "reasons", "reason_names",
             "reason_name", "reason_kind", "decision_note", "note", "created_at",
         ]
         # The outcome is set by the award action, which writes every quote in
         # the استعلام at once. Letting a single PATCH flip one flag would
         # allow two winners in the same request.
-        read_only_fields = ["is_selected"]
+        read_only_fields = ["is_selected", "reason", "reasons"]
+
+    reason_names = serializers.SerializerMethodField()
+
+    def get_reason_names(self, obj) -> list[str]:
+        names = [r.name_fa for r in obj.reasons.all()]
+        # A quote decided before reasons became a list has only `reason`.
+        if not names and obj.reason_id:
+            names = [obj.reason.name_fa]
+        return names
+
+    def get_payment_method_label(self, obj) -> str:
+        return payment_method_label(obj.payment_method)
 
     vat_rial = serializers.SerializerMethodField()
     grand_total_rial = serializers.SerializerMethodField()
@@ -304,15 +319,47 @@ class PurchaseRequestSerializer(serializers.ModelSerializer):
             "quantity", "requester_unit", "requested_on", "needed_by",
             "period", "period_label", "status", "status_label", "note",
             "quote_count", "best_price_rial", "selected_supplier", "quotes",
-            "created_at", "next_step",
+            "created_at", "next_step", "created_by",
+            "group", "group_items", "supplier_names",
         ]
         # The status is derived from the quotes and orders (see
         # PurchaseRequest.derived_status); «لغو» has its own endpoint. Left
         # writable, the edit form could set «سفارش ثبت شد» on a request with
         # no order and every report would believe it.
-        read_only_fields = ["request_no", "status"]
+        read_only_fields = ["request_no", "status", "created_by"]
 
     next_step = serializers.SerializerMethodField()
+    group_items = serializers.SerializerMethodField()
+    supplier_names = serializers.SerializerMethodField()
+
+    def validate_group(self, value):
+        # Always the first request of the group, so a group is one level
+        # deep: «the next item» of item 3 joins item 1, not a chain.
+        return value.group_root if value else None
+
+    def get_group_items(self, obj) -> list[dict]:
+        """
+        The other items of this پیش‌فاکتور, for the tabs and the list.
+
+        Empty for a request on its own — the common case should cost nothing
+        on screen.
+        """
+        if not obj.group_id and not obj.group_items.exists():
+            return []
+        return [
+            {
+                "id": r.id, "request_no": r.request_no,
+                "material_name": r.material.name_fa,
+                "quantity": str(r.quantity),
+                "material_unit": r.material.get_unit_display(),
+                "status": r.status, "status_label": r.get_status_display(),
+            }
+            for r in obj.group_members()
+        ]
+
+    def get_supplier_names(self, obj) -> list[str]:
+        """Who priced it — so the list can be searched by supplier."""
+        return sorted({q.supplier.name_fa for q in obj.quotes.all()})
 
     def get_next_step(self, obj) -> str:
         """The one thing the department has to do next on this request."""
@@ -348,6 +395,51 @@ class PurchaseRequestListSerializer(PurchaseRequestSerializer):
         ]
 
 
+class DeliveryPartSerializer(serializers.ModelSerializer):
+    """پارت ارسال — one load of a split order."""
+
+    class Meta:
+        model = DeliveryPart
+        fields = [
+            "id", "order", "quantity", "shipped_on", "delivered_on",
+            "note", "created_at",
+        ]
+
+    def validate(self, attrs):
+        order = attrs.get("order", getattr(self.instance, "order", None))
+        quantity = attrs.get("quantity", getattr(self.instance, "quantity", None))
+        shipped = attrs.get("shipped_on", getattr(self.instance, "shipped_on", None))
+        delivered = attrs.get(
+            "delivered_on", getattr(self.instance, "delivered_on", None)
+        )
+        if order is None:
+            return attrs
+        if not order.split_delivery:
+            raise serializers.ValidationError({
+                "order": "این سفارش «یکجا» است؛ اول «حمل به دفعات» را روشن کنید."
+            })
+        if order.status == PurchaseOrder.Status.CANCELLED:
+            raise serializers.ValidationError({"order": "این سفارش لغو شده است."})
+        if quantity is None or quantity <= 0:
+            raise serializers.ValidationError({"quantity": "مقدار این پارت را وارد کنید."})
+        others = order.parts.exclude(pk=getattr(self.instance, "pk", None))
+        sent = sum((p.quantity for p in others), Decimal(0))
+        if sent + quantity > (order.quantity or 0):
+            left = max((order.quantity or Decimal(0)) - sent, Decimal(0))
+            raise serializers.ValidationError({
+                "quantity": f"از این سفارش فقط {left.normalize():f} باقی مانده است."
+            })
+        if shipped and order.ordered_on and shipped < order.ordered_on:
+            raise serializers.ValidationError({
+                "shipped_on": "تاریخ ارسال نمی‌تواند پیش از تاریخ سفارش باشد."
+            })
+        if delivered and shipped and delivered < shipped:
+            raise serializers.ValidationError({
+                "delivered_on": "تاریخ تحویل نمی‌تواند پیش از تاریخ ارسال باشد."
+            })
+        return attrs
+
+
 class PurchaseOrderSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source="supplier.name_fa", read_only=True)
     material_name = serializers.CharField(source="material.name_fa", read_only=True)
@@ -366,9 +458,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     payment_term_name = serializers.CharField(
         source="payment_term.name_fa", read_only=True, default=""
     )
-    payment_method_label = serializers.CharField(
-        source="get_payment_method_display", read_only=True, default=""
-    )
+    payment_method_label = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseOrder
@@ -379,10 +469,31 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "delivered_on", "delivery_days", "period", "period_label",
             "status", "status_label", "payment_term", "payment_term_name",
             "payment_method", "payment_method_label", "payment_note",
+            "delivery_terms", "split_delivery", "parts",
+            "shipped_qty", "delivered_qty", "remaining_qty",
             "is_official", "vat_pct", "vat_rial", "grand_total_rial",
             "note", "created_at",
         ]
         read_only_fields = ["order_no"]
+
+    parts = DeliveryPartSerializer(many=True, read_only=True)
+    shipped_qty = serializers.SerializerMethodField()
+    delivered_qty = serializers.SerializerMethodField()
+    remaining_qty = serializers.SerializerMethodField()
+
+    def get_shipped_qty(self, obj) -> str:
+        return str(sum((p.quantity for p in obj.parts.all()), Decimal(0)))
+
+    def get_delivered_qty(self, obj) -> str:
+        return str(sum((p.quantity for p in obj.parts.all() if p.delivered_on), Decimal(0)))
+
+    def get_remaining_qty(self, obj) -> str:
+        """Not yet delivered — what the factory is still waiting for."""
+        done = sum((p.quantity for p in obj.parts.all() if p.delivered_on), Decimal(0))
+        return str(max((obj.quantity or Decimal(0)) - done, Decimal(0)))
+
+    def get_payment_method_label(self, obj) -> str:
+        return payment_method_label(obj.payment_method)
 
     vat_rial = serializers.SerializerMethodField()
     grand_total_rial = serializers.SerializerMethodField()
@@ -421,6 +532,19 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "request": "این درخواست لغو شده؛ برای آن سفارش ثبت نمی‌شود."
             })
+        split = attrs.get("split_delivery", getattr(self.instance, "split_delivery", False))
+        if self.instance is not None and not split and self.instance.parts.exists():
+            raise serializers.ValidationError({
+                "split_delivery": "این سفارش پارت ارسال دارد؛ اول پارت‌ها را حذف کنید."
+            })
+        if split and "status" in attrs and attrs["status"] in (
+            PurchaseOrder.Status.SHIPPED, PurchaseOrder.Status.DELIVERED,
+        ) and (self.instance is None or attrs["status"] != self.instance.status):
+            # In a split order these two follow from the parts. Set by hand,
+            # the order would say «تحویل شد» with half the goods still out.
+            raise serializers.ValidationError({
+                "status": "در حمل به دفعات، ارسال و تحویل از روی پارت‌ها ثبت می‌شود."
+            })
         if quote and self.instance is None:
             # An order placed from an استعلام buys from the supplier that won
             # it. Ordering from a loser leaves the file saying one thing and
@@ -447,6 +571,12 @@ class AwardSerializer(serializers.Serializer):
     reason = serializers.PrimaryKeyRelatedField(
         queryset=QuoteReason.objects.filter(kind=QuoteReason.Kind.WIN),
         required=False, allow_null=True,
+    )
+    #: Every reason the winner was chosen for. `reason` alone still works,
+    #: as a list of one.
+    reasons = serializers.PrimaryKeyRelatedField(
+        queryset=QuoteReason.objects.filter(kind=QuoteReason.Kind.WIN),
+        many=True, required=False,
     )
     decision_note = serializers.CharField(
         required=False, allow_blank=True, max_length=300

@@ -74,6 +74,8 @@ export interface Suggestions {
   carriers: string[];
   origin_ports: string[];
   destination_ports: string[];
+  payment_methods: string[];
+  delivery_terms: string[];
 }
 
 export interface QuoteReason {
@@ -87,7 +89,8 @@ export interface QuoteReason {
 }
 
 /** How the money moves — separate from when, which is PaymentTerm. */
-export type PaymentMethodCode = "cash" | "cheque" | "transfer" | "lc" | "other" | "";
+/** Free text since the list was opened up; the defaults live in payment.ts. */
+export type PaymentMethodCode = string;
 
 /**
  * شرایط پرداخت as a schedule, not a sentence: a percentage up front and a
@@ -177,6 +180,7 @@ export interface Quote {
   payment_method: PaymentMethodCode;
   payment_method_label: string;
   payment_note: string;
+  delivery_terms: string;
   /** فاکتور رسمی — adds ارزش افزوده on top of the quoted price. */
   is_official: boolean;
   vat_pct: string;
@@ -188,6 +192,9 @@ export interface Quote {
   sample_status: QuoteSample | null;
   is_selected: boolean;
   reason: number | null;
+  /** Every reason given; `reason` is the first of them. */
+  reasons: number[];
+  reason_names: string[];
   reason_name: string;
   reason_kind: "win" | "lose" | "sample" | "";
   decision_note: string;
@@ -217,11 +224,38 @@ export interface PurchaseRequest {
   selected_supplier: string;
   /** What the department has to do next; empty once delivered or cancelled. */
   next_step: string;
+  created_by: number | null;
+  /** The first request of its پیش‌فاکتور group; null for the first itself. */
+  group: number | null;
+  /** Every item of the group, this one included; empty when on its own. */
+  group_items: GroupItem[];
+  /** Who priced it — what the list's search matches on. */
+  supplier_names: string[];
   quotes?: Quote[];
 }
 
+export interface GroupItem {
+  id: number;
+  request_no: string;
+  material_name: string;
+  quantity: string;
+  material_unit: string;
+  status: RequestStatus;
+  status_label: string;
+}
+
 export type OrderStatus =
-  | "pending" | "buying" | "shipped" | "delivered" | "cancelled";
+  | "pending" | "buying" | "producing" | "shipped" | "delivered" | "cancelled";
+
+/** پارت ارسال — one load of a split order. */
+export interface DeliveryPart {
+  id: number;
+  order: number;
+  quantity: string;
+  shipped_on: string;
+  delivered_on: string | null;
+  note: string;
+}
 
 export interface PurchaseOrder {
   id: number;
@@ -250,6 +284,14 @@ export interface PurchaseOrder {
   payment_method: PaymentMethodCode;
   payment_method_label: string;
   payment_note: string;
+  delivery_terms: string;
+  /** حمل به دفعات: the goods come in `parts` rather than in one go. */
+  split_delivery: boolean;
+  parts: DeliveryPart[];
+  shipped_qty: string;
+  delivered_qty: string;
+  /** Not yet delivered — what the factory is still waiting for. */
+  remaining_qty: string;
   /** فاکتور رسمی — adds ارزش افزوده on top of `total_rial`. */
   is_official: boolean;
   vat_pct: string;
@@ -456,6 +498,7 @@ export interface PriceIncreaseRow {
 export interface AwardPayload {
   quote: number;
   reason?: number | null;
+  reasons?: number[];
   decision_note?: string;
   rejections?: { quote: number; reason?: number | null; decision_note?: string }[];
 }
@@ -649,6 +692,15 @@ export const commercialApi = {
   },
   async removeOrder(id: number) {
     await api.delete(`/commercial/orders/${id}/`);
+  },
+  async savePart(payload: Record<string, unknown>, id?: number): Promise<DeliveryPart> {
+    const { data } = id
+      ? await api.patch(`/commercial/order-parts/${id}/`, payload)
+      : await api.post("/commercial/order-parts/", payload);
+    return data;
+  },
+  async removePart(id: number) {
+    await api.delete(`/commercial/order-parts/${id}/`);
   },
   /** One step forward (or cancellation) — the server refuses a step back. */
   async advanceOrder(

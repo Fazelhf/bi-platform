@@ -189,13 +189,25 @@ class QuoteReason(TimeStampedModel):
 
 
 class PaymentMethod(models.TextChoices):
-    """*How* the money moves. Separate from *when* — see PaymentTerm."""
+    """
+    *How* the money moves. Separate from *when* — see PaymentTerm.
+
+    These are the suggestions, not a closed list: the field stores the words
+    themselves («چک ۳ ماهه», «تهاتر»…), because the department kept meeting
+    methods the list did not have and had nowhere to put them. The codes are
+    kept only to read rows written before the field was opened up.
+    """
 
     CASH = "cash", "نقدی"
     CHEQUE = "cheque", "چک"
     TRANSFER = "transfer", "حواله بانکی"
     LC = "lc", "اعتبار اسنادی داخلی"
     OTHER = "other", "سایر"
+
+
+def payment_method_label(value: str) -> str:
+    """The words for a stored payment method — a legacy code or free text."""
+    return dict(PaymentMethod.choices).get(value, value or "")
 
 
 class PaymentTerm(TimeStampedModel):
@@ -275,6 +287,14 @@ class PurchaseRequest(TimeStampedModel):
         max_length=10, choices=Status.choices, default=Status.OPEN
     )
     note = models.TextField(blank=True)
+    #: چند قلم در یک استعلام. A supplier's پیش‌فاکتور usually prices several
+    #: items; each stays its own request (one material, so the comparison
+    #: table still compares like with like), tied to the first one here so
+    #: the items travel together through award, order and delivery.
+    group = models.ForeignKey(
+        "self", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="group_items",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="+",
@@ -302,6 +322,15 @@ class PurchaseRequest(TimeStampedModel):
         """The cheapest quote received — not necessarily the chosen one."""
         low = self.quotes.aggregate(v=models.Min("unit_price_rial"))["v"]
         return low if low is not None else ZERO
+
+    @property
+    def group_root(self) -> "PurchaseRequest":
+        return self.group or self
+
+    def group_members(self) -> list["PurchaseRequest"]:
+        """Every item of this request's group, itself included, oldest first."""
+        root = self.group_root
+        return [root, *sorted(root.group_items.all(), key=lambda r: r.id)]
 
     @property
     def live_orders(self):
@@ -379,10 +408,11 @@ class Quote(TimeStampedModel):
         PaymentTerm, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="quotes",
     )
-    payment_method = models.CharField(
-        max_length=10, choices=PaymentMethod.choices, blank=True
-    )
+    payment_method = models.CharField(max_length=60, blank=True)
     payment_note = models.CharField(max_length=250, blank=True)
+    #: شرایط تحویل — «درب کارخانه»، «درب انبار فروشنده»… Free text with
+    #: suggestions, for the same reason as payment_method.
+    delivery_terms = models.CharField(max_length=120, blank=True)
 
     # -- فاکتور رسمی ------------------------------------------------------
     # A price is compared as what leaves the account. An official invoice
@@ -395,9 +425,16 @@ class Quote(TimeStampedModel):
     )
 
     is_selected = models.BooleanField(default=False)
+    #: The first of `reasons` — kept so the supplier statistics, which count
+    #: one reason per quote, read the same as before.
     reason = models.ForeignKey(
         QuoteReason, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="quotes",
+    )
+    #: Every reason given. A winner is rarely chosen for one thing alone —
+    #: «قیمت مناسب» and «تحویل سریع» together is the usual answer.
+    reasons = models.ManyToManyField(
+        QuoteReason, blank=True, related_name="quotes_any"
     )
     decision_note = models.CharField(max_length=300, blank=True)
     note = models.CharField(max_length=300, blank=True)
@@ -448,6 +485,7 @@ class PurchaseOrder(TimeStampedModel):
     class Status(models.TextChoices):
         PENDING = "pending", "در انتظار تایید"
         BUYING = "buying", "در حال خرید"
+        PRODUCING = "producing", "در مرحله تولید"
         SHIPPED = "shipped", "ارسال شده"
         DELIVERED = "delivered", "تحویل شد"
         CANCELLED = "cancelled", "لغو شد"
@@ -455,7 +493,7 @@ class PurchaseOrder(TimeStampedModel):
     #: The order a purchase moves through. Each step may only go forward, and
     #: «لغو» is allowed from anywhere but «تحویل شد» — goods that arrived were
     #: bought, and a cancellation would erase a real purchase from the reports.
-    FLOW = ["pending", "buying", "shipped", "delivered"]
+    FLOW = ["pending", "buying", "producing", "shipped", "delivered"]
 
     order_no = models.CharField(max_length=24, unique=True, blank=True)
     request = models.ForeignKey(
@@ -489,10 +527,15 @@ class PurchaseOrder(TimeStampedModel):
         PaymentTerm, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="orders",
     )
-    payment_method = models.CharField(
-        max_length=10, choices=PaymentMethod.choices, blank=True
-    )
+    payment_method = models.CharField(max_length=60, blank=True)
     payment_note = models.CharField(max_length=250, blank=True)
+    #: شرایط تحویل — «درب کارخانه»، «درب انبار فروشنده»… Free text with
+    #: suggestions, for the same reason as payment_method.
+    delivery_terms = models.CharField(max_length=120, blank=True)
+    #: حمل به دفعات. Off, the goods come in one go and the order moves
+    #: through its steps by hand. On, they come in parts (DeliveryPart) and
+    #: «ارسال شده» / «تحویل شد» follow from what the parts say.
+    split_delivery = models.BooleanField("حمل به دفعات", default=False)
     #: Carried over from the winning quote; see Quote.is_official.
     is_official = models.BooleanField("فاکتور رسمی", default=False)
     vat_pct = models.DecimalField(
@@ -544,6 +587,43 @@ class PurchaseOrder(TimeStampedModel):
             return None
         return (self.delivered_on - self.ordered_on).days
 
+    # -- حمل به دفعات --------------------------------------------------------
+    @property
+    def shipped_qty(self) -> Decimal:
+        """Everything sent so far, arrived or not."""
+        return self.parts.aggregate(v=models.Sum("quantity"))["v"] or ZERO
+
+    @property
+    def delivered_qty(self) -> Decimal:
+        return (
+            self.parts.exclude(delivered_on=None)
+            .aggregate(v=models.Sum("quantity"))["v"] or ZERO
+        )
+
+    def sync_from_parts(self) -> None:
+        """
+        Read «ارسال شده» / «تحویل شد» off the parts of a split order.
+
+        Delivered once what arrived covers the order; shipped while anything
+        is on its way. Removing parts can take the order back down — a step
+        recorded by mistake must be undoable, unlike the forward-only advance.
+        """
+        if not self.split_delivery or self.status == self.Status.CANCELLED:
+            return
+        parts = list(self.parts.all())
+        delivered = sum((p.quantity for p in parts if p.delivered_on), ZERO)
+        status, delivered_on = self.status, None
+        if parts and delivered >= (self.quantity or ZERO):
+            status = self.Status.DELIVERED
+            delivered_on = max(p.delivered_on for p in parts if p.delivered_on)
+        elif parts:
+            status = self.Status.SHIPPED
+        elif self.status in (self.Status.SHIPPED, self.Status.DELIVERED):
+            status = self.Status.PRODUCING
+        if (status, delivered_on) != (self.status, self.delivered_on):
+            self.status, self.delivered_on = status, delivered_on
+            self.save(update_fields=["status", "delivered_on", "updated_at"])
+
     def save(self, *args, **kwargs):
         if not self.order_no:
             self.order_no = _next_number("PO", self.ordered_on)
@@ -551,6 +631,36 @@ class PurchaseOrder(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.order_no} · {self.material} از {self.supplier}"
+
+
+class DeliveryPart(TimeStampedModel):
+    """
+    One load of a split order — «پارت ۲: ۴ تن، ارسال ۱۲ آبان».
+
+    A part is recorded when it leaves the supplier; `delivered_on` is filled
+    when it reaches the factory. The order's own status follows from these
+    (PurchaseOrder.sync_from_parts), so the remaining quantity on screen and
+    the status beside it cannot disagree.
+    """
+
+    order = models.ForeignKey(
+        PurchaseOrder, on_delete=models.CASCADE, related_name="parts"
+    )
+    quantity = models.DecimalField(max_digits=14, decimal_places=2)
+    shipped_on = models.DateField()
+    delivered_on = models.DateField(null=True, blank=True)
+    note = models.CharField(max_length=250, blank=True)
+
+    class Meta:
+        ordering = ("shipped_on", "id")
+        verbose_name = "delivery part (پارت ارسال)"
+
+    @property
+    def is_delivered(self) -> bool:
+        return self.delivered_on is not None
+
+    def __str__(self) -> str:
+        return f"{self.order.order_no} · {self.quantity}"
 
 
 class Sample(TimeStampedModel):

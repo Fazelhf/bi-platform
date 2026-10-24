@@ -15,7 +15,8 @@ import {
   type PurchaseRequest,
   type Supplier,
 } from "@/api/commercial";
-import { PAYMENT_METHODS } from "@/components/commercial/payment";
+import { DELIVERY_TERMS, PAYMENT_METHODS, withSeen } from "@/components/commercial/payment";
+import PaymentTermField from "@/components/commercial/PaymentTermField.vue";
 
 /**
  * ثبت استعلام از پرونده تامین‌کننده یا کالا.
@@ -28,8 +29,22 @@ import { PAYMENT_METHODS } from "@/components/commercial/payment";
 const props = defineProps<{
   supplierId?: number | null;
   materialId?: number | null;
+  /**
+   * «کالای بعدی همین پیش‌فاکتور»: each save opens a new item in this
+   * request's group, and the form stays open, emptied, for the next line —
+   * the way a پیش‌فاکتور is actually read, one row after another.
+   */
+  group?: number | null;
 }>();
-const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
+const emit = defineEmits<{
+  (e: "close"): void;
+  (e: "saved"): void;
+  /** Group mode: one more item saved, the form stays open. */
+  (e: "added", requestId: number): void;
+}>();
+
+/** The items saved in this sitting, shown as a running list. */
+const addedNames = ref<string[]>([]);
 
 const inp =
   "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none " +
@@ -61,8 +76,14 @@ const form = ref({
   validity_days: 0,
   payment_term: null as number | null,
   payment_method: "",
+  delivery_terms: "",
   note: "",
 });
+
+/** Typed before into the two free-text fields, offered after the defaults. */
+const seen = ref({ payment_methods: [] as string[], delivery_terms: [] as string[] });
+const methodOptions = computed(() => withSeen(PAYMENT_METHODS, seen.value.payment_methods));
+const deliveryOptions = computed(() => withSeen(DELIVERY_TERMS, seen.value.delivery_terms));
 
 const materialOptions = computed(() => materials.value.map((m) => ({
   value: m.id, label: m.name_fa, hint: m.category_name || "",
@@ -71,9 +92,6 @@ const materialOptions = computed(() => materials.value.map((m) => ({
 const supplierOptions = computed(() => suppliers.value.map((s) => ({
   value: s.id, label: s.name_fa, hint: s.activity,
   keywords: `${s.code} ${s.contact_name} ${s.mobile}`,
-})));
-const termOptions = computed(() => terms.value.map((t) => ({
-  value: t.id, label: t.name_fa,
 })));
 
 const chosenRequest = computed(
@@ -127,6 +145,8 @@ async function loadRequests() {
 watch(() => form.value.material, loadRequests);
 
 onMounted(async () => {
+  // Suggestions are a convenience, never a gate.
+  commercialApi.suggestions().then((s) => { seen.value = s; }).catch(() => {});
   [materials.value, suppliers.value, terms.value] = await Promise.all([
     commercialApi.materials({ is_active: true }),
     commercialApi.suppliers({ is_active: true }),
@@ -147,12 +167,24 @@ async function save() {
   saving.value = true;
   error.value = "";
   try {
-    await commercialApi.quickQuote({
+    const quote = await commercialApi.quickQuote({
       ...form.value,
-      request: chosenRequest.value?.id ?? null,
+      request: props.group ? null : chosenRequest.value?.id ?? null,
+      group: props.group ?? null,
       unit_price_rial: form.value.unit_price_rial || 0,
       quoted_on: form.value.quoted_on || null,
     });
+    if (props.group) {
+      // Same supplier, same terms; the next line only differs in what and how much.
+      addedNames.value.push(
+        materials.value.find((m) => m.id === form.value.material)?.name_fa ?? "",
+      );
+      form.value.material = null;
+      form.value.quantity = "";
+      form.value.unit_price_rial = "";
+      emit("added", quote.request);
+      return;
+    }
     emit("saved");
   } catch (e) {
     error.value = apiError(e);
@@ -164,13 +196,25 @@ async function save() {
 
 <template>
   <FormModal
-    title="ثبت استعلام قیمت"
+    :title="group ? 'کالای بعدی همین پیش‌فاکتور' : 'ثبت استعلام قیمت'"
+    :subtitle="group ? 'هر ردیف که ذخیره شود، فرم برای ردیف بعدی خالی می‌شود' : ''"
     :saving="saving"
     :error="error"
+    :save-label="group ? 'ذخیره و ردیف بعدی' : 'ذخیره'"
     wide
     @close="emit('close')"
     @save="save"
   >
+    <div
+      v-if="addedNames.length"
+      class="bg-emerald-50 text-emerald-800 rounded-xl px-3 py-2 text-sm"
+    >
+      <p class="font-medium">✓ {{ addedNames.length }} قلم ثبت شد</p>
+      <p class="text-xs mt-0.5">{{ addedNames.join("، ") }}</p>
+      <p class="text-xs text-emerald-700/80 mt-1">
+        ردیف بعدی را وارد کنید؛ اگر تمام شد، پنجره را ببندید.
+      </p>
+    </div>
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
         <label :class="lbl">تامین‌کننده *</label>
@@ -190,7 +234,7 @@ async function save() {
           search-placeholder="نام یا کد کالا…"
         />
       </div>
-      <div>
+      <div v-if="!group">
         <label :class="lbl">درخواست خرید</label>
         <PickerField
           v-model="form.request" :options="requestOptions" :clearable="false"
@@ -255,11 +299,21 @@ async function save() {
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
         <label :class="lbl">شرایط پرداخت</label>
-        <PickerField v-model="form.payment_term" :options="termOptions" placeholder="مثلاً ۶۰ روزه…" />
+        <PaymentTermField v-model="form.payment_term" :terms="terms" @added="terms.push($event)" />
       </div>
       <div>
         <label :class="lbl">روش پرداخت</label>
-        <PickerField v-model="form.payment_method" :options="PAYMENT_METHODS" placeholder="نقدی، چک، حواله…" />
+        <PickerField
+          v-model="form.payment_method" :options="methodOptions" creatable
+          placeholder="نقدی، چک… یا هر روش دیگر"
+        />
+      </div>
+      <div class="sm:col-span-2">
+        <label :class="lbl">شرایط تحویل</label>
+        <PickerField
+          v-model="form.delivery_terms" :options="deliveryOptions" creatable
+          placeholder="درب کارخانه، درب انبار فروشنده…"
+        />
       </div>
     </div>
 

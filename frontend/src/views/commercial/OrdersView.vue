@@ -32,6 +32,12 @@ const canEdit = computed(
 
 const advancing = ref<{ order: PurchaseOrder; target: OrderStatus } | null>(null);
 
+/** A split order ships and arrives through its parts, on the request page. */
+function canAdvance(order: PurchaseOrder): boolean {
+  const step = nextOrderStep(order.status);
+  return !!step && !(order.split_delivery && ["shipped", "delivered"].includes(step.status));
+}
+
 function advance(order: PurchaseOrder) {
   const step = nextOrderStep(order.status);
   if (step) advancing.value = { order, target: step.status };
@@ -106,6 +112,7 @@ async function remove(order: PurchaseOrder) {
         <option value="">همه وضعیت‌ها</option>
         <option value="pending">در انتظار تایید</option>
         <option value="buying">در حال خرید</option>
+        <option value="producing">در مرحله تولید</option>
         <option value="shipped">ارسال شده</option>
         <option value="delivered">تحویل شد</option>
         <option value="cancelled">لغو شد</option>
@@ -180,7 +187,7 @@ async function remove(order: PurchaseOrder) {
 
           <div v-if="canEdit" class="flex flex-wrap gap-2 mt-3">
             <button
-              v-if="isLiveOrder(o.status) && nextOrderStep(o.status)"
+              v-if="isLiveOrder(o.status) && canAdvance(o)"
               class="text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700"
               @click="advance(o)"
             >{{ nextOrderStep(o.status)!.action }}</button>
@@ -233,10 +240,13 @@ async function remove(order: PurchaseOrder) {
                 <span class="text-xs rounded-full px-2 py-0.5" :class="STATUS_CLASS[o.status]">
                   {{ o.status_label }}
                 </span>
+                <p v-if="o.split_delivery && o.status !== 'cancelled'" class="text-xs text-slate-400 mt-0.5">
+                  به دفعات · {{ num(o.remaining_qty) }} باقی‌مانده
+                </p>
               </td>
               <td class="px-4 text-left whitespace-nowrap">
                 <button
-                  v-if="canEdit && isLiveOrder(o.status) && nextOrderStep(o.status)"
+                  v-if="canEdit && isLiveOrder(o.status) && canAdvance(o)"
                   class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg px-2 py-1 ml-1"
                   @click="advance(o)"
                 >{{ nextOrderStep(o.status)!.action }}</button>

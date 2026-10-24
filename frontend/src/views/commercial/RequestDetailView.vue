@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   commercialApi,
+  type DeliveryPart,
   type OrderStatus,
   type PurchaseOrder,
   type PurchaseRequest,
@@ -22,6 +23,9 @@ import OrderForm from "@/components/commercial/OrderForm.vue";
 import SampleForm from "@/components/commercial/SampleForm.vue";
 import SampleVerdictDialog from "@/components/commercial/SampleVerdictDialog.vue";
 import OrderAdvanceDialog from "@/components/commercial/OrderAdvanceDialog.vue";
+import PartDialog from "@/components/commercial/PartDialog.vue";
+import QuickQuoteForm from "@/components/commercial/QuickQuoteForm.vue";
+import { REQUEST_STATUS_CLASS } from "@/components/commercial/orderFlow";
 import {
   ORDER_STATUS_CLASS, ORDER_STEPS, isLiveOrder, nextOrderStep, orderStepIndex,
 } from "@/components/commercial/orderFlow";
@@ -104,6 +108,30 @@ async function load() {
 }
 
 onMounted(async () => { await loadMoneySettings(); await load(); });
+// The item tabs of a پیش‌فاکتور stay on this page and only change the id.
+watch(() => route.params.id, (id) => { if (id) { justSaved.value = null; load(); } });
+
+/**
+ * «کالای بعدی همین پیش‌فاکتور». After a new price is saved, the page asks
+ * whether the same پیش‌فاکتور has more lines; the answer opens the quick
+ * form on the same supplier, adding each line as an item of this group.
+ */
+const justSaved = ref<Quote | null>(null);
+const nextItemFor = ref<number | null>(null);
+
+function onQuoteSaved(quote: Quote) {
+  const wasNew = !editingQuote.value;
+  afterChange();
+  if (wasNew) justSaved.value = quote;
+}
+
+function addNextItem(supplierId: number) {
+  justSaved.value = null;
+  nextItemFor.value = supplierId;
+}
+
+/** The group's items, or this request alone once it is about to gain one. */
+const groupItems = computed(() => request.value?.group_items ?? []);
 
 const editingQuote = ref<Quote | null>(null);
 const showQuote = ref(false);
@@ -154,6 +182,53 @@ async function cancelRequest() {
   }
 }
 
+/** Only a cancelled request, and only by whoever raised it (the server agrees). */
+const canDelete = computed(() =>
+  cancelled.value
+  && (request.value?.created_by === auth.me?.id || !!auth.me?.is_superuser),
+);
+
+async function deleteRequest() {
+  const ok = await confirm({
+    title: "حذف کامل درخواست",
+    message: `درخواست ${request.value?.request_no} با همه‌ی استعلام‌هایش برای همیشه حذف شود؟`,
+    danger: true,
+  });
+  if (!ok || !request.value) return;
+  try {
+    await commercialApi.removeRequest(request.value.id);
+    router.push({ name: "commercial-requests" });
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
+
+/** پارت ارسال being added (part null) or edited. */
+const partDialog = ref<{ order: PurchaseOrder; part: DeliveryPart | null } | null>(null);
+
+async function removePart(id: number) {
+  const ok = await confirm({ title: "حذف پارت", message: "این پارت حذف شود؟", danger: true });
+  if (!ok) return;
+  try {
+    await commercialApi.removePart(id);
+    load();
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
+
+async function toggleSplit(order: PurchaseOrder) {
+  try {
+    await commercialApi.saveOrder({ split_delivery: !order.split_delivery }, order.id);
+    load();
+  } catch (e) {
+    error.value = apiError(e);
+  }
+}
+
+/** The award dialog in «reasons only» mode — after an order the winner is fixed. */
+const editingReasons = ref(false);
+
 async function reopenRequest() {
   if (!request.value) return;
   try {
@@ -194,6 +269,8 @@ function afterChange() {
   preselect.value = null;
   advancing.value = null;
   editingOrder.value = null;
+  partDialog.value = null;
+  editingReasons.value = false;
   load();
 }
 
@@ -275,11 +352,18 @@ const FA = new Intl.NumberFormat("fa-IR");
           class="mt-4 bg-slate-100 rounded-xl px-3 py-2.5 flex flex-wrap items-center justify-between gap-2"
         >
           <span class="text-sm text-slate-500">این درخواست لغو شده است.</span>
-          <button
-            v-if="canEdit"
-            class="border border-slate-200 bg-surface text-ink rounded-xl px-4 py-2 text-sm"
-            @click="reopenRequest"
-          >بازگشایی درخواست</button>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-if="canEdit"
+              class="border border-slate-200 bg-surface text-ink rounded-xl px-4 py-2 text-sm"
+              @click="reopenRequest"
+            >بازگشایی درخواست</button>
+            <button
+              v-if="canDelete"
+              class="bg-red-50 text-red-600 hover:bg-red-100 rounded-xl px-4 py-2 text-sm"
+              @click="deleteRequest"
+            >حذف کامل</button>
+          </div>
         </div>
         <template v-else>
           <!-- Phone: five chips do not fit, so the current step by name and a bar -->
@@ -347,6 +431,62 @@ const FA = new Intl.NumberFormat("fa-IR");
             </div>
           </div>
         </template>
+
+        <!-- اقلام این پیش‌فاکتور: one tab per item, each with where it stands -->
+        <div v-if="groupItems.length" class="mt-4 border-t border-slate-100 pt-3">
+          <p class="text-xs text-slate-400 mb-2">
+            اقلام این پیش‌فاکتور ({{ FA.format(groupItems.length) }} قلم)
+          </p>
+          <div class="flex gap-2 overflow-x-auto pb-1">
+            <button
+              v-for="(item, i) in groupItems" :key="item.id"
+              class="shrink-0 text-right rounded-xl border px-3 py-2 transition-colors min-w-[9rem]"
+              :class="item.id === request.id
+                ? 'border-panel bg-panel/5'
+                : 'border-slate-200 hover:bg-slate-50'"
+              @click="item.id !== request.id && router.push({ name: 'commercial-request', params: { id: item.id } })"
+            >
+              <span class="block text-xs text-slate-400">قلم {{ FA.format(i + 1) }}</span>
+              <span class="block text-sm text-ink font-medium truncate max-w-[12rem]">
+                {{ item.material_name }}
+              </span>
+              <span class="flex items-center gap-1.5 mt-1">
+                <span class="text-xs text-slate-500 ltr-nums">
+                  {{ num(item.quantity) }} {{ item.material_unit }}
+                </span>
+                <span
+                  class="text-[11px] rounded-full px-1.5 py-0.5"
+                  :class="REQUEST_STATUS_CLASS[item.status]"
+                >{{ item.status_label }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Just saved a price: does this پیش‌فاکتور have more lines? -->
+      <div
+        v-if="justSaved && canEdit"
+        class="bg-emerald-50 border border-emerald-200 rounded-card p-4 flex flex-wrap items-center justify-between gap-3"
+      >
+        <div>
+          <p class="text-sm font-medium text-emerald-800">
+            ✓ قیمت «{{ justSaved.supplier_name }}» ثبت شد
+          </p>
+          <p class="text-xs text-emerald-700/80 mt-0.5">
+            این پیش‌فاکتور کالای دیگری هم دارد؟ هر قلم جدا ثبت و مقایسه می‌شود.
+          </p>
+        </div>
+        <div class="flex gap-2">
+          <button
+            class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
+            @click="addNextItem(justSaved.supplier)"
+          >+ کالای بعدی همین پیش‌فاکتور</button>
+          <button
+            class="text-sm text-emerald-700 px-3 py-2"
+            @click="justSaved = null"
+          >نه، تمام شد</button>
+        </div>
       </div>
 
       <p
@@ -385,17 +525,22 @@ const FA = new Intl.NumberFormat("fa-IR");
         </div>
 
         <!-- Where the order is on its way -->
-        <ol v-if="o.status !== 'cancelled'" class="mt-4 grid grid-cols-4 gap-1.5">
+        <ol v-if="o.status !== 'cancelled'" class="mt-4 grid grid-cols-5 gap-1.5">
           <li v-for="(s, i) in ORDER_STEPS" :key="s.status">
             <div
               class="h-1.5 rounded-full"
               :class="i <= orderStepIndex(o.status) ? 'bg-emerald-500' : 'bg-slate-200'"
             />
+            <!-- On a phone only the current step is named; five labels in
+                 375px would each be cut to two letters. -->
             <p
               class="text-xs mt-1.5 truncate"
-              :class="i === orderStepIndex(o.status)
-                ? 'text-ink font-medium'
-                : i < orderStepIndex(o.status) ? 'text-emerald-700' : 'text-slate-400'"
+              :class="[
+                i === orderStepIndex(o.status)
+                  ? 'text-ink font-medium'
+                  : i < orderStepIndex(o.status) ? 'text-emerald-700' : 'text-slate-400',
+                i === orderStepIndex(o.status) ? '' : 'hidden sm:block',
+              ]"
             >{{ s.label }}</p>
           </li>
         </ol>
@@ -403,20 +548,99 @@ const FA = new Intl.NumberFormat("fa-IR");
           تحویل {{ faDate(o.delivered_on) }}
           <span v-if="o.delivery_days !== null">— {{ num(o.delivery_days) }} روز پس از سفارش</span>
         </p>
+        <p v-if="o.delivery_terms || o.payment_method_label" class="text-xs text-slate-400 mt-1">
+          {{ [o.delivery_terms, o.payment_term_name, o.payment_method_label].filter(Boolean).join(" · ") }}
+        </p>
+
+        <!-- حمل به دفعات: how much has come, what is on its way, what is left -->
+        <div v-if="o.split_delivery && o.status !== 'cancelled'" class="mt-4 bg-slate-50 rounded-xl p-3">
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <p class="text-sm font-medium text-ink">حمل به دفعات</p>
+            <p class="text-xs text-slate-500">
+              <span class="text-emerald-700">{{ num(o.delivered_qty) }} تحویل</span>
+              <template v-if="Number(o.shipped_qty) > Number(o.delivered_qty)">
+                · <span class="text-violet-700">{{ num(Number(o.shipped_qty) - Number(o.delivered_qty)) }} در راه</span>
+              </template>
+              · <span class="text-ink font-medium">{{ num(o.remaining_qty) }} باقی‌مانده</span>
+              از {{ num(o.quantity) }} {{ o.material_unit }}
+            </p>
+          </div>
+          <!-- One bar, three shades: delivered, on its way, not yet sent -->
+          <div class="mt-2 h-2 rounded-full bg-slate-200 overflow-hidden flex">
+            <div
+              class="bg-emerald-500 h-full"
+              :style="{ width: `${Math.min(Number(o.delivered_qty) / Number(o.quantity || 1) * 100, 100)}%` }"
+            />
+            <div
+              class="bg-violet-400 h-full"
+              :style="{ width: `${Math.max(Number(o.shipped_qty) - Number(o.delivered_qty), 0) / Number(o.quantity || 1) * 100}%` }"
+            />
+          </div>
+
+          <ul v-if="o.parts.length" class="mt-3 divide-y divide-slate-200/70">
+            <li
+              v-for="(p, i) in o.parts" :key="p.id"
+              class="py-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+            >
+              <span class="text-xs text-slate-400 w-12 shrink-0">پارت {{ num(i + 1) }}</span>
+              <span class="text-ink font-medium ltr-nums">{{ num(p.quantity) }} {{ o.material_unit }}</span>
+              <span class="text-xs text-slate-500">ارسال {{ faDate(p.shipped_on) }}</span>
+              <span
+                class="text-xs rounded-full px-2 py-0.5"
+                :class="p.delivered_on ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'"
+              >{{ p.delivered_on ? `تحویل ${faDate(p.delivered_on)}` : "در راه" }}</span>
+              <span v-if="p.note" class="text-xs text-slate-400 truncate max-w-[12rem]">{{ p.note }}</span>
+              <span class="flex-1" />
+              <template v-if="canEdit">
+                <button
+                  v-if="!p.delivered_on"
+                  class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg px-2 py-1"
+                  @click="partDialog = { order: o, part: p }"
+                >رسید</button>
+                <button
+                  class="text-xs text-slate-400 hover:text-ink px-1"
+                  @click="partDialog = { order: o, part: p }"
+                >ویرایش</button>
+                <button
+                  class="text-xs text-slate-400 hover:text-red-500 px-1"
+                  @click="removePart(p.id)"
+                >حذف</button>
+              </template>
+            </li>
+          </ul>
+          <p v-else class="text-xs text-slate-400 mt-2">هنوز پارتی ارسال نشده.</p>
+        </div>
 
         <div v-if="canEdit" class="mt-4 flex flex-wrap items-center gap-2">
           <template v-if="isLiveOrder(o.status)">
+            <!-- A split order ships through its parts, so from production on
+                 the main button records the next part instead. -->
             <button
-              v-if="nextOrderStep(o.status)"
+              v-if="o.split_delivery && ['producing', 'shipped'].includes(o.status) && Number(o.shipped_qty) < Number(o.quantity)"
+              class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
+              @click="partDialog = { order: o, part: null }"
+            >+ ثبت ارسال پارت {{ num(o.parts.length + 1) }}</button>
+            <button
+              v-else-if="nextOrderStep(o.status) && !(o.split_delivery && ['shipped', 'delivered'].includes(nextOrderStep(o.status)!.status))"
               class="bg-emerald-600 text-white rounded-xl px-4 py-2 text-sm"
               @click="advancing = { order: o, target: nextOrderStep(o.status)!.status }"
             >{{ nextOrderStep(o.status)!.action }}</button>
             <button
-              v-if="nextOrderStep(o.status)?.status !== 'delivered'"
+              v-if="!o.split_delivery && nextOrderStep(o.status)?.status !== 'delivered'"
               class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
               title="بدون مرحله‌ی ارسال، مستقیم تحویل شد"
               @click="advancing = { order: o, target: 'delivered' }"
             >مستقیم تحویل شد</button>
+            <button
+              v-if="o.split_delivery && ['pending', 'buying'].includes(o.status)"
+              class="border border-slate-200 text-ink rounded-xl px-4 py-2 text-sm"
+              @click="partDialog = { order: o, part: null }"
+            >+ ثبت پارت ارسال</button>
+            <button
+              v-if="!o.parts.length && ['pending', 'buying', 'producing'].includes(o.status)"
+              class="text-xs text-slate-500 hover:text-ink px-2 py-1"
+              @click="toggleSplit(o)"
+            >{{ o.split_delivery ? "حمل یکجا" : "حمل به دفعات" }}</button>
           </template>
           <span class="flex-1" />
           <button
@@ -539,14 +763,21 @@ const FA = new Intl.NumberFormat("fa-IR");
                   <span v-else class="text-xs text-slate-300">—</span>
                 </td>
                 <td class="px-3">
-                  <span
-                    v-if="q.reason_name"
-                    class="text-xs rounded-full px-2 py-0.5"
-                    :class="q.reason_kind === 'win'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-red-50 text-red-500'"
-                  >{{ q.reason_name }}</span>
+                  <div v-if="q.reason_names?.length" class="flex flex-wrap gap-1">
+                    <span
+                      v-for="name in q.reason_names" :key="name"
+                      class="text-xs rounded-full px-2 py-0.5 whitespace-nowrap"
+                      :class="q.reason_kind === 'win'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-red-50 text-red-500'"
+                    >{{ name }}</span>
+                  </div>
                   <span v-else class="text-xs text-slate-300">—</span>
+                  <button
+                    v-if="canEdit && q.is_selected && locked && !cancelled"
+                    class="block text-xs text-slate-400 hover:text-ink mt-1"
+                    @click="editingReasons = true"
+                  >{{ q.reason_names?.length ? "ویرایش دلیل‌ها" : "+ دلیل انتخاب" }}</button>
                   <p v-if="q.decision_note" class="text-xs text-slate-400 mt-0.5">
                     {{ q.decision_note }}
                   </p>
@@ -558,6 +789,12 @@ const FA = new Intl.NumberFormat("fa-IR");
                     :title="`${q.supplier_name} برنده این استعلام شود`"
                     @click="awardFrom(q)"
                   >برنده</button>
+                  <button
+                    v-if="canEdit && !cancelled"
+                    class="text-xs text-slate-400 hover:text-emerald-700 px-1.5"
+                    :title="`کالای دیگری از پیش‌فاکتور ${q.supplier_name}`"
+                    @click="addNextItem(q.supplier)"
+                  >+ قلم بعدی</button>
                   <button
                     v-if="canEdit"
                     class="text-xs text-slate-400 hover:text-ink px-1.5"
@@ -651,12 +888,27 @@ const FA = new Intl.NumberFormat("fa-IR");
         v-if="showQuote"
         :request="request" :quote="editingQuote"
         :taken-supplier-ids="takenSupplierIds"
-        @close="showQuote = false" @saved="afterChange"
+        @close="showQuote = false" @saved="onQuoteSaved"
+      />
+      <QuickQuoteForm
+        v-if="nextItemFor"
+        :supplier-id="nextItemFor" :group="request.id"
+        @close="nextItemFor = null; load()" @added="load()" @saved="nextItemFor = null; load()"
       />
       <AwardDialog
         v-if="showAward"
         :request="request" :quotes="quotes" :preselect="preselect"
         @close="showAward = false" @saved="afterChange"
+      />
+      <AwardDialog
+        v-if="editingReasons"
+        :request="request" :quotes="quotes" reasons-only
+        @close="editingReasons = false" @saved="afterChange"
+      />
+      <PartDialog
+        v-if="partDialog"
+        :order="partDialog.order" :part="partDialog.part"
+        @close="partDialog = null" @saved="afterChange"
       />
       <OrderForm
         v-if="showOrder"
