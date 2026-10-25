@@ -10,7 +10,7 @@ import api from "./client";
  * chart that opened it.
  */
 export interface Drill {
-  kind: "deals" | "customers" | "activities" | "feedback" | "invoices" | null;
+  kind: "deals" | "customers" | "activities" | "feedback" | "invoices" | "tasks" | null;
   params: Record<string, string | number>;
 }
 
@@ -150,6 +150,7 @@ export interface Deal {
   status: "open" | "won" | "lost";
   status_display: string;
   province_name: string;
+  province_id?: number | null;
   group_name: string;
   source_name: string;
   reason_name: string;
@@ -602,6 +603,18 @@ export const crmApi = {
     return data as CrmCustomer & { id: number };
   },
 
+  /** Customers that may be this one — a suggestion, never a decision. */
+  async similarCustomers(id: number): Promise<SimilarCustomer[]> {
+    const { data } = await api.get(`/crm/customers/${id}/similar/`);
+    return data;
+  },
+
+  /** Fold one customer into another; `keep` says which survives. */
+  async mergeCustomer(id: number, other: number, keep: "this" | "other"): Promise<{ id: number; absorbed: number }> {
+    const { data } = await api.post(`/crm/customers/${id}/merge/`, { other, keep });
+    return data;
+  },
+
   async deleteCustomer(id: number) {
     await api.delete(`/crm/customers/${id}/`);
   },
@@ -655,9 +668,17 @@ export const crmApi = {
    * It replays the same `drill` payload the drawer lists from, so the file
    * and the drawer answer the same question.
    */
+  /** Any CRM endpoint that answers a workbook (dashboard, map, کنترل داده…). */
+  async exportUrl(url: string, params: Params = {}) {
+    return api.get(url, { params: clean(params), responseType: "blob" });
+  },
+
   async exportDrill(d: Drill, title: string, extra: Params = {}) {
     return api.get("/crm/export/drill/", {
-      params: clean({ ...d.params, kind: d.kind ?? "deals", title, ...extra }),
+      // Not `kind`: an activities drill carries its own `kind` (call, meeting…)
+      // and the export's record type used to overwrite it — every activities
+      // export came back empty.
+      params: clean({ ...d.params, export_kind: d.kind ?? "deals", title, ...extra }),
       responseType: "blob",
     });
   },
@@ -965,4 +986,17 @@ export interface DataCheck {
   severity: "high" | "medium" | "low";
   count: number;
   rows: DataCheckRow[];
+}
+
+export interface SimilarCustomer {
+  id: number;
+  name_fa: string;
+  city: string;
+  province: string;
+  owner: string;
+  phone: string;
+  national_id: string;
+  deals: number;
+  invoices: number;
+  why: string[];
 }

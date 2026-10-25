@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import { useRouter } from "vue-router";
 import { crmApi, type DataCheck, type DataCheckRow } from "@/api/crm";
 import { num } from "@/utils/format";
@@ -66,6 +67,7 @@ const card = "bg-surface rounded-card shadow-soft min-w-0";
       <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
         <input v-model="showClean" type="checkbox" /> نمایش بررسی‌های بدون مشکل
       </label>
+      <CrmExportButton url="/crm/checks/export/" :params="{}" title="کنترل داده CRM" :total="checks.length" subtle />
       <button class="text-xs bg-surface shadow-soft rounded-xl px-3 py-1.5 text-slate-600 hover:text-ink" :disabled="loading" @click="load">
         بررسی دوباره
       </button>

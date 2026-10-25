@@ -317,3 +317,34 @@ def to_stream(wb):
     wb.save(stream)
     stream.seek(0)
     return stream
+
+
+# --------------------------------------------------------------------------
+# Several tables in one workbook — dashboard, کنترل داده, فروش سوری
+# --------------------------------------------------------------------------
+def sheets_workbook(title: str, sheets: list[dict], context: list[tuple[str, str]]):
+    """
+    `sheets`: [{name, columns, rows, title?, subtitle?, total?}] — one sheet
+    each, in order, styled like every other CRM export, then «فیلترها».
+    """
+    wb = Workbook()
+    for i, sh in enumerate(sheets):
+        ws = _sheet(wb, sh["name"][:31], first=(i == 0))
+        start = _title_block(ws, sh.get("title") or title, sh.get("subtitle", ""), len(sh["columns"]))
+        numeric = {c["key"] for c in sh["columns"] if c.get("fmt") in ("rial", "count", "pct", "days")}
+        rows = [{k: (_numeric(v) if k in numeric else v) for k, v in r.items()} for r in sh["rows"]]
+        _write_table(ws, sh["columns"], rows, start_row=start, total_row=sh.get("total"))
+    _filters_sheet(wb, context)
+    return wb
+
+
+DRILL_COLUMNS["tasks"] = [
+    {"key": "title", "label": "کار", "fmt": "text"},
+    {"key": "customer_name", "label": "مشتری", "fmt": "text"},
+    {"key": "owner_name", "label": "کارشناس", "fmt": "text"},
+    {"key": "kind_display", "label": "نوع", "fmt": "text"},
+    {"key": "due_jalali", "label": "موعد", "fmt": "text"},
+    {"key": "state", "label": "وضعیت", "fmt": "text"},
+    {"key": "note", "label": "توضیح", "fmt": "text"},
+]
+KIND_TITLE["tasks"] = "کارها و یادآوری‌ها"

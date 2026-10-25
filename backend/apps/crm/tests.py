@@ -1828,7 +1828,7 @@ class WorkScreensTests(APITestCase):
                 opened_at=now - timedelta(days=2),
             )
         self.client.force_authenticate(self.rep)
-        res = self.client.get("/api/crm/export/drill/", {"kind": "deals", "status": "open", "page_size": 25})
+        res = self.client.get("/api/crm/export/drill/", {"export_kind": "deals", "status": "open", "page_size": 25})
         titles = [r[1] for r in self._sheet_rows(res)]
         self.assertEqual(len(titles), 41)
         self.assertNotIn("معامله دیگری", titles)
@@ -1836,7 +1836,7 @@ class WorkScreensTests(APITestCase):
     def test_drill_export_can_be_narrowed_to_ticked_rows(self):
         self.client.force_authenticate(self.boss)
         res = self.client.get("/api/crm/export/drill/", {
-            "kind": "deals", "status": "open", "ids": str(self.their_deal.id),
+            "export_kind": "deals", "status": "open", "ids": str(self.their_deal.id),
         })
         self.assertEqual([r[1] for r in self._sheet_rows(res)], ["معامله دیگری"])
 
@@ -2450,3 +2450,126 @@ class TeamyarCustomerImportTests(APITestCase):
         found = {c["key"]: c for c in checks.run()["checks"]}
         self.assertEqual(found["invoice_deal_customer"]["count"], 1)
         self.assertEqual(found["invoice_deal_customer"]["rows"][0]["id"], deal.pk)
+
+
+class ActivityExportTests(APITestCase):
+    """The activities export: every activity, and an activity-type filter that survives."""
+
+    def setUp(self):
+        now = timezone.now()
+        self.ceo = _user("ae-ceo", "executive")
+        c = Customer.objects.create(code="ae-c", name_fa="مشتری", first_contact_at=now)
+        Activity.objects.create(kind="call_out", customer=c, at=now)
+        Activity.objects.create(kind="meeting", customer=c, at=now)
+
+    def _count(self, params):
+        import io
+        import openpyxl
+
+        res = self.client.get("/api/crm/export/drill/", params)
+        self.assertEqual(res.status_code, 200)
+        ws = openpyxl.load_workbook(io.BytesIO(res.content)).worksheets[0]
+        return sum(1 for r in ws.iter_rows(values_only=True) if r and r[0] in ("تماس پیگیری", "جلسه حضوری"))
+
+    def test_activities_export_is_not_empty_and_keeps_its_kind(self):
+        self.client.force_authenticate(self.ceo)
+        self.assertEqual(self._count({"export_kind": "activities"}), 2)
+        self.assertEqual(self._count({"export_kind": "activities", "kind": "call"}), 1)
+
+
+class CustomerPageMergeTests(APITestCase):
+    """«ادغام با مشتری دیگر» on the customer page, and the province from the deals list."""
+
+    def setUp(self):
+        from apps.sales.models import DimProvince
+
+        now = timezone.now()
+        self.boss = _user("cm-boss", "manager", "sales_team")
+        self.rep = _user("cm-rep", "operator", "sales_team")
+        self.prov = DimProvince.objects.create(code="cm-fars", name_fa="فارس")
+        self.a = Customer.objects.create(code="cm-a", name_fa="فروشگاه رضا موسوی", mobile="09121111111",
+                                         first_contact_at=now)
+        self.b = Customer.objects.create(code="cm-b", name_fa="رضا موسوی", mobile="09121111111",
+                                         address="شیراز", first_contact_at=now)
+        self.deal = Deal.objects.create(code="cm-d", title="معامله ب", customer=self.b, opened_at=now)
+        CustomerExternalRef.objects.create(source=ExternalSource.ARPA, external_id="503051", customer=self.b)
+
+    def test_similar_suggests_by_phone_and_name(self):
+        self.client.force_authenticate(self.boss)
+        rows = self.client.get(f"/api/crm/customers/{self.a.pk}/similar/").data
+        self.assertEqual(rows[0]["id"], self.b.pk)
+        self.assertIn("تلفن یکسان", rows[0]["why"])
+
+    def test_merge_moves_everything_and_is_recorded(self):
+        self.client.force_authenticate(self.boss)
+        res = self.client.post(f"/api/crm/customers/{self.a.pk}/merge/",
+                               {"other": self.b.pk, "keep": "this"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.deal.refresh_from_db()
+        self.b.refresh_from_db()
+        self.a.refresh_from_db()
+        self.assertEqual(self.deal.customer_id, self.a.pk)
+        self.assertEqual(self.b.merged_into_id, self.a.pk)
+        self.assertEqual(self.a.address, "شیراز")  # the blank filled from the absorbed one
+        self.assertTrue(self.a.external_refs.filter(external_id="503051").exists())
+        self.assertTrue(CustomerMatchCandidate.objects.filter(state="accepted").exists())
+
+    def test_a_rep_cannot_merge(self):
+        from apps.sales.models import DimEmployee
+
+        emp = DimEmployee.objects.create(code="cm-e", full_name_fa="کارشناس", user=self.rep)
+        Customer.objects.filter(pk__in=[self.a.pk, self.b.pk]).update(owner=emp)
+        self.client.force_authenticate(self.rep)
+        res = self.client.post(f"/api/crm/customers/{self.a.pk}/merge/", {"other": self.b.pk}, format="json")
+        self.assertEqual(res.status_code, 403)
+
+    def test_deals_without_province_and_setting_it(self):
+        self.client.force_authenticate(self.boss)
+        params = {"status": "open", "date_basis": "opened", "no_province": "1"}
+        self.assertEqual(self.client.get("/api/crm/deals/", params).data["count"], 1)
+        row = self.client.get("/api/crm/deals/", params).data["results"][0]
+        self.assertIsNone(row["province_id"])
+        self.client.patch(f"/api/crm/customers/{self.b.pk}/", {"province": self.prov.pk}, format="json")
+        self.assertEqual(self.client.get("/api/crm/deals/", params).data["count"], 0)
+
+
+class SectionExportTests(APITestCase):
+    """Every CRM section answers a real workbook."""
+
+    def setUp(self):
+        from datetime import date
+        from apps.sales.models import DimProvince
+
+        now = timezone.now()
+        self.ceo = _user("se-ceo", "executive")
+        self.admin = _user("se-admin", "admin")
+        self.prov = DimProvince.objects.create(code="se-teh", name_fa="تهران")
+        c = Customer.objects.create(code="se-c", name_fa="مشتری", province=self.prov, first_contact_at=now)
+        Deal.objects.create(code="se-d", title="معامله", customer=c, opened_at=now)
+        Task.objects.create(title="پیگیری", customer=c, due_at=now)
+        SalesInvoice.objects.create(code="se-i", number="1", customer=c, issued_at=timezone.localdate(),
+                                    amount_rial=100)
+        SalesInvoice.objects.create(code="se-s", number="2", customer=c, issued_at=date(2026, 1, 1),
+                                    amount_rial=50, review="suspect")
+
+    def _sheets(self, url, params, user):
+        import io
+        import openpyxl
+
+        self.client.force_authenticate(user)
+        res = self.client.get(url, params)
+        self.assertEqual(res.status_code, 200, getattr(res, "data", res.content[:200]))
+        self.assertIn("spreadsheetml", res["Content-Type"])
+        return openpyxl.load_workbook(io.BytesIO(res.content)).sheetnames
+
+    def test_dashboard_geo_tasks(self):
+        self.assertIn("شاخص‌ها", self._sheets("/api/crm/dashboard/export/", {}, self.ceo))
+        self.assertIn("استان‌ها", self._sheets("/api/crm/geo/", {"export": "1"}, self.ceo))
+        self.assertIn("مشتریان", self._sheets("/api/crm/geo/", {"export": "1", "province": self.prov.pk}, self.ceo))
+        self.assertIn("کارها و یادآوری‌ها", self._sheets("/api/crm/export/drill/", {"export_kind": "tasks"}, self.ceo))
+
+    def test_checks_and_suspect_are_the_admins(self):
+        self.assertIn("خلاصه", self._sheets("/api/crm/checks/export/", {}, self.admin))
+        self.assertIn("فروش سوری", self._sheets("/api/crm/suspect-invoices/", {"export": "1"}, self.admin))
+        self.client.force_authenticate(self.ceo)
+        self.assertEqual(self.client.get("/api/crm/checks/export/").status_code, 403)

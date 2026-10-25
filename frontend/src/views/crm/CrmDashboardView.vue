@@ -5,6 +5,7 @@ import { crmApi, type CrmDashboard, type DashCard, type ReportRow } from "@/api/
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import CrmChart from "@/components/crm/CrmChart.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import FunnelChart from "@/components/crm/FunnelChart.vue";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
@@ -300,6 +301,9 @@ async function onSaved(id?: number) {
     <DealForm v-if="modal === 'deal'" @close="modal = null" @saved="onSaved" />
     <ActivityForm v-if="modal === 'activity'" @close="modal = null" @saved="onSaved" />
 
+    <div class="flex justify-end no-print -mb-2">
+      <CrmExportButton url="/crm/dashboard/export/" :params="crm.query" title="داشبورد CRM" :total="data?.cards.length ?? 0" subtle />
+    </div>
     <CrmFilterBar />
 
     <!-- ============ Headline KPIs ============ -->

@@ -22,7 +22,9 @@ router.register("match-candidates", views.MatchCandidateViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("dashboard/export/", views.CrmDashboardExportView.as_view(), name="crm-dashboard-export"),
     path("dashboard/", views.CrmDashboardView.as_view(), name="crm-dashboard"),
+    path("checks/export/", views.CrmChecksExportView.as_view(), name="crm-checks-export"),
     path("teamyar-import/", views.TeamyarImportView.as_view(), name="crm-teamyar-import"),
     path("checks/", views.CrmChecksView.as_view(), name="crm-checks"),
     path("wipe/", views.CrmWipeView.as_view(), name="crm-wipe"),
