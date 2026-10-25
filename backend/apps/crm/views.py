@@ -664,6 +664,86 @@ class CustomerViewSet(_Base):
             Customer.objects.filter(dataset=active_dataset(request))
         ))
 
+    @action(detail=True, methods=["get"])
+    def similar(self, request, pk=None):
+        """
+        Customers that may be this one: same شناسه/کد ملی, same mobile or
+        phone, or a name that shares its words. A suggestion for the person
+        deciding a merge — never a decision; nothing here merges.
+        """
+        from apps.crm.matching import id_key, name_key, phone_key
+
+        me = self.get_object()
+        live = self.get_queryset().filter(merged_into__isnull=True).exclude(pk=me.pk)
+        found: dict[int, dict] = {}
+
+        def add(qs, why):
+            for c in qs.select_related("owner", "province")[:10]:
+                row = found.setdefault(c.pk, {
+                    "id": c.pk, "name_fa": c.name_fa, "city": c.city,
+                    "province": c.province.name_fa if c.province_id else "",
+                    "owner": c.owner.full_name_fa if c.owner_id else "",
+                    "phone": c.mobile or c.phone, "national_id": c.national_id,
+                    "deals": c.deals.count(), "invoices": c.invoices.count(),
+                    "why": [],
+                })
+                if why not in row["why"]:
+                    row["why"].append(why)
+
+        for value in {id_key(me.national_id), id_key(me.economic_code)} - {""}:
+            add(live.filter(Q(national_id=value) | Q(economic_code=value)), "شناسه/کد ملی یکسان")
+        for value in {phone_key(me.mobile), phone_key(me.phone)} - {""}:
+            add(live.filter(Q(mobile__endswith=value) | Q(phone__endswith=value)), "تلفن یکسان")
+        words = [w for w in name_key(me.name_fa).split() if len(w) > 2]
+        if words:
+            q = Q()
+            for w in words:
+                q &= Q(name_fa__icontains=w)
+            add(live.filter(q), "نام شبیه")
+            if len(words) > 1:
+                longest = max(words, key=len)
+                add(live.filter(name_fa__icontains=longest), "بخشی از نام")
+        rows = sorted(found.values(), key=lambda r: -len(r["why"]))[:15]
+        return Response(rows)
+
+    @action(detail=True, methods=["post"])
+    def merge(self, request, pk=None):
+        """
+        «این دو یک مشتری‌اند» — from the customer page itself.
+
+        `other` is the second customer; `keep` says which survives ("this" or
+        "other"). Everything the absorbed one had — deals, invoices,
+        activities, tasks, its آرپا/دیدار codes — moves to the survivor, which
+        also takes any field it was missing. The absorbed row is kept and
+        marked, not deleted. The pair is filed in بازبینی تطبیق as decided, so
+        there is a record of who merged what.
+        """
+        if not is_crm_manager(request.user):
+            return Response({"detail": "ادغام مشتری با مدیر فروش است."}, status=status.HTTP_403_FORBIDDEN)
+        me = self.get_object()
+        try:
+            other = self.get_queryset().get(pk=int(request.data.get("other") or 0))
+        except (Customer.DoesNotExist, ValueError):
+            return Response({"detail": "مشتری دوم پیدا نشد."}, status=status.HTTP_400_BAD_REQUEST)
+        survivor, absorbed = (me, other) if request.data.get("keep", "this") == "this" else (other, me)
+        try:
+            with transaction.atomic():
+                candidate = crm_merge.queue_pair(survivor, absorbed)
+                if candidate is None:
+                    candidate = CustomerMatchCandidate.objects.filter(
+                        source="crm", state=CustomerMatchCandidate.State.PENDING,
+                        customer_id__in=(survivor.pk, absorbed.pk),
+                        duplicate_id__in=(survivor.pk, absorbed.pk),
+                    ).first()
+                if candidate is not None:
+                    crm_merge.accept(candidate, request.user, customer=survivor)
+                else:
+                    crm_merge.absorb(survivor, absorbed, request.user)
+        except crm_merge.MergeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        survivor.refresh_from_db()
+        return Response({"id": survivor.pk, "name_fa": survivor.name_fa, "absorbed": absorbed.pk})
+
     @action(detail=False, methods=["post"], url_path="bulk-review")
     def bulk_review(self, request):
         """
@@ -1044,6 +1124,9 @@ class DealViewSet(_Base):
                 | Q(customer__name_fa__icontains=search)
                 | Q(code__icontains=search)
             )
+        # «فقط بدون استان» — the deals whose customer the map cannot place yet.
+        if q.get("no_province") == "1":
+            qs = qs.filter(customer__province__isnull=True)
         ids = id_list(self.request)
         if ids:
             qs = qs.filter(pk__in=ids)
@@ -1456,7 +1539,73 @@ class CrmGeoView(GatedAPIView):
             "start": f.start.isoformat() if f.start else None,
             "end": f.end.isoformat() if f.end else None,
         }
+        if request.query_params.get("export") == "1":
+            return _geo_workbook(data, request)
         return Response(data)
+
+
+def _geo_workbook(data: dict, request):
+    """فروش جغرافیایی → اکسل, exactly what the map shows: the country, or one province."""
+    from apps.crm.export import sheets_workbook
+
+    lbl = {"key": "label", "label": "عنوان", "fmt": "text"}
+    amt = {"key": "amount", "label": "فروش (ریال)", "fmt": "rial"}
+    context = export_context(request)
+    if "customers" not in data:
+        sheet = {
+            "name": "استان‌ها", "title": "فروش به تفکیک استان",
+            "columns": [
+                {"key": "label", "label": "استان", "fmt": "text"}, amt,
+                {"key": "share_pct", "label": "سهم از کل", "fmt": "pct"},
+                {"key": "count", "label": "فاکتور", "fmt": "count"},
+                {"key": "customers", "label": "مشتری خریدار", "fmt": "count"},
+                {"key": "customer_base", "label": "کل مشتریان", "fmt": "count"},
+                {"key": "target", "label": "تارگت (ریال)", "fmt": "rial"},
+                {"key": "achievement_pct", "label": "تحقق", "fmt": "pct"},
+                {"key": "owner_label", "label": "کارشناسان", "fmt": "text"},
+            ],
+            "rows": data["rows"],
+            "total": {"label": "جمع کل", "amount": data["total"]},
+        }
+        return xlsx_response(sheets_workbook("فروش جغرافیایی", [sheet], context), "فروش جغرافیایی")
+
+    name = data["label"]
+    sheets = [
+        {"name": "مشتریان", "title": f"مشتریان {name}", "columns": [
+            {"key": "label", "label": "مشتری", "fmt": "text"},
+            {"key": "city", "label": "شهر", "fmt": "text"},
+            {"key": "owner", "label": "کارشناس", "fmt": "text"},
+            {"key": "group", "label": "گروه", "fmt": "text"},
+            {"key": "amount", "label": "خرید (ریال)", "fmt": "rial"},
+            {"key": "count", "label": "فاکتور", "fmt": "count"},
+            {"key": "unsettled", "label": "مانده (ریال)", "fmt": "rial"},
+            {"key": "last_purchase", "label": "آخرین خرید", "fmt": "text"},
+        ], "rows": [
+            {**c, "last_purchase": jalali_str(dt_date(c["last_purchase"])) if c["last_purchase"] else ""}
+            for c in data["customers"]
+        ], "total": {"label": "جمع کل", "amount": data["amount"], "unsettled": data["unsettled"]}},
+        {"name": "آخرین خریدها", "title": f"آخرین خریدهای {name}", "columns": [
+            {"key": "number", "label": "برگه", "fmt": "text"},
+            {"key": "date", "label": "تاریخ", "fmt": "text"},
+            {"key": "customer", "label": "مشتری", "fmt": "text"},
+            {"key": "amount", "label": "مبلغ (ریال)", "fmt": "rial"},
+            {"key": "unsettled", "label": "مانده (ریال)", "fmt": "rial"},
+        ], "rows": [{**r, "date": jalali_str(dt_date(r["date"]))} for r in data["recent"]]},
+        {"name": "کالاها", "title": f"پرفروش‌ترین کالاهای {name}", "columns": [
+            lbl, amt, {"key": "quantity", "label": "تعداد", "fmt": "count"},
+        ], "rows": data["products"]},
+        {"name": "شهرها", "title": f"فروش شهرهای {name}", "columns": [
+            lbl, amt, {"key": "buyers", "label": "خریدار", "fmt": "count"},
+        ], "rows": data["cities"]},
+        {"name": "کارشناسان", "title": f"کارشناسان {name}", "columns": [lbl, amt], "rows": data["reps"]},
+    ]
+    return xlsx_response(sheets_workbook(f"فروش {name}", sheets, context), f"فروش {name}")
+
+
+def dt_date(iso: str):
+    from datetime import date
+
+    return date.fromisoformat(iso[:10])
 
 
 class CrmReportView(GatedAPIView):
@@ -1854,6 +2003,7 @@ DRILL_VIEWSETS = {
     "activities": "ActivityViewSet",
     "feedback": "CustomerFeedbackViewSet",
     "invoices": "SalesInvoiceViewSet",
+    "tasks": "TaskViewSet",
 }
 
 
@@ -1875,7 +2025,9 @@ class CrmDrillExportView(GatedAPIView):
     def get(self, request):
         from apps.crm.export import KIND_TITLE, drill_workbook
 
-        kind = request.query_params.get("kind") or "deals"
+        # `export_kind`, not `kind`: the list's own filters read `kind` (an
+        # activity's type), so the two must not share a name.
+        kind = request.query_params.get("export_kind") or "deals"
         if kind not in DRILL_VIEWSETS:
             return Response(
                 {"detail": f"نوع «{kind}» تعریف نشده است."},
@@ -1892,6 +2044,13 @@ class CrmDrillExportView(GatedAPIView):
 
         total = qs.count()
         rows = viewset.get_serializer(qs[: self.MAX_ROWS], many=True).data
+        if kind == "tasks":
+            now = timezone.now().isoformat()
+            rows = [
+                {**r, "state": "انجام شده" if r.get("is_done")
+                 else ("عقب‌افتاده" if (r.get("due_at") or "") < now else "باز")}
+                for r in rows
+            ]
 
         title = request.query_params.get("title") or KIND_TITLE.get(kind, "ریز اطلاعات")
         extra: list[tuple[str, str]] = []
@@ -2412,6 +2571,28 @@ class SuspectInvoiceView(GatedAPIView):
             }
             for i in qs.order_by("-issued_at", "-number")[:500]
         ]
+        if request.query_params.get("export") == "1":
+            from apps.crm.export import sheets_workbook
+
+            label = dict(Review.choices).get(state, state)
+            sheet = {
+                "name": "فروش سوری", "title": f"فروش سوری — {label}",
+                "subtitle": f"{len(rows):,} فاکتور",
+                "columns": [
+                    {"key": "number", "label": "شماره برگه", "fmt": "text"},
+                    {"key": "issued_jalali", "label": "تاریخ", "fmt": "text"},
+                    {"key": "book_display", "label": "دفتر", "fmt": "text"},
+                    {"key": "customer", "label": "مشتری", "fmt": "text"},
+                    {"key": "owner", "label": "بازاریاب", "fmt": "text"},
+                    {"key": "created_by", "label": "ایجادکننده", "fmt": "text"},
+                    {"key": "responsible", "label": "مسوول فروش", "fmt": "text"},
+                    {"key": "payment_terms", "label": "شرایط تسویه", "fmt": "text"},
+                    {"key": "amount", "label": "مبلغ فروش (ریال)", "fmt": "rial"},
+                ],
+                "rows": rows,
+                "total": {"number": "جمع کل", "amount": sum(r["amount"] for r in rows)},
+            }
+            return xlsx_response(sheets_workbook("فروش سوری", [sheet], []), "فروش سوری")
         return Response({"state": state, "rows": rows, "counts": counts})
 
     def post(self, request):
@@ -2557,3 +2738,98 @@ class CrmChecksView(GatedAPIView):
         from apps.crm import checks
 
         return Response(checks.run())
+
+
+def _dashboard_sheets(data: dict) -> list[dict]:
+    """The dashboard as tables: every tile with its previous period, then every widget."""
+    unit = {"rial": "ریال", "count": "تعداد", "percent": "درصد", "days": "روز"}
+    cards = []
+    for c in data["cards"]:
+        prev = c.get("prev")
+        change = None
+        if prev not in (None, 0) and c["unit"] != "percent":
+            change = round((float(c["value"]) - float(prev)) / abs(float(prev)) * 100, 1)
+        cards.append({"label": c["label"], "value": c["value"], "unit": unit.get(c["unit"], ""),
+                      "prev": prev, "change": change})
+
+    lbl = {"key": "label", "label": "عنوان", "fmt": "text"}
+    amt = {"key": "amount", "label": "مبلغ (ریال)", "fmt": "rial"}
+    cnt = {"key": "count", "label": "تعداد", "fmt": "count"}
+
+    def t(name, rows, cols):
+        return {"name": name, "columns": cols, "rows": rows}
+
+    return [
+        t("شاخص‌ها", cards, [
+            {"key": "label", "label": "شاخص", "fmt": "text"},
+            {"key": "value", "label": "مقدار", "fmt": "count"},
+            {"key": "unit", "label": "واحد", "fmt": "text"},
+            {"key": "prev", "label": "دوره قبل", "fmt": "count"},
+            {"key": "change", "label": "تغییر (٪)", "fmt": "pct"},
+        ]),
+        t("روند فروش", data["trend"], [lbl, amt, {"key": "profit", "label": "سود (ریال)", "fmt": "rial"}, cnt]),
+        t("فرصت‌های جدید", data["incoming_trend"], [
+            lbl, {"key": "won_count", "label": "موفق", "fmt": "count"},
+            {"key": "open_count", "label": "جاری", "fmt": "count"},
+            {"key": "lost_count", "label": "ناموفق", "fmt": "count"}]),
+        t("فروشندگان", data["top_sellers"], [lbl, amt, cnt]),
+        t("قیف فروش", data["funnel"], [lbl, cnt, amt]),
+        t("دلایل از دست رفتن", data["lost_reasons"], [lbl, cnt, amt]),
+        t("فعالیت‌ها", data["activities_by_kind"], [lbl, cnt]),
+        t("منابع سرنخ", data["sources"], [lbl, amt, {"key": "conversion_pct", "label": "نرخ تبدیل", "fmt": "pct"}]),
+        t("استان‌ها", data["provinces"], [
+            lbl, {"key": "owner_label", "label": "کارشناس", "fmt": "text"}, amt,
+            {"key": "target", "label": "تارگت (ریال)", "fmt": "rial"},
+            {"key": "achievement_pct", "label": "تحقق", "fmt": "pct"}]),
+        t("گروه مشتری", data["by_group"], [lbl, amt, cnt]),
+        t("مشتریان جدید", data["new_customers_by_user"], [lbl, cnt]),
+    ]
+
+
+class CrmDashboardExportView(GatedAPIView):
+    """داشبورد → اکسل: every tile (with the previous period) and every widget."""
+
+    def get(self, request):
+        from apps.crm.export import sheets_workbook
+
+        data = rpt.dashboard(query_filters(request))
+        wb = sheets_workbook("داشبورد CRM", _dashboard_sheets(data), export_context(request))
+        return xlsx_response(wb, "داشبورد CRM")
+
+
+class CrmChecksExportView(GatedAPIView):
+    """کنترل داده → اکسل: a summary, then a sheet per check that found something."""
+
+    permission_classes = [SystemAdminOnly]
+
+    def get(self, request):
+        from apps.crm import checks
+        from apps.crm.export import sheets_workbook
+
+        result = checks.run()
+        sev = {"high": "جدی", "medium": "مهم", "low": "تکمیلی"}
+        sheets = [{
+            "name": "خلاصه", "title": "کنترل داده‌ی CRM",
+            "columns": [
+                {"key": "label", "label": "بررسی", "fmt": "text"},
+                {"key": "severity", "label": "اهمیت", "fmt": "text"},
+                {"key": "count", "label": "تعداد", "fmt": "count"},
+                {"key": "why", "label": "توضیح", "fmt": "text"},
+            ],
+            "rows": [{**c, "severity": sev[c["severity"]]} for c in result["checks"]],
+        }]
+        for i, c in enumerate(r for r in result["checks"] if r["count"]):
+            shown = len(c["rows"])
+            sheets.append({
+                # Sheet names must be unique and at most 31 characters.
+                "name": f"{i + 1}. {c['label']}"[:31], "title": c["label"],
+                "subtitle": f"{c['count']:,} مورد" + (f" — {shown} مورد اول" if c["count"] > shown else ""),
+                "columns": [
+                    {"key": "title", "label": "رکورد", "fmt": "text"},
+                    {"key": "customer", "label": "مشتری", "fmt": "text"},
+                    {"key": "detail", "label": "جزئیات", "fmt": "text"},
+                    {"key": "id", "label": "شناسه", "fmt": "text"},
+                ],
+                "rows": c["rows"],
+            })
+        return xlsx_response(sheets_workbook("کنترل داده", sheets, []), "کنترل داده CRM")

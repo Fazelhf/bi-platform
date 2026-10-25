@@ -5,6 +5,7 @@ import { crmApi, type Deal, type ForecastBucket, type PipelineColumn } from "@/a
 import { useCrmStore } from "@/stores/crm";
 import { num, rial } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import DealForm from "@/components/crm/DealForm.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import { toast } from "@/composables/useUi";
@@ -199,6 +200,9 @@ async function onSaved() {
 
 <template>
   <div class="space-y-4">
+    <div class="flex justify-end no-print -mb-2">
+      <CrmExportButton kind="deals" :params="{ ...crm.query, status: 'open', date_basis: 'opened' }" title="کاریز فروش — معامله‌های جاری" :total="totals.count" subtle />
+    </div>
     <CrmFilterBar />
 
     <!-- Board summary -->

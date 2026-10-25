@@ -163,6 +163,8 @@ class DealListSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True)
     stage_name = serializers.CharField(source="stage.name_fa", read_only=True)
     province_name = serializers.CharField(source="customer.province.name_fa", read_only=True)
+    #: For changing the customer's province straight from the deals list.
+    province_id = serializers.IntegerField(source="customer.province_id", read_only=True)
     group_name = serializers.CharField(source="customer.group.name_fa", read_only=True)
     source_name = serializers.CharField(source="lead_source.name_fa", read_only=True)
     reason_name = serializers.CharField(source="lost_reason.name_fa", read_only=True)
@@ -180,7 +182,7 @@ class DealListSerializer(serializers.ModelSerializer):
         fields = (
             "id", "code", "title", "customer", "customer_name",
             "owner", "owner_name", "stage", "stage_name", "status",
-            "status_display", "province_name", "group_name",
+            "status_display", "province_name", "province_id", "group_name",
             "lead_source", "source_name", "lost_reason", "reason_name",
             "lost_note", "amount_rial", "cost_rial", "profit_rial",
             "discount_rial", "shipping_cost_rial", "other_cost_rial",

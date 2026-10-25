@@ -5,9 +5,11 @@ import { crmApi, type CrmActivity, type CrmCustomer, type Deal } from "@/api/crm
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import DealForm from "@/components/crm/DealForm.vue";
 import ActivityForm from "@/components/crm/ActivityForm.vue";
 import TaskForm from "@/components/crm/TaskForm.vue";
+import MergeCustomerModal from "@/components/crm/MergeCustomerModal.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -46,7 +48,14 @@ onMounted(async () => { await crm.loadOptions(); await load(); });
 watch(() => route.params.id, load);
 
 // Entry forms opened from this page — all pre-bound to this customer.
-const modal = ref<"customer" | "deal" | "activity" | "task" | null>(null);
+const modal = ref<"customer" | "deal" | "activity" | "task" | "merge" | null>(null);
+
+/** After a merge the page follows the customer that stayed. */
+function onMerged(id: number) {
+  modal.value = null;
+  if (id !== customer.value?.id) router.replace({ name: "crm-customer", params: { id } });
+  else load();
+}
 
 async function onSaved(id?: number) {
   const wasEdit = modal.value === "customer";
@@ -109,15 +118,28 @@ const card = "bg-surface rounded-card shadow-soft p-4";
     <div class="flex items-center gap-2 no-print">
       <button class="text-sm text-slate-400 hover:text-ink" @click="router.back()">‹ بازگشت</button>
       <span class="flex-1"></span>
+      <template v-if="customer">
+        <!-- All time: the customer's whole history, not the CRM's current window. -->
+        <CrmExportButton kind="deals" :params="{ customer: customer.id, status: '', date_basis: 'opened', date_from: '2000-01-01' }" :title="`معاملات ${customer.name_fa}`" :total="1" label="معاملات" subtle />
+        <CrmExportButton kind="invoices" :params="{ customer: customer.id, date_from: '2000-01-01' }" :title="`فاکتورهای ${customer.name_fa}`" :total="1" label="فاکتورها" subtle />
+        <CrmExportButton kind="activities" :params="{ customer: customer.id, date_from: '2000-01-01' }" :title="`فعالیت‌های ${customer.name_fa}`" :total="1" label="فعالیت‌ها" subtle />
+      </template>
       <template v-if="crm.canEdit && customer">
         <button class="text-sm bg-panel text-white rounded-xl px-3 py-1.5" @click="modal = 'activity'">ثبت فعالیت</button>
         <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'deal'">معامله جدید</button>
         <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'task'">کار جدید</button>
         <button class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5" @click="modal = 'customer'">ویرایش</button>
+        <!-- Merging fuses two order histories; it is the manager's call. -->
+        <button
+          v-if="crm.isManager"
+          class="text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl px-3 py-1.5"
+          @click="modal = 'merge'"
+        >ادغام با مشتری دیگر</button>
       </template>
     </div>
 
     <CustomerForm v-if="modal === 'customer'" :customer="customer" @close="modal = null" @saved="onSaved" />
+    <MergeCustomerModal v-if="modal === 'merge' && customer" :customer="customer" @close="modal = null" @merged="onMerged" />
     <DealForm v-if="modal === 'deal'" :customer-id="customer!.id" @close="modal = null" @saved="onSaved" />
     <ActivityForm
       v-if="modal === 'activity'" :customer-id="customer!.id" :customer-label="customer!.name_fa"

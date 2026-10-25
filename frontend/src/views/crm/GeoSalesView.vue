@@ -8,6 +8,7 @@ import { init, registerMap, type EChartsOption, type EChartsType } from "@/lib/e
 import { activePalette, isDark, labelColor, mutedColor, surfaceColor, TOOLTIP } from "@/components/charts/theme";
 import { num, pct, rial } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import CrmChart from "@/components/crm/CrmChart.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -335,6 +336,12 @@ const card = "bg-surface rounded-card shadow-soft p-4 min-w-0";
             <h2 v-else key="country" class="font-bold text-ink">فروش به تفکیک استان</h2>
           </Transition>
           <span class="flex-1"></span>
+          <CrmExportButton
+            url="/crm/geo/"
+            :params="{ ...params(), export: 1, ...(selected ? { province: selected.id } : {}) }"
+            :title="selected ? `فروش ${selected.label}` : 'فروش جغرافیایی'"
+            :total="overview?.rows.length ?? 0" subtle
+          />
           <div v-if="!selected" class="flex bg-slate-100 rounded-xl p-0.5 text-xs">
             <button
               v-for="m in METRICS" :key="m.key"

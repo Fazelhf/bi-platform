@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   crmApi,
@@ -386,6 +387,7 @@ const tile = "bg-slate-50 rounded-xl p-3";
           </div>
           <span v-if="list?.counts[state]" class="text-xs text-slate-400">{{ rial(list.counts[state]!.amount) }}</span>
           <span class="flex-1"></span>
+          <CrmExportButton url="/crm/suspect-invoices/" :params="{ state, search, export: 1 }" title="فروش سوری" :total="rows.length" subtle />
           <input
             v-model="search"
             class="bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-slate-300 w-56"

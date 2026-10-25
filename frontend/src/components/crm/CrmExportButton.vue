@@ -14,19 +14,25 @@ import { num } from "@/utils/format";
  * button states it rather than leaving the reader to find out in Excel.
  */
 const props = withDefaults(defineProps<{
-  kind: Drill["kind"];
+  /** A list's records — or, with `url`, an endpoint that builds its own workbook. */
+  kind?: Drill["kind"];
+  url?: string;
   params: Record<string, any>;
   title: string;
   total?: number;
   subtle?: boolean;
-}>(), { total: 0, subtle: false });
+  /** Shown instead of «خروجی اکسل» where several buttons sit side by side. */
+  label?: string;
+}>(), { kind: "deals", url: "", total: 0, subtle: false, label: "" });
 
 const busy = ref(false);
 
 async function run() {
   busy.value = true;
   try {
-    const res = await crmApi.exportDrill({ kind: props.kind, params: props.params }, props.title);
+    const res = props.url
+      ? await crmApi.exportUrl(props.url, { ...props.params, title: props.title })
+      : await crmApi.exportDrill({ kind: props.kind ?? "deals", params: props.params }, props.title);
     saveAsFile(res, `${props.title}.xlsx`);
   } catch {
     toast.error("خروجی اکسل گرفته نشد.");
@@ -49,6 +55,6 @@ async function run() {
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
-    <span>{{ busy ? "در حال ساخت…" : "خروجی اکسل" }}</span>
+    <span>{{ busy ? "در حال ساخت…" : label || "خروجی اکسل" }}</span>
   </button>
 </template>
