@@ -80,6 +80,7 @@ const PATHS: Record<string, string> = {
   info: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 16v-4M12 8h.01",
   filter: "M22 3H2l8 9.5V19l4 2v-8.5z",
   calendar: "M3 5h18v16H3zM16 3v4M8 3v4M3 10h18",
+  pin: "M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z",
 };
 </script>
 

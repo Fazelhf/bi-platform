@@ -139,37 +139,54 @@ async function remove(n: Note) {
 /** A tinted card that still reads in both skins — never a flat fill. */
 function cardStyle(n: Note): Record<string, string> {
   if (!n.color) return {};
-  return { background: `${n.color}1f`, borderColor: `${n.color}66` };
+  // A real colour, not a 12% wash: a red note should look red from across
+  // the room, the way a sticky note does. Mixed over the surface so it still
+  // reads in the dark skin.
+  return {
+    background: `color-mix(in srgb, ${n.color} 42%, rgb(var(--c-surface)))`,
+    borderColor: `color-mix(in srgb, ${n.color} 60%, transparent)`,
+  };
 }
 
 </script>
 
 <template>
   <div class="space-y-4">
-    <div class="bg-surface rounded-card shadow-soft p-2 flex flex-wrap items-center gap-1">
-      <button
-        v-for="t in ([
-          { key: 'all', label: 'همه', n: counts.all },
-          { key: 'reminders', label: 'یادآوری‌ها', n: counts.reminders },
-          { key: 'archive', label: 'بایگانی', n: counts.archive },
-        ] as const)"
-        :key="t.key"
-        class="office-tab px-3.5 py-2 rounded-xl text-sm flex items-center gap-2"
-        :class="tab === t.key ? 'is-active' : 'text-slate-500'"
-        @click="tab = t.key"
-      >
-        {{ t.label }}
-        <span v-if="t.n" class="text-[11px] ltr-nums opacity-70">{{ num(t.n) }}</span>
-      </button>
+    <div class="office-card p-2.5 flex flex-wrap items-center gap-2">
+      <div class="office-seg">
+        <button
+          v-for="t in ([
+            { key: 'all', label: 'همه', n: counts.all },
+            { key: 'reminders', label: 'یادآوری‌ها', n: counts.reminders },
+            { key: 'archive', label: 'بایگانی', n: counts.archive },
+          ] as const)"
+          :key="t.key"
+          :class="{ 'is-active': tab === t.key }"
+          @click="tab = t.key"
+        >
+          {{ t.label }}
+          <span v-if="t.n" class="office-count ltr-nums">{{ num(t.n) }}</span>
+        </button>
+      </div>
 
-      <input
-        v-model="search" class="office-input flex-1 min-w-[10rem] mx-1"
-        placeholder="جستجو در یادداشت‌ها…"
-      />
-      <button class="office-btn rounded-xl px-4 py-2 text-sm" @click="startNew">
-        + یادداشت
-      </button>
+      <label class="office-search flex-1 min-w-[10rem]">
+        <NavIcon name="search" :size="16" />
+        <input v-model="search" class="office-input" placeholder="جستجو در یادداشت‌ها…" />
+      </label>
     </div>
+
+    <!-- Keep-style capture: a line that looks like a note waiting to be
+         written. One click and you are typing; no «+» to find first. -->
+    <button
+      v-if="editingId !== 0 && tab !== 'archive'"
+      class="w-full max-w-xl mx-auto flex items-center gap-3 office-card px-4 h-12 text-sm text-slate-400
+             hover:shadow-pop transition-shadow text-right"
+      @click="startNew"
+    >
+      <span class="flex-1">یادداشت خود را بنویسید…</span>
+      <NavIcon name="bell" :size="17" />
+      <NavIcon name="pencil" :size="17" />
+    </button>
 
     <p v-if="error" class="bg-red-50 text-red-600 text-sm rounded-xl px-4 py-3">
       {{ error }}
@@ -183,7 +200,7 @@ function cardStyle(n: Note): Record<string, string> {
       <!-- The composer sits where the new note will appear. -->
       <div
         v-if="editingId === 0"
-        class="bg-surface rounded-card shadow-soft p-4 space-y-3 border-2"
+        class="max-w-xl mx-auto bg-surface rounded-card shadow-pop p-4 space-y-3 border-2"
         :style="{ borderColor: draft.color || 'transparent' }"
       >
         <input v-model="draft.title" class="office-input" placeholder="عنوان یادداشت" />
@@ -223,8 +240,8 @@ function cardStyle(n: Note): Record<string, string> {
       <div v-else class="columns-1 sm:columns-2 lg:columns-3 gap-3">
         <div
           v-for="n in shown" :key="n.id"
-          class="break-inside-avoid mb-3 rounded-card shadow-soft border-2 border-transparent
-                 bg-surface overflow-hidden"
+          class="group/note break-inside-avoid mb-3 rounded-card shadow-soft border-2 border-transparent
+                 bg-surface overflow-hidden hover:shadow-pop transition-shadow"
           :style="cardStyle(n)"
         >
           <!-- Editing happens in the card itself. -->
@@ -258,11 +275,12 @@ function cardStyle(n: Note): Record<string, string> {
                 </p>
               </button>
               <button
-                class="shrink-0 text-sm leading-none"
-                :class="n.is_pinned ? 'opacity-100' : 'opacity-30 hover:opacity-70'"
+                class="office-icon-btn !w-7 !h-7 shrink-0"
+                :class="n.is_pinned ? '!text-ink' : 'opacity-0 group-hover/note:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100'"
+                :aria-label="n.is_pinned ? 'برداشتن سنجاق' : 'سنجاق'"
                 :title="n.is_pinned ? 'برداشتن سنجاق' : 'سنجاق'"
                 @click="togglePin(n)"
-              >📌</button>
+              ><NavIcon name="pin" :size="15" /></button>
             </div>
 
             <div class="flex flex-wrap items-center gap-2 mt-3">
@@ -284,15 +302,24 @@ function cardStyle(n: Note): Record<string, string> {
               <span class="text-[10px] text-slate-400 ltr-nums">{{ faDate(n.created_at) }}</span>
             </div>
 
-            <div class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-100/60">
+            <!-- Card tools appear when you reach for the card, as in Keep. -->
+            <div class="flex items-center gap-1 mt-2 -mb-1 opacity-0 group-hover/note:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
               <button
-                class="text-[11px] text-slate-400 hover:text-ink"
+                class="office-icon-btn !w-7 !h-7"
+                aria-label="ویرایش" title="ویرایش"
+                @click="startEdit(n)"
+              ><NavIcon name="pencil" :size="14" /></button>
+              <button
+                class="office-icon-btn !w-7 !h-7"
+                :aria-label="n.is_archived ? 'خروج از بایگانی' : 'بایگانی'"
+                :title="n.is_archived ? 'خروج از بایگانی' : 'بایگانی'"
                 @click="toggleArchive(n)"
-              >{{ n.is_archived ? "خروج از بایگانی" : "بایگانی" }}</button>
+              ><NavIcon name="archive" :size="14" /></button>
               <button
-                class="text-[11px] text-slate-400 hover:text-red-500"
+                class="office-icon-btn office-btn-danger !w-7 !h-7"
+                aria-label="حذف" title="حذف"
                 @click="remove(n)"
-              >حذف</button>
+              ><NavIcon name="trash" :size="14" /></button>
             </div>
           </div>
         </div>

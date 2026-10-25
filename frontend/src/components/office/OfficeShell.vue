@@ -21,6 +21,8 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import { workApi } from "@/api/officeWork";
+import { socialApi, type TeamMember } from "@/api/social";
+import { timeAgo } from "@/utils/adminFormat";
 import { useAuthStore } from "@/stores/auth";
 import { usePresence } from "@/composables/usePresence";
 import { useClickOutside } from "@/composables/useClickOutside";
@@ -64,9 +66,29 @@ async function loadBadges() {
   }
 }
 
+/**
+ * همکاران — who else is here. The list under the rail is what makes the
+ * workspace feel inhabited: a green dot says someone is at their desk right
+ * now, and one tap opens a conversation with them.
+ */
+const team = ref<TeamMember[]>([]);
+async function loadTeam() {
+  try {
+    const rows = await socialApi.team();
+    team.value = rows
+      .filter((m) => m.id !== auth.me?.id)
+      .sort((a, b) => Number(b.is_online) - Number(a.is_online)
+        || (b.last_seen ?? "").localeCompare(a.last_seen ?? ""));
+  } catch {
+    team.value = [];
+  }
+}
+const onlineCount = computed(() => team.value.filter((m) => m.is_online).length);
+
 onMounted(() => {
   loadBadges();
-  timer = window.setInterval(loadBadges, 60_000);
+  loadTeam();
+  timer = window.setInterval(() => { loadBadges(); loadTeam(); }, 60_000);
 });
 onUnmounted(() => window.clearInterval(timer));
 
@@ -144,11 +166,11 @@ const tabItems = computed(() =>
         @click="toggleRail"
       ><NavIcon name="chevron" :size="18" /></button>
 
-      <nav class="flex-1 overflow-y-auto px-2.5 pb-2 space-y-1">
+      <nav class="shrink-0 px-2.5 pb-2 space-y-1">
         <button
           v-for="item in OFFICE_SECTIONS"
           :key="item.name"
-          class="office-nav w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-colors"
+          class="office-nav relative w-full flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-colors"
           :class="[
             isActive(item.name, route.name as string) ? 'is-active' : 'text-slate-500 hover:bg-slate-100',
             collapsed ? 'justify-center' : '',
@@ -162,14 +184,54 @@ const tabItems = computed(() =>
             <span class="flex-1 text-right">{{ item.label }}</span>
             <span
               v-if="badges[item.name]"
-              class="text-[10px] rounded-full min-w-[18px] px-1.5 leading-[18px] text-center ltr-nums shrink-0"
-              :class="isActive(item.name, route.name as string)
-                ? 'bg-white/25 text-white'
-                : 'bg-slate-100 text-slate-500'"
+              class="text-[10px] font-bold rounded-md min-w-[22px] px-1.5 leading-5 text-center ltr-nums shrink-0"
+              :class="isActive(item.name, route.name as string) ? 'bg-white/25 text-white' : 'text-white'"
+              :style="isActive(item.name, route.name as string) ? {} : { background: `rgb(${item.color})` }"
             >{{ badges[item.name] }}</span>
           </template>
+          <!-- Collapsed rail: a dot says there is something waiting. -->
+          <span
+            v-else-if="badges[item.name]"
+            class="absolute top-1.5 left-3 w-2 h-2 rounded-full ring-2 ring-surface"
+            :style="{ background: `rgb(${item.color})` }"
+          ></span>
         </button>
       </nav>
+
+      <!-- همکاران -->
+      <div v-if="team.length" class="flex-1 min-h-0 flex flex-col border-t border-slate-100 mt-1">
+        <p
+          v-if="!collapsed"
+          class="mx-2.5 mt-2.5 mb-1 rounded-xl px-3 h-8 flex items-center justify-between text-xs font-bold text-white"
+          :style="{ background: `rgb(${section.color})` }"
+        >
+          همکاران
+          <span class="font-normal opacity-90 ltr-nums">{{ onlineCount }} آنلاین</span>
+        </p>
+        <ul class="flex-1 overflow-y-auto px-2.5 pb-2 space-y-0.5 mt-1">
+          <li v-for="m in team" :key="m.id">
+            <button
+              class="w-full flex items-center gap-2.5 rounded-xl px-2 py-1.5 text-right hover:bg-slate-100 transition-colors"
+              :class="collapsed ? 'justify-center' : ''"
+              :title="collapsed ? m.name : `گفتگو با ${m.name}`"
+              @click="router.push({ name: 'chat', query: { with: String(m.id) } }); mobileOpen = false"
+            >
+              <UserAvatar
+                :name="m.name" :initials="m.initials" :image="m.avatar_image"
+                :color="m.avatar_color" :online="m.is_online" :size="32"
+              />
+              <span v-if="!collapsed" class="flex-1 min-w-0">
+                <span class="block text-[13px] text-ink truncate">{{ m.name }}</span>
+                <span
+                  class="block text-[11px] truncate"
+                  :class="m.is_online ? 'text-emerald-600' : 'text-slate-400'"
+                >{{ m.is_online ? "آنلاین" : (m.last_seen ? `آخرین بازدید ${timeAgo(m.last_seen)}` : (m.job_title_fa || "")) }}</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+      </div>
+      <div v-else class="flex-1"></div>
 
       <!-- The way out, in one fixed place. -->
       <div class="p-3 border-t border-slate-100">
@@ -193,8 +255,13 @@ const tabItems = computed(() =>
         :class="{ 'is-scrolled': scrolled }"
       >
         <!-- The section's colour as a top edge: present without shouting. -->
-        <div class="h-1" :style="{ background: 'rgb(' + section.color + ')' }"></div>
-        <div class="px-4 sm:px-5 py-3 flex items-center gap-3">
+        <div class="h-1.5" :style="{ background: 'rgb(' + section.color + ')' }"></div>
+        <!-- The section's colour washes the header, so you know where you are
+             before you read the title — a thin strip alone was easy to miss. -->
+        <div
+          class="px-4 sm:px-5 py-3 flex items-center gap-3 transition-colors duration-300"
+          :style="{ background: 'linear-gradient(to left, rgb(' + section.color + ' / 0.16), rgb(' + section.color + ' / 0.03) 70%)' }"
+        >
           <button
             class="md:hidden text-slate-500 p-1 shrink-0"
             aria-label="منو"
