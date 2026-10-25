@@ -715,6 +715,26 @@ export const crmApi = {
     };
   },
 
+  // ---- ورود مشتریان از تیم‌یار ----------------------------------------------
+  async teamyarImport(files: File[], commit: boolean): Promise<TeamyarImportResult> {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    fd.append("commit", commit ? "1" : "0");
+    const { data } = await api.post("/crm/teamyar-import/", fd, { timeout: 0 });
+    return data;
+  },
+
+  async teamyarImports(): Promise<{ imports: DidarImportRow[] }> {
+    const { data } = await api.get("/crm/teamyar-import/");
+    return data;
+  },
+
+  // ---- کنترل داده ------------------------------------------------------------
+  async checks(): Promise<{ checks: DataCheck[]; at: string }> {
+    const { data } = await api.get("/crm/checks/");
+    return data;
+  },
+
   // ---- پاک‌سازی داده --------------------------------------------------------
   async wipeInfo(): Promise<WipeInfo> {
     const { data } = await api.get("/crm/wipe/");
@@ -910,4 +930,39 @@ export interface WipeInfo {
   remove: { key: string; label: string; count: number }[];
   keep: { customers: number };
   confirm: string;
+}
+
+// ---- ورود مشتریان / کنترل داده ----------------------------------------------
+export interface TeamyarImportResult {
+  files: { file: string; sheets: { sheet: string; rows: number }[] }[];
+  rows: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  duplicate: number;
+  matched_by: Record<string, number>;
+  skipped: Record<string, number>;
+  unknown_reps: { name: string; count: number }[];
+  nothing_new: boolean;
+  committed: boolean;
+  previous: { at: string; by: string } | null;
+}
+
+export interface DataCheckRow {
+  kind: "deal" | "customer" | "invoice" | "suspect" | "group";
+  id: number;
+  title: string;
+  customer: string;
+  customer_id: number | null;
+  detail: string;
+  ids?: number[];
+}
+
+export interface DataCheck {
+  key: string;
+  label: string;
+  why: string;
+  severity: "high" | "medium" | "low";
+  count: number;
+  rows: DataCheckRow[];
 }

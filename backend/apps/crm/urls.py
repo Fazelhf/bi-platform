@@ -23,6 +23,8 @@ router.register("match-candidates", views.MatchCandidateViewSet)
 urlpatterns = [
     path("", include(router.urls)),
     path("dashboard/", views.CrmDashboardView.as_view(), name="crm-dashboard"),
+    path("teamyar-import/", views.TeamyarImportView.as_view(), name="crm-teamyar-import"),
+    path("checks/", views.CrmChecksView.as_view(), name="crm-checks"),
     path("wipe/", views.CrmWipeView.as_view(), name="crm-wipe"),
     path("didar-import/", views.DidarImportView.as_view(), name="crm-didar-import"),
     path("arpa-import/", views.ArpaImportView.as_view(), name="crm-arpa-import"),

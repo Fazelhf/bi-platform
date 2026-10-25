@@ -60,10 +60,8 @@ const NAV = [
   { name: "crm-activities", label: "پیگیری‌ها", icon: "notes" },
   { name: "crm-geo", label: "فروش جغرافیایی", icon: "globe" },
   { name: "crm-reports", label: "گزارش‌ها", icon: "chart" },
-  { name: "crm-arpa-import", label: "ورود از آرپا", icon: "upload", adminOnly: true },
-  { name: "crm-didar-import", label: "ورود از دیدار", icon: "download", adminOnly: true },
-  { name: "crm-data-reset", label: "پاک‌سازی داده", icon: "trash", adminOnly: true },
-  { name: "crm-match-review", label: "بازبینی تطبیق", icon: "check", adminOnly: true },
+  // Where CRM's data comes from and whether it is right — the system admin's.
+  { name: "crm-settings", label: "تنظیمات CRM", icon: "settings", adminOnly: true },
 ] as { name: string; label: string; icon: string; managerOnly?: boolean; adminOnly?: boolean }[];
 
 /** مدیر سیستم: the import pages are theirs alone. */

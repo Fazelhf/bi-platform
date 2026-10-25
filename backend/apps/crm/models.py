@@ -732,6 +732,8 @@ class ExternalSource(models.TextChoices):
     # It rides in the same queue because it is the same question and deserves
     # the same care — the دیدار import alone left 35 pairs sharing a name.
     CRM = "crm", "داخل CRM"
+    #: تیم‌یار's customer lists — «ورود مشتریان» files each row under its ID.
+    TEAMYAR = "teamyar", "تیم‌یار"
 
 
 class CustomerExternalRef(DatasetModel):
@@ -929,6 +931,7 @@ class ImportBatch(TimeStampedModel):
     class Source(models.TextChoices):
         ARPA = "arpa", "آرپا"
         DIDAR = "didar", "دیدار"
+        TEAMYAR = "teamyar", "تیم‌یار"
 
     source = models.CharField(max_length=8, choices=Source.choices, default=Source.ARPA)
     file_name = models.CharField(max_length=255)

@@ -2507,3 +2507,53 @@ class CrmWipeView(GatedAPIView):
             )
         removed = wipe.wipe()
         return Response({"removed": removed, **wipe.counts()})
+
+
+class TeamyarImportView(GatedAPIView):
+    """
+    ورود مشتریان از تیم‌یار. Rows land on the customer CRM already has, by
+    the آرپا/دیدار code in «آخرین توضیحات» or an id no one else shares —
+    see `apps.crm.teamyar_import`. Same preview-then-commit as the others.
+    """
+
+    permission_classes = [SystemAdminOnly]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        from apps.crm.models import ImportBatch
+
+        return Response({"imports": [
+            {
+                "id": b.pk, "file_name": b.file_name, "at": b.created_at.isoformat(),
+                "by": getattr(b.uploaded_by, "username", ""), "rows": b.rows,
+                "created": b.created, "updated": b.updated, "unchanged": b.unchanged,
+                "skipped": b.skipped,
+            }
+            for b in ImportBatch.objects.filter(source=ImportBatch.Source.TEAMYAR)
+            .select_related("uploaded_by")[:40]
+        ]})
+
+    def post(self, request):
+        from apps.crm.arpa_file import ArpaFileError
+        from apps.crm.teamyar_import import run
+
+        uploads = request.FILES.getlist("files")
+        if not uploads:
+            return Response({"detail": "فایلی انتخاب نشده است."}, status=400)
+        commit = str(request.data.get("commit", "")).lower() in {"1", "true", "yes"}
+        try:
+            result = run([(u.name, u.read()) for u in uploads], user=request.user, commit=commit)
+        except ArpaFileError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(result)
+
+
+class CrmChecksView(GatedAPIView):
+    """کنترل داده — every check, its count and the first records behind it."""
+
+    permission_classes = [SystemAdminOnly]
+
+    def get(self, request):
+        from apps.crm import checks
+
+        return Response(checks.run())
