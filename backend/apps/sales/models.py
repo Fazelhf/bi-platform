@@ -198,8 +198,12 @@ class FactSalesMonthly(TimeStampedModel):
     # much of it fell through is the leading indicator of next month's
     # revenue. فروش بانکی also records the price inquiries it registers, the
     # step before a quote, by amount. Zero for B2B.
+    #
+    # db_default as well: the column arrived in 1.51, and a site rolled back
+    # to 1.50 (`deploy.sh 1.50`) inserts rows without it. Without a default
+    # in the database itself every new monthly row would fail NOT NULL.
     inquiries_rial = models.DecimalField(
-        max_digits=20, decimal_places=0, default=0,
+        max_digits=20, decimal_places=0, default=0, db_default=0,
         help_text="مبلغ استعلام‌های ثبت‌شده (فروش بانکی)",
     )
     proforma_issued_rial = models.DecimalField(
