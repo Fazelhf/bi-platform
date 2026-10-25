@@ -146,6 +146,13 @@ def _sales_workbook(period, channel):
                 row += [float(f.proforma_issued_rial), float(f.proforma_cancelled_rial)]
             fmts[10] = RIAL_FMT
             fmts[11] = RIAL_FMT
+        elif channel == SalesChannel.ORGANIZATIONAL:
+            headers += ["استعلام ثبت‌شده", "پیش‌فاکتور صادره", "پیش‌فاکتور کنسل‌شده", "وصول نقدی"]
+            for row, f in zip(rows, facts):
+                row += [float(f.inquiries_rial), float(f.proforma_issued_rial),
+                        float(f.proforma_cancelled_rial), float(f.collected_rial)]
+            for i in (10, 11, 12, 13):
+                fmts[i] = RIAL_FMT
     _write_table(ws, headers, rows, formats=fmts)
 
     ws = _sheet(wb, "استان‌ها")

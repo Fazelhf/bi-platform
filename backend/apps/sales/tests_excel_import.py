@@ -279,3 +279,77 @@ class SheetFigureRulesTests(APITestCase):
         self.assertEqual(kinds["invoice_count"], ("int", False))
         self.assertEqual(kinds["revenue_rial"], ("money", False))
         self.assertEqual(kinds["profit_rial"], ("money", True))
+
+
+class BankDailyFiguresTests(APITestCase):
+    """
+    فروش بانکی's daily figures: the eight rows it always had, then inquiries,
+    quotes issued and cancelled, and cash collected — on the sheet, in the
+    Excel file and on the dashboard, day by day.
+    """
+
+    ORIGINAL = ["revenue_rial", "invoice_count", "active_customers", "new_customers",
+                "profit_rial", "cost_rial", "calls"]
+
+    def setUp(self):
+        self.month = DimPeriod.objects.create(jalali_year=1405, jalali_month=8)
+        periods.backfill_dates(self.month)
+        periods.set_grain(self.month, "sales_org", "day")
+        self.day1, self.day2 = periods.units_of(self.month, "sales_org")[:2]
+        self.emp = DimEmployee.objects.create(code="e-bank", full_name_fa="مریم احمدی")
+        EmployeeChannel.objects.create(employee=self.emp, channel="organizational")
+        self.client.force_authenticate(get_user_model().objects.create_user(
+            "bank_mgr", password="Pass-12345!", role="manager", department="sales_org",
+        ))
+
+    def sheet(self, period):
+        return self.client.get("/api/sales/input/",
+                               {"period": period.id, "channel": "organizational"}).json()
+
+    def test_new_rows_follow_the_original_ones_untouched(self):
+        fields = [m["field"] for m in self.sheet(self.day1)["metric_rows"]]
+        self.assertEqual(fields[:7], self.ORIGINAL)
+        self.assertEqual(fields[7:], ["inquiries_rial", "proforma_issued_rial",
+                                      "proforma_cancelled_rial", "collected_rial", "target_rial"])
+        labels = {m["field"]: m["label"] for m in self.sheet(self.day1)["metric_rows"]}
+        self.assertEqual(labels["collected_rial"], "وصول نقدی")
+        # The other channels' sheets are unchanged.
+        self.assertNotIn("inquiries_rial", [f for f, _ in __import__(
+            "apps.sales.views", fromlist=["TEAM_METRIC_ROWS"]).TEAM_METRIC_ROWS])
+
+    def test_daily_entry_reaches_the_dashboard_day_by_day(self):
+        for day, (rev, inq, issued, cancelled, cash) in (
+            (self.day1, (500, 4, 900, 100, 300)),
+            (self.day2, (200, 2, 400, 0, 250)),
+        ):
+            r = self.client.post("/api/sales/input/", {
+                "period": day.id, "channel": "organizational", "submit": True,
+                "columns": [{"employee_id": self.emp.id, "name": self.emp.full_name_fa,
+                             "revenue_rial": rev, "invoice_count": 1, "new_customers": 1,
+                             "inquiries_rial": inq, "proforma_issued_rial": issued,
+                             "proforma_cancelled_rial": cancelled, "collected_rial": cash}],
+                "provinces": [], "customer_groups": [],
+            }, format="json")
+            self.assertEqual(r.status_code, 200, r.content)
+
+        d = self.client.get("/api/sales/dashboard/detail/",
+                            {"period": self.month.id, "channel": "organizational"}).json()
+        self.assertEqual(d["totals"], {
+            "revenue": 700, "invoices": 2, "new_customers": 2, "inquiries": 6,
+            "proforma_issued": 1300, "proforma_cancelled": 100, "collected": 550,
+        })
+        self.assertEqual([x["label"] for x in d["daily"][:2]], ["1", "2"])
+        self.assertEqual((d["daily"][0]["inquiries"], d["daily"][1]["collected"]), (4, 250))
+        person = d["salespeople"][0]
+        self.assertEqual((person["inquiries"], person["proforma_issued"], person["collected"]),
+                         (6, 1300, 550))
+        # The sheet's month roll-up says the same.
+        col = self.sheet(self.month)["columns"][0]
+        self.assertEqual((int(col["inquiries_rial"]), int(col["collected_rial"])), (6, 550))
+
+    def test_bank_excel_template_carries_the_new_columns(self):
+        r = self.client.get("/api/imports/sales-daily-organizational/template/")
+        heads = [c.value for c in load_workbook(BytesIO(r.content))["داده"][1]]
+        for h in ("فروش ریالی", "مبلغ استعلام‌های ثبت‌شده", "مبلغ پیش‌فاکتورهای صادره",
+                  "مبلغ پیش‌فاکتورهای کنسل‌شده", "وصول نقدی", "تعداد فاکتور فروش", "تعداد مشتری جدید"):
+            self.assertIn(h, heads)

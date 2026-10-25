@@ -752,8 +752,18 @@ TEAM_METRIC_ROWS = _BASE_ROWS + [
     ("proforma_cancelled_rial", "مبلغ پیش‌فاکتورهای کنسل‌شده"),
 ]
 
-# فروش بانکی — the original eight rows, unchanged.
-ORG_METRIC_ROWS = list(_BASE_ROWS)
+# فروش بانکی — its original rows, then what the bank desk asked to track
+# every day: inquiries and quotes registered, quotes cancelled, and cash
+# collected. «فروش روز طبق فاکتورهای ثبت‌شده», «تعداد فروش» and «مشتری جدید»
+# are rows it already had (revenue, invoices, new customers). The target is
+# read-only here, so it goes last, out of the way of the rows being typed.
+ORG_METRIC_ROWS = [r for r in _BASE_ROWS if r[0] != "target_rial"] + [
+    ("inquiries_rial", "مبلغ استعلام‌های ثبت‌شده"),
+    ("proforma_issued_rial", "مبلغ پیش‌فاکتورهای صادره"),
+    ("proforma_cancelled_rial", "مبلغ پیش‌فاکتورهای کنسل‌شده"),
+    ("collected_rial", "وصول نقدی"),
+    ("target_rial", "تارگت فروش"),
+]
 
 # B2B (فروش شرکت‌به‌شرکت / عمده) is a different business: paper is sold by
 # tonnage to companies on credit terms, so the sheet tracks volume, collection
@@ -774,8 +784,8 @@ B2B_METRIC_ROWS = [
 ]
 
 # Kept for backwards compatibility with anything importing the old name.
-SALES_METRIC_ROWS = ORG_METRIC_ROWS
-SALES_METRIC_FIELDS = [f for f, _ in ORG_METRIC_ROWS]
+SALES_METRIC_ROWS = list(_BASE_ROWS)
+SALES_METRIC_FIELDS = [f for f, _ in _BASE_ROWS]
 
 
 def metric_rows_for(channel: str):
@@ -1597,6 +1607,62 @@ def month_plans(period, channel: str) -> tuple[dict[int, Decimal], dict[int, Dec
     return people, provinces
 
 
+#: The daily figures a channel's dashboard leads with: (key, field) pairs.
+#: فروش بانکی asked for exactly these seven, as entered each day.
+DAILY_MEASURES = (
+    ("revenue", "revenue_rial"),
+    ("invoices", "invoice_count"),
+    ("new_customers", "new_customers"),
+    ("inquiries", "inquiries_rial"),
+    ("proforma_issued", "proforma_issued_rial"),
+    ("proforma_cancelled", "proforma_cancelled_rial"),
+    ("collected", "collected_rial"),
+)
+
+
+def _daily_block(period, channel: str, own=None) -> dict:
+    """
+    The period's headline totals and, for each period it is entered in (the
+    days of a daily month, the weeks of a weekly one), the same figures — so
+    the dashboard can show the month day by day, exactly as it was typed.
+    Approved figures only, like every other chart on the page.
+    """
+    from apps.core.periods import channel_department, units_of
+
+    units = units_of(period, channel_department(channel))
+    facts = FactSalesMonthly.objects.filter(
+        period__in=units, channel=channel, status=ApprovalStatus.APPROVED,
+    )
+    if own is not None:
+        facts = facts.filter(employee=own)
+    sums = {
+        row["period_id"]: row
+        for row in facts.values("period_id").annotate(
+            **{key: Sum(field) for key, field in DAILY_MEASURES}
+        )
+    }
+
+    def clean(row) -> dict:
+        return {key: float((row or {}).get(key) or 0) for key, _ in DAILY_MEASURES}
+
+    series = []
+    for unit in units:
+        if unit.kind == PeriodKind.DAY:
+            label = str(from_gregorian(unit.start_date)[2]) if unit.start_date else unit.label
+        elif unit.kind == PeriodKind.WEEK:
+            label = f"هفته {unit.seq}"
+        else:
+            label = unit.label
+        series.append({"period_id": unit.id, "label": label, **clean(sums.get(unit.id))})
+    totals = {key: sum(day[key] for day in series) for key, _ in DAILY_MEASURES}
+    return {
+        "totals": totals,
+        # One point per entry period; a monthly channel has a single point,
+        # which is no series at all, so the page hides the chart then.
+        "daily": series if len(series) > 1 else [],
+    }
+
+
 class SalesDashboardDetailView(APIView):
     """Per-salesperson and per-team series for the sales chart dashboards."""
 
@@ -1651,6 +1717,10 @@ class SalesDashboardDetailView(APIView):
                 "cost": float(f.cost_rial),
                 "target": float(f.target_rial),
                 "calls": f.calls,
+                # Quote funnel — team and banking (0 for B2B)
+                "inquiries": float(f.inquiries_rial),
+                "proforma_issued": float(f.proforma_issued_rial),
+                "proforma_cancelled": float(f.proforma_cancelled_rial),
                 # B2B-only measures (0 elsewhere)
                 "quantity_ton": float(f.quantity_ton),
                 "collected": float(f.collected_rial),
@@ -1746,6 +1816,7 @@ class SalesDashboardDetailView(APIView):
             "teams": teams,
             "provinces": provinces,
             "pending": pending,
+            **_daily_block(period, channel, own),
         })
 
 

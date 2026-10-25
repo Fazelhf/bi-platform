@@ -213,7 +213,7 @@ class SalesFiguresImporter(_SalesImporter):
             "revenue_rial": (850_000_000, 420_000_000), "invoice_count": (6, 3),
             "active_customers": (14, 9), "new_customers": (2, 1),
             "profit_rial": (120_000_000, 55_000_000), "cost_rial": (18_000_000, 9_000_000),
-            "calls": (25, 17), "proforma_issued_rial": (300_000_000, 0),
+            "calls": (25, 17), "inquiries_rial": (1_500_000_000, 600_000_000), "proforma_issued_rial": (300_000_000, 0),
             "proforma_cancelled_rial": (40_000_000, 0), "quantity_ton": (Decimal("12.5"), Decimal("6")),
             "collected_rial": (500_000_000, 200_000_000), "receivables_rial": (1_200_000_000, 650_000_000),
             "won_invoices_rial": (700_000_000, 0),

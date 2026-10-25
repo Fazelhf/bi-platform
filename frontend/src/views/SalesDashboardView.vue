@@ -12,7 +12,7 @@ import WeekProgress from "@/components/WeekProgress.vue";
 import PeriodCalendar from "@/components/PeriodCalendar.vue";
 import ReconcilePanel from "@/components/ReconcilePanel.vue";
 import PeriodReport from "@/components/PeriodReport.vue";
-import { rial } from "@/utils/format";
+import { num, pct, rial } from "@/utils/format";
 import SectionBoard from "@/components/boards/SectionBoard.vue";
 
 /** One component serves three channels, so its board follows the channel. */
@@ -39,6 +39,9 @@ interface Detail {
   salespeople: Record<string, any>[];
   teams: Record<string, any>[];
   provinces: { name: string; sales: number; target: number }[];
+  /** The period's headline figures, and the same per day (or week) it was entered in. */
+  totals?: Record<string, number>;
+  daily?: ({ period_id: number; label: string } & Record<string, number>)[];
   /** Entered for this period but not approved — so not on these charts. */
   pending?: { rows: number; revenue: number; draft: number; submitted: number };
 }
@@ -205,6 +208,8 @@ function linesFor(def: ChartDef) {
 // B2B is wholesale on credit: tonnage and collection replace call activity,
 // and the counterparty is a company rather than a retail customer.
 const isB2B = computed(() => props.channel === "b2b");
+/** فروش بانکی leads with the seven figures it enters every day. */
+const isBank = computed(() => props.channel === "organizational");
 const buyer = computed(() => (isB2B.value ? "شرکت" : "مشتری"));
 
 const peopleCharts = computed<ChartDef[]>(() => {
@@ -223,6 +228,16 @@ const peopleCharts = computed<ChartDef[]>(() => {
     { title: "درصد رسیدن به تارگت", scope: "people", percent: true,
       metrics: [{ key: "target_achievement", label: "تحقق تارگت", percent: true }] },
   ];
+  const bank: ChartDef[] = isBank.value
+    ? [
+        { title: "مبلغ استعلام‌های ثبت‌شده", scope: "people",
+          metrics: [{ key: "inquiries", label: "مبلغ استعلام‌های ثبت‌شده" }] },
+        { title: "پیش‌فاکتور صادره / کنسل‌شده", scope: "people", metrics: [
+          { key: "proforma_issued", label: "پیش‌فاکتور صادره" },
+          { key: "proforma_cancelled", label: "پیش‌فاکتور کنسل‌شده" }] },
+        { title: "وصول نقدی", scope: "people", metrics: [{ key: "collected", label: "وصول نقدی" }] },
+      ]
+    : [];
   const tail: ChartDef[] = isB2B.value
     ? [
         { title: "مقدار فروش (تن)", scope: "people", metrics: [{ key: "quantity_ton", label: "مقدار فروش (تن)" }] },
@@ -237,7 +252,7 @@ const peopleCharts = computed<ChartDef[]>(() => {
         { title: "نرخ تماس موفق", scope: "people", percent: true,
           metrics: [{ key: "call_conversion", label: "تماس به فروش", percent: true }] },
       ];
-  return [...base, ...tail];
+  return [...base, ...bank, ...tail];
 });
 
 const teamCharts = computed<ChartDef[]>(() => [
@@ -317,6 +332,46 @@ const volumeShare = computed(() => volumeShareOf(data.value));
 const volumeShareB = computed(() => volumeShareOf(dataB.value));
 
 const fa = (n: number) => new Intl.NumberFormat("fa-IR").format(n);
+
+/* ---- فروش بانکی: the seven daily figures --------------------------------
+ * The tiles are the period's totals; the charts below them are the same
+ * figures day by day, one bar per day entered on the sheet. */
+const BANK_TILES: { key: string; label: string; money?: boolean }[] = [
+  { key: "revenue", label: "فروش (طبق فاکتورهای ثبت‌شده)", money: true },
+  { key: "inquiries", label: "استعلام‌های ثبت‌شده", money: true },
+  { key: "proforma_issued", label: "پیش‌فاکتورهای صادره", money: true },
+  { key: "proforma_cancelled", label: "پیش‌فاکتورهای کنسل‌شده", money: true },
+  { key: "collected", label: "وصول نقدی", money: true },
+  { key: "invoices", label: "تعداد فروش" },
+  { key: "new_customers", label: "تعداد مشتری جدید" },
+];
+const bankTotal = (key: string) => Number(data.value?.totals?.[key] ?? 0);
+/** Of what was quoted, how much fell through; of what was sold, how much came in as cash. */
+const cancelRate = computed(() => {
+  const issued = bankTotal("proforma_issued");
+  return issued ? (bankTotal("proforma_cancelled") / issued) * 100 : null;
+});
+const collectionRate = computed(() => {
+  const sold = bankTotal("revenue");
+  return sold ? (bankTotal("collected") / sold) * 100 : null;
+});
+const dailyRows = computed(() => data.value?.daily ?? []);
+const dailyLabels = computed(() =>
+  dailyRows.value.map((d) => (/^\d+$/.test(d.label) ? fa(Number(d.label)) : d.label)),
+);
+const dailySeries = (metrics: { key: string; label: string }[]) =>
+  metrics.map((m) => ({ name: m.label, values: dailyRows.value.map((d) => Number(d[m.key] ?? 0)) }));
+const DAILY_CHARTS = [
+  { title: "فروش و وصول نقدی روزانه", metrics: [
+    { key: "revenue", label: "فروش" }, { key: "collected", label: "وصول نقدی" }] },
+  { title: "استعلام و پیش‌فاکتور روزانه", metrics: [
+    { key: "inquiries", label: "استعلام ثبت‌شده" },
+    { key: "proforma_issued", label: "پیش‌فاکتور صادره" },
+    { key: "proforma_cancelled", label: "پیش‌فاکتور کنسل‌شده" }] },
+  { title: "تعداد فروش و مشتری جدید روزانه", metrics: [
+    { key: "invoices", label: "تعداد فروش" },
+    { key: "new_customers", label: "مشتری جدید" }] },
+];
 
 const totalRevenue = computed(() =>
   (data.value?.salespeople ?? []).reduce((s, p) => s + Number(p.revenue || 0), 0),
@@ -533,6 +588,38 @@ watch([periodA, () => props.channel], () => {
 
     <!-- ========== داشبورد فروشنده ========== -->
     <template v-else-if="tab === 'people'">
+      <!-- ===== فروش بانکی: the daily figures, totals then day by day ===== -->
+      <section v-if="isBank" class="bg-surface rounded-card shadow-soft p-5 space-y-4">
+        <div class="flex items-baseline justify-between flex-wrap gap-2">
+          <h3 class="font-bold text-ink">شاخص‌های روزانه‌ی فروش بانکی — {{ data.period.label }}</h3>
+          <span class="text-xs text-slate-400">جمع ارقام تأییدشده‌ی همین دوره، همان‌طور که روزانه وارد شده</span>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div v-for="t in BANK_TILES" :key="t.key" class="bg-slate-50 rounded-xl px-3 py-2">
+            <p class="text-[11px] text-slate-400">{{ t.label }}</p>
+            <p class="text-sm font-bold text-ink ltr-nums">{{ t.money ? rial(bankTotal(t.key)) : num(bankTotal(t.key)) }}</p>
+          </div>
+          <div class="bg-slate-50 rounded-xl px-3 py-2" title="پیش‌فاکتور کنسل‌شده ÷ پیش‌فاکتور صادره">
+            <p class="text-[11px] text-slate-400">نرخ کنسلی پیش‌فاکتور</p>
+            <p class="text-sm font-bold ltr-nums" :class="cancelRate === null ? 'text-slate-300' : 'text-ink'">
+              {{ cancelRate === null ? "—" : pct(cancelRate) }}
+            </p>
+          </div>
+          <div class="bg-slate-50 rounded-xl px-3 py-2" title="وصول نقدی ÷ فروش">
+            <p class="text-[11px] text-slate-400">وصول نقدی به فروش</p>
+            <p class="text-sm font-bold ltr-nums" :class="collectionRate === null ? 'text-slate-300' : 'text-ink'">
+              {{ collectionRate === null ? "—" : pct(collectionRate) }}
+            </p>
+          </div>
+        </div>
+        <div v-if="dailyRows.length" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <SeriesChart
+            v-for="c in DAILY_CHARTS" :key="c.title"
+            :title="c.title" :categories="dailyLabels" :series="dailySeries(c.metrics)"
+          />
+        </div>
+      </section>
+
       <div v-if="!names.length" class="bg-surface rounded-card shadow-soft">
         <EmptyState
           icon="📊"

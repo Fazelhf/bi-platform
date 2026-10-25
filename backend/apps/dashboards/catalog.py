@@ -225,6 +225,7 @@ DATASETS: tuple[Dataset, ...] = (
             Metric("collected", "مبلغ وصول‌شده", "sum", "collected_rial", "rial"),
             Metric("receivables", "مانده مطالبات", "sum", "receivables_rial", "rial",
                    description=STOCK_NOTE),
+            Metric("inquiries", "مبلغ استعلام‌های ثبت‌شده", "sum", "inquiries_rial", "rial"),
             Metric("proforma", "مبلغ پیش‌فاکتورهای صادره", "sum",
                    "proforma_issued_rial", "rial"),
             Metric("proforma_cancelled", "مبلغ پیش‌فاکتورهای کنسل‌شده", "sum",
