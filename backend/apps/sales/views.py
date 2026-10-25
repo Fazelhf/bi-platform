@@ -154,7 +154,7 @@ def own_employee(user):
     return employee
 
 
-def entry_block(user, period, channel: str, employee=None) -> str:
+def entry_block(user, period, channel: str, employee=None, also_filled=frozenset()) -> str:
     """
     Why this sheet cannot be filled in right now — or "" when it can.
 
@@ -169,6 +169,9 @@ def entry_block(user, period, channel: str, employee=None) -> str:
       them is always allowed, so fixing last week's typo is never blocked.
 
     The CEO and superusers are not held to either — they correct history.
+
+    `also_filled` are periods about to be filled in the same write — an Excel
+    file that carries days 1 to 5 at once is not «skipping» day 1.
     """
     if user.is_superuser or user.role == "executive":
         return ""
@@ -184,7 +187,7 @@ def entry_block(user, period, channel: str, employee=None) -> str:
         qs = FactSalesMonthly.objects.filter(period_id__in=ids, channel=channel)
         if employee is not None:
             qs = qs.filter(employee=employee)
-        return set(qs.values_list("period_id", flat=True))
+        return set(qs.values_list("period_id", flat=True)) | (set(ids) & set(also_filled))
 
     if filled([period.id]):
         return ""
@@ -734,7 +737,7 @@ def _nonzero(value) -> bool:
 _BASE_ROWS = [
     ("revenue_rial", "فروش ریالی"),
     ("invoice_count", "تعداد فاکتور فروش"),
-    ("active_customers", "تعداد مشتری فعال ماه"),
+    ("active_customers", "تعداد مشتری فعال"),
     ("new_customers", "تعداد مشتری جدید"),
     ("profit_rial", "سود فروش"),
     ("cost_rial", "هزینه فروش"),
@@ -788,6 +791,49 @@ def metric_rows_for(channel: str):
 
 def metric_fields_for(channel: str) -> list[str]:
     return [f for f, _ in metric_rows_for(channel)]
+
+
+# What each row holds, so the sheet, the Excel import and the server agree on
+# what may be typed: counts are whole numbers, tonnage takes decimals, money is
+# whole rials. Only profit may go below zero — a loss is a real figure, a
+# negative invoice count is a typo (and used to reach the database as a 500).
+COUNT_FIELDS = {"invoice_count", "active_customers", "new_customers", "calls"}
+DECIMAL_FIELDS = {"quantity_ton"}
+SIGNED_FIELDS = {"profit_rial"}
+
+
+def metric_kind(field: str) -> str:
+    """int | decimal | money — the kind of number a sheet row holds."""
+    if field in COUNT_FIELDS:
+        return "int"
+    if field in DECIMAL_FIELDS:
+        return "decimal"
+    return "money"
+
+
+def metric_label(channel: str, field: str) -> str:
+    return dict(metric_rows_for(channel)).get(field, field)
+
+
+def _figure(value, field: str, label: str) -> Decimal:
+    """
+    One cell of the sheet, checked against its row's kind — or a 400 that
+    names the cell. Persian digits and thousands separators are accepted.
+    """
+    from apps.core.excel_import import fold
+
+    raw = fold(value if value not in (None, "") else 0).replace(",", "").replace("٬", "")
+    number = _amount(raw, label)
+    if not number.is_finite():
+        raise ValidationError({"detail": f"مقدار «{label}» عدد معتبری نیست."})
+    if number < 0 and field not in SIGNED_FIELDS:
+        raise ValidationError({"detail": f"مقدار «{label}» نمی‌تواند منفی باشد."})
+    kind = metric_kind(field)
+    if kind == "int" and number != number.to_integral_value():
+        raise ValidationError({"detail": f"مقدار «{label}» باید عدد صحیح باشد."})
+    if kind == "money" and number != number.to_integral_value():
+        raise ValidationError({"detail": f"مقدار «{label}» باید به ریال و بدون اعشار باشد."})
+    return number
 
 
 def _breakdown(period, facts, fields, stock_fields, channel: str = "") -> list[dict]:
@@ -1004,7 +1050,12 @@ class SalesInputView(APIView):
         return Response({
             "period": PeriodSerializer(period).data,
             "channel": channel,
-            "metric_rows": [{"field": f, "label": l} for f, l in metric_rows_for(channel)],
+            # Each row says what it holds, so the page draws one kind of input
+            # per kind of number instead of guessing from the field name.
+            "metric_rows": [
+                {"field": f, "label": l, "kind": metric_kind(f), "signed": f in SIGNED_FIELDS}
+                for f, l in metric_rows_for(channel)
+            ],
             # Targets belong to the CEO; the sheet shows them read-only.
             "readonly_fields": sorted(TARGET_FIELDS),
             "can_edit_targets": bool(
@@ -1110,7 +1161,9 @@ class SalesInputView(APIView):
                     eligible = sales_eligible_ids(channel)
                 if employee.id not in eligible:
                     raise ValidationError({"detail": f"«{name}» کارشناس فروش این بخش نیست."})
-            values = {m: _amount(row.get(m), f"{name} · {m}") for m in editable}
+            values = {
+                m: _figure(row.get(m), m, f"{name} · {metric_label(channel, m)}") for m in editable
+            }
             values.update(sheet_state)
             obj, _ = FactSalesMonthly.objects.update_or_create(
                 period=period, employee=employee, channel=channel, defaults=values
@@ -1152,7 +1205,7 @@ class SalesInputView(APIView):
                 continue
             if pid not in known_provinces:
                 raise ValidationError({"detail": "استان انتخاب‌شده وجود ندارد."})
-            sales = _amount(p.get("sales_rial"), "فروش استان")
+            sales = _figure(p.get("sales_rial"), "sales_rial", "فروش استان")
             existing = FactSalesProvince.objects.filter(
                 period=period, province_id=pid, channel=channel
             ).first()
@@ -1171,9 +1224,9 @@ class SalesInputView(APIView):
             if not gid:
                 continue
             values = {
-                "sales_rial": _amount(g.get("sales_rial"), "فروش بخش مشتری"),
-                "profit_rial": _amount(g.get("profit_rial"), "سود بخش مشتری"),
-                "invoice_count": _amount(g.get("invoice_count"), "تعداد فاکتور"),
+                "sales_rial": _figure(g.get("sales_rial"), "sales_rial", "فروش گروه مشتری"),
+                "profit_rial": _figure(g.get("profit_rial"), "profit_rial", "سود گروه مشتری"),
+                "invoice_count": _figure(g.get("invoice_count"), "invoice_count", "تعداد فاکتور گروه مشتری"),
             }
             existing = FactSalesByCustomerGroup.objects.filter(
                 period=period, customer_group_id=gid, channel=channel
@@ -1218,7 +1271,7 @@ class SalesInputView(APIView):
         )
         if row is None:
             raise ValidationError({"detail": "ستون شما در این برگه پیدا نشد."})
-        values = {m: _amount(row.get(m), m) for m in editable}
+        values = {m: _figure(row.get(m), m, metric_label(channel, m)) for m in editable}
         values["status"] = status
         if submit:
             values["submitted_by"] = request.user
@@ -1665,12 +1718,34 @@ class SalesDashboardDetailView(APIView):
             period, channel, province_plans, include_all=True,
         )
 
+        # What has been entered for this period but is not on the charts yet.
+        # The dashboard reads approved figures only, so a saved draft or a
+        # sheet awaiting approval used to make the two pages simply disagree,
+        # with nothing saying why.
+        waiting = FactSalesMonthly.objects.filter(
+            period_id__in=channel_units(period, channel), channel=channel,
+        ).exclude(status=ApprovalStatus.APPROVED)
+        if own is not None:
+            waiting = waiting.filter(employee=own)
+        by_status = {
+            row["status"]: row
+            for row in waiting.values("status").annotate(n=Count("id"), revenue=Sum("revenue_rial"))
+        }
+        pending = {
+            "rows": sum(r["n"] for r in by_status.values()),
+            "revenue": float(sum((r["revenue"] or 0) for r in by_status.values())),
+            "draft": sum(r["n"] for s, r in by_status.items()
+                         if s in (ApprovalStatus.DRAFT, ApprovalStatus.NEEDS_REVISION, ApprovalStatus.REJECTED)),
+            "submitted": by_status.get(ApprovalStatus.SUBMITTED, {}).get("n", 0),
+        }
+
         return Response({
             "period": PeriodSerializer(period).data,
             "channel": channel,
             "salespeople": salespeople,
             "teams": teams,
             "provinces": provinces,
+            "pending": pending,
         })
 
 

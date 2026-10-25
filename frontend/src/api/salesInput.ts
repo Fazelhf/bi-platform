@@ -3,7 +3,8 @@ import api from "./client";
 export interface SalesInput {
   period: { id: number; label: string };
   channel: string;
-  metric_rows: { field: string; label: string }[];
+  /** kind: what the row may hold — whole numbers (int, money) or decimals (tonnage). */
+  metric_rows: { field: string; label: string; kind?: "int" | "money" | "decimal"; signed?: boolean }[];
   /** Fields the CEO owns (targets) — shown but not editable here. */
   readonly_fields: string[];
   can_edit_targets: boolean;

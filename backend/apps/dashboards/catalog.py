@@ -168,6 +168,12 @@ CHANNEL_DIM = Dim(
     key="channel", label="کانال فروش", path="channel", choices=CHANNEL_CHOICES
 )
 
+#: For a balance rather than a flow. The entry sheet's month shows each
+#: person's latest value; a widget summing a weekly or daily month adds the
+#: days up instead, so the two only agree on a single period.
+STOCK_NOTE = ("مانده است نه جریان: جدول ورود اطلاعات برای ماه آخرین مقدار را نشان می‌دهد، "
+              "این شاخص در ماهِ روزانه/هفتگی روزها را جمع می‌زند.")
+
 #: The monthly plans set on «تعیین تارگت». They used to be read off the fact
 #: rows' own `target_rial`, a column nothing has written since the plans
 #: moved to `SalesTarget` — so every «تارگت» and «تحقق تارگت» widget read 0.
@@ -208,21 +214,29 @@ DATASETS: tuple[Dataset, ...] = (
             STATUS_DIM,
         ),
         metrics=(
+            # Labels are the entry sheet's row names (apps.sales.views
+            # _BASE_ROWS and friends), so a figure is called the same thing
+            # where it is typed and where it is charted. «هزینه فروش» used to
+            # read «بهای تمام‌شده» here — a different number altogether.
             Metric("revenue", "فروش ریالی", "sum", "revenue_rial", "rial"),
-            Metric("target", "تارگت", "sum", "target_rial", "rial", side=SALES_TARGETS),
-            Metric("profit", "سود", "sum", "profit_rial", "rial"),
-            Metric("cost", "بهای تمام‌شده", "sum", "cost_rial", "rial"),
-            Metric("collected", "وصولی", "sum", "collected_rial", "rial"),
-            Metric("receivables", "مطالبات", "sum", "receivables_rial", "rial"),
-            Metric("proforma", "پیش‌فاکتور صادرشده", "sum",
+            Metric("target", "تارگت فروش", "sum", "target_rial", "rial", side=SALES_TARGETS),
+            Metric("profit", "سود فروش", "sum", "profit_rial", "rial"),
+            Metric("cost", "هزینه فروش", "sum", "cost_rial", "rial"),
+            Metric("collected", "مبلغ وصول‌شده", "sum", "collected_rial", "rial"),
+            Metric("receivables", "مانده مطالبات", "sum", "receivables_rial", "rial",
+                   description=STOCK_NOTE),
+            Metric("proforma", "مبلغ پیش‌فاکتورهای صادره", "sum",
                    "proforma_issued_rial", "rial"),
-            Metric("won_invoices", "فاکتور قطعی‌شده", "sum",
+            Metric("proforma_cancelled", "مبلغ پیش‌فاکتورهای کنسل‌شده", "sum",
+                   "proforma_cancelled_rial", "rial"),
+            Metric("won_invoices", "مبلغ فاکتورهای برنده‌شده", "sum",
                    "won_invoices_rial", "rial"),
-            Metric("quantity_ton", "تناژ", "sum", "quantity_ton", "ton"),
-            Metric("invoice_count", "تعداد فاکتور", "sum", "invoice_count"),
-            Metric("active_customers", "مشتری فعال", "sum", "active_customers"),
-            Metric("new_customers", "مشتری جدید", "sum", "new_customers"),
-            Metric("calls", "تماس", "sum", "calls"),
+            Metric("quantity_ton", "مقدار فروش (تن)", "sum", "quantity_ton", "ton"),
+            Metric("invoice_count", "تعداد فاکتور فروش", "sum", "invoice_count"),
+            Metric("active_customers", "تعداد مشتری فعال", "sum", "active_customers",
+                   description=STOCK_NOTE),
+            Metric("new_customers", "تعداد مشتری جدید", "sum", "new_customers"),
+            Metric("calls", "تعداد تماس", "sum", "calls"),
             Metric("rows", "تعداد ردیف", "count"),
         ),
     ),

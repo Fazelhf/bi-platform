@@ -39,6 +39,8 @@ interface Detail {
   salespeople: Record<string, any>[];
   teams: Record<string, any>[];
   provinces: { name: string; sales: number; target: number }[];
+  /** Entered for this period but not approved — so not on these charts. */
+  pending?: { rows: number; revenue: number; draft: number; submitted: number };
 }
 
 const periods = ref<Period[]>([]);
@@ -60,7 +62,21 @@ const loading = ref(false);
 const weekId = ref<number | null>(null);
 const progress = ref<MonthProgress | null>(null);
 const showBreakdown = ref(false);
-const viewedPeriod = computed(() => weekId.value ?? periodA.value);
+/**
+ * A day inside the picked week, when the channel records daily. Without it a
+ * day entered on the sheet could only be seen inside its whole week.
+ */
+const dayId = ref<number | null>(null);
+const weekDays = computed(
+  () => progress.value?.weeks.find((w) => w.id === weekId.value)?.day_periods ?? [],
+);
+/** The period on screen: the day, else the week, else the month. */
+const subPeriod = computed(() => dayId.value ?? weekId.value);
+const viewedPeriod = computed(() => subPeriod.value ?? periodA.value);
+
+const ENTRY_ROUTE: Record<string, string> = {
+  team: "sales-entry", organizational: "sales-org-entry", b2b: "sales-b2b-entry",
+};
 
 async function fetchDetail(pid: number): Promise<Detail> {
   const { data } = await api.get("/sales/dashboard/detail/", {
@@ -91,6 +107,7 @@ async function load() {
 
 function pickWeek(id: number | null) {
   weekId.value = id;
+  dayId.value = null;
 }
 
 /* ==========================================================================
@@ -201,18 +218,18 @@ const peopleCharts = computed<ChartDef[]>(() => {
       metrics: [{ key: "profit", label: "سود فروش" }],
       line: { key: "profit_margin", label: "درصد سود", percent: true } },
     { title: `تعداد فروش / تعداد ${buyer.value}`, scope: "people", metrics: [
-      { key: "invoices", label: isB2B.value ? "تعداد قرارداد" : "تعداد فاکتور" },
+      { key: "invoices", label: isB2B.value ? "تعداد قرارداد / فاکتور" : "تعداد فاکتور فروش" },
       { key: "active_customers", label: `${buyer.value} فعال` }] },
     { title: "درصد رسیدن به تارگت", scope: "people", percent: true,
       metrics: [{ key: "target_achievement", label: "تحقق تارگت", percent: true }] },
   ];
   const tail: ChartDef[] = isB2B.value
     ? [
-        { title: "مقدار فروش (تن)", scope: "people", metrics: [{ key: "quantity_ton", label: "تناژ فروش" }] },
+        { title: "مقدار فروش (تن)", scope: "people", metrics: [{ key: "quantity_ton", label: "مقدار فروش (تن)" }] },
         { title: "نرخ وصول مطالبات", scope: "people", percent: true,
           metrics: [{ key: "collection_rate", label: "نرخ وصول", percent: true }] },
         { title: "وصول‌شده / مانده مطالبات", scope: "people", metrics: [
-          { key: "collected", label: "وصول‌شده" }, { key: "receivables", label: "مانده مطالبات" }] },
+          { key: "collected", label: "مبلغ وصول‌شده" }, { key: "receivables", label: "مانده مطالبات" }] },
         { title: "میانگین قیمت هر تن", scope: "people", metrics: [{ key: "price_per_ton", label: "قیمت هر تن" }] },
       ]
     : [
@@ -299,6 +316,8 @@ function volumeShareOf(d: Detail | null) {
 const volumeShare = computed(() => volumeShareOf(data.value));
 const volumeShareB = computed(() => volumeShareOf(dataB.value));
 
+const fa = (n: number) => new Intl.NumberFormat("fa-IR").format(n);
+
 const totalRevenue = computed(() =>
   (data.value?.salespeople ?? []).reduce((s, p) => s + Number(p.revenue || 0), 0),
 );
@@ -340,10 +359,11 @@ onMounted(async () => {
   periodB.value = null;
   await Promise.all([load(), loadProgress()]);
 });
-watch([periodA, periodB, compare, weekId, () => props.channel], load);
+watch([periodA, periodB, compare, weekId, dayId, () => props.channel], load);
 // Changing the month reloads the strip and drops any week drill-down.
 watch([periodA, () => props.channel], () => {
   weekId.value = null;
+  dayId.value = null;
   loadProgress();
 });
 </script>
@@ -426,6 +446,43 @@ watch([periodA, () => props.channel], () => {
       >{{ showBreakdown ? "بستن تفکیک هفته‌ها" : "تفکیک هفته‌ها و تقویم" }}</button>
     </div>
 
+    <!-- Days of the picked week, for a channel that records daily -->
+    <div v-if="weekDays.length" class="flex items-center gap-1.5 flex-wrap no-print">
+      <span class="text-xs text-slate-500 px-1">روز:</span>
+      <button
+        class="px-3 h-8 rounded-xl text-xs transition-colors"
+        :class="dayId === null ? 'bg-panel text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50 text-slate-600'"
+        @click="dayId = null"
+      >کل هفته</button>
+      <button
+        v-for="d in weekDays" :key="d.id"
+        class="w-8 h-8 rounded-xl text-xs transition-colors"
+        :class="dayId === d.id ? 'bg-panel text-white' : 'bg-surface border border-slate-200 hover:bg-slate-50 text-slate-600'"
+        :title="d.label"
+        @click="dayId = d.id"
+      >{{ d.jalali_day === null ? "—" : fa(d.jalali_day) }}</button>
+    </div>
+
+    <!-- Entered but not approved: the sheet shows it, these charts do not.
+         Said out loud, so the two pages never just disagree. -->
+    <div
+      v-if="data?.pending?.rows"
+      class="bg-amber-50 border border-amber-200 text-amber-800 rounded-card px-4 py-3 text-sm leading-6 flex flex-wrap items-center gap-x-3 no-print"
+    >
+      <span>
+        {{ fa(data.pending.rows) }} ستون فروش این دوره هنوز تأیید نشده
+        <template v-if="data.pending.submitted">({{ fa(data.pending.submitted) }} در انتظار تأیید<template v-if="data.pending.draft">، {{ fa(data.pending.draft) }} پیش‌نویس</template>)</template>
+        <template v-else>(پیش‌نویس)</template>
+        — جمعاً <span class="ltr-nums font-medium">{{ rial(data.pending.revenue) }}</span> فروش
+        که در جدول ورود اطلاعات دیده می‌شود ولی در این داشبورد نیست. داشبورد فقط ارقام تأییدشده را نشان می‌دهد.
+      </span>
+      <RouterLink
+        v-if="ENTRY_ROUTE[channel]"
+        :to="{ name: ENTRY_ROUTE[channel] }"
+        class="text-brand-600 hover:underline whitespace-nowrap"
+      >رفتن به ورود اطلاعات</RouterLink>
+    </div>
+
     <!-- Calendar + the proof that the weeks add up to the month -->
     <div
       v-if="showBreakdown && progress"
@@ -465,7 +522,7 @@ watch([periodA, () => props.channel], () => {
     <!-- The section's board — the month's headline figures — first, above
          the per-salesperson charts: they are what a manager opens this page
          to see. Not on «گزارش دوره‌ای», which picks its own range of months. -->
-    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" :week="weekId" part="top" />
+    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" :week="subPeriod" part="top" />
 
     <!-- ========== گزارش دوره‌ای ==========
          A range of months rather than one, so it owns its own period picker
@@ -558,6 +615,6 @@ watch([periodA, () => props.channel], () => {
     </template>
 
     <!-- The board's trend and detail table, under the charts. -->
-    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" :week="weekId" part="bottom" />
+    <SectionBoard v-if="tab !== 'period'" :section="boardSection" :period="periodA" :week="subPeriod" part="bottom" />
 </div>
 </template>
