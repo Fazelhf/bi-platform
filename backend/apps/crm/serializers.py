@@ -9,7 +9,7 @@ from apps.crm.jalali import jalali_str
 from apps.crm.models import (
     Activity, Customer, CustomerMatchCandidate, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product, SalesInvoice,
-    ProductCategory, Tag, Task, TerritoryAssignment,
+    ProductCategory, Tag, Task, TerritoryAssignment, stages_for,
 )
 
 
@@ -102,7 +102,7 @@ class PipelineStageSerializer(serializers.ModelSerializer):
         model = PipelineStage
         fields = (
             "id", "code", "name_fa", "order", "kind", "kind_display",
-            "probability_pct", "is_active",
+            "probability_pct", "is_active", "channel",
         )
 
 
@@ -301,6 +301,8 @@ class DealWriteSerializer(RosterOwnerMixin, serializers.ModelSerializer):
             "discount_rial", "shipping_cost_rial", "other_cost_rial",
             "opened_at", "expected_close_date", "closed_at", "channel",
             "next_action_title", "next_action_due",
+            "tender_channel", "tender_rank", "competitor", "competitor_unit_price_rial",
+            "probability_pct",
         )
         read_only_fields = ("id",)
         extra_kwargs = {
@@ -319,6 +321,17 @@ class DealWriteSerializer(RosterOwnerMixin, serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"lost_reason": "برای ثبت فرصت از دست رفته، انتخاب دلیل الزامی است."}
             )
+        # A stage of another book's pipeline: the deal would sit in a column
+        # its own board does not have. (A new deal takes its customer's book.)
+        if attrs.get("stage"):
+            customer = attrs.get("customer")
+            channel = (customer.channel if self.instance is None and customer
+                       else attrs.get("channel", getattr(self.instance, "channel", "")))
+            if not stages_for(channel, attrs["stage"].dataset).filter(pk=attrs["stage"].pk).exists():
+                raise serializers.ValidationError({"stage": "این مرحله از قیف این دفتر نیست."})
+        pct = attrs.get("probability_pct")
+        if pct is not None and pct > 100:
+            raise serializers.ValidationError({"probability_pct": "احتمال بین ۰ و ۱۰۰ است."})
         title = (attrs.get("next_action_title") or "").strip()
         due = attrs.get("next_action_due")
         if bool(title) != bool(due):

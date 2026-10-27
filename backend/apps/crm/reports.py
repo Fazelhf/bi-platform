@@ -27,6 +27,7 @@ from django.utils import timezone
 
 from apps.core.models import DimPeriod, PeriodKind
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label
+from apps.crm.models import stages_in_view
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, Deal, DealItem,
     PipelineStage, SalesInvoice,
@@ -112,6 +113,9 @@ class Filters:
     #: "0" narrows deals to those with no invoice attached, "1" to those with
     #: one — how «موفق، فاکتورنشده» drills to exactly the deals it counted.
     invoiced: str = ""
+    #: B2B tender slices: who we bid against, سامانه or مستقیم.
+    competitor: str = ""
+    tender_channel: str = ""
 
     #: The channels in view; None means all of them. Set from the account (see
     #: `Scope.channels`); a `channel` query param may only narrow within what
@@ -159,6 +163,8 @@ class Filters:
         f.tag = num("tag")
         f.status = (q.get("status") or "").strip()
         f.invoiced = (q.get("invoiced") or "").strip()
+        f.competitor = (q.get("competitor") or "").strip()
+        f.tender_channel = (q.get("tender_channel") or "").strip()
         f.result = (q.get("result") or "").strip()
         f.kind = (q.get("kind") or "").strip()
         f.granularity = (q.get("granularity") or "month").strip()
@@ -231,6 +237,10 @@ class Filters:
             qs = qs.filter(stage_id=self.stage)
         if self.lost_reason:
             qs = qs.filter(lost_reason_id=self.lost_reason)
+        if self.competitor:
+            qs = qs.filter(competitor=self.competitor)
+        if self.tender_channel:
+            qs = qs.filter(tender_channel=self.tender_channel)
         if self.customer:
             qs = qs.filter(customer_id=self.customer)
         if self.tag:
@@ -370,9 +380,7 @@ class Filters:
             v = getattr(self, name)
             if v:
                 out[name] = v
-        if self.group == 0:
-            out["group"] = "none"
-        for name in ("status", "result", "kind", "invoiced"):
+        for name in ("status", "result", "kind", "invoiced", "competitor", "tender_channel"):
             v = getattr(self, name)
             if v:
                 out[name] = v
@@ -440,6 +448,9 @@ DEAL_AXES: dict[str, Axis] = {
     "reason": Axis("reason", "دلیل از دست رفتن", "lost_reason_id", "lost_reason__name_fa", "lost_reason"),
     "customer": Axis("customer", "مشتری", "customer_id", "customer__name_fa", "customer"),
     "team": Axis("team", "تیم", "owner__team_id", "owner__team__name_fa", "team"),
+    # Text, not a table: the id is the name itself.
+    "competitor": Axis("competitor", "رقیب", "competitor", "competitor", "competitor"),
+    "tender_channel": Axis("tender_channel", "کانال دریافت سفارش", "tender_channel", "tender_channel", "tender_channel"),
 }
 
 ACTIVITY_AXES: dict[str, Axis] = {
@@ -570,7 +581,10 @@ def _grouped(qs, axis: Axis, measures: dict) -> list[dict]:
     out = []
     for r in rows:
         gid = r.pop(axis.id_path)
-        label = r.pop(axis.label_path) or "—"
+        # A text axis (رقیب) groups on one column that is both id and label.
+        label = r.pop(axis.label_path, gid) or "—"
+        if axis.key == "tender_channel":
+            label = dict(Deal.TenderChannel.choices).get(gid, "—")
         # Sum()/Avg() hand back Decimal. Left as-is they serialise to JSON
         # strings (so charts plot nothing) and `_shape` skips them when
         # totalling, because they are not int/float. Coerce once, here.
@@ -765,15 +779,18 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
       • `ever`           — how many deals ever reached the stage (from the
         stage-event log), which is the only honest way to compute drop-off.
     """
-    stages = list(
-        PipelineStage.objects.filter(is_active=True, dataset=f.dataset)
-        .order_by("order")
-    )
+    # Each book's own pipeline once (see `stages_in_view`); reach and
+    # drop-off are counted within one list, never across two.
+    stages = stages_in_view(f.channels, f.dataset)
     open_qs = f.deals("opened_at").filter(status=Deal.Status.OPEN)
     now_map = {
         r["stage_id"]: r
         for r in open_qs.values("stage_id").annotate(
-            count=Count("id", distinct=True), amount=_money(Sum("amount_rial"))
+            count=Count("id", distinct=True), amount=_money(Sum("amount_rial")),
+            weighted=_money(Sum(
+                F("amount_rial") * Coalesce("probability_pct", "stage__probability_pct") / Value(100),
+                output_field=DecimalField(max_digits=20, decimal_places=2),
+            )),
         )
     }
     reached_qs = f.deals("opened_at")
@@ -785,25 +802,26 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
     }
 
     rows = []
-    first_ever = None
-    for st in stages:
+    first_ever: dict[str, int] = {}
+    for st, label in stages:
         cur = now_map.get(st.id, {})
         ever = ever_map.get(st.id, 0)
-        if first_ever is None and ever:
-            first_ever = ever
+        if st.channel not in first_ever and ever:
+            first_ever[st.channel] = ever
         d = dict(f.drill_base())
         d["stage"] = st.id
         d["status"] = "open"
         rows.append({
             "id": st.id,
-            "label": st.name_fa,
+            "label": label,
             "kind": st.kind,
+            "book": st.channel,
             "probability_pct": st.probability_pct,
             "count": _num(cur.get("count")),
             "amount": _num(cur.get("amount")),
-            "weighted": _num(cur.get("amount")) * st.probability_pct / 100,
+            "weighted": _num(cur.get("weighted")),
             "ever": ever,
-            "reach_pct": _pct(ever, first_ever) if first_ever else 0.0,
+            "reach_pct": _pct(ever, first_ever[st.channel]) if st.channel in first_ever else 0.0,
             "drill": {"kind": "deals", "params": d},
         })
 
@@ -818,13 +836,15 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
     # reading available from current state alone: `ever` would be better, but
     # it comes from the stage-event log, and deals imported from دیدار have no
     # event history to read.
-    running = 0
+    running: dict[str, int] = {}
     for row in reversed(rows):
-        running += int(row["count"])
-        row["remaining"] = running
-    widest = rows[0]["remaining"] if rows else 0
+        running[row["book"]] = running.get(row["book"], 0) + int(row["count"])
+        row["remaining"] = running[row["book"]]
+    widest = {}
     for row in rows:
-        row["remaining_pct"] = _pct(row["remaining"], widest) if widest else 0.0
+        widest.setdefault(row["book"], row["remaining"])
+        w = widest[row["book"]]
+        row["remaining_pct"] = _pct(row["remaining"], w) if w else 0.0
 
     return _shape("funnel", "stage", rows, chronological=True)
 

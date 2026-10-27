@@ -205,6 +205,10 @@ class PipelineStage(DatasetModel):
     # Weighted-pipeline forecasting: amount x probability.
     probability_pct = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    #: The book whose pipeline this is; blank = shared by every book that has
+    #: none of its own. B2B sells through tenders and approvals, همکار does not,
+    #: so one list cannot describe both — see :func:`stages_for`.
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, blank=True, default="")
 
     class Meta:
         ordering = ("order", "id")
@@ -212,6 +216,44 @@ class PipelineStage(DatasetModel):
 
     def __str__(self) -> str:
         return self.name_fa
+
+
+def stages_for(channel: str, dataset: str):
+    """A book's active stages: its own if it has any, else the shared list."""
+    active = PipelineStage.objects.filter(is_active=True, dataset=dataset)
+    own = active.filter(channel=channel) if channel else active.none()
+    return own if own.exists() else active.filter(channel="")
+
+
+def stages_in_view(channels, dataset: str) -> list[tuple["PipelineStage", str]]:
+    """
+    The stage columns of a board or funnel spanning `channels` (None = every
+    book): each book's own list once, the shared list once if any book uses
+    it. Labels carry the book when more than one list shows, so «مذاکره» of
+    همکار and of B2B are not read as one column.
+    """
+    books = list(channels) if channels is not None else [c for c, _ in SalesChannel.choices]
+    lists: dict[str, list] = {}
+    for book in books:
+        stages = list(stages_for(book, dataset).order_by("order", "id"))
+        if stages:
+            lists.setdefault(stages[0].channel, stages)
+    names = dict(SalesChannel.choices)
+    out = []
+    for key in sorted(lists, key=lambda k: (k != "", k)):
+        for st in lists[key]:
+            label = f"{names[key]} · {st.name_fa}" if key and len(lists) > 1 else st.name_fa
+            out.append((st, label))
+    return out
+
+
+def fit_stage(stage, channel: str, dataset: str):
+    """`stage` if it is in the book's list, else that list's first stage of
+    the same kind — a deal moved to another book keeps being open/won/lost."""
+    allowed = stages_for(channel, dataset)
+    if stage is None or allowed.filter(pk=stage.pk).exists():
+        return stage
+    return allowed.filter(kind=stage.kind).order_by("order").first() or stage
 
 
 # --------------------------------------------------------------------------
@@ -505,6 +547,20 @@ class Deal(DatasetModel):
     lost_note = models.CharField(max_length=400, blank=True)
     tags = models.ManyToManyField(Tag, blank=True, related_name="deals")
 
+    # ---- Tender (مناقصه / استعلام) — B2B quotes are won or lost on price ---
+    class TenderChannel(models.TextChoices):
+        SYSTEM = "system", "سامانه"
+        DIRECT = "direct", "مستقیم"
+
+    tender_channel = models.CharField(max_length=8, choices=TenderChannel.choices, blank=True)
+    #: Our place in the سامانه ranking, 1 = lowest bid.
+    tender_rank = models.PositiveSmallIntegerField(null=True, blank=True)
+    #: Who we bid against — on a loss, who won.
+    competitor = models.CharField(max_length=120, blank=True, db_index=True)
+    competitor_unit_price_rial = models.DecimalField(max_digits=18, decimal_places=0, null=True, blank=True)
+    #: The rep's own odds for this deal; blank = the stage's.
+    probability_pct = models.PositiveSmallIntegerField(null=True, blank=True)
+
     # ---- Money (all Rials, all derived from DealItem) ---------------------
     amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     cost_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
@@ -558,10 +614,12 @@ class Deal(DatasetModel):
 
     @property
     def weighted_rial(self) -> Decimal:
-        """Forecast value: amount x stage probability (open deals only)."""
+        """Forecast value: amount x probability — the rep's, else the
+        stage's (open deals only)."""
         if self.status != self.Status.OPEN or not self.stage:
             return Decimal(0)
-        return self.amount_rial * Decimal(self.stage.probability_pct) / Decimal(100)
+        pct = self.stage.probability_pct if self.probability_pct is None else self.probability_pct
+        return self.amount_rial * Decimal(pct) / Decimal(100)
 
     def recalculate(self, save: bool = True) -> None:
         """Roll the deal lines up into the denormalised money fields."""
