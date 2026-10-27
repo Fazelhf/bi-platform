@@ -19,6 +19,7 @@ router.register("stages", views.PipelineStageViewSet)
 router.register("tags", views.TagViewSet)
 router.register("invoices", views.SalesInvoiceViewSet)
 router.register("match-candidates", views.MatchCandidateViewSet)
+router.register("territories", views.TerritoryAssignmentViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),

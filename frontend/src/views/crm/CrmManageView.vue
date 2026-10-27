@@ -13,6 +13,7 @@ const router = useRouter();
 
 const SECTIONS = [
   { key: "groups", label: "گروه‌های مشتری", icon: "team", view: defineAsyncComponent(() => import("./CustomerGroupsView.vue")) },
+  { key: "territories", label: "مناطق و مسئولان", icon: "globe", view: defineAsyncComponent(() => import("./TerritoriesView.vue")) },
 ] as const;
 
 const current = computed(() => SECTIONS.find((s) => s.key === route.query.section) ?? SECTIONS[0]);

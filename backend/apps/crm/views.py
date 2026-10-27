@@ -35,13 +35,13 @@ from rest_framework.views import APIView
 from apps.crm import merge as crm_merge, reports as rpt
 from apps.crm.jalali import jalali_month_of, jalali_str, month_bounds, month_label, period_for
 from apps.crm.models import (
-    CustomerMatchCandidate, Dataset, SalesInvoice,
+    CustomerMatchCandidate, Dataset, SalesInvoice, SalesZone, TerritoryAssignment,
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
     ProductCategory, Tag, Task,
 )
 from apps.crm.serializers import (
-    MatchCandidateSerializer, SalesInvoiceSerializer,
+    MatchCandidateSerializer, SalesInvoiceSerializer, TerritoryAssignmentSerializer,
     ActivitySerializer, CustomerDetailSerializer, CustomerFeedbackSerializer,
     CustomerGroupSerializer, CustomerListSerializer, CustomerWriteSerializer,
     DealDetailSerializer, DealItemSerializer, DealListSerializer,
@@ -268,25 +268,31 @@ def employee_options(request):
     who has never worked their book — a row that then shows up in nobody's
     reports, because the rest of the system agrees the two are separate.
     """
+    from django.db.models import Exists
+
+    from apps.crm.people import sales_roster
+    from apps.sales.models import EmployeeChannel
+
     qs = (
         DimEmployee.objects.select_related("team")
         .filter(is_active=True, is_placeholder=False)
         .exclude(full_name_fa__in=["", "0"])
     )
     channels = channels_for(request.user)
-    if channels is not None:
-        wanted = list(channels)
-        # The roster, *plus* anyone who already owns something in this book.
-        # Nine of the nineteen active salespeople have no membership row —
-        # the roster was added long after the customer file — and dropping
-        # them would mean opening an existing customer and finding its owner
-        # missing from the list that is supposed to contain it.
-        qs = qs.filter(
-            Q(memberships__channel__in=wanted, memberships__is_active=True)
-            | Q(customers__channel__in=wanted)
-            | Q(deals__channel__in=wanted)
-        ).distinct()
-    return qs
+    # Every sales book for an account with no department (the CEO). It used
+    # to mean every employee in the company — finance and production too.
+    wanted = list(channels) if channels is not None else [c for c, _ in SalesChannel.choices]
+    # The roster, *plus* anyone who already owns something in this book, so an
+    # existing customer's owner is still on the list that labels it. Those
+    # extra rows come back with `in_roster` false: shown, not offered for new
+    # assignments — `sales_roster` is what a save is checked against.
+    return qs.filter(
+        Q(pk__in=sales_roster(wanted).values("pk"))
+        | Q(customers__channel__in=wanted)
+        | Q(deals__channel__in=wanted)
+    ).annotate(in_roster=Exists(EmployeeChannel.objects.filter(
+        employee=OuterRef("pk"), is_active=True, channel__in=wanted,
+    ))).distinct()
 
 
 def apply_ordering(qs, request, allowed: dict[str, str]):
@@ -654,6 +660,8 @@ class CustomerViewSet(_Base):
             qs = qs.filter(group_id=f.group)
         if f.province:
             qs = qs.filter(province_id=f.province)
+        if f.zone:
+            qs = qs.filter(rpt.zone_q(f.zone))
         if f.source:
             qs = qs.filter(lead_source_id=f.source)
         if f.tag:
@@ -1215,7 +1223,7 @@ def bulk_assign(request, scoped_qs):
         return Response({"detail": "تغییر کارشناس فقط برای مدیران فروش است."}, status=403)
     ids = [i for i in (request.data.get("ids") or []) if isinstance(i, int)]
     owner_id = request.data.get("owner")
-    owner = employee_options(request).filter(pk=owner_id).first() if owner_id else None
+    owner = employee_options(request).filter(pk=owner_id, in_roster=True).first() if owner_id else None
     if not ids or not owner:
         return Response({"detail": "ردیف‌ها و کارشناس جدید را انتخاب کنید."}, status=400)
     updated = scoped_qs.filter(pk__in=ids).update(owner=owner)
@@ -2420,6 +2428,15 @@ def has_sample_data() -> bool:
 class CrmOptionsView(GatedAPIView):
     """Every filter dropdown the CRM UI needs, in one request."""
 
+    @staticmethod
+    def _zones() -> list[dict]:
+        SalesZone.ensure_tehran()
+        return [
+            {"id": z.id, "name_fa": z.name_fa, "province": z.province_id,
+             "channel": z.channel, "is_default": z.is_default}
+            for z in SalesZone.objects.all()
+        ]
+
     def get(self, request):
         # The month list is served rather than computed in the browser so the
         # Jalali calendar lives in exactly one place.
@@ -2445,11 +2462,15 @@ class CrmOptionsView(GatedAPIView):
                 {"id": p.id, "name_fa": p.name_fa}
                 for p in DimProvince.objects.all()
             ],
+            "zones": self._zones(),
             # The employee dimension carries a placeholder row with no real
             # name; it must not show up in a filter dropdown.
             "employees": [
                 {"id": e.id, "name": e.full_name_fa,
-                 "team": e.team.name_fa if e.team else ""}
+                 "team": e.team.name_fa if e.team else "",
+                 # False: owns records here but is no longer on the sales
+                 # roster — a label for old rows, not a choice for new ones.
+                 "active": e.in_roster}
                 for e in employee_options(request)
             ],
             "groups": CustomerGroupSerializer(
@@ -2643,6 +2664,51 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             "created": {"id": customer.id, "name_fa": customer.name_fa},
         })
 
+
+
+class TerritoryAssignmentViewSet(viewsets.ModelViewSet):
+    """
+    مسئولان استان‌ها و محدوده‌ها. Everyone in CRM reads them (the map shows
+    them); a manager assigns. Only roster members can be assigned, and a
+    department manager assigns only in their own books.
+    """
+
+    permission_classes = [CrmAccess]
+    pagination_class = None
+    serializer_class = TerritoryAssignmentSerializer
+    queryset = TerritoryAssignment.objects.select_related("province", "zone", "employee")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        channels = crm_scope(self.request.user).channels
+        return qs if channels is None else qs.filter(channel__in=channels)
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in SAFE_METHODS and not is_crm_manager(request.user):
+            self.permission_denied(request, message="تعیین مسئول استان با مدیر فروش است.")
+
+    def perform_create(self, serializer):
+        from apps.crm.people import sales_roster
+
+        channels = crm_scope(self.request.user).channels
+        channel = serializer.validated_data.get("channel") or (channels[0] if channels else SalesChannel.TEAM)
+        if channels is not None and channel not in channels:
+            raise ValidationError({"channel": ["این دفتر در دسترس شما نیست."]})
+        emp = serializer.validated_data["employee"]
+        if not sales_roster([channel]).filter(pk=emp.pk).exists():
+            raise ValidationError({"employee": [f"«{emp.full_name_fa}» در فهرست کارشناسان فعال این واحد فروش نیست."]})
+        zone = serializer.validated_data.get("zone")
+        if zone and zone.province_id != serializer.validated_data["province"].pk:
+            raise ValidationError({"zone": ["محدوده به این استان تعلق ندارد."]})
+        if serializer.validated_data.get("role") == TerritoryAssignment.Role.MANAGER:
+            # One manager per province (zone) and channel: assigning a new one
+            # replaces the old, which is what «change manager» means.
+            TerritoryAssignment.objects.filter(
+                province=serializer.validated_data["province"], zone=zone,
+                channel=channel, role=TerritoryAssignment.Role.MANAGER,
+            ).delete()
+        serializer.save(channel=channel)
 
 
 class CrmConfigView(GatedAPIView):

@@ -316,6 +316,13 @@ class Customer(DatasetModel):
         max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM
     )
 
+    # Tehran's sales zone (بازار، ایرانشهر …) for فروش همکار. Blank counts as
+    # «سایر مناطق» on the map until someone places the customer.
+    zone = models.ForeignKey(
+        "SalesZone", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="customers",
+    )
+
     # ---- Matching keys -------------------------------------------------
     # The same three systems write names and numbers three ways: آرپا in
     # legacy Arabic letters, دیدار and تیم‌یار in Persian with ZWNJ, phones
@@ -1200,6 +1207,108 @@ class SalesInvoiceItem(DatasetModel):
 # --------------------------------------------------------------------------
 # Duplicate detection settings and merge history
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Territories: sales zones inside a province, and who answers for each
+# --------------------------------------------------------------------------
+class SalesZone(TimeStampedModel):
+    """
+    محدوده‌ی فروش داخل یک استان — today فروش همکار's four in Tehran: بازار،
+    ایرانشهر، ظهیرالاسلام، سایر مناطق.
+
+    A customer is placed in a zone by its `zone` field, set by a person — not
+    guessed from an address. `geometry` can hold a real GeoJSON boundary when
+    one exists; until then the map draws a labelled schematic tile, which
+    says it is schematic rather than inventing a border.
+    """
+
+    code = models.SlugField(unique=True)
+    name_fa = models.CharField(max_length=60)
+    province = models.ForeignKey(DimProvince, on_delete=models.CASCADE, related_name="crm_zones")
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM)
+    order = models.PositiveSmallIntegerField(default=0)
+    #: Where a customer of this province with no zone yet is counted. One per
+    #: province and channel («سایر مناطق»).
+    is_default = models.BooleanField(default=False)
+    geometry = models.JSONField(null=True, blank=True)
+
+    #: فروش همکار's Tehran zones. Created on first use rather than by a
+    #: migration, because a fresh database gets its provinces from
+    #: `seed_sales` only after migrating.
+    TEHRAN = (
+        ("thr-bazar", "بازار", 1, False),
+        ("thr-iranshahr", "ایرانشهر", 2, False),
+        ("thr-zahir", "ظهیرالاسلام", 3, False),
+        ("thr-other", "سایر مناطق", 4, True),
+    )
+
+    @classmethod
+    def ensure_tehran(cls):
+        if cls.objects.filter(code="thr-bazar").exists():
+            return
+        tehran = DimProvince.objects.filter(name_fa="تهران").first()
+        if tehran is None:
+            return
+        for code, name, order, default in cls.TEHRAN:
+            cls.objects.get_or_create(code=code, defaults={
+                "name_fa": name, "province": tehran, "channel": SalesChannel.TEAM,
+                "order": order, "is_default": default,
+            })
+
+    class Meta:
+        ordering = ("province", "order", "id")
+        verbose_name = "محدوده فروش"
+
+    def __str__(self) -> str:
+        return self.name_fa
+
+
+class TerritoryAssignment(TimeStampedModel):
+    """
+    Who answers for a province (or one zone of it) in one channel: its sales
+    manager and its کارشناس(ان).
+
+    For reporting and default filters only. What a user may *see* is still
+    decided by `crm_scope`; an assignment never widens it.
+    """
+
+    class Role(models.TextChoices):
+        MANAGER = "manager", "مدیر فروش"
+        EXPERT = "expert", "کارشناس"
+
+    province = models.ForeignKey(DimProvince, on_delete=models.CASCADE, related_name="crm_territories")
+    zone = models.ForeignKey(SalesZone, null=True, blank=True, on_delete=models.CASCADE,
+                             related_name="assignments")
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM)
+    employee = models.ForeignKey(DimEmployee, on_delete=models.CASCADE, related_name="territories")
+    role = models.CharField(max_length=8, choices=Role.choices, default=Role.EXPERT)
+
+    class Meta:
+        ordering = ("province__name_fa", "role", "employee__full_name_fa")
+        verbose_name = "مسئول استان/محدوده"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["province", "zone", "channel", "employee", "role"],
+                name="crm_territory_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["province", "channel", "employee", "role"],
+                condition=models.Q(zone__isnull=True),
+                name="crm_territory_unique_nozone",
+            ),
+            # One sales manager per province (or zone) and channel.
+            models.UniqueConstraint(
+                fields=["province", "zone", "channel"],
+                condition=models.Q(role="manager"),
+                name="crm_territory_one_manager",
+            ),
+            models.UniqueConstraint(
+                fields=["province", "channel"],
+                condition=models.Q(role="manager", zone__isnull=True),
+                name="crm_territory_one_manager_nozone",
+            ),
+        ]
+
+
 class CrmConfig(TimeStampedModel):
     """
     تنظیمات تشخیص مشتری تکراری — one row, read by `matching` and the

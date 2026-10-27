@@ -94,8 +94,10 @@ const opts = computed(() => ({
   groups: (crm.options?.groups ?? []).map((g) => ({ id: g.id, name: g.name_fa })),
   provinces: (crm.options?.provinces ?? []).map((p) => ({ id: p.id, name: p.name_fa })),
   sources: (crm.options?.sources ?? []).map((p) => ({ id: p.id, name: p.name_fa })),
-  employees: (crm.options?.employees ?? []).map((e) => ({ id: e.id, name: e.name })),
+  employees: crm.rosterEmployees.map((e) => ({ id: e.id, name: e.name })),
 }));
+const zoneOpts = (provinceId: number | null) =>
+  crm.zonesOf(provinceId).map((z) => ({ id: z.id, name: z.name_fa }));
 const nameOf = (list: { id: string | number; name: string }[], id: unknown) =>
   list.find((o) => o.id === id)?.name ?? "";
 
@@ -113,20 +115,21 @@ async function saveField(c: CrmCustomer & Record<string, any>, field: string, va
   row.group_name = nameOf(opts.value.groups, row.group);
   row.province_name = nameOf(opts.value.provinces, row.province);
   row.source_name = nameOf(opts.value.sources, row.lead_source);
-  row.owner_name = nameOf(opts.value.employees, row.owner) || row.owner_name;
+  row.owner_name = crm.employeeName(row.owner);
   row.status_display = nameOf(STATUSES, row.status);
   rows.value[i] = row as CrmCustomer;
 }
 
 /** One value onto every ticked row, in one request. */
-const bulkField = ref<"" | "group" | "province" | "status" | "lead_source">("");
+const bulkField = ref<"" | "group" | "province" | "zone" | "status" | "lead_source">("");
 const bulkValue = ref<string | number | "">("");
 const BULK_FIELDS = [
-  { key: "group", label: "گروه" }, { key: "province", label: "استان" },
+  { key: "group", label: "گروه" }, { key: "province", label: "استان" }, { key: "zone", label: "محدوده‌ی تهران" },
   { key: "status", label: "وضعیت" }, { key: "lead_source", label: "منبع سرنخ" },
 ] as const;
 const bulkOptions = computed(() => ({
   group: opts.value.groups, province: opts.value.provinces,
+  zone: (crm.options?.zones ?? []).map((z) => ({ id: z.id, name: z.name_fa })),
   status: STATUSES, lead_source: opts.value.sources, "": [],
 }[bulkField.value]));
 watch(bulkField, () => { bulkValue.value = ""; });
@@ -344,7 +347,7 @@ const statusClass: Record<string, string> = {
       >ارسال به بازبینی</button>
       <select v-if="canCurate" v-model="assignTo" class="bg-white/10 rounded-xl px-3 py-2 text-sm outline-none">
         <option value="" class="text-ink">سپردن به کارشناس…</option>
-        <option v-for="e in crm.options?.employees ?? []" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
+        <option v-for="e in crm.rosterEmployees" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
       </select>
       <button
         v-if="assignTo"
@@ -474,6 +477,15 @@ const statusClass: Record<string, string> = {
               <td class="px-3 py-2 text-slate-500">
                 <InlineCell :value="c.province" :display="c.province_name || '—'" :options="opts.provinces"
                             :disabled="!crm.canEdit" :save="(v) => saveField(c, 'province', v)" />
+                <!-- Tehran's sales zone (بازار، ایرانشهر …), only where the province has zones. -->
+                <InlineCell v-if="zoneOpts(c.province).length" :value="c.zone"
+                            :display="zoneOpts(c.province).find((z) => z.id === c.zone)?.name ?? 'محدوده؟'"
+                            :options="zoneOpts(c.province)" :disabled="!crm.canEdit"
+                            :save="(v) => saveField(c, 'zone', v)">
+                  <span class="text-[11px]" :class="c.zone ? 'text-sky-700' : 'text-amber-600'">
+                    {{ zoneOpts(c.province).find((z) => z.id === c.zone)?.name ?? "محدوده؟" }}
+                  </span>
+                </InlineCell>
               </td>
               <td class="px-3 py-2 text-slate-500">
                 <InlineCell :value="c.city" :disabled="!crm.canEdit" :save="(v) => saveField(c, 'city', v)" />

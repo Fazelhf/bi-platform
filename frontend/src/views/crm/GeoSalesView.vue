@@ -5,7 +5,7 @@ import { crmApi, type GeoOverview, type GeoProvince, type GeoProvinceRow } from 
 import { useCrmStore } from "@/stores/crm";
 import { useUiStore } from "@/stores/ui";
 import { init, registerMap, type EChartsOption, type EChartsType } from "@/lib/echarts";
-import { activePalette, isDark, labelColor, mutedColor, surfaceColor, TOOLTIP } from "@/components/charts/theme";
+import { activePalette, isDark, labelColor, surfaceColor, TOOLTIP } from "@/components/charts/theme";
 import { num, pct, rial } from "@/utils/format";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
 import CrmExportButton from "@/components/crm/CrmExportButton.vue";
@@ -48,6 +48,13 @@ const loadingDetail = ref(false);
 const metric = ref<"amount" | "customers" | "achievement_pct">("amount");
 const search = ref("");
 const showIdle = ref(true);
+/**
+ * Tehran on the country map or on its own. Off by default: Tehran's volume
+ * is the outlier that set the old scale's maximum and washed every other
+ * province out. Display only — Tehran's numbers stay in every total.
+ */
+const showTehran = ref(false);
+const TEHRAN = "تهران";
 
 const METRICS = [
   { key: "amount", label: "فروش" },
@@ -117,12 +124,54 @@ const rowsByName = computed(() => {
   return m;
 });
 
-const metricMax = computed(() => {
-  const vals = (overview.value?.rows ?? []).map((r) => Number(r[metric.value]) || 0);
-  return Math.max(1, ...vals);
+/** The server's cut points for this metric; see `reports.color_breaks`. */
+const breaks = computed<number[]>(() => {
+  const s = showTehran.value ? overview.value?.scale_with_tehran : overview.value?.scale;
+  const key = metric.value === "achievement_pct" ? "achievement" : metric.value;
+  return s?.[key] ?? [];
+});
+
+/** Hex blend, for a sequential ramp in the palette's own colour. */
+function mix(a: string, b: string, t: number): string {
+  const p = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * One colour per class. Achievement is diverging — below target reads as
+ * warm, at or above as green — because «80٪» and «120٪» mean opposite
+ * things; amounts and counts are a light-to-strong ramp.
+ */
+const classColors = computed<string[]>(() => {
+  void ui.chartTheme;
+  const n = breaks.value.length + 1;
+  if (metric.value === "achievement_pct") return ["#dc2626", "#f97316", "#facc15", "#86efac", "#16a34a"];
+  const strong = activePalette().actual;
+  const light = isDark() ? "#33405a" : "#dbe6fb";
+  return Array.from({ length: n }, (_, i) => mix(light, strong.startsWith("#") && strong.length === 7 ? strong : "#2563eb", n === 1 ? 1 : i / (n - 1)));
+});
+
+/** A province with nothing to measure — distinct from one that measured low. */
+function hasValue(r: GeoProvinceRow): boolean {
+  if (metric.value === "achievement_pct") return r.target > 0;
+  return r.amount !== 0 || r.customer_base > 0 || r.customers > 0;
+}
+
+const legend = computed(() => {
+  const b = breaks.value;
+  const c = classColors.value;
+  if (!b.length) return [];
+  const f = fmtMetric;
+  return [
+    { color: c[0], label: `کمتر از ${f(b[0])}` },
+    ...b.slice(1).map((x, i) => ({ color: c[i + 1], label: `${f(b[i])} تا ${f(x)}` })),
+    { color: c[b.length], label: `${f(b[b.length - 1])} و بیشتر` },
+  ];
 });
 
 const hasData = computed(() => (overview.value?.rows ?? []).some((r) => Number(r[metric.value]) > 0));
+const metricLabel = computed(() => METRICS.find((m) => m.key === metric.value)?.label ?? "");
 
 function fmtMetric(v: number): string {
   if (metric.value === "amount") return rial(v);
@@ -158,25 +207,31 @@ const option = computed<EChartsOption>(() => {
       formatter: (x: any) => {
         const r = rowsByName.value.get(x.name);
         if (!r) return x.name;
-        return `<b>${x.name}</b><br/>فروش: ${rial(r.amount)}`
+        const people = [
+          r.managers?.length ? `مدیر: ${r.managers.map((m) => m.name).join("، ")}` : "",
+          r.experts?.length ? `کارشناس: ${r.experts.map((m) => m.name).join("، ")}` : "",
+        ].filter(Boolean).join("<br/>");
+        return `<b>${x.name}</b>`
+          + (r.label === TEHRAN && !showTehran.value ? " <span style='opacity:.7'>(جداگانه، زیر نقشه)</span>" : "")
+          + `<br/>فروش: ${rial(r.amount)}`
           + `<br/>مشتری خریدار: ${num(r.customers)} از ${num(r.customer_base)}`
-          + (r.target ? `<br/>تحقق تارگت: ${pct(r.achievement_pct)}` : "")
-          + `<br/>سهم از کل: ${pct(r.share_pct)}`;
+          + (r.target ? `<br/>تارگت: ${rial(r.target)} · تحقق ${pct(r.achievement_pct)}` : "<br/>تارگت: ثبت نشده")
+          + `<br/>سهم از کل: ${pct(r.share_pct)}`
+          + (people ? `<br/>${people}` : "<br/>مسئول تعیین نشده");
       },
     },
+    // Classes, not a 0..max gradient: the legend (drawn in HTML beside the
+    // map) states each class's bounds, and no outlier can stretch them.
     visualMap: {
-      // A colour scale over nothing but zeros is a legend for no data.
-      show: !sel && hasData.value,
-      min: 0,
-      max: metricMax.value,
-      left: 12,
-      bottom: 12,
-      itemHeight: 90,
-      itemWidth: 10,
-      calculable: false,
-      text: [fmtMetric(metricMax.value), "۰"],
-      textStyle: { color: mutedColor(), fontSize: 10 },
-      inRange: { color: [dark ? "#33405a" : "#dbe6fb", p.actual] },
+      show: false,
+      type: "piecewise",
+      pieces: breaks.value.length
+        ? [
+          { lt: breaks.value[0], color: classColors.value[0] },
+          ...breaks.value.slice(1).map((b, i) => ({ gte: breaks.value[i], lt: b, color: classColors.value[i + 1] })),
+          { gte: breaks.value[breaks.value.length - 1], color: classColors.value[breaks.value.length] },
+        ]
+        : [{ min: -Infinity, max: Infinity, color: base }],
       outOfRange: { color: base },
     },
     series: [{
@@ -202,7 +257,9 @@ const option = computed<EChartsOption>(() => {
       },
       data: (overview.value?.rows ?? []).map((r) => ({
         name: r.label,
-        value: Number(r[metric.value]) || 0,
+        // NaN = no data: drawn in the base colour, apart from the lowest class.
+        // Tehran shown separately is drawn the same way and labelled so.
+        value: (r.label === TEHRAN && !showTehran.value) || !hasValue(r) ? NaN : Number(r[metric.value]) || 0,
         // Zoomed in, the neighbours step back so the province reads as the
         // subject rather than one shape among many.
         itemStyle: sel
@@ -310,6 +367,24 @@ function openCustomer(id: number | null) {
 const barColor = computed(() => { void ui.chartTheme; return activePalette().actual; });
 
 const card = "bg-surface rounded-card shadow-soft p-4 min-w-0";
+
+// ---- Tehran, on its own ----------------------------------------------------
+const tehran = computed(() => overview.value?.tehran ?? null);
+/** Schematic positions only — a 2×2 of tiles, not a map of Tehran. */
+const TILE = [
+  { x: 10, y: 10 }, { x: 170, y: 10 }, { x: 10, y: 110 }, { x: 170, y: 110 },
+];
+function zoneColor(z: { amount: number; buyers: number }): string {
+  const key = metric.value === "customers" ? "customers" : "amount";
+  const b = tehran.value?.scale[key] ?? [];
+  const v = key === "customers" ? z.buyers : z.amount;
+  if (!v) return isDark() ? "#2a2a31" : "#eef1f5";
+  const i = b.filter((x) => v >= x).length;
+  const n = b.length + 1;
+  return mix(isDark() ? "#33405a" : "#dbe6fb", "#2563eb", n === 1 ? 1 : i / (n - 1));
+}
+const repsAssigned = computed(() => (detail.value?.reps ?? []).filter((r) => r.assigned));
+const repsOther = computed(() => (detail.value?.reps ?? []).filter((r) => !r.assigned));
 </script>
 
 <template>
@@ -342,6 +417,10 @@ const card = "bg-surface rounded-card shadow-soft p-4 min-w-0";
             :title="selected ? `فروش ${selected.label}` : 'فروش جغرافیایی'"
             :total="overview?.rows.length ?? 0" subtle
           />
+          <label v-if="!selected" class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer" title="فقط نمایش؛ اعداد تهران در جمع‌ها هست">
+            <input v-model="showTehran" type="checkbox" class="rounded" />
+            تهران روی نقشه
+          </label>
           <div v-if="!selected" class="flex bg-slate-100 rounded-xl p-0.5 text-xs">
             <button
               v-for="m in METRICS" :key="m.key"
@@ -360,6 +439,18 @@ const card = "bg-surface rounded-card shadow-soft p-4 min-w-0";
           <p v-if="!selected && !loading" class="absolute bottom-3 right-3 text-[11px] text-slate-400 pointer-events-none">
             روی هر استان بزنید تا جزئیاتش باز شود
           </p>
+        </div>
+        <!-- The legend states the metric and every class's bounds. -->
+        <div v-if="!selected && hasData" class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <span class="font-semibold text-ink">رنگ: {{ metricLabel }}</span>
+          <span v-for="l in legend" :key="l.label" class="flex items-center gap-1">
+            <span class="inline-block w-3 h-3 rounded-sm" :style="{ background: l.color }"></span>{{ l.label }}
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="inline-block w-3 h-3 rounded-sm border border-slate-300 bg-slate-100"></span>
+            {{ metric === "achievement_pct" ? "بدون تارگت" : "بدون داده" }}
+          </span>
+          <span v-if="!showTehran" class="text-slate-400">· تهران جدا، زیر نقشه</span>
         </div>
       </div>
 
@@ -463,18 +554,78 @@ const card = "bg-surface rounded-card shadow-soft p-4 min-w-0";
           </div>
 
           <div :class="card">
-            <p class="text-sm font-semibold text-ink mb-3">کارشناسان این استان</p>
+            <p class="text-sm font-semibold text-ink mb-1">مسئولان این استان</p>
+            <p class="text-xs text-slate-500 mb-3">
+              مدیر فروش: {{ detail?.managers?.map((m) => m.name).join("، ") || "تعیین نشده" }}
+            </p>
             <Skeleton v-if="loadingDetail" class="h-16 rounded-xl" />
-            <p v-else-if="!detail?.reps.length" class="text-xs text-slate-400">فروشی ثبت نشده</p>
-            <ul v-else class="space-y-2 text-sm">
-              <li v-for="r in detail.reps" :key="String(r.id)" class="flex justify-between gap-2">
-                <span class="text-slate-600 truncate">{{ r.label }}</span>
-                <span class="text-ink whitespace-nowrap">{{ rial(r.amount) }}</span>
-              </li>
-            </ul>
+            <template v-else>
+              <p class="text-[11px] text-slate-400 mb-1">کارشناسان این استان</p>
+              <p v-if="!repsAssigned.length" class="text-xs text-slate-400 mb-2">کارشناسی به این استان تخصیص نیافته</p>
+              <ul class="space-y-2 text-sm mb-3">
+                <li v-for="r in repsAssigned" :key="'a' + r.id" class="flex justify-between gap-2">
+                  <span class="text-ink truncate">{{ r.label }}</span>
+                  <span class="text-ink whitespace-nowrap">{{ rial(r.amount) }}</span>
+                </li>
+              </ul>
+              <template v-if="repsOther.length">
+                <p class="text-[11px] text-slate-400 mb-1">سایر کارشناسان (فروش در این استان)</p>
+                <ul class="space-y-2 text-sm">
+                  <li v-for="r in repsOther" :key="'o' + String(r.id)" class="flex justify-between gap-2">
+                    <span class="text-slate-600 truncate">{{ r.label }}</span>
+                    <span class="text-ink whitespace-nowrap">{{ rial(r.amount) }}</span>
+                  </li>
+                </ul>
+              </template>
+              <p class="text-[10px] text-slate-400 mt-2">هر فاکتور یک‌بار و به نام کارشناس همان فاکتور شمرده می‌شود.</p>
+            </template>
           </div>
         </div>
       </Transition>
+    </div>
+
+    <!-- ================= Tehran by sales zone (فروش همکار) ================= -->
+    <div v-if="!selected && !showTehran && tehran" :class="card">
+      <div class="flex flex-wrap items-baseline gap-2 mb-3">
+        <h2 class="font-bold text-ink">تهران به تفکیک محدوده‌ی فروش</h2>
+        <span class="text-xs text-slate-400">فروش همکار · {{ rial(tehran.total) }}</span>
+        <span class="flex-1"></span>
+        <span class="text-[11px] text-slate-400">نقشه‌ی شماتیک؛ مرز جغرافیایی واقعی ندارد</span>
+      </div>
+      <div class="grid md:grid-cols-[340px_minmax(0,1fr)] gap-4 items-start">
+        <svg viewBox="0 0 330 210" class="w-full max-w-[340px]" role="img" aria-label="نقشه‌ی شماتیک محدوده‌های تهران">
+          <g v-for="(z, i) in tehran.rows.slice(0, 4)" :key="z.id" class="cursor-pointer" @click="crm.openDrill(z.drill, `فاکتورهای ${z.label}`)">
+            <rect :x="TILE[i].x" :y="TILE[i].y" width="150" height="90" rx="14" :fill="zoneColor(z)" stroke="white" stroke-width="2" />
+            <text :x="TILE[i].x + 75" :y="TILE[i].y + 40" text-anchor="middle" class="fill-current text-ink" font-size="14" font-weight="700">{{ z.label }}</text>
+            <text :x="TILE[i].x + 75" :y="TILE[i].y + 62" text-anchor="middle" class="fill-current text-slate-600" font-size="11">{{ rial(z.amount) }}</text>
+          </g>
+        </svg>
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-slate-400">
+              <th class="text-right font-medium py-1.5">محدوده</th>
+              <th class="text-left font-medium">فروش</th>
+              <th class="text-left font-medium">خریدار</th>
+              <th class="text-left font-medium">مشتری</th>
+              <th class="text-right font-medium pr-3">مسئول</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="z in tehran.rows" :key="z.id" class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
+                @click="crm.openDrill(z.drill, `فاکتورهای ${z.label}`)">
+              <td class="py-2 text-ink">{{ z.label }}</td>
+              <td class="text-left ltr-nums">{{ rial(z.amount) }} <span class="text-slate-400">({{ pct(z.share_pct) }})</span></td>
+              <td class="text-left ltr-nums">{{ num(z.buyers) }}</td>
+              <td class="text-left ltr-nums">{{ num(z.customer_base) }}</td>
+              <td class="pr-3 text-slate-500">{{ [...z.managers, ...z.experts].map((p) => p.name).join("، ") || "—" }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="tehran.unzoned_customers" class="text-[11px] text-amber-600 mt-3">
+        {{ num(tehran.unzoned_customers) }} مشتری تهران هنوز محدوده ندارند و در «{{ tehran.default_zone }}» شمرده شده‌اند؛
+        محدوده را در فهرست مشتریان (ستون استان) تعیین کنید.
+      </p>
     </div>
 
     <!-- ================= Province detail, below the map ================= -->

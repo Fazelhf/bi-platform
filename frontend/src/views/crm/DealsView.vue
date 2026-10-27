@@ -430,7 +430,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
           <span class="w-px h-5 bg-white/20 mx-1"></span>
           <select v-model="assignTo" class="bg-white/10 rounded-lg px-2 py-1.5 text-xs outline-none">
             <option value="" class="text-ink">سپردن به کارشناس…</option>
-            <option v-for="e in crm.options?.employees ?? []" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
+            <option v-for="e in crm.rosterEmployees" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
           </select>
           <button v-if="assignTo" class="text-xs rounded-lg px-3 py-1.5 bg-white text-ink disabled:opacity-50" :disabled="bulkBusy" @click="bulkAssign">ثبت</button>
         </template>

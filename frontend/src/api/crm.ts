@@ -69,9 +69,42 @@ export interface GeoProvinceRow extends ReportRow {
   achievement_pct: number;
   share_pct: number;
   owner_label: string;
+  managers: GeoPerson[];
+  experts: GeoPerson[];
+}
+
+export interface GeoPerson { id: number; name: string }
+
+/** Four cut points between five colour classes, per map metric (server-side). */
+export interface GeoScale { amount: number[]; customers: number[]; achievement: number[] }
+
+export interface GeoZoneRow {
+  id: number;
+  code: string;
+  label: string;
+  is_default: boolean;
+  has_geometry: boolean;
+  amount: number;
+  count: number;
+  buyers: number;
+  customer_base: number;
+  share_pct: number;
+  managers: GeoPerson[];
+  experts: GeoPerson[];
+  drill: Drill;
 }
 
 export interface GeoOverview {
+  scale: GeoScale;
+  scale_with_tehran: GeoScale;
+  tehran: {
+    province_id: number;
+    rows: GeoZoneRow[];
+    total: number;
+    unzoned_customers: number;
+    default_zone: string;
+    scale: { amount: number[]; customers: number[] };
+  } | null;
   rows: GeoProvinceRow[];
   total: number;
   unplaced: { count: number; amount: number };
@@ -111,7 +144,9 @@ export interface GeoProvince {
     id: number; number: string; kind: string; date: string;
     customer_id: number | null; customer: string; amount: number; unsettled: number;
   }[];
-  reps: { id: number | null; label: string; amount: number }[];
+  reps: { id: number | null; label: string; amount: number; assigned: boolean }[];
+  managers: GeoPerson[];
+  experts: GeoPerson[];
   drill: Drill;
   window: { start: string | null; end: string | null };
 }
@@ -214,6 +249,18 @@ export interface CrmCustomer {
   insights?: CustomerInsights;
 }
 
+export interface TerritoryRow {
+  id: number;
+  province: number;
+  province_name: string;
+  zone: number | null;
+  zone_name: string;
+  channel: string;
+  employee: number;
+  employee_name: string;
+  role: "manager" | "expert";
+}
+
 export interface CustomerGroupRow {
   id: number;
   code: string;
@@ -296,7 +343,10 @@ export interface CrmOptions {
   /** Sample rows from `seed_crm_sample` are loaded; every screen says so. */
   sample_data?: boolean;
   provinces: { id: number; name_fa: string }[];
-  employees: { id: number; name: string; team: string }[];
+  /** `active` false: owns old records but is no longer on the sales roster —
+   *  kept as a label, never offered as a new owner. */
+  employees: { id: number; name: string; team: string; active?: boolean }[];
+  zones: { id: number; name_fa: string; province: number; channel: string; is_default: boolean }[];
   groups: { id: number; name_fa: string }[];
   sources: { id: number; name_fa: string }[];
   reasons: { id: number; name_fa: string; is_controllable: boolean }[];
@@ -644,6 +694,21 @@ export const crmApi = {
   async bulkUpdateCustomers(ids: number[], fields: Record<string, unknown>): Promise<{ updated: number }> {
     const { data } = await api.post("/crm/customers/bulk-update/", { ids, fields });
     return data;
+  },
+
+  // ---- province / zone responsibilities ------------------------------------
+  async territories(): Promise<TerritoryRow[]> {
+    const { data } = await api.get("/crm/territories/");
+    return data;
+  },
+  async saveTerritory(payload: {
+    province: number; zone: number | null; role: string; employee: number; channel?: string;
+  }): Promise<TerritoryRow> {
+    const { data } = await api.post("/crm/territories/", payload);
+    return data;
+  },
+  async deleteTerritory(id: number) {
+    await api.delete(`/crm/territories/${id}/`);
   },
 
   // ---- customer groups ----------------------------------------------------

@@ -99,6 +99,13 @@ export const useCrmStore = defineStore("crm", {
     employeeName: (state) => (id: number | null) =>
       state.options?.employees.find((e) => e.id === id)?.name ?? "—",
 
+    /** کارشناسان فعال واحد فروش — the only people a record may be given to. */
+    rosterEmployees: (state) => (state.options?.employees ?? []).filter((e) => e.active !== false),
+
+    /** Sales zones of a province (today: Tehran's four), or none. */
+    zonesOf: (state) => (provinceId: number | null | undefined) =>
+      (state.options?.zones ?? []).filter((z) => z.province === provinceId),
+
     canEdit: (state) => !!state.me?.can_edit,
 
     /**
