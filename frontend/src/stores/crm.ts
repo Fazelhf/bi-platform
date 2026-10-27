@@ -18,7 +18,8 @@ interface Filters {
   date_from: string;
   date_to: string;
   owner: number | "";
-  group: number | "";
+  /** "none": customers with no group. */
+  group: number | "" | "none";
   source: number | "";
   province: number | "";
 }

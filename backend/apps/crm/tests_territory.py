@@ -66,6 +66,11 @@ class RosterTests(APITestCase):
         self.assertTrue({head.pk, lead.pk, self.seller.pk} <= team_roster)
         self.assertNotIn(ceo.pk, set(sales_roster().values_list("pk", flat=True)))
         self.assertNotIn(lead.pk, set(sales_roster(["b2b"]).values_list("pk", flat=True)))
+        # And the pickers offer them: `active` is what the frontend filters on.
+        self.client.force_authenticate(_user("r-ceo2", "executive", ""))
+        emps = {e["id"]: e for e in self.client.get("/api/crm/options/").data["employees"]}
+        self.assertTrue(emps[head.pk]["active"] and emps[lead.pk]["active"])
+        self.assertNotIn(ceo.pk, emps)
 
     def test_bulk_assign_refuses_someone_off_the_roster(self):
         self.client.force_authenticate(_user("r-boss2"))
