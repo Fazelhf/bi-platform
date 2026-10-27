@@ -47,6 +47,26 @@ class RosterTests(APITestCase):
         res = self.client.patch(f"/api/crm/customers/{self.old.pk}/", {"owner": self.seller.pk}, format="json")
         self.assertEqual(res.status_code, 200, res.data)
 
+    def test_sales_managers_come_from_their_seats_but_other_heads_do_not(self):
+        from apps.crm.people import sales_roster
+        from apps.hr.models import OrgUnit, Position
+
+        top = OrgUnit.objects.create(name_fa="مدیریت", kind="department")
+        sales = OrgUnit.objects.create(name_fa="فروش", kind="department", parent=top)
+        team = OrgUnit.objects.create(name_fa="همکار", parent=sales, sales_channel="team")
+        OrgUnit.objects.create(name_fa="مالی", parent=top)
+        head = DimEmployee.objects.create(code="r-h", full_name_fa="مدیر فروش")
+        lead = DimEmployee.objects.create(code="r-sv", full_name_fa="سرپرست")
+        ceo = DimEmployee.objects.create(code="r-ceo", full_name_fa="مدیرعامل")
+        Position.objects.create(unit=sales, title_fa="مدیر فروش", holder=head, is_head=True)
+        # A سرپرست is off the sales sheet, so HR gives no membership.
+        Position.objects.create(unit=team, title_fa="سرپرست", holder=lead, is_head=True, on_sales_sheet=False)
+        Position.objects.create(unit=top, title_fa="مدیرعامل", holder=ceo, is_head=True)
+        team_roster = set(sales_roster(["team"]).values_list("pk", flat=True))
+        self.assertTrue({head.pk, lead.pk, self.seller.pk} <= team_roster)
+        self.assertNotIn(ceo.pk, set(sales_roster().values_list("pk", flat=True)))
+        self.assertNotIn(lead.pk, set(sales_roster(["b2b"]).values_list("pk", flat=True)))
+
     def test_bulk_assign_refuses_someone_off_the_roster(self):
         self.client.force_authenticate(_user("r-boss2"))
         res = self.client.post("/api/crm/customers/bulk-assign/",

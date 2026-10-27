@@ -15,7 +15,8 @@ import CustomerPicker from "./CustomerPicker.vue";
  * not visible afterwards. The absorbed customer is kept and marked, not
  * deleted, and the pair is recorded in بازبینی تطبیق.
  */
-const props = defineProps<{ customer: CrmCustomer }>();
+/** `stay`: opened from a list that stays put after the merge (کنترل داده). */
+const props = defineProps<{ customer: CrmCustomer; stay?: boolean }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "merged", id: number): void }>();
 
 const similar = ref<SimilarCustomer[]>([]);
@@ -110,7 +111,7 @@ async function save() {
     :saving="saving"
     :error="error"
     wide
-    :save-label="result ? 'بستن و رفتن به مشتری' : 'ادغام'"
+    :save-label="result ? (stay ? 'بستن' : 'بستن و رفتن به مشتری') : 'ادغام'"
     @close="emit('close')"
     @save="save"
   >

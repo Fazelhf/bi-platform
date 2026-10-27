@@ -2,7 +2,9 @@
 import { computed, onMounted, ref } from "vue";
 import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import { useRouter } from "vue-router";
-import { crmApi, type DataCheck, type DataCheckRow } from "@/api/crm";
+import { crmApi, type CrmCustomer, type DataCheck, type DataCheckRow } from "@/api/crm";
+import { toast } from "@/composables/useUi";
+import MergeCustomerModal from "@/components/crm/MergeCustomerModal.vue";
 import { num } from "@/utils/format";
 import Skeleton from "@/components/Skeleton.vue";
 import NavIcon from "@/components/NavIcon.vue";
@@ -12,8 +14,8 @@ import NavIcon from "@/components/NavIcon.vue";
  *
  * Checks are ordered by how much they distort a report: a deal on the wrong
  * customer moves money between accounts, a deal without an amount only
- * understates a forecast. Nothing here changes data; each row opens the
- * record so a person can fix it where it lives.
+ * understates a forecast. Only «ادغام» of a duplicate group changes data here,
+ * in a modal; every other row opens the record so a person can fix it where it lives.
  */
 const router = useRouter();
 const checks = ref<DataCheck[]>([]);
@@ -45,12 +47,32 @@ const visible = computed(() => checks.value.filter((c) => c.count || showClean.v
 const clean = computed(() => checks.value.filter((c) => !c.count).length);
 const issues = computed(() => checks.value.filter((c) => c.count && c.severity === "high").length);
 
-function openRow(r: DataCheckRow) {
+/** The customer whose duplicate group is being merged right here. */
+const merging = ref<CrmCustomer | null>(null);
+const fetching = ref<number | null>(null);
+
+async function openRow(r: DataCheckRow) {
   if (r.kind === "deal") router.push({ name: "crm-deal", params: { id: r.id } });
   else if (r.kind === "suspect") router.push({ name: "crm-settings", query: { section: "arpa", tab: "suspect" } });
-  // A duplicate group opens straight into «ادغام»: its twins are the first suggestions there.
-  else if (r.kind === "group") router.push({ name: "crm-customer", params: { id: r.id }, query: { merge: "1" } });
-  else if (r.customer_id) router.push({ name: "crm-customer", params: { id: r.customer_id } });
+  // A duplicate group opens «ادغام» on this page: its twins are the first suggestions there.
+  else if (r.kind === "group") {
+    fetching.value = r.id;
+    try {
+      merging.value = await crmApi.customer(r.id);
+    } catch {
+      toast.error("مشتری باز نشد.");
+    } finally {
+      fetching.value = null;
+    }
+  } else if (r.customer_id) router.push({ name: "crm-customer", params: { id: r.customer_id } });
+}
+
+/** A merge shrinks the group: re-run the checks, keeping the same card open. */
+async function onMerged() {
+  merging.value = null;
+  const keepOpen = open.value;
+  await load();
+  open.value = keepOpen;
 }
 
 const card = "bg-surface rounded-card shadow-soft min-w-0";
@@ -94,6 +116,7 @@ const card = "bg-surface rounded-card shadow-soft min-w-0";
             <tr
               v-for="r in c.rows" :key="`${r.kind}-${r.id}-${r.detail}`"
               class="border-b border-slate-50 hover:bg-slate-50 cursor-pointer"
+              :class="fetching === r.id && r.kind === 'group' ? 'opacity-50' : ''"
               @click="openRow(r)"
             >
               <td class="px-4 py-2 text-ink">{{ r.title }}</td>
@@ -107,5 +130,6 @@ const card = "bg-surface rounded-card shadow-soft min-w-0";
         </p>
       </div>
     </div>
+    <MergeCustomerModal v-if="merging" :customer="merging" stay @close="merging = null" @merged="onMerged" />
   </div>
 </template>

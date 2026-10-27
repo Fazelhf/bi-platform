@@ -24,6 +24,10 @@ def sales_roster(channels=None):
 
     Finance, production and warehouse staff have no such membership, which is
     what keeps them out of every CRM picker.
+
+    The managers are added from the org chart's seats: a سرپرست is kept off
+    the sales sheet (`Position.on_sales_sheet`), so HR never gives them a
+    membership, and مدیر فروش sits in «فروش», which is no book of its own.
     """
     from django.db.models import Q
 
@@ -32,11 +36,51 @@ def sales_roster(channels=None):
     match = Q(memberships__is_active=True)
     if channels is not None:
         match &= Q(memberships__channel__in=list(channels))
+    wanted = None if channels is None else set(channels)
+    managers = [e for e, chs in sales_seats().items() if wanted is None or chs & wanted]
     return (
         DimEmployee.objects.filter(is_active=True, is_placeholder=False)
         .exclude(full_name_fa__in=["", "0"])
-        .filter(match).distinct()
+        .filter(match | Q(pk__in=managers)).distinct()
     )
+
+
+def sales_seats() -> dict[int, set[str]]:
+    """
+    Holder of every seat in a sales unit → the books under that seat, on the
+    sales sheet or not. A sales unit has a channel (its own or a parent's), or
+    is a unit whose sub-units are all sales units — «فروش» above همکار, B2B
+    and بانکی — so a head of the whole company is never counted.
+    """
+    from apps.hr.models import OrgUnit, Position
+    from apps.hr.services.rosters import unit_channels
+
+    own = unit_channels()
+    kids: dict[int, list[int]] = {}
+    for uid, parent, active in OrgUnit.objects.values_list("id", "parent_id", "is_active"):
+        if parent and active:
+            kids.setdefault(parent, []).append(uid)
+
+    memo: dict[int, set[str]] = {}
+
+    def books(uid: int, seen=frozenset()) -> set[str]:
+        if uid not in memo:
+            if own.get(uid):
+                memo[uid] = {own[uid]}
+            elif uid in seen or not kids.get(uid):
+                return set()
+            else:
+                parts = [books(k, seen | {uid}) for k in kids[uid]]
+                memo[uid] = set().union(*parts) if all(parts) else set()
+        return memo[uid]
+
+    seats: dict[int, set[str]] = {}
+    for unit, holder in Position.objects.filter(
+        holder__isnull=False, holder__is_active=True, unit__is_active=True,
+    ).values_list("unit_id", "holder_id"):
+        if chs := books(unit):
+            seats.setdefault(holder, set()).update(chs)
+    return seats
 
 
 #: A placeholder in آرپا's بازاریاب column, not a colleague. 425 of 1,098
