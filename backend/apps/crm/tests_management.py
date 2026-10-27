@@ -26,6 +26,13 @@ class GroupTests(APITestCase):
         self.c2 = _customer("g-c2", group=self.a)
         self.client.force_authenticate(self.boss)
 
+    def test_filter_customers_without_a_group(self):
+        loose = _customer("g-none")
+        codes = lambda q: {r["code"] for r in self.client.get("/api/crm/customers/", q).data["results"]}
+        self.assertEqual(codes({"group": "none"}), {"g-none"})
+        self.assertEqual(codes({"group": self.a.pk}), {"g-c1", "g-c2"})
+        self.assertIn(loose.code, codes({}))
+
     def test_create_rename_and_count(self):
         res = self.client.post("/api/crm/groups/", {"name_fa": "عمده‌فروش"}, format="json")
         self.assertEqual(res.status_code, 201, res.data)

@@ -110,6 +110,7 @@ const sel = "bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none bor
 
     <select v-model="crm.filters.group" :class="sel" @change="changed">
       <option value="">همه گروه‌ها</option>
+      <option value="none">— بدون گروه</option>
       <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name_fa }}</option>
     </select>
 

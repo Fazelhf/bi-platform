@@ -147,7 +147,8 @@ class Filters:
 
         f = cls(raw=dict(q.items()), dataset=dataset)
         f.owner = num("owner")
-        f.group = num("group")
+        # «بدون گروه»: 0 means «no group», None means «any group».
+        f.group = 0 if q.get("group") == "none" else num("group")
         f.source = num("source")
         f.province = num("province")
         f.zone = num("zone")
@@ -220,8 +221,8 @@ class Filters:
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
-        if self.group:
-            qs = qs.filter(customer__group_id=self.group)
+        if self.group is not None:
+            qs = qs.filter(customer__group_id=self.group or None)
         if self.source:
             qs = qs.filter(lead_source_id=self.source)
         if self.province:
@@ -253,8 +254,8 @@ class Filters:
         qs = self._window(qs, "at")
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
-        if self.group:
-            qs = qs.filter(customer__group_id=self.group)
+        if self.group is not None:
+            qs = qs.filter(customer__group_id=self.group or None)
         if self.province:
             qs = qs.filter(customer__province_id=self.province)
         if self.customer:
@@ -277,8 +278,8 @@ class Filters:
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
-        if self.group:
-            qs = qs.filter(group_id=self.group)
+        if self.group is not None:
+            qs = qs.filter(group_id=self.group or None)
         if self.source:
             qs = qs.filter(lead_source_id=self.source)
         if self.province:
@@ -328,8 +329,8 @@ class Filters:
             qs = qs.filter(issued_at__lt=self.end)
         if self.owner:
             qs = qs.filter(rep_id=self.owner)
-        if self.group:
-            qs = qs.filter(customer__group_id=self.group)
+        if self.group is not None:
+            qs = qs.filter(customer__group_id=self.group or None)
         if self.source:
             qs = qs.filter(customer__lead_source_id=self.source)
         if self.province:
@@ -369,10 +370,14 @@ class Filters:
             v = getattr(self, name)
             if v:
                 out[name] = v
+        if self.group == 0:
+            out["group"] = "none"
         for name in ("status", "result", "kind", "invoiced"):
             v = getattr(self, name)
             if v:
                 out[name] = v
+        if self.group == 0:
+            out["group"] = "none"
         return out
 
 
@@ -1511,7 +1516,7 @@ def sales_target(f: Filters) -> float:
     Plans are set per salesperson, so a slice the plan was never cut along
     (a customer group, a lead source) has no target: 0, not a misleading one.
     """
-    if f.blind or any((f.group, f.source, f.province, f.customer, f.product, f.tag)):
+    if f.blind or f.group is not None or any((f.source, f.province, f.customer, f.product, f.tag)):
         return 0.0
     months = Q(pk__in=[])
     for jy, jm, _, _ in _time_buckets(f):

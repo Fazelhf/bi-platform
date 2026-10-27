@@ -268,10 +268,9 @@ def employee_options(request):
     who has never worked their book — a row that then shows up in nobody's
     reports, because the rest of the system agrees the two are separate.
     """
-    from django.db.models import Exists
+    from django.db.models import BooleanField, ExpressionWrapper
 
     from apps.crm.people import sales_roster
-    from apps.sales.models import EmployeeChannel
 
     qs = (
         DimEmployee.objects.select_related("team")
@@ -286,13 +285,13 @@ def employee_options(request):
     # existing customer's owner is still on the list that labels it. Those
     # extra rows come back with `in_roster` false: shown, not offered for new
     # assignments — `sales_roster` is what a save is checked against.
+    # Ids, not membership rows: a سرپرست or مدیر فروش is on the roster by seat.
+    roster = list(sales_roster(wanted).values_list("pk", flat=True))
     return qs.filter(
-        Q(pk__in=sales_roster(wanted).values("pk"))
+        Q(pk__in=roster)
         | Q(customers__channel__in=wanted)
         | Q(deals__channel__in=wanted)
-    ).annotate(in_roster=Exists(EmployeeChannel.objects.filter(
-        employee=OuterRef("pk"), is_active=True, channel__in=wanted,
-    ))).distinct()
+    ).annotate(in_roster=ExpressionWrapper(Q(pk__in=roster), output_field=BooleanField())).distinct()
 
 
 def apply_ordering(qs, request, allowed: dict[str, str]):
@@ -668,8 +667,8 @@ class CustomerViewSet(_Base):
 
         if f.owner:
             qs = qs.filter(owner_id=f.owner)
-        if f.group:
-            qs = qs.filter(group_id=f.group)
+        if f.group is not None:
+            qs = qs.filter(group_id=f.group or None)
         if f.province:
             qs = qs.filter(province_id=f.province)
         if f.zone:
@@ -2307,8 +2306,8 @@ class PipelineBoardView(GatedAPIView):
         )
         if f.owner:
             qs = qs.filter(owner_id=f.owner)
-        if f.group:
-            qs = qs.filter(customer__group_id=f.group)
+        if f.group is not None:
+            qs = qs.filter(customer__group_id=f.group or None)
         if f.province:
             qs = qs.filter(customer__province_id=f.province)
         search = (request.query_params.get("search") or "").strip()
