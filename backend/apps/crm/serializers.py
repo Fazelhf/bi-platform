@@ -17,9 +17,13 @@ from apps.crm.models import (
 # Lookups
 # --------------------------------------------------------------------------
 class CustomerGroupSerializer(serializers.ModelSerializer):
+    customer_count = serializers.IntegerField(read_only=True, default=0)
+
     class Meta:
         model = CustomerGroup
-        fields = ("id", "code", "name_fa", "color")
+        fields = ("id", "code", "name_fa", "color", "is_system", "customer_count")
+        read_only_fields = ("is_system",)
+        extra_kwargs = {"code": {"required": False}}
 
 
 class TagSerializer(serializers.ModelSerializer):
@@ -121,7 +125,7 @@ class CustomerWriteSerializer(serializers.ModelSerializer):
         fields = (
             "id", "code", "name_fa", "kind", "status", "group", "province", "city",
             "lead_source", "owner", "tags", "contact_name", "phone", "mobile",
-            "email", "address", "national_id", "note", "first_contact_at",
+            "email", "address", "national_id", "economic_code", "note", "first_contact_at",
             "channel",
         )
         read_only_fields = ("id",)
@@ -132,6 +136,11 @@ class CustomerWriteSerializer(serializers.ModelSerializer):
             # for no gain.
             "first_contact_at": {"required": False},
         }
+
+    #: Fields the list's bulk edit may set on many customers at once. Names,
+    #: phones and ids are per-customer facts; setting one on fifty rows is
+    #: always a mistake.
+    BULK = ("group", "province", "owner", "status", "lead_source", "city")
 
 
 # --------------------------------------------------------------------------
@@ -440,6 +449,7 @@ class MatchCandidateSerializer(serializers.ModelSerializer):
         fields = (
             "id", "source", "external_id", "external_name", "method",
             "method_display", "score", "state", "state_display",
+            "confidence", "reason",
             "decided_at", "decided_by_name", "crm", "arpa",
         )
 

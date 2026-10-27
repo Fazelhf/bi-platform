@@ -25,6 +25,7 @@ from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import SAFE_METHODS, BasePermission
@@ -483,8 +484,84 @@ class _Base(viewsets.ModelViewSet):
 
 
 class CustomerGroupViewSet(_Base):
+    """
+    گروه‌های مشتری. Everyone reads them; a manager creates, renames, moves
+    customers between them and deletes them.
+
+    Moving and deleting touch only customers in the manager's own books: a
+    group is shared reference data, but فروش همکار's manager re-filing
+    بانکی's customers is not theirs to do. A group that still holds someone
+    else's customers after the move is therefore not deleted.
+    """
+
     queryset = CustomerGroup.objects.all()
     serializer_class = CustomerGroupSerializer
+
+    def get_queryset(self):
+        return super().get_queryset().annotate(customer_count=Count(
+            "customers", filter=Q(customers__merged_into__isnull=True), distinct=True,
+        ))
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in SAFE_METHODS and not is_crm_manager(request.user):
+            self.permission_denied(request, message="مدیریت گروه‌ها با مدیر فروش است.")
+
+    def perform_create(self, serializer):
+        from django.utils.text import slugify
+
+        base = "cg-" + (slugify(serializer.validated_data.get("code") or serializer.validated_data["name_fa"],
+                                allow_unicode=True)[:40] or "group")
+        code, n = base, 1
+        while CustomerGroup.objects.filter(code=code).exists():
+            n += 1
+            code = f"{base}-{n}"
+        serializer.save(code=code, **self.create_defaults(serializer))
+
+    def _mine(self, group):
+        qs = Customer.objects.filter(group=group)
+        channels = crm_scope(self.request.user).channels
+        return qs if channels is None else qs.filter(channel__in=channels)
+
+    def _target(self, group):
+        raw = self.request.data.get("move_to") or self.request.query_params.get("move_to")
+        if not raw:
+            return None
+        target = CustomerGroup.objects.filter(pk=raw, dataset=group.dataset).first()
+        if target is None or target.pk == group.pk:
+            raise ValidationError({"move_to": ["گروه مقصد معتبر نیست."]})
+        return target
+
+    @action(detail=True, methods=["post"])
+    def move(self, request, pk=None):
+        """All of this group's customers (in the caller's books) to `move_to`."""
+        group = self.get_object()
+        target = self._target(group)
+        if target is None:
+            return Response({"move_to": ["گروه مقصد را انتخاب کنید."]}, status=status.HTTP_400_BAD_REQUEST)
+        moved = self._mine(group).update(group=target)
+        return Response({"moved": moved, "to": target.name_fa})
+
+    def destroy(self, request, *args, **kwargs):
+        group = self.get_object()
+        if group.is_system:
+            return Response({"detail": f"«{group.name_fa}» گروه سیستمی است و حذف نمی‌شود؛ فقط نامش قابل تغییر است."},
+                            status=status.HTTP_409_CONFLICT)
+        held = group.customers.count()
+        target = self._target(group)
+        if held and target is None:
+            return Response({"detail": f"{held} مشتری در این گروه است؛ گروه مقصد را انتخاب کنید.",
+                             "customers": held}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            moved = self._mine(group).update(group=target) if held else 0
+            left = group.customers.count()
+            if left:
+                transaction.set_rollback(True)
+                return Response({"detail": f"{left} مشتری این گروه در دفتر واحد دیگری است؛ "
+                                           "گروه حذف نشد. مدیر آن واحد باید آن‌ها را منتقل کند."},
+                                status=status.HTTP_409_CONFLICT)
+            group.delete()
+        return Response({"moved": moved, "deleted": True})
 
 
 class TagViewSet(_Base):
@@ -585,13 +662,23 @@ class CustomerViewSet(_Base):
             qs = qs.filter(status=q["status"])
         search = (q.get("search") or "").strip()
         if search:
-            qs = qs.filter(
+            from apps.crm.matching import fold, name_key, phone_key
+
+            # The folded key as well as the raw column: «علي» typed in Arabic
+            # letters has to find «علی» stored in Persian, and the reverse.
+            cond = (
                 Q(name_fa__icontains=search)
                 | Q(contact_name__icontains=search)
                 | Q(phone__icontains=search)
                 | Q(mobile__icontains=search)
                 | Q(code__icontains=search)
             )
+            if name_key(search):
+                cond |= Q(name_key__icontains=name_key(search))
+            digits = "".join(ch for ch in fold(search) if ch.isdigit())
+            if len(digits) >= 8:
+                cond |= Q(mobile_key=phone_key(digits)) | Q(phone_key=phone_key(digits))
+            qs = qs.filter(cond)
         ids = id_list(self.request)
         if ids:
             qs = qs.filter(pk__in=ids)
@@ -657,12 +744,47 @@ class CustomerViewSet(_Base):
         return Response({"activities": acts, "deals": deals})
 
 
+    def perform_update(self, serializer):
+        # Which department's book a customer is filed in is a manager's call.
+        if not is_crm_manager(self.request.user):
+            serializer.validated_data.pop("channel", None)
+        super().perform_update(serializer)
+
     # -- bulk actions on the list -------------------------------------------
     @action(detail=False, methods=["post"], url_path="bulk-assign")
     def bulk_assign(self, request):
         return bulk_assign(request, self.scoped(
             Customer.objects.filter(dataset=active_dataset(request))
         ))
+
+    @action(detail=False, methods=["post"], url_path="bulk-update")
+    def bulk_update(self, request):
+        """
+        One value onto many customers — group, province, owner, status, lead
+        source or city — in one request and one UPDATE. Validated by the same
+        serializer as a single edit, and limited to rows the caller may edit.
+        """
+        ids = [i for i in (request.data.get("ids") or []) if isinstance(i, int)]
+        fields = request.data.get("fields") or {}
+        if not ids or not isinstance(fields, dict) or not fields:
+            return Response({"detail": "ردیف‌ها و مقدار تازه را انتخاب کنید."}, status=status.HTTP_400_BAD_REQUEST)
+        bad = set(fields) - set(CustomerWriteSerializer.BULK)
+        if bad:
+            return Response({"detail": "این فیلدها گروهی ویرایش نمی‌شوند: " + "، ".join(sorted(bad))},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if "owner" in fields and not is_crm_manager(request.user):
+            return Response({"detail": "تغییر کارشناس فقط برای مدیران فروش است."}, status=status.HTTP_403_FORBIDDEN)
+        rows = self.scoped(Customer.objects.filter(
+            dataset=active_dataset(request), merged_into__isnull=True, pk__in=ids,
+        ))
+        first = rows.first()
+        if first is None:
+            return Response({"detail": "مشتری معتبری در انتخاب نبود."}, status=status.HTTP_400_BAD_REQUEST)
+        ser = CustomerWriteSerializer(first, data=fields, partial=True, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        values = {k: ser.validated_data[k] for k in fields if k in ser.validated_data}
+        updated = rows.update(**values)
+        return Response({"updated": updated})
 
     @action(detail=True, methods=["get"])
     def similar(self, request, pk=None):
@@ -671,10 +793,20 @@ class CustomerViewSet(_Base):
         phone, or a name that shares its words. A suggestion for the person
         deciding a merge — never a decision; nothing here merges.
         """
-        from apps.crm.matching import id_key, name_key, phone_key
+        from difflib import SequenceMatcher
+
+        from apps.crm.models import CrmConfig
 
         me = self.get_object()
-        live = self.get_queryset().filter(merged_into__isnull=True).exclude(pk=me.pk)
+        # A manager is looking for duplicates anywhere in the file — the
+        # twin of a بانکی customer is often filed under همکار. An expert
+        # still sees only their own book.
+        base = (
+            Customer.objects.filter(dataset=active_dataset(request))
+            if is_crm_manager(request.user) else self.scoped(Customer.objects.all())
+        )
+        live = base.filter(merged_into__isnull=True).exclude(pk=me.pk)
+        cfg = CrmConfig.get()
         found: dict[int, dict] = {}
 
         def add(qs, why):
@@ -690,21 +822,55 @@ class CustomerViewSet(_Base):
                 if why not in row["why"]:
                     row["why"].append(why)
 
-        for value in {id_key(me.national_id), id_key(me.economic_code)} - {""}:
-            add(live.filter(Q(national_id=value) | Q(economic_code=value)), "شناسه/کد ملی یکسان")
-        for value in {phone_key(me.mobile), phone_key(me.phone)} - {""}:
-            add(live.filter(Q(mobile__endswith=value) | Q(phone__endswith=value)), "تلفن یکسان")
-        words = [w for w in name_key(me.name_fa).split() if len(w) > 2]
-        if words:
-            q = Q()
-            for w in words:
-                q &= Q(name_fa__icontains=w)
-            add(live.filter(q), "نام شبیه")
-            if len(words) > 1:
-                longest = max(words, key=len)
-                add(live.filter(name_fa__icontains=longest), "بخشی از نام")
+        # Every comparison is on the stored keys, folded the same way on both
+        # sides. Comparing them against the raw columns is what used to miss
+        # «آقاي سلطاني» (آرپا's Arabic letters) against «آقای سلطانی».
+        if me.nid_key:
+            add(live.filter(nid_key=me.nid_key), "شناسه/کد ملی یکسان")
+        if cfg.match_phone:
+            for value in {me.mobile_key, me.phone_key} - {""}:
+                add(live.filter(Q(mobile_key=value) | Q(phone_key=value)), "تلفن یکسان")
+        if me.name_key:
+            add(live.filter(name_key=me.name_key), "نام یکسان")
+            words = [w for w in me.name_key.split() if len(w) > 2]
+            if words:
+                q = Q()
+                for w in words:
+                    q &= Q(name_key__icontains=w)
+                add(live.filter(q), "نام شبیه")
+            if len(me.name_key) >= 4:
+                threshold = float(cfg.fuzzy_threshold)
+                close = [
+                    pk for pk, key in live.filter(name_key__startswith=me.name_key[:4])
+                    .values_list("pk", "name_key")[:500]
+                    if key != me.name_key
+                    and SequenceMatcher(None, key, me.name_key).ratio() >= threshold
+                ]
+                add(live.filter(pk__in=close), "نام مشابه")
         rows = sorted(found.values(), key=lambda r: -len(r["why"]))[:15]
         return Response(rows)
+
+    @action(detail=True, methods=["get"])
+    def merges(self, request, pk=None):
+        """سابقه ادغام — merges this customer took part in, newest first."""
+        from apps.crm.models import CustomerMerge
+
+        me = self.get_object()
+        rows = CustomerMerge.objects.filter(
+            Q(survivor=me) | Q(absorbed=me)
+        ).select_related("survivor", "absorbed", "by")
+        return Response([
+            {
+                "id": m.pk, "at": m.created_at, "at_jalali": jalali_str(m.created_at),
+                "by": m.by.get_full_name() or m.by.username if m.by else "",
+                "survivor": {"id": m.survivor_id, "name_fa": m.survivor.name_fa},
+                "absorbed": {"id": m.absorbed_id, "name_fa": m.absorbed.name_fa,
+                             "code": m.absorbed.code},
+                "moved": {k: len(v) for k, v in m.moved.items()},
+                "before": m.before,
+            }
+            for m in rows
+        ])
 
     @action(detail=True, methods=["post"])
     def merge(self, request, pk=None):
@@ -722,7 +888,11 @@ class CustomerViewSet(_Base):
             return Response({"detail": "ادغام مشتری با مدیر فروش است."}, status=status.HTTP_403_FORBIDDEN)
         me = self.get_object()
         try:
-            other = self.get_queryset().get(pk=int(request.data.get("other") or 0))
+            # Any book, as in `similar`: the twin may be filed under another
+            # channel. Recorded in CustomerMerge, so it stays traceable.
+            other = Customer.objects.filter(dataset=active_dataset(request)).get(
+                pk=int(request.data.get("other") or 0)
+            )
         except (Customer.DoesNotExist, ValueError):
             return Response({"detail": "مشتری دوم پیدا نشد."}, status=status.HTTP_400_BAD_REQUEST)
         survivor, absorbed = (me, other) if request.data.get("keep", "this") == "this" else (other, me)
@@ -741,8 +911,15 @@ class CustomerViewSet(_Base):
                     crm_merge.absorb(survivor, absorbed, request.user)
         except crm_merge.MergeError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        from apps.crm.models import CustomerMerge
+
         survivor.refresh_from_db()
-        return Response({"id": survivor.pk, "name_fa": survivor.name_fa, "absorbed": absorbed.pk})
+        record = CustomerMerge.objects.filter(survivor=survivor, absorbed=absorbed).first()
+        return Response({
+            "id": survivor.pk, "name_fa": survivor.name_fa, "absorbed": absorbed.pk,
+            "moved": {k: len(v) for k, v in (record.moved if record else {}).items()},
+            "last_activity_at": survivor.last_activity_at,
+        })
 
     @action(detail=False, methods=["post"], url_path="bulk-review")
     def bulk_review(self, request):
@@ -818,9 +995,11 @@ class CustomerViewSet(_Base):
                 {"detail": "هیچ مشتری‌ای انتخاب نشده است."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        rows = Customer.objects.filter(
+        # Scoped like every other write: an expert deletes only their own rows,
+        # a department only its own book.
+        rows = self.scoped(Customer.objects.filter(
             pk__in=ids, dataset=active_dataset(request)
-        ).annotate(
+        )).annotate(
             n_deals=Count("deals", distinct=True),
             n_invoices=Count("invoices", distinct=True),
             n_activities=Count("activities", distinct=True),
@@ -1219,6 +1398,8 @@ class DealViewSet(_Base):
             )
         if obj.status == Deal.Status.WON and previous_status != Deal.Status.WON:
             self._mark_customer_won(obj)
+        elif previous_status == Deal.Status.WON and obj.status != Deal.Status.WON:
+            Customer.refresh_rollups([obj.customer_id])
 
     @staticmethod
     def _sync_close(deal: Deal) -> None:
@@ -1288,6 +1469,7 @@ class DealViewSet(_Base):
         """One deal to one stage, with its stage event — shared by the single
         move and the bulk one so neither can skip the log the funnel reads."""
         previous = deal.stage
+        was_won = deal.status == Deal.Status.WON
         now = timezone.now()
         last = deal.stage_events.order_by("-at").first()
         days = max((now - (last.at if last else deal.opened_at)).days, 0)
@@ -1314,6 +1496,8 @@ class DealViewSet(_Base):
             deal.closed_at = None
             deal.close_period = None
         deal.save()
+        if was_won and deal.status != Deal.Status.WON:
+            Customer.refresh_rollups([deal.customer_id])
 
         DealStageEvent.objects.create(
             deal=deal, from_stage=previous, to_stage=stage, at=now,
@@ -1436,13 +1620,22 @@ class ActivityViewSet(_Base):
         obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
-        Customer.objects.filter(pk=obj.customer_id).update(last_activity_at=obj.at)
+        # Recomputed, not overwritten: a call logged today for last week must
+        # not pull «آخرین فعالیت» back past yesterday's meeting.
+        Customer.refresh_rollups([obj.customer_id])
 
     def perform_update(self, serializer):
+        previous = serializer.instance.customer_id
         super().perform_update(serializer)
         obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
+        Customer.refresh_rollups({previous, obj.customer_id})
+
+    def perform_destroy(self, instance):
+        customer_id = instance.customer_id
+        super().perform_destroy(instance)
+        Customer.refresh_rollups([customer_id])
 
     @action(detail=False, methods=["get"])
     def summary(self, request):
@@ -2333,6 +2526,9 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
         method = self.request.query_params.get("method")
         if method:
             qs = qs.filter(method=method)
+        confidence = self.request.query_params.get("confidence")
+        if confidence:
+            qs = qs.filter(confidence=confidence)
         search = self.request.query_params.get("search")
         if search:
             qs = qs.filter(
@@ -2353,7 +2549,12 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             .annotate(n=Count("id"))
         )
         by_state = dict(qs.values_list("state").annotate(n=Count("id")))
+        by_confidence = dict(
+            qs.filter(state=CustomerMatchCandidate.State.PENDING)
+            .values_list("confidence").annotate(n=Count("id"))
+        )
         return Response({
+            "by_confidence": by_confidence,
             "by_method": [
                 {"key": k, "label": label, "count": by_method.get(k, 0)}
                 for k, label in CustomerMatchCandidate.Method.choices
@@ -2361,6 +2562,22 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             ],
             "by_state": by_state,
             "pending": by_state.get(CustomerMatchCandidate.State.PENDING, 0),
+        })
+
+    @action(detail=False, methods=["post"])
+    def scan(self, request):
+        """
+        «جست‌وجوی تکراری‌ها» — the whole customer file against itself.
+
+        `dry_run` counts without queueing. Queued pairs wait for a person;
+        nothing here merges, however sure the match.
+        """
+        pairs, crowded = crm_merge.find_pairs(active_dataset(request))
+        definite = sum(1 for p in pairs if p["confidence"] == "definite")
+        queued = 0 if request.data.get("dry_run") else crm_merge.queue_found(pairs)
+        return Response({
+            "found": len(pairs), "definite": definite, "suspect": len(pairs) - definite,
+            "queued": queued, "crowded": crowded,
         })
 
     @action(detail=True, methods=["get"])
@@ -2426,6 +2643,46 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             "created": {"id": customer.id, "name_fa": customer.name_fa},
         })
 
+
+
+class CrmConfigView(GatedAPIView):
+    """تنظیمات تشخیص تکراری — read by everyone in CRM, changed by a manager."""
+
+    FIELDS = ("fuzzy_threshold", "match_phone", "queue_on_import")
+
+    def _out(self, cfg):
+        return {
+            "fuzzy_threshold": float(cfg.fuzzy_threshold),
+            "match_phone": cfg.match_phone,
+            "queue_on_import": cfg.queue_on_import,
+        }
+
+    def get(self, request):
+        from apps.crm.models import CrmConfig
+
+        return Response(self._out(CrmConfig.get()))
+
+    def patch(self, request):
+        from apps.crm.models import CrmConfig
+
+        if not is_crm_manager(request.user):
+            return Response({"detail": "تنظیمات با مدیر فروش است."}, status=status.HTTP_403_FORBIDDEN)
+        cfg = CrmConfig.get()
+        data = request.data
+        if "fuzzy_threshold" in data:
+            try:
+                value = Decimal(str(data["fuzzy_threshold"]))
+            except Exception:
+                value = None
+            if value is None or not Decimal("0.5") <= value <= Decimal("1"):
+                return Response({"fuzzy_threshold": ["عددی بین ۰٫۵ و ۱ وارد کنید."]},
+                                status=status.HTTP_400_BAD_REQUEST)
+            cfg.fuzzy_threshold = value.quantize(Decimal("0.01"))
+        for flag in ("match_phone", "queue_on_import"):
+            if flag in data:
+                setattr(cfg, flag, bool(data[flag]))
+        cfg.save()
+        return Response(self._out(cfg))
 
 
 # --------------------------------------------------------------------------

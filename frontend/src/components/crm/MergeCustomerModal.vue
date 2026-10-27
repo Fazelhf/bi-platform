@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { crmApi, type CrmCustomer, type SimilarCustomer } from "@/api/crm";
+import { computed, onMounted, ref, watch } from "vue";
+import { crmApi, MOVED_LABELS, type CrmCustomer, type SimilarCustomer } from "@/api/crm";
 import { num } from "@/utils/format";
 import FormModal from "./FormModal.vue";
 import CustomerPicker from "./CustomerPicker.vue";
@@ -25,6 +25,37 @@ const otherLabel = ref("");
 const keep = ref<"this" | "other">("this");
 const saving = ref(false);
 const error = ref("");
+/** The second customer in full, for the side-by-side table. */
+const other = ref<(CrmCustomer & Record<string, any>) | null>(null);
+/** Set once the merge is done: what moved, shown before the modal closes. */
+const result = ref<{ id: number; moved: Record<string, number> } | null>(null);
+
+watch(otherId, async (id) => {
+  other.value = null;
+  if (id) other.value = await crmApi.customer(Number(id)).catch(() => null);
+});
+
+/** The fields a reviewer compares, and which side's value survives: the
+ *  survivor's, unless it is blank — exactly what the backend does. */
+const COMPARE: [string, string][] = [
+  ["phone", "تلفن"], ["mobile", "موبایل"], ["national_id", "شناسه/کد ملی"],
+  ["province_name", "استان"], ["city", "شهر"], ["address", "آدرس"],
+  ["owner_name", "کارشناس"], ["group_name", "گروه"], ["contact_name", "رابط"],
+  ["status_display", "وضعیت"],
+];
+const COUNTS: [string, string][] = [
+  ["deals", "معامله"], ["activities", "فعالیت"], ["open_tasks", "کار باز"],
+];
+const me = computed(() => props.customer as CrmCustomer & Record<string, any>);
+const sides = computed(() =>
+  keep.value === "this" ? { keepRow: me.value, goneRow: other.value } : { keepRow: other.value, goneRow: me.value },
+);
+/** Column `i` (0 = this customer, 1 = the other) holds the value that stays. */
+function wins(field: string, i: number): boolean {
+  const survivorCol = keep.value === "this" ? 0 : 1;
+  if (sides.value.keepRow?.[field]) return i === survivorCol;
+  return !!sides.value.goneRow?.[field] && i !== survivorCol;
+}
 
 onMounted(async () => {
   try {
@@ -55,11 +86,15 @@ async function save() {
     error.value = "مشتری دوم را انتخاب کنید.";
     return;
   }
+  if (result.value) {
+    emit("merged", result.value.id);
+    return;
+  }
   saving.value = true;
   error.value = "";
   try {
     const res = await crmApi.mergeCustomer(props.customer.id, Number(otherId.value), keep.value);
-    emit("merged", res.id);
+    result.value = { id: res.id, moved: res.moved ?? {} };
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "ادغام انجام نشد.";
   } finally {
@@ -75,11 +110,22 @@ async function save() {
     :saving="saving"
     :error="error"
     wide
-    save-label="ادغام"
+    :save-label="result ? 'بستن و رفتن به مشتری' : 'ادغام'"
     @close="emit('close')"
     @save="save"
   >
-    <div class="space-y-4 text-sm">
+    <div v-if="result" class="space-y-3 text-sm">
+      <p class="rounded-xl bg-emerald-50 p-3 text-emerald-800">
+        «{{ absorbedName }}» در «{{ survivorName }}» ادغام شد. سابقه‌ی ادغام در صفحه‌ی مشتری ثبت است.
+      </p>
+      <ul class="grid grid-cols-2 gap-2">
+        <li v-for="(n, k) in result.moved" :key="k" class="rounded-lg bg-slate-50 px-3 py-2 flex justify-between">
+          <span class="text-slate-500">{{ MOVED_LABELS[k] ?? k }}</span><b class="ltr-nums">{{ num(n) }}</b>
+        </li>
+        <li v-if="!Object.keys(result.moved).length" class="text-slate-400">چیزی برای انتقال نبود.</li>
+      </ul>
+    </div>
+    <div v-else class="space-y-4 text-sm">
       <div>
         <p class="text-xs text-slate-500 mb-2">مشتری‌های شبیه</p>
         <p v-if="loading" class="text-xs text-slate-400">در حال پیدا کردن…</p>
@@ -127,10 +173,34 @@ async function save() {
         <label class="flex items-center gap-2 cursor-pointer">
           <input v-model="keep" type="radio" value="other" /> <span class="text-ink">{{ otherLabel }}</span>
         </label>
+        <table v-if="other" class="w-full text-xs border-t border-slate-200">
+          <thead>
+            <tr class="text-slate-400">
+              <th class="text-right font-normal py-1 w-24"></th>
+              <th class="text-right font-normal py-1">{{ customer.name_fa }}</th>
+              <th class="text-right font-normal py-1">{{ other.name_fa }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="[f, label] in COMPARE" :key="f" class="border-t border-slate-100">
+              <td class="py-1 text-slate-400">{{ label }}</td>
+              <td v-for="(row, i) in [me, other]" :key="i" class="py-1"
+                  :class="wins(f, i) ? 'bg-emerald-50 font-semibold text-ink' : 'text-slate-500'">
+                {{ row?.[f] || "—" }}
+              </td>
+            </tr>
+            <tr v-for="[f, label] in COUNTS" :key="f" class="border-t border-slate-100">
+              <td class="py-1 text-slate-400">{{ label }}</td>
+              <td class="py-1 ltr-nums">{{ num(me.stats?.[f] ?? 0) }}</td>
+              <td class="py-1 ltr-nums">{{ num(other.stats?.[f] ?? 0) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="other" class="text-[11px] text-slate-400">سبز: مقداری که بعد از ادغام می‌ماند. شمارنده‌ها جمع می‌شوند.</p>
         <p class="text-xs text-slate-600 leading-6 pt-1 border-t border-slate-200">
-          همه‌ی معامله‌ها، فاکتورها، فعالیت‌ها، کارها و کدهای آرپا/دیدارِ
+          همه‌ی معامله‌ها، فاکتورها، فعالیت‌ها، کارها، برچسب‌ها، اسناد مالی و کدهای آرپا/دیدارِ
           <b>«{{ absorbedName }}»</b> به <b>«{{ survivorName }}»</b> منتقل می‌شود
-          و جاهای خالی «{{ survivorName }}» از آن پر می‌شود.
+          و جاهای خالی «{{ survivorName }}» از آن پر می‌شود؛ «آخرین فعالیت» دوباره از روی فعالیت‌ها حساب می‌شود.
           «{{ absorbedName }}» پاک نمی‌شود؛ «ادغام‌شده» علامت می‌خورد و در بازبینی تطبیق ثبت می‌شود.
           <template v-if="picked"> ({{ num(picked.deals) }} معامله و {{ num(picked.invoices) }} فاکتورِ مشتری دوم)</template>
         </p>

@@ -14,7 +14,6 @@ from collections import defaultdict
 from django.db.models import F
 from django.utils import timezone
 
-from apps.crm.matching import name_key
 from apps.crm.models import (
     Activity, Customer, Deal, Review, SalesInvoice, Task,
 )
@@ -136,12 +135,16 @@ def run() -> dict:
     ))
 
     # ---- customers -----------------------------------------------------------
-    for key, label, field, norm in (
-        ("dup_national_id", "چند مشتری با یک شناسه/کد ملی", "national_id", lambda v: v),
-        ("dup_mobile", "چند مشتری با یک موبایل", "mobile", lambda v: "".join(ch for ch in v if ch.isdigit())[-10:]),
-        ("dup_name", "چند مشتری با نام یکسان", "name_fa", name_key),
+    # Grouped on the stored keys (see Customer.fill_keys): the raw columns
+    # mixed Persian and ASCII digits, dashes and Arabic letters, and a group
+    # on them missed most of what they were meant to find.
+    for key, label, field in (
+        ("dup_national_id", "چند مشتری با یک شناسه/کد ملی یا اقتصادی", "nid_key"),
+        ("dup_mobile", "چند مشتری با یک موبایل", "mobile_key"),
+        ("dup_phone", "چند مشتری با یک تلفن ثابت", "phone_key"),
+        ("dup_name", "چند مشتری با نام یکسان", "name_key"),
     ):
-        groups = _duplicates(field, norm)
+        groups = _duplicates(field)
         rows = [
             {"kind": "group", "id": g[0].pk, "title": g[0].name_fa,
              "customer": "، ".join(c.name_fa for c in g[1:4]), "customer_id": g[0].pk,

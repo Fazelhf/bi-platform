@@ -34,6 +34,7 @@ urlpatterns = [
     path("geo/", views.CrmGeoView.as_view(), name="crm-geo"),
     path("pipeline/", views.PipelineBoardView.as_view(), name="crm-pipeline"),
     path("options/", views.CrmOptionsView.as_view(), name="crm-options"),
+    path("config/", views.CrmConfigView.as_view(), name="crm-config"),
     path("today/", views.CrmTodayView.as_view(), name="crm-today"),
     path("search/", views.CrmSearchView.as_view(), name="crm-search"),
     path("me/", views.CrmMeView.as_view(), name="crm-me"),

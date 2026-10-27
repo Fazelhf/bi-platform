@@ -10,6 +10,7 @@ import SortHeader from "@/components/crm/SortHeader.vue";
 import { useSort } from "@/composables/useListPrefs";
 import { toast } from "@/composables/useUi";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
+import InlineCell from "@/components/crm/InlineCell.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
@@ -24,7 +25,23 @@ const loading = ref(true);
 const search = ref("");
 const status = ref("");
 const page = ref(1);
-const PAGE_SIZE = 30;
+/** Rows per page, remembered per browser. 100 by default: managing a book of
+ *  thousands 30 rows at a time was most of the clicking on this page. */
+const PAGE_SIZES = [30, 100, 200, 500];
+function storedSize(): number {
+  try {
+    const n = Number(localStorage.getItem("crm.customers.pageSize"));
+    return PAGE_SIZES.includes(n) ? n : 100;
+  } catch {
+    return 100;
+  }
+}
+const pageSize = ref(storedSize());
+watch(pageSize, (n) => {
+  try { localStorage.setItem("crm.customers.pageSize", String(n)); } catch { /* private mode */ }
+  page.value = 1;
+  load();
+});
 
 const { ordering, sortBy, dir } = useSort("");
 
@@ -42,7 +59,7 @@ async function load() {
   try {
     const res = await crmApi.customers({
       ...exportParams.value,
-      page: page.value, page_size: PAGE_SIZE,
+      page: page.value, page_size: pageSize.value,
     });
     rows.value = res.results;
     total.value = res.count;
@@ -63,7 +80,75 @@ watch(ordering, () => { page.value = 1; load(); });
 let t: number | undefined;
 watch(search, () => { window.clearTimeout(t); t = window.setTimeout(() => { page.value = 1; load(); }, 350); });
 
-const pages = computed(() => Math.max(Math.ceil(total.value / PAGE_SIZE), 1));
+const pages = computed(() => Math.max(Math.ceil(total.value / pageSize.value), 1));
+/** The list rows with their FK ids, which the list serializer sends but the
+ *  shared `CrmCustomer` type does not name. */
+const editableRows = computed(() => rows.value as (CrmCustomer & Record<string, any>)[]);
+
+// ---- editing in the table ------------------------------------------------
+const STATUSES = [
+  { id: "lead", name: "سرنخ" }, { id: "active", name: "مشتری فعال" },
+  { id: "dormant", name: "راکد" }, { id: "lost", name: "از دست رفته" },
+];
+const opts = computed(() => ({
+  groups: (crm.options?.groups ?? []).map((g) => ({ id: g.id, name: g.name_fa })),
+  provinces: (crm.options?.provinces ?? []).map((p) => ({ id: p.id, name: p.name_fa })),
+  sources: (crm.options?.sources ?? []).map((p) => ({ id: p.id, name: p.name_fa })),
+  employees: (crm.options?.employees ?? []).map((e) => ({ id: e.id, name: e.name })),
+}));
+const nameOf = (list: { id: string | number; name: string }[], id: unknown) =>
+  list.find((o) => o.id === id)?.name ?? "";
+
+/**
+ * Save one field and refresh the row from what the server stored. The row is
+ * replaced in place, so the page, filter, sort and scroll position all stay
+ * where the user left them; a row that no longer matches the filter stays
+ * until the next load rather than vanishing under the cursor.
+ */
+async function saveField(c: CrmCustomer & Record<string, any>, field: string, value: unknown) {
+  const saved: Record<string, any> = await crmApi.saveCustomer({ [field]: value }, c.id);
+  const i = rows.value.findIndex((r) => r.id === c.id);
+  if (i < 0) return;
+  const row: Record<string, any> = { ...rows.value[i], ...saved };
+  row.group_name = nameOf(opts.value.groups, row.group);
+  row.province_name = nameOf(opts.value.provinces, row.province);
+  row.source_name = nameOf(opts.value.sources, row.lead_source);
+  row.owner_name = nameOf(opts.value.employees, row.owner) || row.owner_name;
+  row.status_display = nameOf(STATUSES, row.status);
+  rows.value[i] = row as CrmCustomer;
+}
+
+/** One value onto every ticked row, in one request. */
+const bulkField = ref<"" | "group" | "province" | "status" | "lead_source">("");
+const bulkValue = ref<string | number | "">("");
+const BULK_FIELDS = [
+  { key: "group", label: "گروه" }, { key: "province", label: "استان" },
+  { key: "status", label: "وضعیت" }, { key: "lead_source", label: "منبع سرنخ" },
+] as const;
+const bulkOptions = computed(() => ({
+  group: opts.value.groups, province: opts.value.provinces,
+  status: STATUSES, lead_source: opts.value.sources, "": [],
+}[bulkField.value]));
+watch(bulkField, () => { bulkValue.value = ""; });
+
+async function bulkUpdate() {
+  if (!bulkField.value) return;
+  acting.value = true;
+  try {
+    const res = await crmApi.bulkUpdateCustomers([...selected.value], {
+      [bulkField.value]: bulkValue.value === "" ? null : bulkValue.value,
+    });
+    toast.success(`${num(res.updated)} مشتری به‌روز شد`);
+    bulkField.value = "";
+    selected.value = new Set();
+    await load();
+  } catch (e: any) {
+    const d = e?.response?.data;
+    toast.error(d?.detail ?? (d ? String(Object.values(d)[0]) : "انجام نشد."));
+  } finally {
+    acting.value = false;
+  }
+}
 
 const showForm = ref(false);
 function onSaved() {
@@ -88,6 +173,8 @@ function onSaved() {
  * not deleted, which loses them.
  */
 const canCurate = computed(() => crm.canEdit && crm.isManager);
+/** Bulk field edits are scoped server-side, so an expert may use them on their own rows. */
+const canSelect = computed(() => crm.canEdit);
 
 const assignTo = ref<number | "">("");
 
@@ -218,6 +305,9 @@ const statusClass: Record<string, string> = {
         <option value="lost">از دست رفته</option>
       </select>
       <span class="text-xs text-slate-400 px-2">{{ num(total) }} مشتری</span>
+      <select v-model.number="pageSize" class="bg-slate-100 rounded-xl px-2 py-2 text-xs text-ink outline-none" aria-label="تعداد در هر صفحه">
+        <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ num(n) }} در صفحه</option>
+      </select>
       <CrmExportButton kind="customers" :params="exportParams" :total="total" title="مشتریان" />
       <button
         v-if="crm.canEdit"
@@ -229,16 +319,30 @@ const statusClass: Record<string, string> = {
     <!-- Appears only once something is selected: an action bar that is always
          there invites a click, and one of these two deletes. -->
     <div
-      v-if="canCurate && selected.size"
+      v-if="canSelect && selected.size"
       class="bg-panel text-white rounded-card shadow-soft p-3 flex flex-wrap items-center gap-2"
     >
       <span class="text-sm px-1">{{ num(selected.size) }} انتخاب شده</span>
+      <select v-model="bulkField" class="bg-white/10 rounded-xl px-3 py-2 text-sm outline-none" aria-label="ویرایش گروهی">
+        <option value="" class="text-ink">ویرایش گروهی…</option>
+        <option v-for="f in BULK_FIELDS" :key="f.key" :value="f.key" class="text-ink">{{ f.label }}</option>
+      </select>
+      <template v-if="bulkField">
+        <select v-model="bulkValue" class="bg-white/10 rounded-xl px-3 py-2 text-sm outline-none" aria-label="مقدار تازه">
+          <option value="" class="text-ink">— خالی —</option>
+          <option v-for="o in bulkOptions" :key="o.id" :value="o.id" class="text-ink">{{ o.name }}</option>
+        </select>
+        <button class="bg-white text-ink rounded-xl px-4 py-2 text-sm disabled:opacity-50" :disabled="acting" @click="bulkUpdate">
+          اعمال روی {{ num(selected.size) }} مشتری
+        </button>
+      </template>
       <button
+        v-if="canCurate"
         class="bg-white/15 rounded-xl px-4 py-2 text-sm disabled:opacity-50"
         :disabled="acting"
         @click="sendToReview"
       >ارسال به بازبینی</button>
-      <select v-model="assignTo" class="bg-white/10 rounded-xl px-3 py-2 text-sm outline-none">
+      <select v-if="canCurate" v-model="assignTo" class="bg-white/10 rounded-xl px-3 py-2 text-sm outline-none">
         <option value="" class="text-ink">سپردن به کارشناس…</option>
         <option v-for="e in crm.options?.employees ?? []" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
       </select>
@@ -253,6 +357,7 @@ const statusClass: Record<string, string> = {
         :total="selected.size" title="مشتریان انتخاب‌شده" subtle
       />
       <button
+        v-if="canCurate"
         class="bg-red-500/90 rounded-xl px-4 py-2 text-sm disabled:opacity-50"
         :disabled="acting"
         @click="removeSelected"
@@ -260,7 +365,7 @@ const statusClass: Record<string, string> = {
       <button class="text-sm px-3 py-2 text-white/70" @click="selected = new Set()">
         لغو انتخاب
       </button>
-      <span class="text-xs text-white/60 basis-full sm:basis-auto sm:mr-auto">
+      <span v-if="canCurate" class="text-xs text-white/60 basis-full sm:basis-auto sm:mr-auto">
         دو مشتری = همان جفت؛ یک یا چند تا = دنبال مشابهشان می‌گردد
       </span>
     </div>
@@ -294,7 +399,7 @@ const statusClass: Record<string, string> = {
         >
           <div class="flex items-start justify-between gap-3">
             <input
-              v-if="canCurate" type="checkbox" class="mt-1 shrink-0"
+              v-if="canSelect" type="checkbox" class="mt-1 shrink-0"
               :checked="selected.has(c.id)"
               @click.stop @change="toggle(c.id)"
             />
@@ -317,15 +422,18 @@ const statusClass: Record<string, string> = {
       </ul>
 
       <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm min-w-[760px]">
+        <table class="w-full text-sm min-w-[1100px]">
           <thead>
             <tr class="text-xs text-slate-400 bg-slate-50">
-              <th v-if="canCurate" class="w-10 px-3">
-                <input type="checkbox" :checked="allOnPage" @change="toggleAll" />
+              <th v-if="canSelect" class="w-10 px-3">
+                <input type="checkbox" :checked="allOnPage" aria-label="انتخاب همه‌ی این صفحه" @change="toggleAll" />
               </th>
               <SortHeader label="مشتری" :dir="dir('name')" @sort="sortBy('name')" />
+              <th class="text-right font-medium px-3">رابط</th>
+              <th class="text-right font-medium px-3">موبایل</th>
               <SortHeader label="گروه" :dir="dir('group')" @sort="sortBy('group')" />
               <SortHeader label="استان" :dir="dir('province')" @sort="sortBy('province')" />
+              <th class="text-right font-medium px-3">شهر</th>
               <SortHeader v-if="crm.seesAll" label="کارشناس" :dir="dir('owner')" @sort="sortBy('owner')" />
               <th class="text-right font-medium px-3">منبع سرنخ</th>
               <SortHeader label="وضعیت" :dir="dir('status')" @sort="sortBy('status')" />
@@ -334,33 +442,60 @@ const statusClass: Record<string, string> = {
             </tr>
           </thead>
           <tbody>
+            <!-- Cells edit in place (InlineCell); «پرونده» opens the customer page. -->
             <tr
-              v-for="c in rows" :key="c.id"
-              class="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
-              @click="router.push({ name: 'crm-customer', params: { id: c.id } })"
+              v-for="c in editableRows" :key="c.id"
+              class="border-t border-slate-100 hover:bg-slate-50 align-top"
             >
-              <td v-if="canCurate" class="px-3" @click.stop>
+              <td v-if="canSelect" class="px-3 py-2.5">
                 <input
-                  type="checkbox" :checked="selected.has(c.id)"
+                  type="checkbox" :checked="selected.has(c.id)" :aria-label="'انتخاب ' + c.name_fa"
                   @change="toggle(c.id)"
                 />
               </td>
-              <td class="px-4 py-2.5">
-                <p class="text-ink font-medium">{{ c.name_fa }}</p>
-                <p class="text-xs text-slate-400">{{ c.contact_name }} · {{ c.mobile }}</p>
+              <td class="px-4 py-2 min-w-[12rem]">
+                <InlineCell :value="c.name_fa" :disabled="!crm.canEdit" :save="(v) => saveField(c, 'name_fa', v)">
+                  <span class="text-ink font-medium">{{ c.name_fa }}</span>
+                </InlineCell>
+                <router-link :to="{ name: 'crm-customer', params: { id: c.id } }" class="text-[11px] text-sky-600 hover:underline">
+                  پرونده ›
+                </router-link>
               </td>
-              <td class="px-3 text-slate-500">{{ c.group_name }}</td>
-              <td class="px-3 text-slate-500">{{ c.province_name }}</td>
+              <td class="px-3 py-2 text-slate-500">
+                <InlineCell :value="c.contact_name" :disabled="!crm.canEdit" :save="(v) => saveField(c, 'contact_name', v)" />
+              </td>
+              <td class="px-3 py-2 text-slate-500 ltr-nums">
+                <InlineCell :value="c.mobile" :disabled="!crm.canEdit" :save="(v) => saveField(c, 'mobile', v)" />
+              </td>
+              <td class="px-3 py-2 text-slate-500">
+                <InlineCell :value="c.group" :display="c.group_name || '—'" :options="opts.groups"
+                            :disabled="!crm.canEdit" :save="(v) => saveField(c, 'group', v)" />
+              </td>
+              <td class="px-3 py-2 text-slate-500">
+                <InlineCell :value="c.province" :display="c.province_name || '—'" :options="opts.provinces"
+                            :disabled="!crm.canEdit" :save="(v) => saveField(c, 'province', v)" />
+              </td>
+              <td class="px-3 py-2 text-slate-500">
+                <InlineCell :value="c.city" :disabled="!crm.canEdit" :save="(v) => saveField(c, 'city', v)" />
+              </td>
               <!-- Every row would carry the reader's own name. -->
-              <td v-if="crm.seesAll" class="px-3 text-slate-500">{{ c.owner_name }}</td>
-              <td class="px-3 text-slate-500">{{ c.source_name }}</td>
-              <td class="px-3">
-                <span class="text-[11px] rounded-full px-2 py-0.5" :class="statusClass[c.status]">
-                  {{ c.status_display }}
-                </span>
+              <td v-if="crm.seesAll" class="px-3 py-2 text-slate-500">
+                <InlineCell :value="c.owner" :display="c.owner_name || '—'" :options="opts.employees"
+                            :disabled="!crm.canEdit || !crm.isManager" :save="(v) => saveField(c, 'owner', v)" />
               </td>
-              <td class="px-3 text-xs whitespace-nowrap" :class="quietClass(c.last_activity_at)">{{ sinceText(c.last_activity_at) }}</td>
-              <td class="px-4 text-xs text-slate-400 whitespace-nowrap">{{ c.first_won_jalali || "—" }}</td>
+              <td class="px-3 py-2 text-slate-500">
+                <InlineCell :value="c.lead_source" :display="c.source_name || '—'" :options="opts.sources"
+                            :disabled="!crm.canEdit" :save="(v) => saveField(c, 'lead_source', v)" />
+              </td>
+              <td class="px-3 py-2">
+                <InlineCell :value="c.status" :options="STATUSES" :disabled="!crm.canEdit" :save="(v) => saveField(c, 'status', v)">
+                  <span class="text-[11px] rounded-full px-2 py-0.5" :class="statusClass[c.status]">
+                    {{ c.status_display }}
+                  </span>
+                </InlineCell>
+              </td>
+              <td class="px-3 py-2.5 text-xs whitespace-nowrap" :class="quietClass(c.last_activity_at)">{{ sinceText(c.last_activity_at) }}</td>
+              <td class="px-4 py-2.5 text-xs text-slate-400 whitespace-nowrap">{{ c.first_won_jalali || "—" }}</td>
             </tr>
           </tbody>
         </table>

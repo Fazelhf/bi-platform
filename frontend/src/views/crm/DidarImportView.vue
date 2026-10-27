@@ -155,6 +155,7 @@ const card = "bg-surface rounded-card shadow-soft p-4 min-w-0";
       <div v-else-if="result.committed" class="flex items-center gap-3 bg-emerald-50 text-emerald-800 rounded-xl px-4 py-3 text-sm font-semibold">
         <NavIcon name="check" :size="20" />
         ثبت شد: {{ num(result.created) }} مورد جدید، {{ num(result.updated) }} به‌روزشده، {{ num(result.customers_created) }} مشتری تازه.
+        <template v-if="result.queued_for_review">{{ num(result.queued_for_review) }} مشتری تازه شبیه مشتری موجود بود و به «بازبینی تطبیق» رفت.</template>
       </div>
       <h3 v-else class="font-bold text-ink">پیش‌نمایش — هنوز چیزی ثبت نشده</h3>
 

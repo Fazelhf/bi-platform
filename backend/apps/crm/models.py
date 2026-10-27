@@ -70,6 +70,9 @@ class CustomerGroup(DatasetModel):
     code = models.SlugField(unique=True)
     name_fa = models.CharField(max_length=100)
     color = models.CharField(max_length=7, blank=True)
+    #: A group code depends on (imports, reports) — renamable, not deletable.
+    #: Set in the admin; the CRM screen only honours it.
+    is_system = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("name_fa",)
@@ -313,6 +316,20 @@ class Customer(DatasetModel):
         max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM
     )
 
+    # ---- Matching keys -------------------------------------------------
+    # The same three systems write names and numbers three ways: آرپا in
+    # legacy Arabic letters, دیدار and تیم‌یار in Persian with ZWNJ, phones
+    # with dashes and Persian digits. Comparing the raw columns found almost
+    # none of the duplicates, so the folded form is stored beside them and
+    # every duplicate lookup reads these. Derived in `save()`; never edited.
+    name_key = models.CharField(max_length=200, blank=True, db_index=True, editable=False)
+    nid_key = models.CharField(max_length=14, blank=True, db_index=True, editable=False)
+    mobile_key = models.CharField(max_length=8, blank=True, db_index=True, editable=False)
+    phone_key = models.CharField(max_length=8, blank=True, db_index=True, editable=False)
+
+    KEY_SOURCES = frozenset({"name_fa", "national_id", "economic_code", "mobile", "phone"})
+    KEY_FIELDS = frozenset({"name_key", "nid_key", "mobile_key", "phone_key"})
+
     class Meta:
         ordering = ("name_fa",)
         verbose_name = "مشتری"
@@ -324,6 +341,47 @@ class Customer(DatasetModel):
 
     def __str__(self) -> str:
         return self.name_fa
+
+    def fill_keys(self) -> None:
+        from apps.crm.matching import id_key, name_key, phone_key
+
+        self.name_key = name_key(self.name_fa)[:200]
+        self.nid_key = id_key(self.national_id) or id_key(self.economic_code)
+        self.mobile_key = phone_key(self.mobile)
+        self.phone_key = phone_key(self.phone)
+
+    def save(self, *args, **kwargs):
+        self.fill_keys()
+        fields = kwargs.get("update_fields")
+        if fields is not None and set(fields) & self.KEY_SOURCES:
+            kwargs["update_fields"] = set(fields) | self.KEY_FIELDS
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def refresh_rollups(cls, ids) -> None:
+        """
+        Recompute the cached dates from the records they summarise.
+
+        `last_activity_at` and `first_deal_won_at` were only ever pushed
+        forward by whichever code path wrote last, so a merge that moved
+        yesterday's call onto a survivor left it showing a date 100 days old,
+        and a deleted or back-dated activity was never taken back out.
+        """
+        from django.db.models import Max, Min
+
+        ids = list(ids)
+        if not ids:
+            return
+        last = dict(Activity.objects.filter(customer_id__in=ids).values("customer_id")
+                    .annotate(m=Max("at")).values_list("customer_id", "m"))
+        won = dict(Deal.objects.filter(customer_id__in=ids, status="won", closed_at__isnull=False)
+                   .values("customer_id").annotate(m=Min("closed_at")).values_list("customer_id", "m"))
+        batch = []
+        for c in cls.objects.filter(pk__in=ids):
+            c.last_activity_at = last.get(c.pk)
+            c.first_deal_won_at = won.get(c.pk)
+            batch.append(c)
+        cls.objects.bulk_update(batch, ["last_activity_at", "first_deal_won_at"])
 
 
 class DemoProvinceTarget(TimeStampedModel):
@@ -858,6 +916,18 @@ class CustomerMatchCandidate(TimeStampedModel):
     method = models.CharField(max_length=8, choices=Method.choices)
     score = models.DecimalField(max_digits=5, decimal_places=4, default=0)
 
+    class Confidence(models.TextChoices):
+        # Same normalised name *and* a shared phone or national id: two
+        # independent facts agree. Still merged only by a person.
+        DEFINITE = "definite", "قطعی"
+        SUSPECT = "suspect", "مشکوک"
+
+    confidence = models.CharField(
+        max_length=8, choices=Confidence.choices, default=Confidence.SUSPECT, db_index=True
+    )
+    #: Why the pair was raised, in words — «نام یکسان + موبایل یکسان».
+    reason = models.CharField(max_length=200, blank=True)
+
     state = models.CharField(
         max_length=8, choices=State.choices, default=State.PENDING, db_index=True
     )
@@ -1125,3 +1195,55 @@ class SalesInvoiceItem(DatasetModel):
 
     def __str__(self) -> str:
         return f"{self.product_name or self.product_code} × {self.quantity}"
+
+
+# --------------------------------------------------------------------------
+# Duplicate detection settings and merge history
+# --------------------------------------------------------------------------
+class CrmConfig(TimeStampedModel):
+    """
+    تنظیمات تشخیص مشتری تکراری — one row, read by `matching` and the
+    «مشتری‌های شبیه» lookup. A threshold that lived only as a constant could
+    not be what the settings page says it is.
+    """
+
+    fuzzy_threshold = models.DecimalField(
+        max_digits=3, decimal_places=2, default=Decimal("0.86"),
+        help_text="کمترین شباهت نام (۰ تا ۱) برای پیشنهاد «نام مشابه».",
+    )
+    #: Shared phone as a reason to suggest a pair. Off would silence the many
+    #: «same switchboard, different customer» pairs a hospital network makes.
+    match_phone = models.BooleanField(default=True)
+    #: New customers created by an import are checked against the file and
+    #: suspected twins queued for review instead of being silently kept.
+    queue_on_import = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "تنظیمات CRM"
+
+    @classmethod
+    def get(cls) -> "CrmConfig":
+        return cls.objects.first() or cls.objects.create()
+
+
+class CustomerMerge(TimeStampedModel):
+    """
+    One merge, kept so it can be read — and undone — later.
+
+    `moved` holds the ids of every row re-pointed per relation, `before` the
+    two customers' fields as they stood. Together they are everything needed
+    to put the absorbed customer back.
+    """
+
+    survivor = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="merges_kept")
+    absorbed = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="merges_absorbed")
+    by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    moved = models.JSONField(default=dict, blank=True)
+    before = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        verbose_name = "سابقه ادغام مشتری"

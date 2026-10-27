@@ -268,7 +268,8 @@ class Filters:
     def customers(self, date_field: str = "first_deal_won_at"):
         if self.blind:
             return Customer.objects.none()
-        qs = self.by_channel(Customer.objects.filter(dataset=self.dataset))
+        # A merged-away row is the survivor's history, not a second customer.
+        qs = self.by_channel(Customer.objects.filter(dataset=self.dataset, merged_into__isnull=True))
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)

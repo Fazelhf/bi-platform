@@ -86,7 +86,7 @@ _PLACES = frozenset("""
 خرم‌آباد خرم آباد همدان یزد بوشهر هرمزگان بندرعباس سیستان بلوچستان زاهدان
 چهارمحال بختیاری شهرکرد کهگیلویه بویراحمد یاسوج خوزستان اهواز خرمشهر آبادان
 اردکان کاشان قشم کیش نجف‌آباد ورامین اسلامشهر شهریار
-""".split())
+""".replace("آ", "ا").replace("‌", " ").split())
 
 
 def fold(value) -> str:
@@ -105,7 +105,10 @@ def name_key(value) -> str:
     same key are the same customer as far as this module is willing to claim
     without a human.
     """
-    text = fold(value)
+    # آ is ا with a madda half the files drop («آقای» / «اقای»), and a
+    # kashida only stretches a letter («شـرکت»). Folded here, for comparing,
+    # not in `fold` — text the importers read codes out of keeps its آ.
+    text = fold(value).replace("آ", "ا").replace("ـ", "")
     for word in _NOISE:
         text = re.sub(rf"(?:^|\s){re.escape(word)}(?=\s|$)", " ", text)
     text = re.sub(r"[^\w\s؀-ۿ]", " ", text)
@@ -119,14 +122,26 @@ def phone_key(value) -> str:
     Enough to see through «02144641330», «44641330» and «021-4464-1330»
     without pretending that a shared switchboard means a shared identity —
     that judgement belongs to the caller, not to the key.
+
+    A cell holding two numbers («22654910-26200234») is read as its first
+    number; run together they make seventeen digits that match nothing.
     """
-    digits = re.sub(r"\D", "", fold(value)).lstrip("0")
+    text = fold(value)
+    digits = re.sub(r"\D", "", text)
+    if len(digits) > 12:
+        first = next((c for c in re.split(r"\D+", text) if len(c) >= 8), "")
+        digits = first or digits
+    digits = digits.lstrip("0")
     return digits[-8:] if len(digits) >= 8 else ""
 
 
 def id_key(value) -> str:
     """شناسه ملی / کد ملی / کد اقتصادی, or "" if it is not one."""
     digits = re.sub(r"\D", "", fold(value))
+    # A کد ملی that went through Excel as a number lost its leading zeros —
+    # Tehran's codes start «00». Eight or nine digits is that, padded back.
+    if len(digits) in (8, 9):
+        digits = digits.zfill(10)
     return digits if 10 <= len(digits) <= 14 else ""
 
 
@@ -213,7 +228,9 @@ class CustomerIndex:
     row the first of them created instead of making two.
     """
 
-    def __init__(self):
+    def __init__(self, threshold: float | None = None, use_phone: bool = True):
+        self.threshold = FUZZY_FLOOR if threshold is None else float(threshold)
+        self.use_phone = use_phone
         self.by_ref: dict[tuple[str, str], int] = {}
         self.by_nid: dict[str, int] = {}
         self.by_name: dict[str, list[int]] = {}
@@ -282,7 +299,7 @@ class CustomerIndex:
             # reason.
             return Match(Method.AMBIGUOUS, exact[0], 1.0)
 
-        for value in phones:
+        for value in phones if self.use_phone else ():
             k = phone_key(value)
             hits = self.by_phone.get(k) if k else None
             if hits:
@@ -304,8 +321,45 @@ class CustomerIndex:
             score = SequenceMatcher(None, key, other).ratio()
             if score > best_score:
                 best_id, best_score = ids[0], score
-        if best_id is None or best_score < FUZZY_FLOOR:
+        if best_id is None or best_score < self.threshold:
             return Match(Method.NONE, None)
         if place_conflict(name, self.names.get(best_id, "")):
             return Match(Method.NONE, None)
         return Match(Method.FUZZY, best_id, best_score)
+
+
+def configured_index() -> CustomerIndex:
+    """An index honouring «تنظیمات تشخیص تکراری»."""
+    from apps.crm.models import CrmConfig
+
+    cfg = CrmConfig.get()
+    return CustomerIndex(threshold=cfg.fuzzy_threshold, use_phone=cfg.match_phone)
+
+
+def confidence(a: dict, b: dict) -> tuple[str, str]:
+    """
+    («definite» | «suspect», reason) for two customers given as dicts of
+    name_fa / national_id / economic_code / mobile / phone.
+
+    Definite needs two independent facts to agree: the same normalised name
+    *and* a shared phone or id, with no place conflict between the names. A
+    name alone, a phone alone or an id alone stays a suspicion — every one of
+    those has merged different customers in this file before (see the module
+    docstring).
+    """
+    same_name = bool(name_key(a["name_fa"])) and name_key(a["name_fa"]) == name_key(b["name_fa"])
+    ids_a = {id_key(a.get("national_id")), id_key(a.get("economic_code"))} - {""}
+    ids_b = {id_key(b.get("national_id")), id_key(b.get("economic_code"))} - {""}
+    ph_a = {phone_key(a.get("mobile")), phone_key(a.get("phone"))} - {""}
+    ph_b = {phone_key(b.get("mobile")), phone_key(b.get("phone"))} - {""}
+    why = []
+    if same_name:
+        why.append("نام یکسان")
+    if ids_a & ids_b:
+        why.append("شناسه/کد ملی یکسان")
+    if ph_a & ph_b:
+        why.append("تلفن یکسان")
+    if not same_name and similarity(a["name_fa"], b["name_fa"]) >= FUZZY_FLOOR:
+        why.append("نام مشابه")
+    sure = same_name and len(why) > 1 and not place_conflict(a["name_fa"], b["name_fa"])
+    return ("definite" if sure else "suspect"), " + ".join(why) or "پیشنهاد سامانه"

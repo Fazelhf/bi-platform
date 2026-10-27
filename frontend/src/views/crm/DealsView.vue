@@ -137,7 +137,9 @@ const COLUMNS = [
   { key: "amount", label: "مبلغ" },
   { key: "profit", label: "سود" },
   { key: "margin", label: "حاشیه" },
-  { key: "province", label: "استان" },
+  // A deal has no province of its own: this is the customer's, and editing it
+  // re-files every deal and invoice of that customer.
+  { key: "province", label: "استان مشتری" },
   { key: "source", label: "منبع سرنخ", default: false },
   { key: "expected", label: "موعد بسته‌شدن", default: false },
   { key: "date", label: "تاریخ" },
@@ -377,7 +379,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
                   :class="d.province_id ? 'border-transparent hover:border-slate-200 text-slate-600' : 'border-amber-300 text-amber-700 bg-amber-50'"
                   :value="d.province_id ?? ''"
                   :disabled="savingProvince === d.id"
-                  :title="`استان مشتری «${d.customer_name}»`"
+                  :title="`استان مشتری «${d.customer_name}» — تغییرش در پرونده‌ی مشتری ذخیره می‌شود و همه‌ی معامله‌ها و فاکتورهای او را جابه‌جا می‌کند`"
                   @change="setProvince(d, ($event.target as HTMLSelectElement).value)"
                 >
                   <option value="">— بدون استان —</option>

@@ -19,6 +19,7 @@ to be wrong, the ref moves — no history has been destroyed in the meantime.
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.crm.models import (
@@ -56,6 +57,8 @@ def _settle(candidate, state, user, customer):
 #: Everything that hangs off a customer and has to travel when two are fused.
 #: Missing one would leave records pointing at a row nobody can see any more —
 #: invisible, but still counted by any report that joins from the other end.
+#: The sales2 rows are finance's: documents and receipts issued to the
+#: absorbed customer would otherwise keep a balance on a hidden account.
 OWNED = (
     ("deals", "customer"),
     ("activities", "customer"),
@@ -63,6 +66,8 @@ OWNED = (
     ("feedback", "customer"),
     ("invoices", "customer"),
     ("external_refs", "customer"),
+    ("sales2_documents", "customer"),
+    ("sales2_receipts", "customer"),
 )
 
 #: Filled on the survivor from the absorbed row when the survivor has nothing.
@@ -75,6 +80,74 @@ CARRIED = (
 )
 
 
+def _snapshot(customer: Customer) -> dict:
+    import json
+
+    from django.core.serializers.json import DjangoJSONEncoder
+    from django.forms.models import model_to_dict
+
+    data = model_to_dict(customer, exclude=["tags"])
+    data["tags"] = list(customer.tags.values_list("pk", flat=True))
+    return json.loads(json.dumps(data, cls=DjangoJSONEncoder))
+
+
+def _move_accounts(primary: Customer, duplicate: Customer, moved: dict) -> None:
+    """
+    Finance's per-customer accounts, which allow one per customer (per book).
+
+    Re-pointed when the survivor has none. When both have one, the balances
+    are two ledgers finance has to reconcile — choosing one here would
+    silently drop the other, so the merge stops and says which.
+    """
+    from apps.sales2.models import CustomerAccount, LedgerAccount
+
+    mine = set(LedgerAccount.objects.filter(customer=primary).values_list("book", flat=True))
+    theirs = list(LedgerAccount.objects.filter(customer=duplicate))
+    clash = [a.get_book_display() for a in theirs if a.book in mine]
+    if clash:
+        raise MergeError(
+            "هر دو مشتری در «" + "، ".join(clash) + "» حساب دفتری دارند؛ "
+            "پیش از ادغام، مالی باید حساب‌ها را یکی کند."
+        )
+    if theirs:
+        LedgerAccount.objects.filter(pk__in=[a.pk for a in theirs]).update(customer=primary)
+        moved["ledger_accounts"] = [a.pk for a in theirs]
+
+    account = CustomerAccount.objects.filter(customer=duplicate).first()
+    if account and CustomerAccount.objects.filter(customer=primary).exists():
+        raise MergeError(
+            "هر دو مشتری حساب اعتباری (سقف اعتبار) دارند؛ "
+            "پیش از ادغام، مالی باید یکی را حذف کند."
+        )
+    if account:
+        CustomerAccount.objects.filter(pk=account.pk).update(customer=primary)
+        moved["sales2_account"] = [account.pk]
+
+
+def _repoint_candidates(primary: Customer, duplicate: Customer) -> None:
+    """
+    Open review rows about the absorbed customer now concern the survivor.
+    One that would pair the survivor with itself, or repeat a question
+    already filed, is closed instead of left for someone to rule on twice.
+    """
+    for c in CustomerMatchCandidate.objects.filter(
+        state=CustomerMatchCandidate.State.PENDING,
+    ).filter(Q(customer=duplicate) | Q(duplicate=duplicate)):
+        customer_id = primary.pk if c.customer_id == duplicate.pk else c.customer_id
+        duplicate_id = primary.pk if c.duplicate_id == duplicate.pk else c.duplicate_id
+        clash = customer_id == duplicate_id or CustomerMatchCandidate.objects.filter(
+            source=c.source, external_id=c.external_id, customer_id=customer_id,
+        ).exclude(pk=c.pk).exists()
+        if clash:
+            c.state = CustomerMatchCandidate.State.REJECTED
+            c.decided_at = timezone.now()
+            c.save(update_fields=["state", "decided_at", "updated_at"])
+        else:
+            CustomerMatchCandidate.objects.filter(pk=c.pk).update(
+                customer_id=customer_id, duplicate_id=duplicate_id,
+            )
+
+
 @transaction.atomic
 def absorb(primary: Customer, duplicate: Customer, user=None) -> Customer:
     """
@@ -85,9 +158,21 @@ def absorb(primary: Customer, duplicate: Customer, user=None) -> Customer:
     `merged_into` — which is what makes the decision reversible. Deleting it
     would take its `Deal` rows with it by cascade, and a merge that destroys
     history to tidy a list is a worse outcome than the duplicate was.
+
+    Every re-pointed id and both rows' fields as they stood go to
+    `CustomerMerge`, and the survivor's cached dates are recomputed from the
+    records it now owns — a merge used to leave «آخرین فعالیت» at the
+    survivor's own old date while the absorbed side's recent calls sat in its
+    timeline.
     """
+    from apps.crm.models import CustomerMerge
+
     if primary.pk == duplicate.pk:
         raise MergeError("یک مشتری را نمی‌شود در خودش ادغام کرد.")
+    # Re-read under lock: two managers merging the same pair at once must not
+    # both pass the checks below.
+    primary = Customer.objects.select_for_update().get(pk=primary.pk)
+    duplicate = Customer.objects.select_for_update().get(pk=duplicate.pk)
     if duplicate.merged_into_id:
         raise MergeError(f"«{duplicate.name_fa}» قبلاً ادغام شده است.")
     if primary.merged_into_id:
@@ -95,12 +180,38 @@ def absorb(primary: Customer, duplicate: Customer, user=None) -> Customer:
             f"«{primary.name_fa}» خودش در مشتری دیگری ادغام شده است."
         )
 
-    moved = {}
+    before = {"survivor": _snapshot(primary), "absorbed": _snapshot(duplicate)}
+    moved: dict[str, list] = {}
+    _move_accounts(primary, duplicate, moved)
     for accessor, field in OWNED:
-        n = getattr(duplicate, accessor).update(**{field: primary})
-        if n:
-            moved[accessor] = n
+        qs = getattr(duplicate, accessor).all()
+        ids = list(qs.values_list("pk", flat=True))
+        if ids:
+            qs.model.objects.filter(pk__in=ids).update(**{field: primary})
+            moved[accessor] = ids
+    tags = list(duplicate.tags.values_list("pk", flat=True))
+    if tags:
+        primary.tags.add(*tags)
+        moved["tags"] = tags
+    # Rows merged into the absorbed one earlier now point at the survivor, so
+    # `merged_into` never has to be followed more than one step.
+    chained = list(duplicate.merged_from.values_list("pk", flat=True))
+    if chained:
+        Customer.objects.filter(pk__in=chained).update(merged_into=primary)
+        moved["merged_from"] = chained
+    _repoint_candidates(primary, duplicate)
 
+    if duplicate.note and duplicate.note not in primary.note:
+        primary.note = "\n\n".join(filter(None, [primary.note, duplicate.note]))
+    primary.is_good_payer = primary.is_good_payer or duplicate.is_good_payer
+    primary.is_intercompany = primary.is_intercompany or duplicate.is_intercompany
+    if duplicate.vat_cert_expires_at and (
+        not primary.vat_cert_expires_at
+        or duplicate.vat_cert_expires_at > primary.vat_cert_expires_at
+    ):
+        primary.vat_cert_expires_at = duplicate.vat_cert_expires_at
+    if primary.status == Customer.Status.LEAD and duplicate.status != Customer.Status.LEAD:
+        primary.status = duplicate.status
     for field in CARRIED:
         if not getattr(primary, field) and getattr(duplicate, field):
             setattr(primary, field, getattr(duplicate, field))
@@ -118,6 +229,13 @@ def absorb(primary: Customer, duplicate: Customer, user=None) -> Customer:
     duplicate.merged_into = primary
     duplicate.is_active = False
     duplicate.save(update_fields=["merged_into", "is_active", "updated_at"])
+    Customer.refresh_rollups([primary.pk])
+    CustomerMerge.objects.create(
+        survivor=primary, absorbed=duplicate,
+        by=user if user and user.is_authenticated else None,
+        moved=moved, before=before,
+    )
+    primary.refresh_from_db()
     return primary
 
 
@@ -210,7 +328,8 @@ def reject(candidate: CustomerMatchCandidate, user=None) -> Customer:
     return customer
 
 
-def queue_pair(primary: Customer, duplicate: Customer, method="manual"):
+def queue_pair(primary: Customer, duplicate: Customer, method="manual",
+               confidence=None, reason=""):
     """
     File two CRM rows as a suspected duplicate.
 
@@ -240,6 +359,8 @@ def queue_pair(primary: Customer, duplicate: Customer, method="manual"):
         duplicate=duplicate,
         method=method,
         score=1 if method == "manual" else 0,
+        confidence=confidence or CustomerMatchCandidate.Confidence.SUSPECT,
+        reason=reason[:200],
     )
 
 
@@ -255,9 +376,9 @@ def queue_scan(customers, dataset: str):
     while inside one file it more often means someone typed it twice, and the
     person who pressed the button is right there to say which.
     """
-    from apps.crm.matching import CustomerIndex
+    from apps.crm.matching import confidence, configured_index
 
-    index = CustomerIndex()
+    index = configured_index()
     picked = {c.pk for c in customers}
     for pk, name, nid, eco, phone, mobile in Customer.objects.filter(
         dataset=dataset, merged_into__isnull=True,
@@ -284,7 +405,10 @@ def queue_scan(customers, dataset: str):
             })
             continue
         twin = Customer.objects.filter(pk=match.customer_id).first()
-        row = queue_pair(customer, twin, match.method) if twin else None
+        row = None
+        if twin:
+            sure, why = confidence(_as_dict(customer), _as_dict(twin))
+            row = queue_pair(customer, twin, match.method, sure, why)
         if row:
             queued.append(row)
         else:
@@ -293,6 +417,143 @@ def queue_scan(customers, dataset: str):
                 "reason": "این جفت از قبل در صف است یا تعیین تکلیف شده.",
             })
     return queued, skipped
+
+
+class ImportTwins:
+    """
+    For importers: is the customer just created someone the CRM already has?
+
+    The ladder that answered this was removed with the old party importer,
+    so دیدار, تیم‌یار and آرپا have each been adding a second «آقای سلطانی»
+    beside the first. A suspected twin is queued for review — not merged, and
+    not refused: the import still lands, a person decides. Off when
+    «تنظیمات تشخیص تکراری» says so. The index is built on first use, so an
+    upload that creates nothing costs nothing.
+    """
+
+    def __init__(self, dataset: str):
+        self.dataset = dataset
+        self.index = None
+        self.queued = 0
+
+    def _build(self):
+        from apps.crm.matching import configured_index
+
+        index = configured_index()
+        for pk, name, nid, eco, phone, mobile in Customer.objects.filter(
+            dataset=self.dataset, merged_into__isnull=True,
+        ).values_list("pk", "name_fa", "national_id", "economic_code", "phone", "mobile"):
+            index.add(pk, name=name, nids=(nid, eco), phones=(phone, mobile))
+        return index
+
+    def check(self, customer: Customer) -> None:
+        from apps.crm.matching import confidence
+        from apps.crm.models import CrmConfig
+
+        if not CrmConfig.get().queue_on_import:
+            return
+        if self.index is None:
+            self.index = self._build()
+        nids = (customer.national_id, customer.economic_code)
+        phones = (customer.phone, customer.mobile)
+        match = self.index.find(
+            source=ExternalSource.CRM, external_id=f"cust-{customer.pk}",
+            name=customer.name_fa, nids=nids, phones=phones,
+        )
+        if match.found and match.customer_id != customer.pk:
+            twin = Customer.objects.filter(pk=match.customer_id).first()
+            if twin:
+                sure, why = confidence(_as_dict(customer), _as_dict(twin))
+                if queue_pair(twin, customer, match.method, sure, why):
+                    self.queued += 1
+        self.index.add(customer.pk, name=customer.name_fa, nids=nids, phones=phones)
+
+
+def _as_dict(c) -> dict:
+    return {f: getattr(c, f) for f in ("name_fa", "national_id", "economic_code", "mobile", "phone")}
+
+
+#: A key shared by more rows than this is a head office's id or a shared
+#: switchboard, not a duplicate — pairing every branch with every other would
+#: bury the real duplicates under hundreds of non-questions.
+CROWD = 8
+
+
+def find_pairs(dataset: str):
+    """
+    Every suspected duplicate pair in the customer file, with its confidence.
+
+    The whole-file version of `queue_scan`: rows sharing a normalised name,
+    id or phone, plus names within the fuzzy threshold among those sharing
+    their opening letters. Read-only — the caller decides whether to queue.
+    Returns (pairs, crowded), crowded being keys skipped as too common.
+    """
+    from collections import defaultdict
+    from difflib import SequenceMatcher
+    from itertools import combinations
+
+    from apps.crm.matching import confidence, place_conflict
+    from apps.crm.models import CrmConfig
+
+    cfg = CrmConfig.get()
+    rows = list(Customer.objects.filter(dataset=dataset, merged_into__isnull=True).values(
+        "pk", "code", "name_key", "nid_key", "mobile_key", "phone_key",
+        "name_fa", "national_id", "economic_code", "mobile", "phone", "city",
+    ))
+    keys = ("name_key", "nid_key", "mobile_key") + (("phone_key",) if cfg.match_phone else ())
+    buckets = defaultdict(list)
+    for r in rows:
+        for k in keys:
+            if r[k]:
+                buckets[(k, r[k])].append(r)
+    pairs, crowded = {}, 0
+    for grp in buckets.values():
+        if len(grp) > CROWD:
+            crowded += 1
+            continue
+        for a, b in combinations(grp, 2):
+            pairs.setdefault(tuple(sorted((a["pk"], b["pk"]))), (a, b))
+
+    threshold = float(cfg.fuzzy_threshold)
+    heads = defaultdict(list)
+    for r in rows:
+        if len(r["name_key"]) >= 4:
+            heads[r["name_key"][:4]].append(r)
+    for grp in heads.values():
+        for a, b in combinations(grp, 2):
+            if a["name_key"] == b["name_key"] or place_conflict(a["name_fa"], b["name_fa"]):
+                continue
+            if SequenceMatcher(None, a["name_key"], b["name_key"]).ratio() >= threshold:
+                pairs.setdefault(tuple(sorted((a["pk"], b["pk"]))), (a, b))
+
+    out = []
+    for a, b in pairs.values():
+        sure, why = confidence(a, b)
+        out.append({"a": a, "b": b, "confidence": sure, "reason": why})
+    return out, crowded
+
+
+def _method_for(reason: str) -> str:
+    M = CustomerMatchCandidate.Method
+    if "نام یکسان" in reason:
+        return M.NAME
+    if "شناسه" in reason:
+        return M.NATIONAL_ID
+    if "تلفن" in reason:
+        return M.PHONE
+    return M.FUZZY
+
+
+def queue_found(pairs) -> int:
+    """File `find_pairs` output in the review queue. Never merges."""
+    rows = Customer.objects.in_bulk(
+        {p["a"]["pk"] for p in pairs} | {p["b"]["pk"] for p in pairs}
+    )
+    return sum(
+        1 for p in pairs
+        if queue_pair(rows[p["a"]["pk"]], rows[p["b"]["pk"]],
+                      _method_for(p["reason"]), p["confidence"], p["reason"])
+    )
 
 
 def alternatives(candidate: CustomerMatchCandidate, limit: int = 6):

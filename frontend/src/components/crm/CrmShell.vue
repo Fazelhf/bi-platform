@@ -60,6 +60,7 @@ const NAV = [
   { name: "crm-activities", label: "پیگیری‌ها", icon: "notes" },
   { name: "crm-geo", label: "فروش جغرافیایی", icon: "globe" },
   { name: "crm-reports", label: "گزارش‌ها", icon: "chart" },
+  { name: "crm-manage", label: "گروه‌ها و مناطق", icon: "team", managerOnly: true },
   // Where CRM's data comes from and whether it is right — the system admin's.
   { name: "crm-settings", label: "تنظیمات CRM", icon: "settings", adminOnly: true },
 ] as { name: string; label: string; icon: string; managerOnly?: boolean; adminOnly?: boolean }[];

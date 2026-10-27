@@ -48,6 +48,8 @@ const issues = computed(() => checks.value.filter((c) => c.count && c.severity =
 function openRow(r: DataCheckRow) {
   if (r.kind === "deal") router.push({ name: "crm-deal", params: { id: r.id } });
   else if (r.kind === "suspect") router.push({ name: "crm-settings", query: { section: "arpa", tab: "suspect" } });
+  // A duplicate group opens straight into «ادغام»: its twins are the first suggestions there.
+  else if (r.kind === "group") router.push({ name: "crm-customer", params: { id: r.id }, query: { merge: "1" } });
   else if (r.customer_id) router.push({ name: "crm-customer", params: { id: r.customer_id } });
 }
 

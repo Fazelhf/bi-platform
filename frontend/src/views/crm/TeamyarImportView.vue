@@ -125,6 +125,7 @@ const tile = "bg-slate-50 rounded-xl p-3";
         </div>
         <div :class="tile"><p class="text-[11px] text-slate-400">تکمیل‌شده</p><p class="font-bold text-lg text-sky-600">{{ num(result.updated) }}</p></div>
         <div :class="tile"><p class="text-[11px] text-slate-400">مشتری تازه</p><p class="font-bold text-lg text-ink">{{ num(result.created) }}</p></div>
+        <div :class="tile" title="مشتری تازه‌ای که شبیه مشتری موجود بود؛ در «بازبینی تطبیق» تصمیم بگیرید."><p class="text-[11px] text-slate-400">به بازبینی تطبیق</p><p class="font-bold text-lg text-ink">{{ num(result.queued_for_review ?? 0) }}</p></div>
         <div :class="tile">
           <p class="text-[11px] text-slate-400">وارد نشد</p>
           <p class="font-bold text-lg text-amber-600">{{ num(Object.values(result.skipped).reduce((a, b) => a + b, 0)) }}</p>
