@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { crmApi, type TerritoryRow } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { toast } from "@/composables/useUi";
+import { num } from "@/utils/format";
 import Skeleton from "@/components/Skeleton.vue";
 
 /**
@@ -89,7 +90,7 @@ const unassigned = computed(() =>
         <h2 class="text-lg font-bold">مناطق و مسئولان</h2>
         <p class="text-sm text-slate-500 mt-1">
           مدیر فروش و کارشناسان هر استان. استانی که مسئول ندارد روی نقشه «مسئول تعیین نشده» نشان داده می‌شود
-          و فروشش به نام کارشناسِ هر فاکتور ثبت می‌ماند. {{ unassigned }} استان بدون مسئول.
+          و فروشش به نام کارشناسِ هر فاکتور ثبت می‌ماند. {{ num(unassigned) }} استان بدون مسئول.
         </p>
       </div>
       <select v-if="crm.seesAll" v-model="channel" class="bg-slate-100 rounded-xl px-3 py-2 text-sm" aria-label="دفتر فروش">
