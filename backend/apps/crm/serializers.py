@@ -9,17 +9,52 @@ from apps.crm.jalali import jalali_str
 from apps.crm.models import (
     Activity, Customer, CustomerMatchCandidate, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product, SalesInvoice,
-    ProductCategory, Tag, Task,
+    ProductCategory, Tag, Task, TerritoryAssignment,
 )
 
 
 # --------------------------------------------------------------------------
 # Lookups
 # --------------------------------------------------------------------------
+class RosterOwnerMixin:
+    """
+    A new owner must be on the sales roster. Keeping the one a record already
+    has is always allowed: a colleague who left sales still owns their old
+    customers until someone reassigns them, and editing a phone number on one
+    of those must not fail on a field nobody touched.
+    """
+
+    roster_fields = ("owner",)
+
+    def validate(self, attrs):
+        from apps.crm.people import sales_roster
+        from apps.crm.views import is_crm_manager
+
+        attrs = super().validate(attrs)
+        request = self.context.get("request")
+        # A کارشناس's records are stamped with their own name by the viewset
+        # whatever the payload says, so there is no choice here to check.
+        if request is not None and not is_crm_manager(request.user):
+            return attrs
+        for field in self.roster_fields:
+            emp = attrs.get(field)
+            if emp is None:
+                continue
+            current = getattr(self.instance, f"{field}_id", None) if self.instance else None
+            if emp.pk != current and not sales_roster().filter(pk=emp.pk).exists():
+                raise serializers.ValidationError({
+                    field: [f"«{emp.full_name_fa}» کارشناس فعال واحد فروش نیست."],
+                })
+        return attrs
+
 class CustomerGroupSerializer(serializers.ModelSerializer):
+    customer_count = serializers.IntegerField(read_only=True, default=0)
+
     class Meta:
         model = CustomerGroup
-        fields = ("id", "code", "name_fa", "color")
+        fields = ("id", "code", "name_fa", "color", "is_system", "customer_count")
+        read_only_fields = ("is_system",)
+        extra_kwargs = {"code": {"required": False}}
 
 
 class TagSerializer(serializers.ModelSerializer):
@@ -87,7 +122,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
         model = Customer
         fields = (
             "id", "code", "name_fa", "kind", "status", "status_display",
-            "group", "group_name", "province", "province_name",
+            "group", "group_name", "province", "province_name", "zone",
             "owner", "owner_name", "lead_source", "source_name",
             "city", "contact_name", "phone", "mobile", "email",
             "first_contact_at", "first_contact_jalali",
@@ -113,15 +148,15 @@ class CustomerDetailSerializer(CustomerListSerializer):
         )
 
 
-class CustomerWriteSerializer(serializers.ModelSerializer):
+class CustomerWriteSerializer(RosterOwnerMixin, serializers.ModelSerializer):
     class Meta:
         model = Customer
         # `id` is echoed back so the client can navigate straight to the
         # record it just created.
         fields = (
-            "id", "code", "name_fa", "kind", "status", "group", "province", "city",
+            "id", "code", "name_fa", "kind", "status", "group", "province", "zone", "city",
             "lead_source", "owner", "tags", "contact_name", "phone", "mobile",
-            "email", "address", "national_id", "note", "first_contact_at",
+            "email", "address", "national_id", "economic_code", "note", "first_contact_at",
             "channel",
         )
         read_only_fields = ("id",)
@@ -132,6 +167,19 @@ class CustomerWriteSerializer(serializers.ModelSerializer):
             # for no gain.
             "first_contact_at": {"required": False},
         }
+
+    #: Fields the list's bulk edit may set on many customers at once. Names,
+    #: phones and ids are per-customer facts; setting one on fifty rows is
+    #: always a mistake.
+    BULK = ("group", "province", "zone", "owner", "status", "lead_source", "city")
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        zone = attrs.get("zone")
+        province = attrs.get("province", getattr(self.instance, "province", None))
+        if zone and (province is None or zone.province_id != province.pk):
+            raise serializers.ValidationError({"zone": ["محدوده فقط برای مشتریان همان استان است."]})
+        return attrs
 
 
 # --------------------------------------------------------------------------
@@ -228,7 +276,7 @@ class DealItemWriteSerializer(serializers.ModelSerializer):
         extra_kwargs = {"unit_cost_rial": {"required": False}}
 
 
-class DealWriteSerializer(serializers.ModelSerializer):
+class DealWriteSerializer(RosterOwnerMixin, serializers.ModelSerializer):
     """
     Deals are written together with their lines. Saving the header first and
     the lines afterwards would leave a zero-value deal visible in reports for
@@ -357,7 +405,7 @@ class DealStageEventSerializer(serializers.ModelSerializer):
 # --------------------------------------------------------------------------
 # Activity / Task / Feedback
 # --------------------------------------------------------------------------
-class ActivitySerializer(serializers.ModelSerializer):
+class ActivitySerializer(RosterOwnerMixin, serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
     deal_title = serializers.CharField(source="deal.title", read_only=True)
     owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True)
@@ -377,7 +425,7 @@ class ActivitySerializer(serializers.ModelSerializer):
         return jalali_str(obj.at)
 
 
-class TaskSerializer(serializers.ModelSerializer):
+class TaskSerializer(RosterOwnerMixin, serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
     owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True)
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
@@ -396,7 +444,9 @@ class TaskSerializer(serializers.ModelSerializer):
         return jalali_str(obj.due_at)
 
 
-class CustomerFeedbackSerializer(serializers.ModelSerializer):
+class CustomerFeedbackSerializer(RosterOwnerMixin, serializers.ModelSerializer):
+    roster_fields = ("employee",)
+
     customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
     employee_name = serializers.CharField(source="employee.full_name_fa", read_only=True)
     is_unhappy = serializers.BooleanField(read_only=True)
@@ -416,6 +466,20 @@ class CustomerFeedbackSerializer(serializers.ModelSerializer):
 # --------------------------------------------------------------------------
 # Merge review
 # --------------------------------------------------------------------------
+class TerritoryAssignmentSerializer(serializers.ModelSerializer):
+    province_name = serializers.CharField(source="province.name_fa", read_only=True)
+    zone_name = serializers.CharField(source="zone.name_fa", read_only=True, default="")
+    employee_name = serializers.CharField(source="employee.full_name_fa", read_only=True)
+
+    class Meta:
+        model = TerritoryAssignment
+        fields = ("id", "province", "province_name", "zone", "zone_name", "channel",
+                  "employee", "employee_name", "role")
+        extra_kwargs = {"channel": {"required": False}}
+        # The one-manager rule is applied by replacing, in the viewset.
+        validators = []
+
+
 class MatchCandidateSerializer(serializers.ModelSerializer):
     """
     One suspected duplicate, with both sides on screen.
@@ -440,6 +504,7 @@ class MatchCandidateSerializer(serializers.ModelSerializer):
         fields = (
             "id", "source", "external_id", "external_name", "method",
             "method_display", "score", "state", "state_display",
+            "confidence", "reason",
             "decided_at", "decided_by_name", "crm", "arpa",
         )
 

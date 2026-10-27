@@ -31,7 +31,7 @@ from apps.crm.models import (
     Activity, Customer, CustomerFeedback, Deal, DealItem,
     PipelineStage, SalesInvoice,
 )
-from apps.sales.models import FactSalesProvince, SalesTarget
+from apps.sales.models import FactSalesProvince, SalesChannel, SalesTarget
 
 ZERO = Value(0, output_field=DecimalField(max_digits=20, decimal_places=0))
 
@@ -100,6 +100,9 @@ class Filters:
     group: int | None = None
     source: int | None = None
     province: int | None = None
+    #: A Tehran sales zone (SalesZone). The default zone also covers the
+    #: province's customers nobody has placed yet — as the map counts them.
+    zone: int | None = None
     product: int | None = None
     stage: int | None = None
     lost_reason: int | None = None
@@ -147,6 +150,7 @@ class Filters:
         f.group = num("group")
         f.source = num("source")
         f.province = num("province")
+        f.zone = num("zone")
         f.product = num("product")
         f.stage = num("stage")
         f.lost_reason = num("lost_reason")
@@ -268,7 +272,8 @@ class Filters:
     def customers(self, date_field: str = "first_deal_won_at"):
         if self.blind:
             return Customer.objects.none()
-        qs = self.by_channel(Customer.objects.filter(dataset=self.dataset))
+        # A merged-away row is the survivor's history, not a second customer.
+        qs = self.by_channel(Customer.objects.filter(dataset=self.dataset, merged_into__isnull=True))
         qs = self._window(qs, date_field)
         if self.owner:
             qs = qs.filter(owner_id=self.owner)
@@ -329,6 +334,8 @@ class Filters:
             qs = qs.filter(customer__lead_source_id=self.source)
         if self.province:
             qs = qs.filter(customer__province_id=self.province)
+        if self.zone:
+            qs = qs.filter(zone_q(self.zone, "customer__"))
         if self.customer:
             qs = qs.filter(customer_id=self.customer)
         if self.product:
@@ -356,7 +363,7 @@ class Filters:
         if self.end:
             out["date_to"] = (self.end - dt.timedelta(days=1)).isoformat()
         for name in (
-            "owner", "group", "source", "province", "product", "stage",
+            "owner", "group", "source", "province", "zone", "product", "stage",
             "lost_reason", "customer", "tag",
         ):
             v = getattr(self, name)
@@ -1658,6 +1665,142 @@ def dashboard(f: Filters) -> dict:
 # --------------------------------------------------------------------------
 # فروش جغرافیایی — the map
 # --------------------------------------------------------------------------
+#: Achievement bins are fixed, not fitted: «80٪ of target» means the same
+#: thing whatever the other provinces did.
+ACHIEVEMENT_BREAKS = [50, 80, 100, 120]
+
+
+def zone_q(zone_id: int, prefix: str = "") -> Q:
+    """Rows in a zone; for the default zone, also the province's unplaced ones."""
+    from apps.crm.models import SalesZone
+
+    z = SalesZone.objects.filter(pk=zone_id).first()
+    if z is None:
+        return Q(pk__in=[])
+    q = Q(**{f"{prefix}zone_id": z.pk})
+    if z.is_default:
+        q |= Q(**{f"{prefix}zone__isnull": True, f"{prefix}province_id": z.province_id,
+                  f"{prefix}channel": z.channel})
+    return q
+
+
+def color_breaks(values, metric: str) -> list[float]:
+    """
+    The four cut points between five colour classes for one map metric.
+
+    The old scale ran linearly from 0 to the largest province, so one
+    province selling 370 washed every other province — including one at
+    100% of its target — out to near-white. Target achievement now uses fixed
+    bins; amounts and counts use quantiles of the provinces that have any,
+    which no single outlier can stretch.
+    """
+    if metric == "achievement":
+        return list(ACHIEVEMENT_BREAKS)
+    xs = sorted(v for v in values if v and v > 0)
+    if not xs:
+        return []
+    cuts = []
+    for q in (0.2, 0.4, 0.6, 0.8):
+        i = q * (len(xs) - 1)
+        lo, hi = int(i), min(int(i) + 1, len(xs) - 1)
+        cuts.append(round(xs[lo] + (xs[hi] - xs[lo]) * (i - lo), 2))
+    if metric == "customers":  # a count of buyers has no fractions to show
+        cuts = [float(round(c)) for c in cuts]
+    # Equal neighbours collapse to one class; drop the repeats.
+    return sorted(set(cuts))
+
+
+def territory_names(channels, province_ids=None) -> dict:
+    """{(province_id, zone_id|None): {"managers": [...], "experts": [...]}}."""
+    from apps.crm.models import TerritoryAssignment
+
+    qs = TerritoryAssignment.objects.select_related("employee")
+    if channels is not None:
+        qs = qs.filter(channel__in=channels)
+    if province_ids is not None:
+        qs = qs.filter(province_id__in=province_ids)
+    out: dict = {}
+    for a in qs:
+        slot = out.setdefault((a.province_id, a.zone_id), {"managers": [], "experts": []})
+        key = "managers" if a.role == TerritoryAssignment.Role.MANAGER else "experts"
+        # One province has a manager per book — همکار, B2B, بانکی — so a view
+        # across books has to say whose manager each one is.
+        entry = {"id": a.employee_id, "name": a.employee.full_name_fa,
+                 "channel": a.channel, "channel_label": a.get_channel_display()}
+        if entry not in slot[key]:
+            slot[key].append(entry)
+    return out
+
+
+def geo_zones(f: Filters) -> dict | None:
+    """
+    Tehran for فروش همکار, by sales zone.
+
+    Invoices are placed by their customer's `zone`; a Tehran customer nobody
+    has placed yet counts under the default zone («سایر مناطق»), and how many
+    of those there are is reported so the gap is visible rather than hidden
+    in the total.
+    """
+    from apps.crm.models import SalesZone
+
+    SalesZone.ensure_tehran()
+    if f.channels is not None and SalesChannel.TEAM not in f.channels:
+        return None
+    zones = list(SalesZone.objects.filter(channel=SalesChannel.TEAM).select_related("province"))
+    if not zones:
+        return None
+    province_id = zones[0].province_id
+    default = next((z for z in zones if z.is_default), zones[-1])
+    zf = replace(f, channels=(SalesChannel.TEAM,), province=province_id)
+    sales = zf.invoices()
+    by_zone = {
+        r["customer__zone_id"]: r for r in sales.values("customer__zone_id").annotate(
+            amount=_money(Sum("amount_rial")), count=Count("id", distinct=True),
+            buyers=Count("customer_id", distinct=True),
+        ).order_by()
+    }
+    book = Customer.objects.filter(
+        dataset=f.dataset, merged_into__isnull=True, province_id=province_id, channel=SalesChannel.TEAM,
+    )
+    if f.owner:
+        book = book.filter(owner_id=f.owner)
+    if f.blind:
+        book = book.none()
+    base = dict(book.values("zone_id").annotate(n=Count("id")).order_by().values_list("zone_id", "n"))
+    names = territory_names((SalesChannel.TEAM,), [province_id])
+    rows = []
+    for z in zones:
+        r = dict(by_zone.get(z.pk) or {})
+        if z.pk == default.pk:  # the unplaced fold into the default zone
+            extra = by_zone.get(None) or {}
+            for k in ("amount", "count", "buyers"):
+                r[k] = (r.get(k) or 0) + (extra.get(k) or 0)
+        d = dict(zf.drill_base())
+        rows.append({
+            "id": z.pk, "code": z.code, "label": z.name_fa, "is_default": z.is_default,
+            "has_geometry": bool(z.geometry),
+            "amount": _num(r.get("amount")), "count": _num(r.get("count")),
+            "buyers": _num(r.get("buyers")),
+            "customer_base": base.get(z.pk, 0) + (base.get(None, 0) if z.pk == default.pk else 0),
+            **names.get((province_id, z.pk), {"managers": [], "experts": []}),
+            "drill": {"kind": "invoices", "params": d},
+        })
+    total = sum(r["amount"] for r in rows)
+    for r in rows:
+        r["share_pct"] = _pct(r["amount"], total)
+    return {
+        "province_id": province_id,
+        "rows": rows,
+        "total": total,
+        "unzoned_customers": base.get(None, 0),
+        "default_zone": default.name_fa,
+        "scale": {
+            "amount": color_breaks([r["amount"] for r in rows], "amount"),
+            "customers": color_breaks([r["buyers"] for r in rows], "customers"),
+        },
+    }
+
+
 def geo_overview(f: Filters) -> dict:
     """
     Every province on one map: sales, customers and target, plus the share of
@@ -1689,12 +1832,16 @@ def geo_overview(f: Filters) -> dict:
         .values_list("province_id", "n")
     )
 
+    names = territory_names(f.channels)
     rows = []
     for p in DimProvince.objects.order_by("name_fa"):
         r = by_id.get(p.id, {})
         d = dict(f.drill_base())
         d["province"] = p.id
+        assigned = names.get((p.id, None), {"managers": [], "experts": []})
         rows.append({
+            "managers": assigned["managers"],
+            "experts": assigned["experts"],
             "id": p.id,
             "label": p.name_fa,
             "amount": r.get("amount", 0.0),
@@ -1715,6 +1862,19 @@ def geo_overview(f: Filters) -> dict:
         "rows": rows,
         "total": total,
         "unplaced": {"count": _num(unplaced["n"]), "amount": _num(unplaced["amount"])},
+        # Tehran is left out of the scale: its volume is the outlier that
+        # used to wash the rest of the map out. The map shows it on its own.
+        "scale": _scales([r for r in rows if r["label"] != "تهران"]),
+        "scale_with_tehran": _scales(rows),
+        "tehran": geo_zones(f),
+    }
+
+
+def _scales(rows) -> dict:
+    return {
+        "amount": color_breaks([r["amount"] for r in rows], "amount"),
+        "customers": color_breaks([r["customers"] for r in rows], "customers"),
+        "achievement": color_breaks([], "achievement"),
     }
 
 
@@ -1820,19 +1980,27 @@ def geo_province(f: Filters, province_id: int) -> dict | None:
             "unsettled": _num(inv.unsettled_rial),
         })
 
-    reps = []
-    rep_rows = list(
-        sales.values("rep_id").annotate(amount=_money(Sum("amount_rial"))).order_by("-amount")[:6]
+    # The province's assigned کارشناس(ان) first, each with their sales here,
+    # then everyone else who sold here as «سایر کارشناسان». Each invoice has
+    # one rep, so a colleague assigned to several provinces is still counted
+    # once per invoice and the parts add up to the province total.
+    assigned = territory_names(f.channels, [province_id]).get(
+        (province_id, None), {"managers": [], "experts": []}
     )
+    assigned_ids = {e["id"] for e in assigned["experts"]}
+    rep_rows = list(sales.values("rep_id").annotate(amount=_money(Sum("amount_rial"))).order_by("-amount"))
     names = dict(DimEmployee.objects.filter(
-        pk__in=[r["rep_id"] for r in rep_rows if r["rep_id"]]
+        pk__in=[r["rep_id"] for r in rep_rows if r["rep_id"]] + list(assigned_ids)
     ).values_list("pk", "full_name_fa"))
-    for r in rep_rows:
-        reps.append({
-            "id": r["rep_id"],
-            "label": names.get(r["rep_id"]) or UNATTRIBUTED["user"],
-            "amount": _num(r["amount"]),
-        })
+    sold = {r["rep_id"]: _num(r["amount"]) for r in rep_rows}
+    reps = [
+        {"id": i, "label": names.get(i, ""), "amount": sold.get(i, 0.0), "assigned": True}
+        for i in sorted(assigned_ids, key=lambda i: -sold.get(i, 0.0))
+    ] + [
+        {"id": r["rep_id"], "label": names.get(r["rep_id"]) or UNATTRIBUTED["user"],
+         "amount": _num(r["amount"]), "assigned": False}
+        for r in rep_rows if r["rep_id"] not in assigned_ids
+    ][:8]
 
     drill = dict(pf.drill_base())
     return {
@@ -1853,5 +2021,7 @@ def geo_province(f: Filters, province_id: int) -> dict | None:
         "products": products,
         "recent": recent,
         "reps": reps,
+        "managers": assigned["managers"],
+        "experts": assigned["experts"],
         "drill": {"kind": "invoices", "params": drill},
     }

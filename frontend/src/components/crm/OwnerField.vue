@@ -36,7 +36,7 @@ const linked = computed(() => crm.me?.employee ?? null);
 const silent = computed(() => !isManager.value && linked.value !== null);
 
 const options = computed(() =>
-  (crm.options?.employees ?? []).map((e) => ({
+  crm.rosterEmployees.map((e) => ({
     value: e.id,
     label: e.name,
     hint: e.team || undefined,

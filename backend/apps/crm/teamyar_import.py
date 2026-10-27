@@ -34,8 +34,10 @@ from apps.crm.arpa_file import ArpaFileError
 from apps.crm.channels import ChannelResolver
 from apps.crm.matching import fold, id_key
 from apps.crm.models import (
-    Customer, CustomerExternalRef, CustomerGroup, Dataset, ExternalSource, ImportBatch,
+    Customer, CustomerExternalRef, CustomerGroup, Dataset, DismissedParty, ExternalSource,
+    ImportBatch,
 )
+from apps.crm.merge import ImportTwins
 from apps.crm.people import RepMatcher
 from apps.sales.models import DimProvince, SalesChannel
 
@@ -110,11 +112,15 @@ class Importer:
         # An id is a match only if it names one customer. A bank's branches
         # share its شناسه ملی; matching on it would fold every branch in
         # every province into one account.
+        # A merged-away row counts as its survivor, so an id held by a
+        # customer and its absorbed twin still names one customer.
         owners: dict[str, set[int]] = defaultdict(set)
-        for pk, nid, eco in Customer.objects.values_list("pk", "national_id", "economic_code"):
+        for pk, nid, eco, into in Customer.objects.values_list(
+            "pk", "national_id", "economic_code", "merged_into_id",
+        ):
             for v in (id_key(nid), id_key(eco)):
                 if v:
-                    owners[v].add(pk)
+                    owners[v].add(into or pk)
         self.by_id = {v: next(iter(p)) for v, p in owners.items() if len(p) == 1}
         self.shared_in_file: set[str] = set()
         self.provinces = {
@@ -122,6 +128,11 @@ class Importer:
         }
         self.groups: dict[str, CustomerGroup] = {}
         self.seen: set[int] = set()
+        self.dismissed = set(
+            DismissedParty.objects.filter(source=ExternalSource.TEAMYAR)
+            .values_list("external_id", flat=True)
+        )
+        self.twins = ImportTwins(Dataset.REAL)
 
     def _link(self, source: str, external_id: str, customer: Customer, name: str):
         key = (source, external_id[:64])
@@ -180,6 +191,9 @@ class Importer:
         team_key = tid or "n-" + hashlib.sha256(name.encode()).hexdigest()[:24]
         if not pk and (ExternalSource.TEAMYAR, team_key) in self.refs:
             pk, how = self.refs[(ExternalSource.TEAMYAR, team_key)], "ورود قبلی تیم‌یار"
+        if not pk and team_key in self.dismissed:
+            self.skipped["قبلاً عمداً حذف شده"] += 1
+            return
 
         cls = _text(r["CLASS"])
         province = self.provinces.get(re.sub(r"\s|و", "", _text(r["STATE"]))) if _text(r["STATE"]) else None
@@ -224,6 +238,7 @@ class Importer:
                 **{k: v for k, v in fields.items() if v},
             )
             self.stats["created"] += 1
+            self.twins.check(customer)
         self.seen.add(customer.pk)
 
         # File every code the row carries, so each source's next upload
@@ -264,6 +279,7 @@ def run(files: list[tuple[str, bytes]], user=None, commit: bool = False) -> dict
         "updated": s["updated"],
         "unchanged": s["unchanged"],
         "duplicate": s["duplicate"],
+        "queued_for_review": imp.twins.queued,
         "matched_by": dict(imp.matched_by),
         "skipped": dict(imp.skipped),
         "unknown_reps": [{"name": n, "count": c} for n, c in imp.reps.unknown.most_common()],

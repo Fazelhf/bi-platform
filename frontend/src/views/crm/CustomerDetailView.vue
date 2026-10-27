@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { crmApi, type CrmActivity, type CrmCustomer, type Deal } from "@/api/crm";
+import { crmApi, MOVED_LABELS, type CrmActivity, type CrmCustomer, type CustomerMergeRecord, type Deal } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
@@ -29,6 +29,7 @@ const customer = ref<CrmCustomer | null>(null);
 const deals = ref<Deal[]>([]);
 const activities = ref<CrmActivity[]>([]);
 const loading = ref(true);
+const merges = ref<CustomerMergeRecord[]>([]);
 const tab = ref<"timeline" | "deals" | "invoices" | "tasks">("timeline");
 
 async function load() {
@@ -39,12 +40,17 @@ async function load() {
     customer.value = c;
     deals.value = t.deals;
     activities.value = t.activities;
+    merges.value = await crmApi.customerMerges(id).catch(() => []);
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(async () => { await crm.loadOptions(); await load(); });
+onMounted(async () => {
+  await crm.loadOptions();
+  await load();
+  if (route.query.merge && crm.isManager) modal.value = "merge";
+});
 watch(() => route.params.id, load);
 
 // Entry forms opened from this page — all pre-bound to this customer.
@@ -417,6 +423,35 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             </tbody>
           </table>
         </div>
+      </div>
+
+      <!-- سابقه ادغام: who folded what into this customer, and what moved. -->
+      <div v-if="merges.length" :class="card">
+        <p class="text-sm font-semibold text-ink mb-2">سابقه ادغام</p>
+        <ul class="space-y-2 text-xs">
+          <li v-for="m in merges" :key="m.id" class="rounded-lg bg-slate-50 px-3 py-2">
+            <p class="text-slate-600">
+              <template v-if="m.survivor.id === customer.id">
+                «{{ m.absorbed.name_fa }}» <span class="text-slate-400">({{ m.absorbed.code }})</span> در این مشتری ادغام شد
+              </template>
+              <template v-else>این مشتری در «{{ m.survivor.name_fa }}» ادغام شد</template>
+              · {{ m.at_jalali }}<template v-if="m.by"> · {{ m.by }}</template>
+            </p>
+            <p class="text-slate-400 mt-1">
+              {{ Object.entries(m.moved).map(([k, n]) => `${num(n)} ${MOVED_LABELS[k] ?? k}`).join("، ") || "بدون رکورد وابسته" }}
+            </p>
+            <details class="mt-1">
+              <summary class="cursor-pointer text-sky-600">مقادیر پیش از ادغام (برای بازیابی)</summary>
+              <div class="grid sm:grid-cols-2 gap-2 mt-1">
+                <div v-for="side in (['survivor', 'absorbed'] as const)" :key="side" class="bg-white rounded p-2">
+                  <p class="font-semibold mb-1">{{ side === "survivor" ? "مشتری ماندگار" : "مشتری ادغام‌شده" }}</p>
+                  <p v-for="f in ['name_fa', 'phone', 'mobile', 'national_id', 'city', 'address', 'note']" :key="f"
+                     class="text-slate-500 truncate">{{ f }}: {{ m.before[side]?.[f] || "—" }}</p>
+                </div>
+              </div>
+            </details>
+          </li>
+        </ul>
       </div>
     </template>
   </div>

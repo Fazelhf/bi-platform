@@ -320,6 +320,7 @@ const tile = "bg-slate-50 rounded-xl p-3";
           <div :class="tile">
             <p class="text-[11px] text-slate-400">مشتری جدید</p>
             <p class="font-bold text-ink text-lg mt-0.5">{{ num(shown.customers_created) }}</p>
+            <p v-if="shown.queued_for_review" class="text-[11px] text-amber-700">{{ num(shown.queued_for_review) }} به بازبینی تطبیق</p>
           </div>
           <div class="rounded-xl p-3" :class="shown.suspect ? 'bg-amber-50' : 'bg-slate-50'">
             <p class="text-[11px]" :class="shown.suspect ? 'text-amber-700' : 'text-slate-400'">فروش سوری (بدون مسوول فروش)</p>

@@ -1053,6 +1053,9 @@ class ScopeTests(APITestCase):
         now = timezone.now()
         self.mine = DimEmployee.objects.create(code="e-mine", full_name_fa="کارشناس من")
         self.theirs = DimEmployee.objects.create(code="e-theirs", full_name_fa="کارشناس دیگر")
+        # Both on فروش همکار's roster: only roster members can be given records.
+        for e in (self.mine, self.theirs):
+            EmployeeChannel.objects.create(employee=e, channel=SalesChannel.TEAM)
 
         self.rep = _user("rep1", "operator", "sales_team")
         self.mine.user = self.rep

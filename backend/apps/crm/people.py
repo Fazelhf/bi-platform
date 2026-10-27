@@ -16,6 +16,29 @@ from collections import Counter
 from apps.crm.matching import fold, name_key
 from apps.sales.models import DimEmployee
 
+def sales_roster(channels=None):
+    """
+    کارشناسان فعال واحد فروش: active, real (not a placeholder) employees with
+    an active membership in a sales channel — the roster HR keeps from the
+    sales units of the org chart (`hr.services.rosters.sync_rosters`).
+
+    Finance, production and warehouse staff have no such membership, which is
+    what keeps them out of every CRM picker.
+    """
+    from django.db.models import Q
+
+    from apps.sales.models import DimEmployee
+
+    match = Q(memberships__is_active=True)
+    if channels is not None:
+        match &= Q(memberships__channel__in=list(channels))
+    return (
+        DimEmployee.objects.filter(is_active=True, is_placeholder=False)
+        .exclude(full_name_fa__in=["", "0"])
+        .filter(match).distinct()
+    )
+
+
 #: A placeholder in آرپا's بازاریاب column, not a colleague. 425 of 1,098
 #: invoices carry it.
 NO_REP = "بازاریاب بدون پورسانت"

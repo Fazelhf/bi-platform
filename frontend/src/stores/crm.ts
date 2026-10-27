@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { jalaliLabel } from "@/utils/jalali";
 import { crmApi, type CrmMe, type CrmOptions, type Drill } from "@/api/crm";
 
 /**
@@ -61,6 +62,10 @@ export const useCrmStore = defineStore("crm", {
       if (f.range === "custom") {
         if (f.date_from) q.date_from = f.date_from;
         if (f.date_to) q.date_to = f.date_to;
+        // Typed backwards: report the range the user meant (the bar says so).
+        if (q.date_from && q.date_to && q.date_from > q.date_to) {
+          [q.date_from, q.date_to] = [q.date_to, q.date_from];
+        }
       } else if (f.range === "month" && f.month) {
         const m = months.find((x) => x.key === f.month);
         if (m) {
@@ -89,7 +94,10 @@ export const useCrmStore = defineStore("crm", {
       if (f.range === "month") {
         return months.find((m) => m.key === f.month)?.label ?? "—";
       }
-      if (f.range === "custom") return `${f.date_from || "…"} تا ${f.date_to || "…"}`;
+      if (f.range === "custom") {
+        const j = (iso: string) => (iso ? jalaliLabel(iso) : "…");
+        return `${j(f.date_from)} تا ${j(f.date_to)}`;
+      }
       return {
         current: "ماه جاری", last3: "۳ ماه اخیر",
         last6: "۶ ماه اخیر", last12: "۱۲ ماه اخیر",
@@ -98,6 +106,13 @@ export const useCrmStore = defineStore("crm", {
 
     employeeName: (state) => (id: number | null) =>
       state.options?.employees.find((e) => e.id === id)?.name ?? "—",
+
+    /** کارشناسان فعال واحد فروش — the only people a record may be given to. */
+    rosterEmployees: (state) => (state.options?.employees ?? []).filter((e) => e.active !== false),
+
+    /** Sales zones of a province (today: Tehran's four), or none. */
+    zonesOf: (state) => (provinceId: number | null | undefined) =>
+      (state.options?.zones ?? []).filter((z) => z.province === provinceId),
 
     canEdit: (state) => !!state.me?.can_edit,
 

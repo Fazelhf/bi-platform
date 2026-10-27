@@ -49,10 +49,11 @@ from apps.crm.arpa_file import ArpaFileError
 from apps.crm.channels import ChannelResolver
 from apps.crm.jalali import period_for
 from apps.crm.matching import fold, id_key
+from apps.crm.merge import ImportTwins
 from apps.crm.people import RepMatcher
 from apps.crm.models import (
-    Activity, Customer, CustomerExternalRef, Dataset, Deal, DealItem, ExternalSource,
-    ImportBatch, LeadSource, LostReason, PipelineStage, Product, ProductCategory, Task,
+    Activity, Customer, CustomerExternalRef, Dataset, Deal, DealItem, DismissedParty,
+    ExternalSource, ImportBatch, LeadSource, LostReason, PipelineStage, Product, ProductCategory, Task,
 )
 from apps.sales.models import DimEmployee, DimProvince
 
@@ -233,10 +234,18 @@ class Importer:
             CustomerExternalRef.objects.filter(source=ExternalSource.DIDAR)
             .values_list("external_id", "customer_id")
         )
+        # A merged-away row answers for its survivor: attaching new data to
+        # the absorbed half would hide it behind `merged_into` again.
         self.by_national_id = {
-            id_key(n): pk for pk, n in Customer.objects.exclude(national_id="")
-            .values_list("pk", "national_id") if id_key(n)
+            id_key(n): into or pk for pk, n, into in Customer.objects.exclude(national_id="")
+            .values_list("pk", "national_id", "merged_into_id") if id_key(n)
         }
+        # Parties someone deleted on purpose stay deleted — see DismissedParty.
+        self.dismissed = set(
+            DismissedParty.objects.filter(source=ExternalSource.DIDAR)
+            .values_list("external_id", flat=True)
+        )
+        self.twins = ImportTwins(Dataset.REAL)
         self.channels = ChannelResolver()
         self._periods: dict = {}
         self.touched: set[int] = set()
@@ -272,6 +281,9 @@ class Importer:
     def _upsert_customer(self, kind: str, ref: str, name: str, fields: dict, nid: str) -> Customer:
         """New: everything. Existing: only the blanks — people edit these by hand."""
         pk = self.refs.get(ref) or (self.by_national_id.get(nid) if nid else None)
+        if not pk and ref in self.dismissed:
+            self.skipped[kind]["قبلاً عمداً حذف شده"] += 1
+            return None
         if pk:
             customer = Customer.objects.get(pk=pk)
             changed = [
@@ -296,6 +308,7 @@ class Importer:
                 **{k: v for k, v in fields.items() if v not in (None, "")},
             )
             self._link(ref, customer, name)
+            self.twins.check(customer)
             self.created_customers.add(customer.pk)
             if nid:
                 self.by_national_id[nid] = customer.pk
@@ -677,7 +690,7 @@ def run(files: list[tuple[str, bytes]], user=None, commit: bool = False) -> dict
             unchanged=sum(v["unchanged"] for v in per_kind.values()),
             skipped=sum(sum(v["skipped"].values()) for v in per_kind.values()),
             customers_created=len(imp.created_customers),
-            notes={"kinds": per_kind, "unknown_reps": dict(imp.reps.unknown.most_common(30))},
+            notes={"kinds": per_kind, "queued_for_review": imp.twins.queued, "unknown_reps": dict(imp.reps.unknown.most_common(30))},
         )
         if not commit:
             transaction.set_rollback(True)
@@ -688,6 +701,7 @@ def run(files: list[tuple[str, bytes]], user=None, commit: bool = False) -> dict
         "created": created,
         "updated": updated,
         "customers_created": len(imp.created_customers),
+        "queued_for_review": imp.twins.queued,
         "unknown_reps": [{"name": n, "count": c} for n, c in imp.reps.unknown.most_common()],
         "nothing_new": not created and not updated,
         "committed": commit,

@@ -49,6 +49,7 @@ const form = reactive({
   status: "lead",
   group: "" as number | "",
   province: "" as number | "",
+  zone: "" as number | "",
   city: "",
   lead_source: "" as number | "",
   owner: "" as number | "",
@@ -73,6 +74,7 @@ onMounted(async () => {
       status: c.status,
       group: c.group ?? "",
       province: c.province ?? "",
+      zone: c.zone ?? "",
       city: c.city ?? "",
       lead_source: c.lead_source ?? "",
       owner: c.owner ?? "",
@@ -95,6 +97,7 @@ const opt = (rows: { id: number; name_fa: string }[] | undefined) =>
 const groups = computed(() => opt(crm.options?.groups));
 const sources = computed(() => opt(crm.options?.sources));
 const provinces = computed(() => opt(crm.options?.provinces));
+const zones = computed(() => opt(crm.zonesOf(form.province === "" ? null : form.province)));
 
 /**
  * How many folded fields already hold something, so a collapsed section on an
@@ -126,7 +129,9 @@ async function save() {
   error.value = "";
   try {
     const payload: Record<string, any> = { ...form };
-    for (const k of ["group", "province", "lead_source", "owner"]) {
+    // A zone belongs to one province; moving the customer clears it.
+    if (!zones.value.some((z) => z.value === payload.zone)) payload.zone = "";
+    for (const k of ["group", "province", "zone", "lead_source", "owner"]) {
       if (payload[k] === "") payload[k] = null;
     }
     const saved = await crmApi.saveCustomer(payload, props.customer?.id);
@@ -223,6 +228,10 @@ const lbl = "block text-xs text-slate-500 mb-1";
         <div>
           <label :class="lbl">استان</label>
           <PickerField v-model="form.province" :options="provinces" placeholder="— انتخاب کنید —" />
+        </div>
+        <div v-if="zones.length">
+          <label :class="lbl">محدوده‌ی فروش</label>
+          <PickerField v-model="form.zone" :options="zones" placeholder="— سایر مناطق —" />
         </div>
         <div>
           <label :class="lbl">شهر</label>

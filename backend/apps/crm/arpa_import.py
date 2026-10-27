@@ -45,6 +45,7 @@ from apps.crm.arpa_file import ArpaFileError, read_sheet
 from apps.crm.channels import RESPONSIBLE, ChannelResolver
 from apps.crm.jalali import period_for
 from apps.crm.matching import fold
+from apps.crm.merge import ImportTwins
 from apps.crm.models import (
     ImportBatch, Book, Customer, CustomerExternalRef, Dataset, Deal, ExternalSource,
     NOT_COUNTED, Review, SalesInvoice,
@@ -98,6 +99,7 @@ class Result:
     suspect: int = 0
     suspect_amount: Decimal = Decimal(0)
     customers_created: int = 0
+    queued_for_review: int = 0
     amount: Decimal = Decimal(0)
     by_channel: dict = field(default_factory=lambda: defaultdict(Decimal))
     by_kind: dict = field(default_factory=lambda: defaultdict(lambda: [0, Decimal(0)]))
@@ -116,6 +118,7 @@ class Result:
             "suspect": self.suspect,
             "suspect_amount": float(self.suspect_amount),
             "customers_created": self.customers_created,
+            "queued_for_review": self.queued_for_review,
             "amount": float(self.amount),
             "by_channel": {k: float(v) for k, v in self.by_channel.items()},
             "by_kind": {k: {"count": n, "amount": float(a)} for k, (n, a) in self.by_kind.items()},
@@ -275,6 +278,7 @@ class Importer:
         self.reps = RepMatcher()
         self.channels = ChannelResolver()
         self.writer = PartyWriter(with_sales=None)
+        self.twins = ImportTwins(Dataset.REAL)
 
     # -- people -------------------------------------------------------------
     def rep(self, name) -> DimEmployee | None:
@@ -298,6 +302,7 @@ class Importer:
             # address is a guess. Left blank, the salesperson fills it in.
         }
         customer = self.writer.create(party)
+        self.twins.check(customer)
         customer.owner = rep
         customer.channel = self.channels.customer(rep.pk if rep else None, party["نام گروه"])
         customer.status = Customer.Status.ACTIVE
@@ -306,6 +311,7 @@ class Importer:
         self.refs[code] = customer.pk
         self.customers[customer.pk] = customer
         self.result.customers_created += 1
+        self.result.queued_for_review = self.twins.queued
         return customer
 
     # -- one row ------------------------------------------------------------

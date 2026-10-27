@@ -591,6 +591,12 @@ const router = createRouter({
           component: () => import("@/views/crm/GeoSalesView.vue"),
         },
         {
+          // مدیریت فروش: customer groups and province responsibilities.
+          path: "manage",
+          name: "crm-manage",
+          component: () => import("@/views/crm/CrmManageView.vue"),
+        },
+        {
           // تنظیمات CRM: the imports, کنترل داده, بازبینی تطبیق and پاک‌سازی —
           // one page for the system admin, the section in `?section=`.
           path: "settings",

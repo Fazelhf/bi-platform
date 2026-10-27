@@ -69,9 +69,42 @@ export interface GeoProvinceRow extends ReportRow {
   achievement_pct: number;
   share_pct: number;
   owner_label: string;
+  managers: GeoPerson[];
+  experts: GeoPerson[];
+}
+
+export interface GeoPerson { id: number; name: string; channel?: string; channel_label?: string }
+
+/** Four cut points between five colour classes, per map metric (server-side). */
+export interface GeoScale { amount: number[]; customers: number[]; achievement: number[] }
+
+export interface GeoZoneRow {
+  id: number;
+  code: string;
+  label: string;
+  is_default: boolean;
+  has_geometry: boolean;
+  amount: number;
+  count: number;
+  buyers: number;
+  customer_base: number;
+  share_pct: number;
+  managers: GeoPerson[];
+  experts: GeoPerson[];
+  drill: Drill;
 }
 
 export interface GeoOverview {
+  scale: GeoScale;
+  scale_with_tehran: GeoScale;
+  tehran: {
+    province_id: number;
+    rows: GeoZoneRow[];
+    total: number;
+    unzoned_customers: number;
+    default_zone: string;
+    scale: { amount: number[]; customers: number[] };
+  } | null;
   rows: GeoProvinceRow[];
   total: number;
   unplaced: { count: number; amount: number };
@@ -111,7 +144,9 @@ export interface GeoProvince {
     id: number; number: string; kind: string; date: string;
     customer_id: number | null; customer: string; amount: number; unsettled: number;
   }[];
-  reps: { id: number | null; label: string; amount: number }[];
+  reps: { id: number | null; label: string; amount: number; assigned: boolean }[];
+  managers: GeoPerson[];
+  experts: GeoPerson[];
   drill: Drill;
   window: { start: string | null; end: string | null };
 }
@@ -214,6 +249,52 @@ export interface CrmCustomer {
   insights?: CustomerInsights;
 }
 
+export interface TerritoryRow {
+  id: number;
+  province: number;
+  province_name: string;
+  zone: number | null;
+  zone_name: string;
+  channel: string;
+  employee: number;
+  employee_name: string;
+  role: "manager" | "expert";
+}
+
+export interface CustomerGroupRow {
+  id: number;
+  code: string;
+  name_fa: string;
+  color: string;
+  is_system: boolean;
+  customer_count: number;
+}
+
+export interface CustomerMergeRecord {
+  id: number;
+  at: string;
+  at_jalali: string;
+  by: string;
+  survivor: { id: number; name_fa: string };
+  absorbed: { id: number; name_fa: string; code: string };
+  moved: Record<string, number>;
+  before: { survivor: Record<string, any>; absorbed: Record<string, any> };
+}
+
+export interface CrmConfig {
+  fuzzy_threshold: number;
+  match_phone: boolean;
+  queue_on_import: boolean;
+}
+
+/** What a merge carried, in the words the screens use. */
+export const MOVED_LABELS: Record<string, string> = {
+  deals: "معامله", activities: "فعالیت", tasks: "کار", feedback: "بازخورد",
+  invoices: "فاکتور", external_refs: "کد آرپا/دیدار/تیم‌یار", sales2_documents: "سند فروش",
+  sales2_receipts: "دریافت", ledger_accounts: "حساب دفتری", sales2_account: "حساب اعتباری",
+  tags: "برچسب", merged_from: "ادغام قبلی",
+};
+
 export interface CustomerInsights {
   invoiced: number;
   invoice_count: number;
@@ -262,7 +343,10 @@ export interface CrmOptions {
   /** Sample rows from `seed_crm_sample` are loaded; every screen says so. */
   sample_data?: boolean;
   provinces: { id: number; name_fa: string }[];
-  employees: { id: number; name: string; team: string }[];
+  /** `active` false: owns old records but is no longer on the sales roster —
+   *  kept as a label, never offered as a new owner. */
+  employees: { id: number; name: string; team: string; active?: boolean }[];
+  zones: { id: number; name_fa: string; province: number; channel: string; is_default: boolean }[];
   groups: { id: number; name_fa: string }[];
   sources: { id: number; name_fa: string }[];
   reasons: { id: number; name_fa: string; is_controllable: boolean }[];
@@ -388,6 +472,8 @@ export interface MatchCandidate {
   score: string;
   state: "pending" | "accepted" | "rejected";
   state_display: string;
+  confidence: "definite" | "suspect";
+  reason: string;
   decided_at: string | null;
   decided_by_name: string;
   crm: MatchSide;
@@ -397,6 +483,7 @@ export interface MatchCandidate {
 export interface MatchSummary {
   by_method: { key: string; label: string; count: number }[];
   by_state: Record<string, number>;
+  by_confidence: Record<string, number>;
   pending: number;
 }
 
@@ -603,6 +690,45 @@ export const crmApi = {
     return data as CrmCustomer & { id: number };
   },
 
+  /** One value onto many customers (group, province, status, lead source…) in one request. */
+  async bulkUpdateCustomers(ids: number[], fields: Record<string, unknown>): Promise<{ updated: number }> {
+    const { data } = await api.post("/crm/customers/bulk-update/", { ids, fields });
+    return data;
+  },
+
+  // ---- province / zone responsibilities ------------------------------------
+  async territories(): Promise<TerritoryRow[]> {
+    const { data } = await api.get("/crm/territories/");
+    return data;
+  },
+  async saveTerritory(payload: {
+    province: number; zone: number | null; role: string; employee: number; channel?: string;
+  }): Promise<TerritoryRow> {
+    const { data } = await api.post("/crm/territories/", payload);
+    return data;
+  },
+  async deleteTerritory(id: number) {
+    await api.delete(`/crm/territories/${id}/`);
+  },
+
+  // ---- customer groups ----------------------------------------------------
+  async groups(): Promise<CustomerGroupRow[]> {
+    const { data } = await api.get("/crm/groups/", { params: { page_size: 500 } });
+    return data.results ?? data;
+  },
+  async saveGroup(payload: { name_fa: string; color?: string }, id?: number): Promise<CustomerGroupRow> {
+    const { data } = id ? await api.patch(`/crm/groups/${id}/`, payload) : await api.post("/crm/groups/", payload);
+    return data;
+  },
+  async moveGroup(id: number, moveTo: number): Promise<{ moved: number }> {
+    const { data } = await api.post(`/crm/groups/${id}/move/`, { move_to: moveTo });
+    return data;
+  },
+  async deleteGroup(id: number, moveTo?: number): Promise<{ moved: number }> {
+    const { data } = await api.delete(`/crm/groups/${id}/`, { params: moveTo ? { move_to: moveTo } : {} });
+    return data;
+  },
+
   /** Customers that may be this one — a suggestion, never a decision. */
   async similarCustomers(id: number): Promise<SimilarCustomer[]> {
     const { data } = await api.get(`/crm/customers/${id}/similar/`);
@@ -610,8 +736,34 @@ export const crmApi = {
   },
 
   /** Fold one customer into another; `keep` says which survives. */
-  async mergeCustomer(id: number, other: number, keep: "this" | "other"): Promise<{ id: number; absorbed: number }> {
+  async mergeCustomer(
+    id: number, other: number, keep: "this" | "other",
+  ): Promise<{ id: number; absorbed: number; moved: Record<string, number>; last_activity_at: string | null }> {
     const { data } = await api.post(`/crm/customers/${id}/merge/`, { other, keep });
+    return data;
+  },
+
+  /** سابقه ادغام — merges this customer took part in, with both sides' fields as they were. */
+  async customerMerges(id: number): Promise<CustomerMergeRecord[]> {
+    const { data } = await api.get(`/crm/customers/${id}/merges/`);
+    return data;
+  },
+
+  /** تنظیمات تشخیص تکراری. */
+  async crmConfig(): Promise<CrmConfig> {
+    const { data } = await api.get("/crm/config/");
+    return data;
+  },
+  async saveCrmConfig(payload: Partial<CrmConfig>): Promise<CrmConfig> {
+    const { data } = await api.patch("/crm/config/", payload);
+    return data;
+  },
+
+  /** The whole file against itself; `dry_run` counts without queueing. Never merges. */
+  async scanDuplicates(dryRun = false): Promise<{
+    found: number; definite: number; suspect: number; queued: number; crowded: number;
+  }> {
+    const { data } = await api.post("/crm/match-candidates/scan/", { dry_run: dryRun });
     return data;
   },
 
@@ -851,6 +1003,8 @@ export interface ArpaImportResult {
   suspect: number;
   suspect_amount: number;
   customers_created: number;
+  /** New customers that looked like an existing one, sent to بازبینی تطبیق. */
+  queued_for_review?: number;
   amount: number;
   by_channel: Record<string, number>;
   by_kind: Record<string, { count: number; amount: number }>;
@@ -880,6 +1034,8 @@ export interface ArpaImportRow {
   skipped: number;
   suspect: number;
   customers_created: number;
+  /** New customers that looked like an existing one, sent to بازبینی تطبیق. */
+  queued_for_review?: number;
   amount: number;
   date_from: string;
   date_to: string;
@@ -927,6 +1083,8 @@ export interface DidarImportResult {
   created: number;
   updated: number;
   customers_created: number;
+  /** New customers that looked like an existing one, sent to بازبینی تطبیق. */
+  queued_for_review?: number;
   unknown_reps: { name: string; count: number }[];
   nothing_new: boolean;
   committed: boolean;
@@ -944,6 +1102,8 @@ export interface DidarImportRow {
   unchanged: number;
   skipped: number;
   customers_created: number;
+  /** New customers that looked like an existing one, sent to بازبینی تطبیق. */
+  queued_for_review?: number;
 }
 
 // ---- پاک‌سازی داده -----------------------------------------------------------
@@ -961,6 +1121,7 @@ export interface TeamyarImportResult {
   updated: number;
   unchanged: number;
   duplicate: number;
+  queued_for_review?: number;
   matched_by: Record<string, number>;
   skipped: Record<string, number>;
   unknown_reps: { name: string; count: number }[];
