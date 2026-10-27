@@ -73,7 +73,7 @@ export interface GeoProvinceRow extends ReportRow {
   experts: GeoPerson[];
 }
 
-export interface GeoPerson { id: number; name: string }
+export interface GeoPerson { id: number; name: string; channel?: string; channel_label?: string }
 
 /** Four cut points between five colour classes, per map metric (server-side). */
 export interface GeoScale { amount: number[]; customers: number[]; achievement: number[] }

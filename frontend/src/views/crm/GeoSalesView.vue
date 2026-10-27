@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
-import { crmApi, type GeoOverview, type GeoProvince, type GeoProvinceRow } from "@/api/crm";
+import { crmApi, type GeoOverview, type GeoPerson, type GeoProvince, type GeoProvinceRow } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { useUiStore } from "@/stores/ui";
 import { init, registerMap, type EChartsOption, type EChartsType } from "@/lib/echarts";
@@ -152,6 +152,11 @@ const classColors = computed<string[]>(() => {
   return Array.from({ length: n }, (_, i) => mix(light, strong.startsWith("#") && strong.length === 7 ? strong : "#2563eb", n === 1 ? 1 : i / (n - 1)));
 });
 
+/** A name, with its book when the view spans several (همکار / B2B / بانکی). */
+function who(p: GeoPerson): string {
+  return crm.seesAll && p.channel_label ? `${p.name} (${p.channel_label})` : p.name;
+}
+
 /** A province with nothing to measure — distinct from one that measured low. */
 function hasValue(r: GeoProvinceRow): boolean {
   if (metric.value === "achievement_pct") return r.target > 0;
@@ -208,8 +213,8 @@ const option = computed<EChartsOption>(() => {
         const r = rowsByName.value.get(x.name);
         if (!r) return x.name;
         const people = [
-          r.managers?.length ? `مدیر: ${r.managers.map((m) => m.name).join("، ")}` : "",
-          r.experts?.length ? `کارشناس: ${r.experts.map((m) => m.name).join("، ")}` : "",
+          r.managers?.length ? `مدیر: ${r.managers.map(who).join("، ")}` : "",
+          r.experts?.length ? `کارشناس: ${r.experts.map(who).join("، ")}` : "",
         ].filter(Boolean).join("<br/>");
         return `<b>${x.name}</b>`
           + (r.label === TEHRAN && !showTehran.value ? " <span style='opacity:.7'>(جداگانه، زیر نقشه)</span>" : "")
@@ -556,7 +561,7 @@ const repsOther = computed(() => (detail.value?.reps ?? []).filter((r) => !r.ass
           <div :class="card">
             <p class="text-sm font-semibold text-ink mb-1">مسئولان این استان</p>
             <p class="text-xs text-slate-500 mb-3">
-              مدیر فروش: {{ detail?.managers?.map((m) => m.name).join("، ") || "تعیین نشده" }}
+              مدیر فروش: {{ detail?.managers?.map(who).join("، ") || "تعیین نشده" }}
             </p>
             <Skeleton v-if="loadingDetail" class="h-16 rounded-xl" />
             <template v-else>
@@ -617,7 +622,7 @@ const repsOther = computed(() => (detail.value?.reps ?? []).filter((r) => !r.ass
               <td class="text-left ltr-nums">{{ rial(z.amount) }} <span class="text-slate-400">({{ pct(z.share_pct) }})</span></td>
               <td class="text-left ltr-nums">{{ num(z.buyers) }}</td>
               <td class="text-left ltr-nums">{{ num(z.customer_base) }}</td>
-              <td class="pr-3 text-slate-500">{{ [...z.managers, ...z.experts].map((p) => p.name).join("، ") || "—" }}</td>
+              <td class="pr-3 text-slate-500">{{ [...z.managers, ...z.experts].map(who).join("، ") || "—" }}</td>
             </tr>
           </tbody>
         </table>

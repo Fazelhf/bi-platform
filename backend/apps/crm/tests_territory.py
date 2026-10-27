@@ -79,6 +79,20 @@ class TerritoryTests(APITestCase):
         managers = TerritoryAssignment.objects.filter(province=self.fars, role="manager")
         self.assertEqual(list(managers.values_list("employee", flat=True)), [self.b.pk])
 
+    def test_each_book_has_its_own_manager_in_one_province(self):
+        b2b = DimEmployee.objects.create(code="t-b2b", full_name_fa="مدیر بی‌تو‌بی")
+        EmployeeChannel.objects.create(employee=b2b, channel=SalesChannel.B2B)
+        self.client.force_authenticate(_user("t-ceo", "executive", ""))
+        for emp, ch in ((self.a, "team"), (b2b, "b2b")):
+            res = self.client.post("/api/crm/territories/", {
+                "province": self.fars.pk, "employee": emp.pk, "role": "manager", "channel": ch,
+            }, format="json")
+            self.assertEqual(res.status_code, 201, res.data)
+        managers = TerritoryAssignment.objects.filter(province=self.fars, role="manager")
+        self.assertEqual(set(managers.values_list("channel", flat=True)), {"team", "b2b"})
+        row = next(r for r in rpt.geo_overview(rpt.Filters.from_query({}))["rows"] if r["id"] == self.fars.pk)
+        self.assertEqual({m["channel"] for m in row["managers"]}, {"team", "b2b"})
+
     def test_only_roster_members_and_only_managers(self):
         self.assertEqual(self._assign(self.outsider).status_code, 400)
         self.client.force_authenticate(_user("t-op", "operator"))

@@ -1723,7 +1723,10 @@ def territory_names(channels, province_ids=None) -> dict:
     for a in qs:
         slot = out.setdefault((a.province_id, a.zone_id), {"managers": [], "experts": []})
         key = "managers" if a.role == TerritoryAssignment.Role.MANAGER else "experts"
-        entry = {"id": a.employee_id, "name": a.employee.full_name_fa}
+        # One province has a manager per book — همکار, B2B, بانکی — so a view
+        # across books has to say whose manager each one is.
+        entry = {"id": a.employee_id, "name": a.employee.full_name_fa,
+                 "channel": a.channel, "channel_label": a.get_channel_display()}
         if entry not in slot[key]:
             slot[key].append(entry)
     return out
