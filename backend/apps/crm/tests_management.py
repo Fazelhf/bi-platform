@@ -126,3 +126,27 @@ class BulkEditTests(APITestCase):
         res = self.client.get("/api/crm/customers/", {"page_size": 500})
         self.assertEqual(len(res.data["results"]), 500)
         self.assertEqual(res.data["count"], 523)
+
+
+class PeriodTests(APITestCase):
+    """The window every dashboard part sums over is parsed in one place."""
+
+    def setUp(self):
+        self.client.force_authenticate(_user("p-boss"))
+
+    def test_an_unreadable_date_is_refused_not_ignored(self):
+        res = self.client.get("/api/crm/dashboard/", {"date_from": "1405/07/01"})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("date_from", res.data)
+
+    def test_a_backwards_range_is_refused(self):
+        res = self.client.get("/api/crm/dashboard/", {"date_from": "2026-05-01", "date_to": "2026-04-01"})
+        self.assertEqual(res.status_code, 400)
+
+    def test_default_is_the_last_six_jalali_months(self):
+        from apps.crm import reports as rpt
+
+        f = rpt.Filters.from_query({})
+        self.assertIsNotNone(f.start)
+        self.assertGreaterEqual((f.end - f.start).days, 170)
+        self.assertLessEqual((f.end - f.start).days, 190)

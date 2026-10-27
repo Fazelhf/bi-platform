@@ -335,9 +335,21 @@ def query_filters(request) -> rpt.Filters:
     prevent, reintroduced one call site at a time. One helper is harder to
     forget than one argument.
     """
-    return rpt.Filters.from_query(
-        request.query_params, active_dataset(request), crm_scope(request.user)
-    )
+    # A date the parser cannot read used to leave that side of the window
+    # open — «from 1405/07/01» silently meant «from the beginning of time»,
+    # and every card on the page summed a different period from the one on
+    # screen. Refused instead.
+    q = request.query_params
+    bad = {
+        k: ["تاریخ نامعتبر است؛ قالب میلادی YYYY-MM-DD لازم است."]
+        for k in ("date_from", "date_to") if q.get(k) and rpt._parse_date(q.get(k)) is None
+    }
+    if bad:
+        raise ValidationError(bad)
+    f = rpt.Filters.from_query(q, active_dataset(request), crm_scope(request.user))
+    if f.start and f.end and f.start >= f.end:
+        raise ValidationError({"date_to": ["پایان بازه پیش از شروع آن است."]})
+    return f
 
 
 class CrmPagination(PageNumberPagination):
