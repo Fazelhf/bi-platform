@@ -27,11 +27,12 @@ from django.utils import timezone
 
 from apps.core.models import DimPeriod, PeriodKind
 from apps.crm.jalali import jalali_month_of, month_bounds, month_label
+from apps.crm.models import stages_in_view
 from apps.crm.models import (
     Activity, Customer, CustomerFeedback, Deal, DealItem,
     PipelineStage, SalesInvoice,
 )
-from apps.sales.models import FactSalesProvince, SalesTarget
+from apps.sales.models import FactSalesProvince, SalesChannel, SalesTarget
 
 ZERO = Value(0, output_field=DecimalField(max_digits=20, decimal_places=0))
 
@@ -100,6 +101,9 @@ class Filters:
     group: int | None = None
     source: int | None = None
     province: int | None = None
+    #: A Tehran sales zone (SalesZone). The default zone also covers the
+    #: province's customers nobody has placed yet — as the map counts them.
+    zone: int | None = None
     product: int | None = None
     stage: int | None = None
     lost_reason: int | None = None
@@ -109,6 +113,9 @@ class Filters:
     #: "0" narrows deals to those with no invoice attached, "1" to those with
     #: one — how «موفق، فاکتورنشده» drills to exactly the deals it counted.
     invoiced: str = ""
+    #: B2B tender slices: who we bid against, سامانه or مستقیم.
+    competitor: str = ""
+    tender_channel: str = ""
 
     #: The channels in view; None means all of them. Set from the account (see
     #: `Scope.channels`); a `channel` query param may only narrow within what
@@ -143,10 +150,14 @@ class Filters:
                 return None
 
         f = cls(raw=dict(q.items()), dataset=dataset)
-        f.owner = num("owner")
-        f.group = num("group")
-        f.source = num("source")
-        f.province = num("province")
+        # «بدون …» for each: 0 = blank, None = any (as group and province).
+        f.owner = 0 if q.get("owner") == "none" else num("owner")
+        # «بدون گروه»: 0 means «no group», None means «any group».
+        f.group = 0 if q.get("group") == "none" else num("group")
+        f.source = 0 if q.get("source") == "none" else num("source")
+        # «بدون استان», as «بدون گروه»: 0 = no province, None = any.
+        f.province = 0 if q.get("province") == "none" else num("province")
+        f.zone = num("zone")
         f.product = num("product")
         f.stage = num("stage")
         f.lost_reason = num("lost_reason")
@@ -154,6 +165,8 @@ class Filters:
         f.tag = num("tag")
         f.status = (q.get("status") or "").strip()
         f.invoiced = (q.get("invoiced") or "").strip()
+        f.competitor = (q.get("competitor") or "").strip()
+        f.tender_channel = (q.get("tender_channel") or "").strip()
         f.result = (q.get("result") or "").strip()
         f.kind = (q.get("kind") or "").strip()
         f.granularity = (q.get("granularity") or "month").strip()
@@ -214,18 +227,22 @@ class Filters:
             return Deal.objects.none()
         qs = self.by_channel(Deal.objects.filter(dataset=self.dataset))
         qs = self._window(qs, date_field)
-        if self.owner:
-            qs = qs.filter(owner_id=self.owner)
-        if self.group:
-            qs = qs.filter(customer__group_id=self.group)
-        if self.source:
-            qs = qs.filter(lead_source_id=self.source)
-        if self.province:
-            qs = qs.filter(customer__province_id=self.province)
+        if self.owner is not None:
+            qs = qs.filter(owner_id=self.owner or None)
+        if self.group is not None:
+            qs = qs.filter(customer__group_id=self.group or None)
+        if self.source is not None:
+            qs = qs.filter(lead_source_id=self.source or None)
+        if self.province is not None:
+            qs = qs.filter(customer__province_id=self.province or None)
         if self.stage:
             qs = qs.filter(stage_id=self.stage)
         if self.lost_reason:
             qs = qs.filter(lost_reason_id=self.lost_reason)
+        if self.competitor:
+            qs = qs.filter(competitor=self.competitor)
+        if self.tender_channel:
+            qs = qs.filter(tender_channel=self.tender_channel)
         if self.customer:
             qs = qs.filter(customer_id=self.customer)
         if self.tag:
@@ -247,12 +264,12 @@ class Filters:
             Activity.objects.filter(dataset=self.dataset), "customer__channel"
         )
         qs = self._window(qs, "at")
-        if self.owner:
-            qs = qs.filter(owner_id=self.owner)
-        if self.group:
-            qs = qs.filter(customer__group_id=self.group)
-        if self.province:
-            qs = qs.filter(customer__province_id=self.province)
+        if self.owner is not None:
+            qs = qs.filter(owner_id=self.owner or None)
+        if self.group is not None:
+            qs = qs.filter(customer__group_id=self.group or None)
+        if self.province is not None:
+            qs = qs.filter(customer__province_id=self.province or None)
         if self.customer:
             qs = qs.filter(customer_id=self.customer)
         if self.kind == "call":
@@ -268,16 +285,17 @@ class Filters:
     def customers(self, date_field: str = "first_deal_won_at"):
         if self.blind:
             return Customer.objects.none()
-        qs = self.by_channel(Customer.objects.filter(dataset=self.dataset))
+        # A merged-away row is the survivor's history, not a second customer.
+        qs = self.by_channel(Customer.objects.filter(dataset=self.dataset, merged_into__isnull=True))
         qs = self._window(qs, date_field)
-        if self.owner:
-            qs = qs.filter(owner_id=self.owner)
-        if self.group:
-            qs = qs.filter(group_id=self.group)
-        if self.source:
-            qs = qs.filter(lead_source_id=self.source)
-        if self.province:
-            qs = qs.filter(province_id=self.province)
+        if self.owner is not None:
+            qs = qs.filter(owner_id=self.owner or None)
+        if self.group is not None:
+            qs = qs.filter(group_id=self.group or None)
+        if self.source is not None:
+            qs = qs.filter(lead_source_id=self.source or None)
+        if self.province is not None:
+            qs = qs.filter(province_id=self.province or None)
         return qs
 
     def invoices(self, include_intercompany: bool = False):
@@ -303,7 +321,9 @@ class Filters:
         """
         if self.blind:
             return SalesInvoice.objects.none()
-        qs = SalesInvoice.objects.filter(dataset=self.dataset).annotate(
+        # `counted()`: فروش سوری — waiting for a ruling, or ruled fake — is not
+        # a sale, and nothing summed from here may include it.
+        qs = SalesInvoice.objects.counted().filter(dataset=self.dataset).annotate(
             rep_id=Coalesce(
                 "owner_id", "deal__owner_id", "customer__owner_id",
                 output_field=IntegerField(),
@@ -319,14 +339,16 @@ class Filters:
             qs = qs.filter(issued_at__gte=self.start)
         if self.end:
             qs = qs.filter(issued_at__lt=self.end)
-        if self.owner:
-            qs = qs.filter(rep_id=self.owner)
-        if self.group:
-            qs = qs.filter(customer__group_id=self.group)
-        if self.source:
-            qs = qs.filter(customer__lead_source_id=self.source)
-        if self.province:
-            qs = qs.filter(customer__province_id=self.province)
+        if self.owner is not None:
+            qs = qs.filter(rep_id=self.owner or None)
+        if self.group is not None:
+            qs = qs.filter(customer__group_id=self.group or None)
+        if self.source is not None:
+            qs = qs.filter(customer__lead_source_id=self.source or None)
+        if self.province is not None:
+            qs = qs.filter(customer__province_id=self.province or None)
+        if self.zone:
+            qs = qs.filter(zone_q(self.zone, "customer__"))
         if self.customer:
             qs = qs.filter(customer_id=self.customer)
         if self.product:
@@ -354,16 +376,19 @@ class Filters:
         if self.end:
             out["date_to"] = (self.end - dt.timedelta(days=1)).isoformat()
         for name in (
-            "owner", "group", "source", "province", "product", "stage",
+            "owner", "group", "source", "province", "zone", "product", "stage",
             "lost_reason", "customer", "tag",
         ):
             v = getattr(self, name)
             if v:
                 out[name] = v
-        for name in ("status", "result", "kind", "invoiced"):
+        for name in ("status", "result", "kind", "invoiced", "competitor", "tender_channel"):
             v = getattr(self, name)
             if v:
                 out[name] = v
+        for name in ("group", "province", "owner", "source"):
+            if getattr(self, name) == 0:
+                out[name] = "none"
         return out
 
 
@@ -426,6 +451,9 @@ DEAL_AXES: dict[str, Axis] = {
     "reason": Axis("reason", "دلیل از دست رفتن", "lost_reason_id", "lost_reason__name_fa", "lost_reason"),
     "customer": Axis("customer", "مشتری", "customer_id", "customer__name_fa", "customer"),
     "team": Axis("team", "تیم", "owner__team_id", "owner__team__name_fa", "team"),
+    # Text, not a table: the id is the name itself.
+    "competitor": Axis("competitor", "رقیب", "competitor", "competitor", "competitor"),
+    "tender_channel": Axis("tender_channel", "کانال دریافت سفارش", "tender_channel", "tender_channel", "tender_channel"),
 }
 
 ACTIVITY_AXES: dict[str, Axis] = {
@@ -556,7 +584,10 @@ def _grouped(qs, axis: Axis, measures: dict) -> list[dict]:
     out = []
     for r in rows:
         gid = r.pop(axis.id_path)
-        label = r.pop(axis.label_path) or "—"
+        # A text axis (رقیب) groups on one column that is both id and label.
+        label = r.pop(axis.label_path, gid) or "—"
+        if axis.key == "tender_channel":
+            label = dict(Deal.TenderChannel.choices).get(gid, "—")
         # Sum()/Avg() hand back Decimal. Left as-is they serialise to JSON
         # strings (so charts plot nothing) and `_shape` skips them when
         # totalling, because they are not int/float. Coerce once, here.
@@ -751,15 +782,18 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
       • `ever`           — how many deals ever reached the stage (from the
         stage-event log), which is the only honest way to compute drop-off.
     """
-    stages = list(
-        PipelineStage.objects.filter(is_active=True, dataset=f.dataset)
-        .order_by("order")
-    )
+    # Each book's own pipeline once (see `stages_in_view`); reach and
+    # drop-off are counted within one list, never across two.
+    stages = stages_in_view(f.channels, f.dataset)
     open_qs = f.deals("opened_at").filter(status=Deal.Status.OPEN)
     now_map = {
         r["stage_id"]: r
         for r in open_qs.values("stage_id").annotate(
-            count=Count("id", distinct=True), amount=_money(Sum("amount_rial"))
+            count=Count("id", distinct=True), amount=_money(Sum("amount_rial")),
+            weighted=_money(Sum(
+                F("amount_rial") * Coalesce("probability_pct", "stage__probability_pct") / Value(100),
+                output_field=DecimalField(max_digits=20, decimal_places=2),
+            )),
         )
     }
     reached_qs = f.deals("opened_at")
@@ -771,25 +805,26 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
     }
 
     rows = []
-    first_ever = None
-    for st in stages:
+    first_ever: dict[str, int] = {}
+    for st, label in stages:
         cur = now_map.get(st.id, {})
         ever = ever_map.get(st.id, 0)
-        if first_ever is None and ever:
-            first_ever = ever
+        if st.channel not in first_ever and ever:
+            first_ever[st.channel] = ever
         d = dict(f.drill_base())
         d["stage"] = st.id
         d["status"] = "open"
         rows.append({
             "id": st.id,
-            "label": st.name_fa,
+            "label": label,
             "kind": st.kind,
+            "book": st.channel,
             "probability_pct": st.probability_pct,
             "count": _num(cur.get("count")),
             "amount": _num(cur.get("amount")),
-            "weighted": _num(cur.get("amount")) * st.probability_pct / 100,
+            "weighted": _num(cur.get("weighted")),
             "ever": ever,
-            "reach_pct": _pct(ever, first_ever) if first_ever else 0.0,
+            "reach_pct": _pct(ever, first_ever[st.channel]) if st.channel in first_ever else 0.0,
             "drill": {"kind": "deals", "params": d},
         })
 
@@ -804,13 +839,15 @@ def report_funnel(f: Filters, _axis_key: str = "stage") -> dict:
     # reading available from current state alone: `ever` would be better, but
     # it comes from the stage-event log, and deals imported from دیدار have no
     # event history to read.
-    running = 0
+    running: dict[str, int] = {}
     for row in reversed(rows):
-        running += int(row["count"])
-        row["remaining"] = running
-    widest = rows[0]["remaining"] if rows else 0
+        running[row["book"]] = running.get(row["book"], 0) + int(row["count"])
+        row["remaining"] = running[row["book"]]
+    widest = {}
     for row in rows:
-        row["remaining_pct"] = _pct(row["remaining"], widest) if widest else 0.0
+        widest.setdefault(row["book"], row["remaining"])
+        w = widest[row["book"]]
+        row["remaining_pct"] = _pct(row["remaining"], w) if w else 0.0
 
     return _shape("funnel", "stage", rows, chronological=True)
 
@@ -1148,8 +1185,8 @@ def report_satisfaction(f: Filters, axis_key: str = "user") -> dict:
         qs = qs.filter(at__gte=_aware(f.start))
     if f.end:
         qs = qs.filter(at__lt=_aware(f.end))
-    if f.owner:
-        qs = qs.filter(employee_id=f.owner)
+    if f.owner is not None:
+        qs = qs.filter(employee_id=f.owner or None)
 
     rows_raw = (
         qs.values("employee_id", "employee__full_name_fa")
@@ -1222,6 +1259,81 @@ def report_sources(f: Filters, _axis_key: str = "source") -> dict:
 # --------------------------------------------------------------------------
 # Registry + envelope
 # --------------------------------------------------------------------------
+def report_tender(f: Filters, axis_key: str) -> dict:
+    """
+    پیش‌فاکتور و رقبا — B2B's quotes: how many turned into invoices, what was
+    lost to whom, and at what price against ours.
+      conversion_pct = won / all quotes opened in the window (as the B2B
+                       unit counts it: a pending quote is not yet a win)
+      gap_pct        = our price per roll vs the competitor's, on the quotes
+                       where both are known — the number that says whether a
+                       loss was about price.
+    ابطال (the buyer withdrew) is apart from a loss: nobody beat us.
+    """
+    from django.db.models import OuterRef, Subquery
+
+    from apps.crm.b2b import CANCELLED
+
+    first_price = DealItem.objects.filter(deal=OuterRef("pk")).order_by("id").values("unit_price_rial")[:1]
+    # Per deal, both prices or neither: an average over different quotes on
+    # each side would compare nothing. (Filtered aggregates over a subquery
+    # are not portable, so the pairing is done row by row first.)
+    # Tenders are the business of a book with its own pipeline (B2B); a
+    # همکار order is not a quote anyone bid against.
+    books = PipelineStage.objects.filter(dataset=f.dataset, is_active=True).exclude(channel="").values("channel")
+    qs = f.deals("opened_at").filter(channel__in=books).annotate(our_price=Subquery(first_price)).annotate(
+        our_pair=Case(When(our_price__isnull=False, competitor_unit_price_rial__isnull=False,
+                           then=F("our_price")), default=None),
+        rival_pair=Case(When(our_price__isnull=False, competitor_unit_price_rial__isnull=False,
+                             then=F("competitor_unit_price_rial")), default=None),
+    )
+    cancelled = Q(status="lost", lost_reason__code=CANCELLED[0])
+    measures = {
+        "count": Count("id", distinct=True),
+        "won": Count("id", filter=Q(status="won"), distinct=True),
+        "lost": Count("id", filter=Q(status="lost") & ~cancelled, distinct=True),
+        "cancelled": Count("id", filter=cancelled, distinct=True),
+        "open": Count("id", filter=Q(status="open"), distinct=True),
+        "won_amount": _money(Sum("amount_rial", filter=Q(status="won"))),
+        "our_price": Avg("our_pair"),
+        "rival_price": Avg("rival_pair"),
+    }
+
+    def enrich(r):
+        r["conversion_pct"] = _pct(r.get("won", 0), r.get("count", 0))
+        ours, theirs = _num(r.get("our_price")), _num(r.get("rival_price"))
+        r["our_price"], r["rival_price"] = round(ours), round(theirs)
+        r["gap_pct"] = round((ours - theirs) / theirs * 100, 1) if ours and theirs else 0.0
+        return r
+
+    if axis_key == "time":
+        rows = []
+        for jy, jm, s, e in _time_buckets(f):
+            bucket = qs.filter(opened_at__gte=_aware(s), opened_at__lt=_aware(e))
+            d = dict(f.drill_base())
+            d["date_from"], d["date_to"] = s.isoformat(), (e - dt.timedelta(days=1)).isoformat()
+            rows.append(enrich({
+                "id": f"{jy}-{jm}", "label": month_label(jy, jm),
+                **{k: _num(v) for k, v in bucket.aggregate(**measures).items()},
+                "drill": {"kind": "deals", "params": d},
+            }))
+        out = _shape("tender", "time", rows, chronological=True)
+    else:
+        axis = DEAL_AXES.get(axis_key, DEAL_AXES["competitor"])
+        rows = [enrich(r) for r in _grouped(qs, axis, measures)]
+        for r in rows:
+            if axis_key == "competitor" and not r["id"]:
+                r["label"] = "رقیب ثبت نشده"
+        out = _shape("tender", axis_key, _finish(rows, f, axis, "count", "deals"))
+    # Ratios from the totals, not summed; prices are averages, not totals.
+    t = out["totals"]
+    whole = enrich({k: v for k, v in qs.aggregate(**measures).items()})
+    for k in ("our_price", "rival_price", "gap_pct"):
+        t[k] = whole[k]
+    t["conversion_pct"] = _pct(t.get("won", 0), t.get("count", 0))
+    return out
+
+
 REPORTS = {
     "sales": (report_sales, "گزارش کلی فروش", ["time", "user", "team", "province", "group", "source", "customer"]),
     "profit": (report_profit, "سود معاملات", ["user", "time", "group", "customer", "province"]),
@@ -1236,6 +1348,7 @@ REPORTS = {
     "provinces": (report_provinces, "فروش و تارگت استان", ["province"]),
     "satisfaction": (report_satisfaction, "رضایت مشتری", ["user"]),
     "sources": (report_sources, "بهترین منابع سرنخ", ["source"]),
+    "tender": (report_tender, "پیش‌فاکتور و رقبا", ["time", "competitor", "tender_channel", "user", "group"]),
 }
 
 #: The table layout of every report: which row keys become columns, in which
@@ -1250,6 +1363,18 @@ REPORTS = {
 #: measure — a footer total for an average or a ratio would be a lie, so those
 #: are left out and recomputed in `_shape`.
 REPORT_COLUMNS: dict[str, list[dict]] = {
+    "tender": [
+        {"k": "count", "label": "پیش‌فاکتور", "f": "count", "total": True},
+        {"k": "won", "label": "تایید", "f": "count", "total": True},
+        {"k": "lost", "label": "رد", "f": "count", "total": True},
+        {"k": "cancelled", "label": "ابطال", "f": "count", "total": True},
+        {"k": "open", "label": "در انتظار", "f": "count", "total": True},
+        {"k": "conversion_pct", "label": "نرخ تبدیل", "f": "pct"},
+        {"k": "won_amount", "label": "مبلغ تاییدشده", "f": "rial", "total": True},
+        {"k": "our_price", "label": "قیمت ما (هر رول)", "f": "rial"},
+        {"k": "rival_price", "label": "قیمت رقیب (هر رول)", "f": "rial"},
+        {"k": "gap_pct", "label": "اختلاف قیمت", "f": "pct"},
+    ],
     # Sales are the invoices: net of discount and returns, before VAT. Cost
     # and margin are not columns here because آرپا's invoices carry no cost —
     # they live on «سود معاملات», which is built from دیدار's deals.
@@ -1342,6 +1467,7 @@ AXIS_LABELS = {
     "province": "بر محور استان", "group": "بر محور گروه", "source": "بر محور منبع سرنخ",
     "stage": "بر محور مرحله فروش", "reason": "بر محور دلایل", "customer": "بر محور مشتری",
     "kind": "بر محور فعالیت", "team": "بر محور تیم",
+    "competitor": "بر محور رقیب", "tender_channel": "بر محور کانال دریافت سفارش",
 }
 
 
@@ -1357,7 +1483,7 @@ def _shape(key: str, axis: str, rows: list[dict], chronological: bool = False) -
     NOT_ADDITIVE = {
         "probability_pct", "avg_score", "days_to_win", "days_to_lose",
         "reach_pct", "rate", "success_rate", "margin_pct", "conversion_pct",
-        "unhappy_pct",
+        "unhappy_pct", "our_price", "rival_price", "gap_pct",
     }
     totals = {
         k: round(sum(_num(r.get(k)) for r in rows), 2)
@@ -1502,7 +1628,7 @@ def sales_target(f: Filters) -> float:
     Plans are set per salesperson, so a slice the plan was never cut along
     (a customer group, a lead source) has no target: 0, not a misleading one.
     """
-    if f.blind or any((f.group, f.source, f.province, f.customer, f.product, f.tag)):
+    if f.blind or f.group is not None or f.province is not None or f.source is not None or any((f.customer, f.product, f.tag)):
         return 0.0
     months = Q(pk__in=[])
     for jy, jm, _, _ in _time_buckets(f):
@@ -1512,8 +1638,8 @@ def sales_target(f: Filters) -> float:
         period__in=DimPeriod.objects.filter(months, kind=PeriodKind.MONTH),
     )
     qs = f.by_channel(qs)
-    if f.owner:
-        qs = qs.filter(employee_id=f.owner)
+    if f.owner is not None:
+        qs = qs.filter(employee_id=f.owner or None)
     return _num(qs.aggregate(t=Sum("target_rial"))["t"])
 
 
@@ -1560,8 +1686,8 @@ def dashboard(f: Filters) -> dict:
     open_now = f.by_channel(
         Deal.objects.filter(status=Deal.Status.OPEN, dataset=f.dataset)
     )
-    if f.owner:
-        open_now = open_now.filter(owner_id=f.owner)
+    if f.owner is not None:
+        open_now = open_now.filter(owner_id=f.owner or None)
     if f.blind:
         open_now = open_now.none()
     pipeline_agg = open_now.aggregate(
@@ -1573,8 +1699,8 @@ def dashboard(f: Filters) -> dict:
     overdue_qs = CrmTask.objects.filter(
         done_at__isnull=True, due_at__lt=timezone.now(), dataset=f.dataset
     )
-    if f.owner:
-        overdue_qs = overdue_qs.filter(owner_id=f.owner)
+    if f.owner is not None:
+        overdue_qs = overdue_qs.filter(owner_id=f.owner or None)
     overdue = 0 if f.blind else overdue_qs.count()
 
     target = sales_target(f)
@@ -1656,6 +1782,142 @@ def dashboard(f: Filters) -> dict:
 # --------------------------------------------------------------------------
 # فروش جغرافیایی — the map
 # --------------------------------------------------------------------------
+#: Achievement bins are fixed, not fitted: «80٪ of target» means the same
+#: thing whatever the other provinces did.
+ACHIEVEMENT_BREAKS = [50, 80, 100, 120]
+
+
+def zone_q(zone_id: int, prefix: str = "") -> Q:
+    """Rows in a zone; for the default zone, also the province's unplaced ones."""
+    from apps.crm.models import SalesZone
+
+    z = SalesZone.objects.filter(pk=zone_id).first()
+    if z is None:
+        return Q(pk__in=[])
+    q = Q(**{f"{prefix}zone_id": z.pk})
+    if z.is_default:
+        q |= Q(**{f"{prefix}zone__isnull": True, f"{prefix}province_id": z.province_id,
+                  f"{prefix}channel": z.channel})
+    return q
+
+
+def color_breaks(values, metric: str) -> list[float]:
+    """
+    The four cut points between five colour classes for one map metric.
+
+    The old scale ran linearly from 0 to the largest province, so one
+    province selling 370 washed every other province — including one at
+    100% of its target — out to near-white. Target achievement now uses fixed
+    bins; amounts and counts use quantiles of the provinces that have any,
+    which no single outlier can stretch.
+    """
+    if metric == "achievement":
+        return list(ACHIEVEMENT_BREAKS)
+    xs = sorted(v for v in values if v and v > 0)
+    if not xs:
+        return []
+    cuts = []
+    for q in (0.2, 0.4, 0.6, 0.8):
+        i = q * (len(xs) - 1)
+        lo, hi = int(i), min(int(i) + 1, len(xs) - 1)
+        cuts.append(round(xs[lo] + (xs[hi] - xs[lo]) * (i - lo), 2))
+    if metric == "customers":  # a count of buyers has no fractions to show
+        cuts = [float(round(c)) for c in cuts]
+    # Equal neighbours collapse to one class; drop the repeats.
+    return sorted(set(cuts))
+
+
+def territory_names(channels, province_ids=None) -> dict:
+    """{(province_id, zone_id|None): {"managers": [...], "experts": [...]}}."""
+    from apps.crm.models import TerritoryAssignment
+
+    qs = TerritoryAssignment.objects.select_related("employee")
+    if channels is not None:
+        qs = qs.filter(channel__in=channels)
+    if province_ids is not None:
+        qs = qs.filter(province_id__in=province_ids)
+    out: dict = {}
+    for a in qs:
+        slot = out.setdefault((a.province_id, a.zone_id), {"managers": [], "experts": []})
+        key = "managers" if a.role == TerritoryAssignment.Role.MANAGER else "experts"
+        # One province has a manager per book — همکار, B2B, بانکی — so a view
+        # across books has to say whose manager each one is.
+        entry = {"id": a.employee_id, "name": a.employee.full_name_fa,
+                 "channel": a.channel, "channel_label": a.get_channel_display()}
+        if entry not in slot[key]:
+            slot[key].append(entry)
+    return out
+
+
+def geo_zones(f: Filters) -> dict | None:
+    """
+    Tehran for فروش همکار, by sales zone.
+
+    Invoices are placed by their customer's `zone`; a Tehran customer nobody
+    has placed yet counts under the default zone («سایر مناطق»), and how many
+    of those there are is reported so the gap is visible rather than hidden
+    in the total.
+    """
+    from apps.crm.models import SalesZone
+
+    SalesZone.ensure_tehran()
+    if f.channels is not None and SalesChannel.TEAM not in f.channels:
+        return None
+    zones = list(SalesZone.objects.filter(channel=SalesChannel.TEAM).select_related("province"))
+    if not zones:
+        return None
+    province_id = zones[0].province_id
+    default = next((z for z in zones if z.is_default), zones[-1])
+    zf = replace(f, channels=(SalesChannel.TEAM,), province=province_id)
+    sales = zf.invoices()
+    by_zone = {
+        r["customer__zone_id"]: r for r in sales.values("customer__zone_id").annotate(
+            amount=_money(Sum("amount_rial")), count=Count("id", distinct=True),
+            buyers=Count("customer_id", distinct=True),
+        ).order_by()
+    }
+    book = Customer.objects.filter(
+        dataset=f.dataset, merged_into__isnull=True, province_id=province_id, channel=SalesChannel.TEAM,
+    )
+    if f.owner is not None:
+        book = book.filter(owner_id=f.owner or None)
+    if f.blind:
+        book = book.none()
+    base = dict(book.values("zone_id").annotate(n=Count("id")).order_by().values_list("zone_id", "n"))
+    names = territory_names((SalesChannel.TEAM,), [province_id])
+    rows = []
+    for z in zones:
+        r = dict(by_zone.get(z.pk) or {})
+        if z.pk == default.pk:  # the unplaced fold into the default zone
+            extra = by_zone.get(None) or {}
+            for k in ("amount", "count", "buyers"):
+                r[k] = (r.get(k) or 0) + (extra.get(k) or 0)
+        d = dict(zf.drill_base())
+        rows.append({
+            "id": z.pk, "code": z.code, "label": z.name_fa, "is_default": z.is_default,
+            "has_geometry": bool(z.geometry),
+            "amount": _num(r.get("amount")), "count": _num(r.get("count")),
+            "buyers": _num(r.get("buyers")),
+            "customer_base": base.get(z.pk, 0) + (base.get(None, 0) if z.pk == default.pk else 0),
+            **names.get((province_id, z.pk), {"managers": [], "experts": []}),
+            "drill": {"kind": "invoices", "params": d},
+        })
+    total = sum(r["amount"] for r in rows)
+    for r in rows:
+        r["share_pct"] = _pct(r["amount"], total)
+    return {
+        "province_id": province_id,
+        "rows": rows,
+        "total": total,
+        "unzoned_customers": base.get(None, 0),
+        "default_zone": default.name_fa,
+        "scale": {
+            "amount": color_breaks([r["amount"] for r in rows], "amount"),
+            "customers": color_breaks([r["buyers"] for r in rows], "customers"),
+        },
+    }
+
+
 def geo_overview(f: Filters) -> dict:
     """
     Every province on one map: sales, customers and target, plus the share of
@@ -1678,8 +1940,8 @@ def geo_overview(f: Filters) -> dict:
     customers = f.by_channel(
         Customer.objects.filter(dataset=f.dataset, merged_into__isnull=True)
     )
-    if f.owner:
-        customers = customers.filter(owner_id=f.owner)
+    if f.owner is not None:
+        customers = customers.filter(owner_id=f.owner or None)
     if f.blind:
         customers = customers.none()
     base_by_province = dict(
@@ -1687,12 +1949,16 @@ def geo_overview(f: Filters) -> dict:
         .values_list("province_id", "n")
     )
 
+    names = territory_names(f.channels)
     rows = []
     for p in DimProvince.objects.order_by("name_fa"):
         r = by_id.get(p.id, {})
         d = dict(f.drill_base())
         d["province"] = p.id
+        assigned = names.get((p.id, None), {"managers": [], "experts": []})
         rows.append({
+            "managers": assigned["managers"],
+            "experts": assigned["experts"],
             "id": p.id,
             "label": p.name_fa,
             "amount": r.get("amount", 0.0),
@@ -1713,6 +1979,19 @@ def geo_overview(f: Filters) -> dict:
         "rows": rows,
         "total": total,
         "unplaced": {"count": _num(unplaced["n"]), "amount": _num(unplaced["amount"])},
+        # Tehran is left out of the scale: its volume is the outlier that
+        # used to wash the rest of the map out. The map shows it on its own.
+        "scale": _scales([r for r in rows if r["label"] != "تهران"]),
+        "scale_with_tehran": _scales(rows),
+        "tehran": geo_zones(f),
+    }
+
+
+def _scales(rows) -> dict:
+    return {
+        "amount": color_breaks([r["amount"] for r in rows], "amount"),
+        "customers": color_breaks([r["customers"] for r in rows], "customers"),
+        "achievement": color_breaks([], "achievement"),
     }
 
 
@@ -1757,8 +2036,8 @@ def geo_province(f: Filters, province_id: int) -> dict | None:
     book = f.by_channel(Customer.objects.filter(
         dataset=f.dataset, merged_into__isnull=True, province_id=province_id,
     ))
-    if f.owner:
-        book = book.filter(Q(owner_id=f.owner) | Q(pk__in=list(bought)))
+    if f.owner is not None:
+        book = book.filter(Q(owner_id=f.owner or None) | Q(pk__in=list(bought)))
     if f.blind:
         book = book.none()
     customers = []
@@ -1818,19 +2097,27 @@ def geo_province(f: Filters, province_id: int) -> dict | None:
             "unsettled": _num(inv.unsettled_rial),
         })
 
-    reps = []
-    rep_rows = list(
-        sales.values("rep_id").annotate(amount=_money(Sum("amount_rial"))).order_by("-amount")[:6]
+    # The province's assigned کارشناس(ان) first, each with their sales here,
+    # then everyone else who sold here as «سایر کارشناسان». Each invoice has
+    # one rep, so a colleague assigned to several provinces is still counted
+    # once per invoice and the parts add up to the province total.
+    assigned = territory_names(f.channels, [province_id]).get(
+        (province_id, None), {"managers": [], "experts": []}
     )
+    assigned_ids = {e["id"] for e in assigned["experts"]}
+    rep_rows = list(sales.values("rep_id").annotate(amount=_money(Sum("amount_rial"))).order_by("-amount"))
     names = dict(DimEmployee.objects.filter(
-        pk__in=[r["rep_id"] for r in rep_rows if r["rep_id"]]
+        pk__in=[r["rep_id"] for r in rep_rows if r["rep_id"]] + list(assigned_ids)
     ).values_list("pk", "full_name_fa"))
-    for r in rep_rows:
-        reps.append({
-            "id": r["rep_id"],
-            "label": names.get(r["rep_id"]) or UNATTRIBUTED["user"],
-            "amount": _num(r["amount"]),
-        })
+    sold = {r["rep_id"]: _num(r["amount"]) for r in rep_rows}
+    reps = [
+        {"id": i, "label": names.get(i, ""), "amount": sold.get(i, 0.0), "assigned": True}
+        for i in sorted(assigned_ids, key=lambda i: -sold.get(i, 0.0))
+    ] + [
+        {"id": r["rep_id"], "label": names.get(r["rep_id"]) or UNATTRIBUTED["user"],
+         "amount": _num(r["amount"]), "assigned": False}
+        for r in rep_rows if r["rep_id"] not in assigned_ids
+    ][:8]
 
     drill = dict(pf.drill_base())
     return {
@@ -1851,5 +2138,7 @@ def geo_province(f: Filters, province_id: int) -> dict | None:
         "products": products,
         "recent": recent,
         "reps": reps,
+        "managers": assigned["managers"],
+        "experts": assigned["experts"],
         "drill": {"kind": "invoices", "params": drill},
     }

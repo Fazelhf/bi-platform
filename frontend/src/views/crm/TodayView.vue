@@ -6,6 +6,7 @@ import { useCrmStore } from "@/stores/crm";
 import { num, rial } from "@/utils/format";
 import Skeleton from "@/components/Skeleton.vue";
 import ActivityForm from "@/components/crm/ActivityForm.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import TaskForm from "@/components/crm/TaskForm.vue";
 
 /**
@@ -127,6 +128,10 @@ const card = "bg-surface rounded-card shadow-soft";
         <option value="">همه کارشناسان</option>
         <option v-for="e in crm.options?.employees ?? []" :key="e.id" :value="e.id">{{ e.name }}</option>
       </select>
+      <CrmExportButton
+        kind="tasks" :params="{ state: 'open', ...(owner ? { owner } : {}) }"
+        title="کارهای باز" :total="data?.counters.open_count ?? 1" subtle
+      />
     </div>
 
     <div v-if="loading" class="space-y-3">

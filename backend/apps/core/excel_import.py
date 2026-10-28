@@ -46,11 +46,13 @@ def fold(text) -> str:
 @dataclass
 class Col:
     name: str
-    kind: str = "text"  # text | raw | int | money | date | bool | choice
+    kind: str = "text"  # text | raw | int | money | decimal | date | bool | choice
     required: bool = False
     help: str = ""
     choices: dict | None = None  # label → value, for kind="choice"
     aliases: tuple = ()
+    #: A profit may be a loss; every other figure below zero is a typo.
+    signed: bool = False
 
 
 @dataclass
@@ -154,7 +156,8 @@ class Importer:
         guide.append(["ستون", "الزامی", "نوع", "توضیح"])
         for cell in guide[guide.max_row]:
             cell.font = Font(bold=True)
-        kinds = {"text": "متن", "raw": "متن", "int": "عدد صحیح", "money": "مبلغ (ریال)", "date": "تاریخ شمسی ۱۴۰۵/۰۷/۰۱",
+        kinds = {"text": "متن", "raw": "متن", "int": "عدد صحیح", "money": "مبلغ (ریال)",
+                 "decimal": "عدد (اعشار مجاز)", "date": "تاریخ شمسی ۱۴۰۵/۰۷/۰۱",
                  "bool": "بله / خیر", "choice": "یکی از گزینه‌ها"}
         for c in self.columns:
             extra = f" — گزینه‌ها: {'، '.join(c.choices)}" if c.choices else ""
@@ -266,15 +269,21 @@ def _typed(c: Col, v):
         # Free text kept as typed — half-spaces, line breaks and Persian
         # digits survive; only the edges are trimmed.
         return str(v).strip() or None
-    if c.kind in ("int", "money"):
-        s = fold(v).replace(",", "").replace("٬", "")
+    if c.kind in ("int", "money", "decimal"):
+        s = fold(v).replace(",", "").replace("٬", "").replace("٫", ".")
         try:
             d = Decimal(s)
         except InvalidOperation:
             raise ValueError("عدد نیست")
-        if d < 0:
+        if not d.is_finite():
+            raise ValueError("عدد نیست")
+        if d < 0 and not c.signed:
             raise ValueError("منفی است")
-        return int(d) if c.kind == "int" else d.quantize(Decimal(1))
+        if c.kind == "int":
+            if d != d.to_integral_value():
+                raise ValueError("باید عدد صحیح باشد")
+            return int(d)
+        return d if c.kind == "decimal" else d.quantize(Decimal(1))
     if c.kind == "bool":
         s = fold(v)
         if s in ("بله", "آری", "1", "True", "true", "دارد", "x", "✓"):
@@ -296,8 +305,13 @@ def _typed(c: Col, v):
         m = re.match(r"^(1[34]\d\d)[/\-.](\d\d?)[/\-.](\d\d?)$", fold(v))
         if not m:
             raise ValueError("تاریخ شمسی مثل ۱۴۰۵/۰۷/۰۱")
+        jy, jm, jd = (int(x) for x in m.groups())
+        # to_gregorian wraps out-of-range parts (۱۴۰۵/۱۳/۰۱ became فروردین ۱۴۰۶)
+        # instead of failing, so the parts are checked first.
+        if not (1 <= jm <= 12 and 1 <= jd <= jalali.month_days(jy, jm)):
+            raise ValueError("تاریخ نامعتبر")
         try:
-            return jalali.to_gregorian(*(int(x) for x in m.groups()))
+            return jalali.to_gregorian(jy, jm, jd)
         except Exception:
             raise ValueError("تاریخ نامعتبر")
     return v
@@ -308,10 +322,11 @@ def _typed(c: Col, v):
 # ---------------------------------------------------------------------------
 def registry() -> dict[str, Importer]:
     from apps.finance import importers as fin
+    from apps.sales import importers as sales
     from apps.sales2 import importers as s2
     from apps.teamyar import importers as teamyar
 
-    return {i.key: i for i in (*s2.IMPORTERS, *fin.IMPORTERS, *teamyar.IMPORTERS)}
+    return {i.key: i for i in (*sales.IMPORTERS, *s2.IMPORTERS, *fin.IMPORTERS, *teamyar.IMPORTERS)}
 
 
 def _importer(key: str, user) -> Importer:

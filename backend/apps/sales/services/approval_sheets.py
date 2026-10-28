@@ -51,7 +51,7 @@ SHEET_MODELS = (FactSalesMonthly, FactSalesProvince, FactSalesByCustomerGroup)
 PEOPLE_FIELDS = (
     "revenue_rial", "invoice_count", "profit_rial", "cost_rial",
     "new_customers", "active_customers", "calls",
-    "proforma_issued_rial", "proforma_cancelled_rial",
+    "inquiries_rial", "proforma_issued_rial", "proforma_cancelled_rial",
     "quantity_ton", "collected_rial", "receivables_rial", "won_invoices_rial",
 )
 

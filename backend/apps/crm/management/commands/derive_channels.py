@@ -4,9 +4,8 @@ in `apps.crm.channels`.
 
     python manage.py derive_channels
 
-`import_arpa_parties` does this at the end of every run. This command is for
-after the sales roster changes — moving a rep between departments should move
-their customers without waiting for the next accounting export.
+For after the sales roster changes — moving a rep between departments should
+move their customers without waiting for the next upload.
 """
 from django.core.management.base import BaseCommand
 

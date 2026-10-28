@@ -194,7 +194,13 @@ class PartyWriter:
         if not name:
             return None
         if name not in self.groups:
-            self.groups[name] = CustomerGroup.objects.update_or_create(
+            # By name first: a group made here or by the seed under another
+            # code is the same group, not a reason for a second of that name.
+            from apps.crm.matching import name_key
+
+            key = name_key(name)
+            same = next((g for g in CustomerGroup.objects.order_by("id") if name_key(g.name_fa) == key), None)
+            self.groups[name] = same or CustomerGroup.objects.update_or_create(
                 code=f"cg-{slugify(name, allow_unicode=True)[:40]}",
                 defaults={"name_fa": name[:100]},
             )[0]

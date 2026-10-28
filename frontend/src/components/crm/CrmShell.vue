@@ -60,10 +60,17 @@ const NAV = [
   { name: "crm-activities", label: "پیگیری‌ها", icon: "notes" },
   { name: "crm-geo", label: "فروش جغرافیایی", icon: "globe" },
   { name: "crm-reports", label: "گزارش‌ها", icon: "chart" },
-  { name: "crm-match-review", label: "بازبینی تطبیق", icon: "check", managerOnly: true },
-] as { name: string; label: string; icon: string; managerOnly?: boolean }[];
+  { name: "crm-manage", label: "گروه‌ها و مناطق", icon: "team", managerOnly: true },
+  // Where CRM's data comes from and whether it is right — the system admin's.
+  { name: "crm-settings", label: "تنظیمات CRM", icon: "settings", adminOnly: true },
+] as { name: string; label: string; icon: string; managerOnly?: boolean; adminOnly?: boolean }[];
 
-const nav = computed(() => NAV.filter((n) => !n.managerOnly || crm.isManager));
+/** مدیر سیستم: the import pages are theirs alone. */
+const isSystemAdmin = computed(() => !!(auth.me?.is_superuser || auth.me?.role === "admin"));
+
+const nav = computed(() => NAV.filter((n) =>
+  (!n.managerOnly || crm.isManager) && (!n.adminOnly || isSystemAdmin.value),
+));
 
 /** A detail page keeps its list row lit, so you can tell where you are. */
 const PARENT: Record<string, string> = {

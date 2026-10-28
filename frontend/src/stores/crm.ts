@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { jalaliLabel } from "@/utils/jalali";
 import { crmApi, type CrmMe, type CrmOptions, type Drill } from "@/api/crm";
 
 /**
@@ -16,10 +17,14 @@ interface Filters {
   month: string;        // "1405-4" when range === "month"
   date_from: string;
   date_to: string;
-  owner: number | "";
-  group: number | "";
-  source: number | "";
-  province: number | "";
+  /** "none": no کارشناس. */
+  owner: number | "" | "none";
+  /** "none": customers with no group. */
+  group: number | "" | "none";
+  /** "none": no lead source. */
+  source: number | "" | "none";
+  /** "none": customers with no province. */
+  province: number | "" | "none";
 }
 
 /** The lookup fetch that is currently running, shared by concurrent callers. */
@@ -61,6 +66,10 @@ export const useCrmStore = defineStore("crm", {
       if (f.range === "custom") {
         if (f.date_from) q.date_from = f.date_from;
         if (f.date_to) q.date_to = f.date_to;
+        // Typed backwards: report the range the user meant (the bar says so).
+        if (q.date_from && q.date_to && q.date_from > q.date_to) {
+          [q.date_from, q.date_to] = [q.date_to, q.date_from];
+        }
       } else if (f.range === "month" && f.month) {
         const m = months.find((x) => x.key === f.month);
         if (m) {
@@ -89,7 +98,10 @@ export const useCrmStore = defineStore("crm", {
       if (f.range === "month") {
         return months.find((m) => m.key === f.month)?.label ?? "—";
       }
-      if (f.range === "custom") return `${f.date_from || "…"} تا ${f.date_to || "…"}`;
+      if (f.range === "custom") {
+        const j = (iso: string) => (iso ? jalaliLabel(iso) : "…");
+        return `${j(f.date_from)} تا ${j(f.date_to)}`;
+      }
       return {
         current: "ماه جاری", last3: "۳ ماه اخیر",
         last6: "۶ ماه اخیر", last12: "۱۲ ماه اخیر",
@@ -98,6 +110,24 @@ export const useCrmStore = defineStore("crm", {
 
     employeeName: (state) => (id: number | null) =>
       state.options?.employees.find((e) => e.id === id)?.name ?? "—",
+
+    /** A book's pipeline: its own stages if it has any, else the shared list
+     *  — the rule `stages_for` applies on the server. */
+    stagesFor: (state) => (channel: string | null | undefined) => {
+      const all = state.options?.stages ?? [];
+      const own = channel ? all.filter((s) => s.channel === channel) : [];
+      return own.length ? own : all.filter((s) => !s.channel);
+    },
+    /** Whether a book runs its own pipeline (today B2B) — and so tenders. */
+    hasOwnPipeline: (state) => (channel: string | null | undefined) =>
+      !!channel && (state.options?.stages ?? []).some((s) => s.channel === channel),
+
+    /** کارشناسان فعال واحد فروش — the only people a record may be given to. */
+    rosterEmployees: (state) => (state.options?.employees ?? []).filter((e) => e.active !== false),
+
+    /** Sales zones of a province (today: Tehran's four), or none. */
+    zonesOf: (state) => (provinceId: number | null | undefined) =>
+      (state.options?.zones ?? []).filter((z) => z.province === provinceId),
 
     canEdit: (state) => !!state.me?.can_edit,
 

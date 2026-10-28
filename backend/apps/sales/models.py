@@ -193,17 +193,26 @@ class FactSalesMonthly(TimeStampedModel):
     target_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     calls = models.PositiveIntegerField(default=0)
 
-    # ---- Team-channel-only measures ---------------------------------------
-    # The field sales team quotes before it invoices, so how much was quoted
-    # and how much of it fell through is the leading indicator of next
-    # month's revenue. Zero for the other channels.
+    # ---- Quote funnel: فروش همکار and فروش بانکی ----------------------------
+    # Both channels quote before they invoice, so how much was quoted and how
+    # much of it fell through is the leading indicator of next month's
+    # revenue. فروش بانکی also records the price inquiries it registers, the
+    # step before a quote, by amount. Zero for B2B.
+    #
+    # db_default as well: the column arrived in 1.51, and a site rolled back
+    # to 1.50 (`deploy.sh 1.50`) inserts rows without it. Without a default
+    # in the database itself every new monthly row would fail NOT NULL.
+    inquiries_rial = models.DecimalField(
+        max_digits=20, decimal_places=0, default=0, db_default=0,
+        help_text="مبلغ استعلام‌های ثبت‌شده (فروش بانکی)",
+    )
     proforma_issued_rial = models.DecimalField(
         max_digits=20, decimal_places=0, default=0,
-        help_text="مبلغ پیش‌فاکتورهای صادره (فقط فروش همکار)",
+        help_text="مبلغ پیش‌فاکتورهای صادره (فروش همکار و بانکی)",
     )
     proforma_cancelled_rial = models.DecimalField(
         max_digits=20, decimal_places=0, default=0,
-        help_text="مبلغ پیش‌فاکتورهای کنسل‌شده (فقط فروش همکار)",
+        help_text="مبلغ پیش‌فاکتورهای کنسل‌شده (فروش همکار و بانکی)",
     )
 
     # ---- B2B-only measures -------------------------------------------------
@@ -217,7 +226,7 @@ class FactSalesMonthly(TimeStampedModel):
     )
     collected_rial = models.DecimalField(
         max_digits=20, decimal_places=0, default=0,
-        help_text="مبلغ وصول‌شده از فروش این ماه (فقط B2B)",
+        help_text="مبلغ وصول‌شده (B2B) / وصول نقدی (فروش بانکی)",
     )
     receivables_rial = models.DecimalField(
         max_digits=20, decimal_places=0, default=0,

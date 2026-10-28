@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import {
   crmApi,
+  type CrmConfig,
   type MatchCandidate,
   type MatchSide,
   type MatchSummary,
@@ -34,31 +35,31 @@ const loading = ref(true);
 const busy = ref<number | null>(null);
 const error = ref("");
 const method = ref("");
+const confidence = ref<"" | "definite" | "suspect">("");
+const config = ref<CrmConfig | null>(null);
+const showConfig = ref(false);
+const scanning = ref(false);
+const scanResult = ref<string>("");
 const state = ref<"pending" | "accepted" | "rejected" | "all">("pending");
 const search = ref("");
 const alternatives = ref<Record<number, MatchSide[]>>({});
-
-const certain = ref(0);
-const sweeping = ref(false);
-const notice = ref("");
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [list, sum, sure] = await Promise.all([
+    const [list, sum] = await Promise.all([
       crmApi.matchCandidates({
         state: state.value,
         method: method.value,
+        confidence: confidence.value,
         search: search.value,
         page_size: 50,
       }),
       crmApi.matchSummary(),
-      crmApi.acceptCertain(true),
     ]);
     rows.value = list.results;
     summary.value = sum;
-    certain.value = sure.certain;
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "خطا در خواندن صف بازبینی.";
   } finally {
@@ -66,8 +67,40 @@ async function load() {
   }
 }
 
-onMounted(load);
-watch([method, state], load);
+onMounted(async () => {
+  load();
+  config.value = await crmApi.crmConfig().catch(() => null);
+});
+watch([method, state, confidence], load);
+
+/** «جست‌وجوی تکراری‌ها» — queues pairs; a person still decides each one. */
+async function scan() {
+  scanning.value = true;
+  error.value = "";
+  try {
+    const r = await crmApi.scanDuplicates();
+    scanResult.value =
+      `${r.found} جفت پیدا شد (${r.definite} قطعی، ${r.suspect} مشکوک)؛ ${r.queued} جفت تازه به صف آمد.` +
+      (r.crowded ? ` ${r.crowded} شناسه/تلفن بین بیش از ۸ مشتری مشترک بود و کنار گذاشته شد (شعبه‌ها یا سانترال).` : "");
+    await load();
+  } catch (e: any) {
+    error.value = e?.response?.data?.detail ?? "جست‌وجو انجام نشد.";
+  } finally {
+    scanning.value = false;
+  }
+}
+
+async function saveConfig() {
+  if (!config.value) return;
+  error.value = "";
+  try {
+    config.value = await crmApi.saveCrmConfig(config.value);
+    showConfig.value = false;
+  } catch (e: any) {
+    const d = e?.response?.data;
+    error.value = d?.detail ?? d?.fuzzy_threshold?.[0] ?? "ذخیره نشد.";
+  }
+}
 let t: number | undefined;
 watch(search, () => {
   window.clearTimeout(t);
@@ -104,46 +137,6 @@ async function reject(row: MatchCandidate) {
     error.value = e?.response?.data?.detail ?? "ثبت نشد.";
   } finally {
     busy.value = null;
-  }
-}
-
-/** Fill the queue from the whole customer file — selecting rows on the list
- *  page only ever reached one page of it. */
-async function scanAll() {
-  sweeping.value = true;
-  error.value = "";
-  notice.value = "";
-  try {
-    const r = await crmApi.scanDuplicates();
-    notice.value = `${r.scanned.toLocaleString("fa-IR")} مشتری بررسی شد — ${r.queued.toLocaleString("fa-IR")} جفت تازه به صف آمد.`;
-    await load();
-  } catch (e: any) {
-    error.value = e?.response?.data?.detail ?? "بررسی انجام نشد.";
-  } finally {
-    sweeping.value = false;
-  }
-}
-
-/** Merge every certain pair. Each absorbed row stays behind with
- *  `merged_into`, so nothing here is a delete. */
-async function approveCertain() {
-  if (!window.confirm(
-    `${certain.value.toLocaleString("fa-IR")} جفت با نام یکسان و تلفن یا شناسه‌ی مشترک ادغام شوند؟ موارد دیگر در صف می‌مانند.`,
-  )) return;
-  sweeping.value = true;
-  error.value = "";
-  notice.value = "";
-  try {
-    const r = await crmApi.acceptCertain();
-    notice.value = `${r.merged.toLocaleString("fa-IR")} جفت ادغام شد.`;
-    if (r.failed.length) {
-      error.value = r.failed.map((f) => `${f.name_fa}: ${f.reason}`).join(" · ");
-    }
-    await load();
-  } catch (e: any) {
-    error.value = e?.response?.data?.detail ?? "ادغام انجام نشد.";
-  } finally {
-    sweeping.value = false;
   }
 }
 
@@ -245,21 +238,39 @@ const total = computed(() => summary.value?.pending ?? 0);
         class="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700"
       >{{ total }} مورد باز</span>
       <button
-        class="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-700 disabled:opacity-50"
-        :disabled="sweeping"
-        @click="scanAll"
-      >بررسی تکراری‌ها در کل فهرست</button>
-      <button
-        v-if="certain"
-        class="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
-        :disabled="sweeping"
-        @click="approveCertain"
-      >ادغام {{ certain.toLocaleString("fa-IR") }} مورد قطعی</button>
+        class="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+        :disabled="scanning"
+        @click="scan"
+      >{{ scanning ? "در حال جست‌وجو…" : "جست‌وجوی تکراری‌ها" }}</button>
+      <button class="rounded-lg bg-slate-100 px-3 py-1.5 text-sm text-slate-600" @click="showConfig = !showConfig">
+        تنظیمات تشخیص
+      </button>
     </header>
 
-    <p v-if="notice" class="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-      {{ notice }}
-    </p>
+    <p v-if="scanResult" class="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">{{ scanResult }}</p>
+
+    <section v-if="showConfig && config" class="rounded-xl border border-slate-200 bg-white p-4 space-y-3 text-sm">
+      <label class="flex flex-wrap items-center gap-2">
+        <span class="w-56 text-slate-600">حداقل شباهت نام برای «نام مشابه»</span>
+        <input v-model.number="config.fuzzy_threshold" type="number" min="0.5" max="1" step="0.01"
+               class="w-24 rounded-lg border border-slate-200 px-2 py-1 ltr-nums" />
+        <span class="text-xs text-slate-400">بین ۰٫۵ تا ۱؛ عدد بالاتر یعنی پیشنهادهای کمتر و دقیق‌تر.</span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input v-model="config.match_phone" type="checkbox" />
+        <span>تلفن یکسان هم دلیلِ پیشنهاد باشد</span>
+        <span class="text-xs text-slate-400">(سانترال مشترک چند سازمان را شبیه نشان می‌دهد)</span>
+      </label>
+      <label class="flex items-center gap-2">
+        <input v-model="config.queue_on_import" type="checkbox" />
+        <span>مشتری تازه‌ی ورود فایل اگر شبیه مشتری موجود بود، به این صف بیاید</span>
+      </label>
+      <p class="text-xs text-slate-500">
+        «قطعی» یعنی نام نرمال‌شده یکسان و تلفن یا شناسه‌ی مشترک؛ بقیه «مشکوک»اند.
+        هیچ‌کدام خودکار ادغام نمی‌شود.
+      </p>
+      <button class="rounded-lg bg-slate-800 px-4 py-1.5 text-white" @click="saveConfig">ذخیره</button>
+    </section>
 
     <div class="flex flex-wrap items-center gap-2">
       <button
@@ -274,6 +285,15 @@ const total = computed(() => summary.value?.pending ?? 0);
         :class="method === m.key ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'"
         @click="method = m.key"
       >{{ m.label }} ({{ m.count }})</button>
+
+      <span class="mx-1 h-5 w-px bg-slate-200"></span>
+      <button
+        v-for="c in ([['', 'همه'], ['definite', 'قطعی'], ['suspect', 'مشکوک']] as const)"
+        :key="c[0]"
+        class="rounded-lg px-3 py-1.5 text-sm"
+        :class="confidence === c[0] ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'"
+        @click="confidence = c[0]"
+      >{{ c[1] }}<template v-if="c[0] && summary?.by_confidence?.[c[0]]"> ({{ summary.by_confidence[c[0]] }})</template></button>
 
       <select v-model="state" class="rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
         <option value="pending">در انتظار</option>
@@ -311,10 +331,11 @@ const total = computed(() => summary.value?.pending ?? 0);
           :class="methodTone[row.method] ?? 'bg-slate-100 text-slate-600'"
         >{{ row.method_display }}</span>
         <span
-          v-if="row.certain"
-          class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700"
-        >قطعی</span>
-        <span v-if="row.source !== 'crm'" class="text-xs text-slate-400">کد آرپا: {{ row.external_id }}</span>
+          class="rounded-full px-2 py-0.5 text-xs font-bold"
+          :class="row.confidence === 'definite' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'"
+        >{{ row.confidence === "definite" ? "قطعی" : "مشکوک" }}</span>
+        <span v-if="row.reason" class="text-xs text-slate-500">{{ row.reason }}</span>
+        <span class="text-xs text-slate-400">{{ row.source === "crm" ? "دو مشتری CRM" : `کد آرپا: ${row.external_id}` }}</span>
         <span v-if="row.state !== 'pending'" class="text-xs text-slate-500">
           — {{ row.state_display }}
           <template v-if="row.decided_by_name">توسط {{ row.decided_by_name }}</template>
@@ -336,9 +357,7 @@ const total = computed(() => summary.value?.pending ?? 0);
           </p>
         </section>
         <section class="rounded-lg bg-sky-50 p-3">
-          <p class="mb-1 text-xs text-slate-400">
-            {{ row.source === "crm" ? "مشتری تکراری احتمالی در CRM" : "طرف‌حساب حسابداری" }}
-          </p>
+          <p class="mb-1 text-xs text-slate-400">طرف‌حساب حسابداری</p>
           <p class="font-bold">{{ row.arpa.name_fa }}</p>
           <p class="mt-1 text-xs text-slate-500">
             {{ row.arpa.group }}

@@ -9,17 +9,86 @@ from apps.crm.jalali import jalali_str
 from apps.crm.models import (
     Activity, Customer, CustomerMatchCandidate, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product, SalesInvoice,
-    ProductCategory, Tag, Task,
+    ProductCategory, Tag, Task, TerritoryAssignment, stages_for,
 )
 
 
 # --------------------------------------------------------------------------
 # Lookups
 # --------------------------------------------------------------------------
+class RosterOwnerMixin:
+    """
+    A new owner must be on the sales roster. Keeping the one a record already
+    has is always allowed: a colleague who left sales still owns their old
+    customers until someone reassigns them, and editing a phone number on one
+    of those must not fail on a field nobody touched.
+    """
+
+    roster_fields = ("owner",)
+
+    def validate(self, attrs):
+        from apps.crm.people import sales_roster
+        from apps.crm.views import is_crm_manager
+
+        attrs = super().validate(attrs)
+        request = self.context.get("request")
+        # A کارشناس's records are stamped with their own name by the viewset
+        # whatever the payload says, so there is no choice here to check.
+        if request is not None and not is_crm_manager(request.user):
+            return attrs
+        for field in self.roster_fields:
+            emp = attrs.get(field)
+            if emp is None:
+                continue
+            current = getattr(self.instance, f"{field}_id", None) if self.instance else None
+            if emp.pk != current and not sales_roster().filter(pk=emp.pk).exists():
+                raise serializers.ValidationError({
+                    field: [f"«{emp.full_name_fa}» کارشناس فعال واحد فروش نیست."],
+                })
+        return attrs
+
 class CustomerGroupSerializer(serializers.ModelSerializer):
+    customer_count = serializers.IntegerField(read_only=True, default=0)
+    channel_display = serializers.CharField(source="get_channel_display", read_only=True)
+    #: Its customers per book, across all books — where the group is used.
+    by_book = serializers.SerializerMethodField()
+    #: Whether the caller may rename / move / delete it.
+    editable = serializers.SerializerMethodField()
+
     class Meta:
         model = CustomerGroup
-        fields = ("id", "code", "name_fa", "color")
+        fields = ("id", "code", "name_fa", "color", "is_system", "customer_count",
+                  "channel", "channel_display", "by_book", "editable")
+        read_only_fields = ("is_system",)
+        extra_kwargs = {"code": {"required": False}}
+
+    def get_by_book(self, obj):
+        return self.context.get("by_book", {}).get(obj.pk, [])
+
+    def get_editable(self, obj):
+        mine = self.context.get("channels", ())
+        return mine is None or not obj.channel or obj.channel in mine
+
+    def validate_channel(self, value):
+        # Handing a group to another book is the CEO's call, not a book's.
+        # A book may make a group its own, never take one over: claiming a
+        # shared group would lock the other books out of it.
+        mine = self.context.get("channels", ())
+        allowed = {self.instance.channel} if self.instance else {"", *(mine or ())}
+        if mine is not None and value not in allowed:
+            raise serializers.ValidationError("تعیین دفتر مالک گروه با مدیرعامل است.")
+        return value
+
+    def validate_name_fa(self, value):
+        # Two groups of one name split their customers between two filter
+        # entries that look the same; one of them always reads as empty.
+        from apps.crm.matching import name_key
+
+        key = name_key(value)
+        others = CustomerGroup.objects.exclude(pk=getattr(self.instance, "pk", None))
+        if any(name_key(n) == key for n in others.values_list("name_fa", flat=True)):
+            raise serializers.ValidationError("گروهی با همین نام هست.")
+        return value
 
 
 class TagSerializer(serializers.ModelSerializer):
@@ -62,12 +131,13 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class PipelineStageSerializer(serializers.ModelSerializer):
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    channel_display = serializers.CharField(source="get_channel_display", read_only=True)
 
     class Meta:
         model = PipelineStage
         fields = (
             "id", "code", "name_fa", "order", "kind", "kind_display",
-            "probability_pct", "is_active",
+            "probability_pct", "is_active", "channel", "channel_display",
         )
 
 
@@ -87,7 +157,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
         model = Customer
         fields = (
             "id", "code", "name_fa", "kind", "status", "status_display",
-            "group", "group_name", "province", "province_name",
+            "group", "group_name", "province", "province_name", "zone",
             "owner", "owner_name", "lead_source", "source_name",
             "city", "contact_name", "phone", "mobile", "email",
             "first_contact_at", "first_contact_jalali",
@@ -113,15 +183,15 @@ class CustomerDetailSerializer(CustomerListSerializer):
         )
 
 
-class CustomerWriteSerializer(serializers.ModelSerializer):
+class CustomerWriteSerializer(RosterOwnerMixin, serializers.ModelSerializer):
     class Meta:
         model = Customer
         # `id` is echoed back so the client can navigate straight to the
         # record it just created.
         fields = (
-            "id", "code", "name_fa", "kind", "status", "group", "province", "city",
+            "id", "code", "name_fa", "kind", "status", "group", "province", "zone", "city",
             "lead_source", "owner", "tags", "contact_name", "phone", "mobile",
-            "email", "address", "national_id", "note", "first_contact_at",
+            "email", "address", "national_id", "economic_code", "note", "first_contact_at",
             "channel",
         )
         read_only_fields = ("id",)
@@ -132,6 +202,19 @@ class CustomerWriteSerializer(serializers.ModelSerializer):
             # for no gain.
             "first_contact_at": {"required": False},
         }
+
+    #: Fields the list's bulk edit may set on many customers at once. Names,
+    #: phones and ids are per-customer facts; setting one on fifty rows is
+    #: always a mistake.
+    BULK = ("group", "province", "zone", "owner", "status", "lead_source", "city")
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        zone = attrs.get("zone")
+        province = attrs.get("province", getattr(self.instance, "province", None))
+        if zone and (province is None or zone.province_id != province.pk):
+            raise serializers.ValidationError({"zone": ["محدوده فقط برای مشتریان همان استان است."]})
+        return attrs
 
 
 # --------------------------------------------------------------------------
@@ -163,6 +246,8 @@ class DealListSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True)
     stage_name = serializers.CharField(source="stage.name_fa", read_only=True)
     province_name = serializers.CharField(source="customer.province.name_fa", read_only=True)
+    #: For changing the customer's province straight from the deals list.
+    province_id = serializers.IntegerField(source="customer.province_id", read_only=True)
     group_name = serializers.CharField(source="customer.group.name_fa", read_only=True)
     source_name = serializers.CharField(source="lead_source.name_fa", read_only=True)
     reason_name = serializers.CharField(source="lost_reason.name_fa", read_only=True)
@@ -180,7 +265,7 @@ class DealListSerializer(serializers.ModelSerializer):
         fields = (
             "id", "code", "title", "customer", "customer_name",
             "owner", "owner_name", "stage", "stage_name", "status",
-            "status_display", "province_name", "group_name",
+            "status_display", "province_name", "province_id", "group_name",
             "lead_source", "source_name", "lost_reason", "reason_name",
             "lost_note", "amount_rial", "cost_rial", "profit_rial",
             "discount_rial", "shipping_cost_rial", "other_cost_rial",
@@ -214,7 +299,10 @@ class DealDetailSerializer(DealListSerializer):
     tags = TagSerializer(many=True, read_only=True)
 
     class Meta(DealListSerializer.Meta):
-        fields = DealListSerializer.Meta.fields + ("items", "tags")
+        fields = DealListSerializer.Meta.fields + (
+            "items", "tags", "tender_channel", "tender_rank", "competitor",
+            "competitor_unit_price_rial", "probability_pct",
+        )
 
 
 class DealItemWriteSerializer(serializers.ModelSerializer):
@@ -226,7 +314,7 @@ class DealItemWriteSerializer(serializers.ModelSerializer):
         extra_kwargs = {"unit_cost_rial": {"required": False}}
 
 
-class DealWriteSerializer(serializers.ModelSerializer):
+class DealWriteSerializer(RosterOwnerMixin, serializers.ModelSerializer):
     """
     Deals are written together with their lines. Saving the header first and
     the lines afterwards would leave a zero-value deal visible in reports for
@@ -251,6 +339,8 @@ class DealWriteSerializer(serializers.ModelSerializer):
             "discount_rial", "shipping_cost_rial", "other_cost_rial",
             "opened_at", "expected_close_date", "closed_at", "channel",
             "next_action_title", "next_action_due",
+            "tender_channel", "tender_rank", "competitor", "competitor_unit_price_rial",
+            "probability_pct",
         )
         read_only_fields = ("id",)
         extra_kwargs = {
@@ -269,6 +359,17 @@ class DealWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"lost_reason": "برای ثبت فرصت از دست رفته، انتخاب دلیل الزامی است."}
             )
+        # A stage of another book's pipeline: the deal would sit in a column
+        # its own board does not have. (A new deal takes its customer's book.)
+        if attrs.get("stage"):
+            customer = attrs.get("customer")
+            channel = (customer.channel if self.instance is None and customer
+                       else attrs.get("channel", getattr(self.instance, "channel", "")))
+            if not stages_for(channel, attrs["stage"].dataset).filter(pk=attrs["stage"].pk).exists():
+                raise serializers.ValidationError({"stage": "این مرحله از قیف این دفتر نیست."})
+        pct = attrs.get("probability_pct")
+        if pct is not None and pct > 100:
+            raise serializers.ValidationError({"probability_pct": "احتمال بین ۰ و ۱۰۰ است."})
         title = (attrs.get("next_action_title") or "").strip()
         due = attrs.get("next_action_due")
         if bool(title) != bool(due):
@@ -355,7 +456,7 @@ class DealStageEventSerializer(serializers.ModelSerializer):
 # --------------------------------------------------------------------------
 # Activity / Task / Feedback
 # --------------------------------------------------------------------------
-class ActivitySerializer(serializers.ModelSerializer):
+class ActivitySerializer(RosterOwnerMixin, serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
     deal_title = serializers.CharField(source="deal.title", read_only=True)
     owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True)
@@ -375,7 +476,7 @@ class ActivitySerializer(serializers.ModelSerializer):
         return jalali_str(obj.at)
 
 
-class TaskSerializer(serializers.ModelSerializer):
+class TaskSerializer(RosterOwnerMixin, serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
     owner_name = serializers.CharField(source="owner.full_name_fa", read_only=True)
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
@@ -394,7 +495,9 @@ class TaskSerializer(serializers.ModelSerializer):
         return jalali_str(obj.due_at)
 
 
-class CustomerFeedbackSerializer(serializers.ModelSerializer):
+class CustomerFeedbackSerializer(RosterOwnerMixin, serializers.ModelSerializer):
+    roster_fields = ("employee",)
+
     customer_name = serializers.CharField(source="customer.name_fa", read_only=True)
     employee_name = serializers.CharField(source="employee.full_name_fa", read_only=True)
     is_unhappy = serializers.BooleanField(read_only=True)
@@ -414,6 +517,20 @@ class CustomerFeedbackSerializer(serializers.ModelSerializer):
 # --------------------------------------------------------------------------
 # Merge review
 # --------------------------------------------------------------------------
+class TerritoryAssignmentSerializer(serializers.ModelSerializer):
+    province_name = serializers.CharField(source="province.name_fa", read_only=True)
+    zone_name = serializers.CharField(source="zone.name_fa", read_only=True, default="")
+    employee_name = serializers.CharField(source="employee.full_name_fa", read_only=True)
+
+    class Meta:
+        model = TerritoryAssignment
+        fields = ("id", "province", "province_name", "zone", "zone_name", "channel",
+                  "employee", "employee_name", "role")
+        extra_kwargs = {"channel": {"required": False}}
+        # The one-manager rule is applied by replacing, in the viewset.
+        validators = []
+
+
 class MatchCandidateSerializer(serializers.ModelSerializer):
     """
     One suspected duplicate, with both sides on screen.
@@ -432,21 +549,15 @@ class MatchCandidateSerializer(serializers.ModelSerializer):
     )
     crm = serializers.SerializerMethodField()
     arpa = serializers.SerializerMethodField()
-    certain = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerMatchCandidate
         fields = (
             "id", "source", "external_id", "external_name", "method",
             "method_display", "score", "state", "state_display",
-            "decided_at", "decided_by_name", "crm", "arpa", "certain",
+            "confidence", "reason",
+            "decided_at", "decided_by_name", "crm", "arpa",
         )
-
-    def get_certain(self, obj) -> bool:
-        """Whether the bulk «approve certain» button would merge this pair."""
-        from apps.crm.merge import is_certain
-
-        return obj.state == CustomerMatchCandidate.State.PENDING and is_certain(obj)
 
     def get_crm(self, obj) -> dict:
         c = obj.customer

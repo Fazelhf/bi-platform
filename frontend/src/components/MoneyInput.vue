@@ -8,12 +8,30 @@ import { computed } from "vue";
  * so callers keep binding/saving plain numbers. The caret is preserved across
  * reformatting so typing in the middle of a number feels natural.
  */
-const props = defineProps<{ modelValue: string | number | null }>();
+const props = withDefaults(defineProps<{
+  modelValue: string | number | null;
+  /** Whole numbers only — counts, and rials, which have no fraction. */
+  integer?: boolean;
+  /** Allow a leading minus (a loss); off for anything that cannot go below zero. */
+  signed?: boolean;
+}>(), { integer: false, signed: true });
 const emit = defineEmits<{ (e: "update:modelValue", v: string): void }>();
 
+/**
+ * Persian and Arabic-Indic digits typed on a Persian keyboard used to be
+ * stripped by the filter below, so «۱۲۰» became an empty cell without a word.
+ * They are folded to ASCII first, and «٫» is the Persian decimal point.
+ */
+function toLatin(s: string): string {
+  return s
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/٫/g, ".");
+}
+
 function clean(s: string): string {
-  let v = s.replace(/[^\d.\-]/g, "");
-  v = v.replace(/(?!^)-/g, ""); // minus only at the start
+  let v = toLatin(s).replace(props.integer ? /[^\d\-]/g : /[^\d.\-]/g, "");
+  v = props.signed ? v.replace(/(?!^)-/g, "") : v.replace(/-/g, ""); // minus only at the start
   const dot = v.indexOf(".");
   if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, "");
   return v;
@@ -33,7 +51,7 @@ const display = computed(() => group(clean(String(props.modelValue ?? ""))));
 function onInput(e: Event) {
   const el = e.target as HTMLInputElement;
   const caret = el.selectionStart ?? el.value.length;
-  const digitsBefore = (el.value.slice(0, caret).match(/[\d]/g) || []).length;
+  const digitsBefore = (toLatin(el.value.slice(0, caret)).match(/[\d]/g) || []).length;
 
   const raw = clean(el.value);
   const formatted = group(raw);
@@ -66,7 +84,7 @@ function onFocus(e: FocusEvent) {
   <input
     :value="display"
     type="text"
-    inputmode="decimal"
+    :inputmode="integer ? 'numeric' : 'decimal'"
     dir="ltr"
     @input="onInput"
     @focus="onFocus"

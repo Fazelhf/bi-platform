@@ -70,6 +70,13 @@ class CustomerGroup(DatasetModel):
     code = models.SlugField(unique=True)
     name_fa = models.CharField(max_length=100)
     color = models.CharField(max_length=7, blank=True)
+    #: A group code depends on (imports, reports) — renamable, not deletable.
+    #: Set in the admin; the CRM screen only honours it.
+    is_system = models.BooleanField(default=False)
+    #: The book that owns the group: its managers rename, move and delete it.
+    #: Blank = shared — every book files customers under it. Who may *see*
+    #: a customer is still the customer's own book, never the group's.
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, blank=True, default="")
 
     class Meta:
         ordering = ("name_fa",)
@@ -202,6 +209,10 @@ class PipelineStage(DatasetModel):
     # Weighted-pipeline forecasting: amount x probability.
     probability_pct = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    #: The book whose pipeline this is; blank = shared by every book that has
+    #: none of its own. B2B sells through tenders and approvals, همکار does not,
+    #: so one list cannot describe both — see :func:`stages_for`.
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, blank=True, default="")
 
     class Meta:
         ordering = ("order", "id")
@@ -209,6 +220,44 @@ class PipelineStage(DatasetModel):
 
     def __str__(self) -> str:
         return self.name_fa
+
+
+def stages_for(channel: str, dataset: str):
+    """A book's active stages: its own if it has any, else the shared list."""
+    active = PipelineStage.objects.filter(is_active=True, dataset=dataset)
+    own = active.filter(channel=channel) if channel else active.none()
+    return own if own.exists() else active.filter(channel="")
+
+
+def stages_in_view(channels, dataset: str) -> list[tuple["PipelineStage", str]]:
+    """
+    The stage columns of a board or funnel spanning `channels` (None = every
+    book): each book's own list once, the shared list once if any book uses
+    it. Labels carry the book when more than one list shows, so «مذاکره» of
+    همکار and of B2B are not read as one column.
+    """
+    books = list(channels) if channels is not None else [c for c, _ in SalesChannel.choices]
+    lists: dict[str, list] = {}
+    for book in books:
+        stages = list(stages_for(book, dataset).order_by("order", "id"))
+        if stages:
+            lists.setdefault(stages[0].channel, stages)
+    names = dict(SalesChannel.choices)
+    out = []
+    for key in sorted(lists, key=lambda k: (k != "", k)):
+        for st in lists[key]:
+            label = f"{names[key]} · {st.name_fa}" if key and len(lists) > 1 else st.name_fa
+            out.append((st, label))
+    return out
+
+
+def fit_stage(stage, channel: str, dataset: str):
+    """`stage` if it is in the book's list, else that list's first stage of
+    the same kind — a deal moved to another book keeps being open/won/lost."""
+    allowed = stages_for(channel, dataset)
+    if stage is None or allowed.filter(pk=stage.pk).exists():
+        return stage
+    return allowed.filter(kind=stage.kind).order_by("order").first() or stage
 
 
 # --------------------------------------------------------------------------
@@ -313,6 +362,27 @@ class Customer(DatasetModel):
         max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM
     )
 
+    # Tehran's sales zone (بازار، ایرانشهر …) for فروش همکار. Blank counts as
+    # «سایر مناطق» on the map until someone places the customer.
+    zone = models.ForeignKey(
+        "SalesZone", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="customers",
+    )
+
+    # ---- Matching keys -------------------------------------------------
+    # The same three systems write names and numbers three ways: آرپا in
+    # legacy Arabic letters, دیدار and تیم‌یار in Persian with ZWNJ, phones
+    # with dashes and Persian digits. Comparing the raw columns found almost
+    # none of the duplicates, so the folded form is stored beside them and
+    # every duplicate lookup reads these. Derived in `save()`; never edited.
+    name_key = models.CharField(max_length=200, blank=True, db_index=True, editable=False)
+    nid_key = models.CharField(max_length=14, blank=True, db_index=True, editable=False)
+    mobile_key = models.CharField(max_length=8, blank=True, db_index=True, editable=False)
+    phone_key = models.CharField(max_length=8, blank=True, db_index=True, editable=False)
+
+    KEY_SOURCES = frozenset({"name_fa", "national_id", "economic_code", "mobile", "phone"})
+    KEY_FIELDS = frozenset({"name_key", "nid_key", "mobile_key", "phone_key"})
+
     class Meta:
         ordering = ("name_fa",)
         verbose_name = "مشتری"
@@ -325,20 +395,46 @@ class Customer(DatasetModel):
     def __str__(self) -> str:
         return self.name_fa
 
-    def refresh_last_activity(self) -> None:
-        """
-        Re-derive `last_activity_at` from the activities this row now holds.
+    def fill_keys(self) -> None:
+        from apps.crm.matching import id_key, name_key, phone_key
 
-        The field is a cache, and a cache goes stale exactly when activities
-        move between customers (a merge) or are logged out of order (a call
-        entered today for last month). It only ever moves forward from what
-        the activities say: the دیدار import set it from data that may not
-        all have arrived as activity rows, and erasing that would be worse.
+        self.name_key = name_key(self.name_fa)[:200]
+        self.nid_key = id_key(self.national_id) or id_key(self.economic_code)
+        self.mobile_key = phone_key(self.mobile)
+        self.phone_key = phone_key(self.phone)
+
+    def save(self, *args, **kwargs):
+        self.fill_keys()
+        fields = kwargs.get("update_fields")
+        if fields is not None and set(fields) & self.KEY_SOURCES:
+            kwargs["update_fields"] = set(fields) | self.KEY_FIELDS
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def refresh_rollups(cls, ids) -> None:
         """
-        latest = self.activities.aggregate(m=models.Max("at"))["m"]
-        if latest and (not self.last_activity_at or latest > self.last_activity_at):
-            self.last_activity_at = latest
-            Customer.objects.filter(pk=self.pk).update(last_activity_at=latest)
+        Recompute the cached dates from the records they summarise.
+
+        `last_activity_at` and `first_deal_won_at` were only ever pushed
+        forward by whichever code path wrote last, so a merge that moved
+        yesterday's call onto a survivor left it showing a date 100 days old,
+        and a deleted or back-dated activity was never taken back out.
+        """
+        from django.db.models import Max, Min
+
+        ids = list(ids)
+        if not ids:
+            return
+        last = dict(Activity.objects.filter(customer_id__in=ids).values("customer_id")
+                    .annotate(m=Max("at")).values_list("customer_id", "m"))
+        won = dict(Deal.objects.filter(customer_id__in=ids, status="won", closed_at__isnull=False)
+                   .values("customer_id").annotate(m=Min("closed_at")).values_list("customer_id", "m"))
+        batch = []
+        for c in cls.objects.filter(pk__in=ids):
+            c.last_activity_at = last.get(c.pk)
+            c.first_deal_won_at = won.get(c.pk)
+            batch.append(c)
+        cls.objects.bulk_update(batch, ["last_activity_at", "first_deal_won_at"])
 
 
 class DemoProvinceTarget(TimeStampedModel):
@@ -455,6 +551,20 @@ class Deal(DatasetModel):
     lost_note = models.CharField(max_length=400, blank=True)
     tags = models.ManyToManyField(Tag, blank=True, related_name="deals")
 
+    # ---- Tender (مناقصه / استعلام) — B2B quotes are won or lost on price ---
+    class TenderChannel(models.TextChoices):
+        SYSTEM = "system", "سامانه"
+        DIRECT = "direct", "مستقیم"
+
+    tender_channel = models.CharField(max_length=8, choices=TenderChannel.choices, blank=True)
+    #: Our place in the سامانه ranking, 1 = lowest bid.
+    tender_rank = models.PositiveSmallIntegerField(null=True, blank=True)
+    #: Who we bid against — on a loss, who won.
+    competitor = models.CharField(max_length=120, blank=True, db_index=True)
+    competitor_unit_price_rial = models.DecimalField(max_digits=18, decimal_places=0, null=True, blank=True)
+    #: The rep's own odds for this deal; blank = the stage's.
+    probability_pct = models.PositiveSmallIntegerField(null=True, blank=True)
+
     # ---- Money (all Rials, all derived from DealItem) ---------------------
     amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     cost_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
@@ -508,10 +618,12 @@ class Deal(DatasetModel):
 
     @property
     def weighted_rial(self) -> Decimal:
-        """Forecast value: amount x stage probability (open deals only)."""
+        """Forecast value: amount x probability — the rep's, else the
+        stage's (open deals only)."""
         if self.status != self.Status.OPEN or not self.stage:
             return Decimal(0)
-        return self.amount_rial * Decimal(self.stage.probability_pct) / Decimal(100)
+        pct = self.stage.probability_pct if self.probability_pct is None else self.probability_pct
+        return self.amount_rial * Decimal(pct) / Decimal(100)
 
     def recalculate(self, save: bool = True) -> None:
         """Roll the deal lines up into the denormalised money fields."""
@@ -655,6 +767,9 @@ class Activity(DatasetModel):
         DimPeriod, null=True, blank=True,
         on_delete=models.SET_NULL, related_name="crm_activities",
     )
+    #: Identity of an activity brought in from دیدار, which gives activities
+    #: no id of its own — see `apps.crm.didar_import`. Blank for one typed here.
+    external_key = models.CharField(max_length=64, blank=True, db_index=True)
 
     class Meta:
         ordering = ("-at",)
@@ -698,6 +813,8 @@ class Task(DatasetModel):
     due_at = models.DateTimeField()
     done_at = models.DateTimeField(null=True, blank=True)
     note = models.CharField(max_length=500, blank=True)
+    #: As on Activity: a دیدار row's identity, so a re-upload finds it.
+    external_key = models.CharField(max_length=64, blank=True, db_index=True)
 
     class Meta:
         ordering = ("due_at",)
@@ -742,6 +859,8 @@ class ExternalSource(models.TextChoices):
     # It rides in the same queue because it is the same question and deserves
     # the same care — the دیدار import alone left 35 pairs sharing a name.
     CRM = "crm", "داخل CRM"
+    #: تیم‌یار's customer lists — «ورود مشتریان» files each row under its ID.
+    TEAMYAR = "teamyar", "تیم‌یار"
 
 
 class CustomerExternalRef(DatasetModel):
@@ -866,6 +985,18 @@ class CustomerMatchCandidate(TimeStampedModel):
     method = models.CharField(max_length=8, choices=Method.choices)
     score = models.DecimalField(max_digits=5, decimal_places=4, default=0)
 
+    class Confidence(models.TextChoices):
+        # Same normalised name *and* a shared phone or national id: two
+        # independent facts agree. Still merged only by a person.
+        DEFINITE = "definite", "قطعی"
+        SUSPECT = "suspect", "مشکوک"
+
+    confidence = models.CharField(
+        max_length=8, choices=Confidence.choices, default=Confidence.SUSPECT, db_index=True
+    )
+    #: Why the pair was raised, in words — «نام یکسان + موبایل یکسان».
+    reason = models.CharField(max_length=200, blank=True)
+
     state = models.CharField(
         max_length=8, choices=State.choices, default=State.PENDING, db_index=True
     )
@@ -901,6 +1032,73 @@ class CustomerMatchCandidate(TimeStampedModel):
 # One invoice → one customer → optionally one deal. The link to Deal is what
 # eventually answers «چقدر از کاریز واقعاً فاکتور شد».
 # --------------------------------------------------------------------------
+class Book(models.TextChoices):
+    """The آرپا ledger an invoice was billed in."""
+
+    MAIN = "main", "دفتر اصلی"
+    ROLLMARKET = "rollmarket", "رول مارکت"
+
+
+class Review(models.TextChoices):
+    """
+    فروش سوری. Blank is an ordinary sale; the other three are the states of
+    one whose «مسوول فروش» was not a sales group.
+    """
+
+    SUSPECT = "suspect", "سوری — در انتظار بررسی"
+    REAL = "real", "تأیید شد: فروش واقعی"
+    FAKE = "fake", "تأیید شد: سوری"
+
+
+#: Not counted anywhere: still waiting, or confirmed fake.
+NOT_COUNTED = (Review.SUSPECT, Review.FAKE)
+
+
+class SalesInvoiceQuerySet(models.QuerySet):
+    def counted(self):
+        """The invoices that are sales — every report reads through this."""
+        return self.exclude(review__in=NOT_COUNTED)
+
+
+class ImportBatch(TimeStampedModel):
+    """
+    One upload on «ورود از آرپا» or «ورود از دیدار»: which file, by whom, and
+    what it did. The file's SHA-256 is what lets a second upload of the same
+    export say so.
+    """
+
+    class Source(models.TextChoices):
+        ARPA = "arpa", "آرپا"
+        DIDAR = "didar", "دیدار"
+        TEAMYAR = "teamyar", "تیم‌یار"
+        EXCEL = "excel", "اکسل B2B"
+
+    source = models.CharField(max_length=8, choices=Source.choices, default=Source.ARPA)
+    file_name = models.CharField(max_length=255)
+    file_sha256 = models.CharField(max_length=64, db_index=True)
+    book = models.CharField(max_length=12, choices=Book.choices, default=Book.MAIN)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    rows = models.PositiveIntegerField(default=0)
+    created = models.PositiveIntegerField(default=0)
+    updated = models.PositiveIntegerField(default=0)
+    unchanged = models.PositiveIntegerField(default=0)
+    skipped = models.PositiveIntegerField(default=0)
+    suspect = models.PositiveIntegerField(default=0)
+    customers_created = models.PositiveIntegerField(default=0)
+    amount_rial = models.DecimalField(max_digits=22, decimal_places=0, default=0)
+    date_from = models.DateField(null=True, blank=True)
+    date_to = models.DateField(null=True, blank=True)
+    #: Warnings worth reading later — unknown salespeople, skipped rows.
+    notes = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        verbose_name = "ورود فایل"
+
+
 class SalesInvoice(DatasetModel):
     """
     فاکتور فروش یا مرجوعی، از نرم‌افزار حسابداری.
@@ -980,6 +1178,35 @@ class SalesInvoice(DatasetModel):
     tax_ref = models.CharField(max_length=40, blank=True)  # شناسه سامانه مودیان
     note = models.CharField(max_length=400, blank=True)
 
+    # ---- Where it came from (the «ورود از آرپا» upload) ---------------------
+    # The company keeps two آرپا books with their own invoice numbering, so
+    # «فاکتور 352 of 1405/07/11» exists in both and means two sales.
+    book = models.CharField(max_length=12, choices=Book.choices, default=Book.MAIN)
+    #: «مسوول فروش» as آرپا wrote it — name and code — before any decision.
+    sales_responsible = models.CharField(max_length=60, blank=True)
+    sales_responsible_code = models.CharField(max_length=20, blank=True)
+    #: Every one of the export's columns, exactly as read, keyed by header.
+    arpa_row = models.JSONField(default=dict, blank=True)
+    #: Fingerprint of `arpa_row`: how a re-upload tells «already read» from
+    #: «changed in آرپا since» without comparing 52 fields.
+    row_hash = models.CharField(max_length=64, blank=True)
+    import_batch = models.ForeignKey(
+        "ImportBatch", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="invoices",
+    )
+
+    # ---- فروش سوری ----------------------------------------------------------
+    # An invoice whose «مسوول فروش» is not one of the three sales groups is
+    # held out of every report until a manager rules on it.
+    review = models.CharField(max_length=8, choices=Review.choices, blank=True, default="")
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = SalesInvoiceQuerySet.as_manager()
+
     class Meta:
         ordering = ("-issued_at", "-number")
         verbose_name = "فاکتور فروش"
@@ -987,6 +1214,7 @@ class SalesInvoice(DatasetModel):
             models.Index(fields=["customer", "issued_at"]),
             models.Index(fields=["period", "kind"]),
             models.Index(fields=["owner", "issued_at"]),
+            models.Index(fields=["review"]),
         ]
 
     @property
@@ -1037,3 +1265,157 @@ class SalesInvoiceItem(DatasetModel):
 
     def __str__(self) -> str:
         return f"{self.product_name or self.product_code} × {self.quantity}"
+
+
+# --------------------------------------------------------------------------
+# Duplicate detection settings and merge history
+# --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Territories: sales zones inside a province, and who answers for each
+# --------------------------------------------------------------------------
+class SalesZone(TimeStampedModel):
+    """
+    محدوده‌ی فروش داخل یک استان — today فروش همکار's four in Tehran: بازار،
+    ایرانشهر، ظهیرالاسلام، سایر مناطق.
+
+    A customer is placed in a zone by its `zone` field, set by a person — not
+    guessed from an address. `geometry` can hold a real GeoJSON boundary when
+    one exists; until then the map draws a labelled schematic tile, which
+    says it is schematic rather than inventing a border.
+    """
+
+    code = models.SlugField(unique=True)
+    name_fa = models.CharField(max_length=60)
+    province = models.ForeignKey(DimProvince, on_delete=models.CASCADE, related_name="crm_zones")
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM)
+    order = models.PositiveSmallIntegerField(default=0)
+    #: Where a customer of this province with no zone yet is counted. One per
+    #: province and channel («سایر مناطق»).
+    is_default = models.BooleanField(default=False)
+    geometry = models.JSONField(null=True, blank=True)
+
+    #: فروش همکار's Tehran zones. Created on first use rather than by a
+    #: migration, because a fresh database gets its provinces from
+    #: `seed_sales` only after migrating.
+    TEHRAN = (
+        ("thr-bazar", "بازار", 1, False),
+        ("thr-iranshahr", "ایرانشهر", 2, False),
+        ("thr-zahir", "ظهیرالاسلام", 3, False),
+        ("thr-other", "سایر مناطق", 4, True),
+    )
+
+    @classmethod
+    def ensure_tehran(cls):
+        if cls.objects.filter(code="thr-bazar").exists():
+            return
+        tehran = DimProvince.objects.filter(name_fa="تهران").first()
+        if tehran is None:
+            return
+        for code, name, order, default in cls.TEHRAN:
+            cls.objects.get_or_create(code=code, defaults={
+                "name_fa": name, "province": tehran, "channel": SalesChannel.TEAM,
+                "order": order, "is_default": default,
+            })
+
+    class Meta:
+        ordering = ("province", "order", "id")
+        verbose_name = "محدوده فروش"
+
+    def __str__(self) -> str:
+        return self.name_fa
+
+
+class TerritoryAssignment(TimeStampedModel):
+    """
+    Who answers for a province (or one zone of it) in one channel: its sales
+    manager and its کارشناس(ان).
+
+    For reporting and default filters only. What a user may *see* is still
+    decided by `crm_scope`; an assignment never widens it.
+    """
+
+    class Role(models.TextChoices):
+        MANAGER = "manager", "مدیر فروش"
+        EXPERT = "expert", "کارشناس"
+
+    province = models.ForeignKey(DimProvince, on_delete=models.CASCADE, related_name="crm_territories")
+    zone = models.ForeignKey(SalesZone, null=True, blank=True, on_delete=models.CASCADE,
+                             related_name="assignments")
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, default=SalesChannel.TEAM)
+    employee = models.ForeignKey(DimEmployee, on_delete=models.CASCADE, related_name="territories")
+    role = models.CharField(max_length=8, choices=Role.choices, default=Role.EXPERT)
+
+    class Meta:
+        ordering = ("province__name_fa", "role", "employee__full_name_fa")
+        verbose_name = "مسئول استان/محدوده"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["province", "zone", "channel", "employee", "role"],
+                name="crm_territory_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["province", "channel", "employee", "role"],
+                condition=models.Q(zone__isnull=True),
+                name="crm_territory_unique_nozone",
+            ),
+            # One sales manager per province (or zone) and channel.
+            models.UniqueConstraint(
+                fields=["province", "zone", "channel"],
+                condition=models.Q(role="manager"),
+                name="crm_territory_one_manager",
+            ),
+            models.UniqueConstraint(
+                fields=["province", "channel"],
+                condition=models.Q(role="manager", zone__isnull=True),
+                name="crm_territory_one_manager_nozone",
+            ),
+        ]
+
+
+class CrmConfig(TimeStampedModel):
+    """
+    تنظیمات تشخیص مشتری تکراری — one row, read by `matching` and the
+    «مشتری‌های شبیه» lookup. A threshold that lived only as a constant could
+    not be what the settings page says it is.
+    """
+
+    fuzzy_threshold = models.DecimalField(
+        max_digits=3, decimal_places=2, default=Decimal("0.86"),
+        help_text="کمترین شباهت نام (۰ تا ۱) برای پیشنهاد «نام مشابه».",
+    )
+    #: Shared phone as a reason to suggest a pair. Off would silence the many
+    #: «same switchboard, different customer» pairs a hospital network makes.
+    match_phone = models.BooleanField(default=True)
+    #: New customers created by an import are checked against the file and
+    #: suspected twins queued for review instead of being silently kept.
+    queue_on_import = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "تنظیمات CRM"
+
+    @classmethod
+    def get(cls) -> "CrmConfig":
+        return cls.objects.first() or cls.objects.create()
+
+
+class CustomerMerge(TimeStampedModel):
+    """
+    One merge, kept so it can be read — and undone — later.
+
+    `moved` holds the ids of every row re-pointed per relation, `before` the
+    two customers' fields as they stood. Together they are everything needed
+    to put the absorbed customer back.
+    """
+
+    survivor = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="merges_kept")
+    absorbed = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="merges_absorbed")
+    by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+",
+    )
+    moved = models.JSONField(default=dict, blank=True)
+    before = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        verbose_name = "سابقه ادغام مشتری"

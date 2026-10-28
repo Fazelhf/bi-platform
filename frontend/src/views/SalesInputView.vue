@@ -2,17 +2,23 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { rosterApi, salesApi } from "@/api/sales";
 import { customerGroupApi, salesInputApi, type SalesInput } from "@/api/salesInput";
-import type { MonthProgress } from "@/types";
+import { currentPeriodId, type MonthProgress, type Period } from "@/types";
 import { toast, confirm, prompt } from "@/composables/useUi";
 import { num, pct, rial } from "@/utils/format";
-import { selectIfZero } from "@/utils/inputs";
 import { submitHint, submittedMessage } from "@/utils/approval";
 import MoneyInput from "@/components/MoneyInput.vue";
 import ExportActions from "@/components/ExportActions.vue";
 import PeriodCalendar from "@/components/PeriodCalendar.vue";
+import ExcelImport from "@/components/ExcelImport.vue";
 
-// Rial money fields get thousands-grouping while typing; counts stay plain.
-const isMoney = (field: string) => field.endsWith("_rial");
+/**
+ * Every cell is the same grouped input; what differs is what each row may
+ * hold, and that comes from the server (metric_rows[].kind), the same rule it
+ * checks on save and the Excel import checks per row. Counts used to be bare
+ * number boxes that took «۱.۵» or «-۳» — and dropped Persian digits — while
+ * the rial rows beside them grouped digits and accepted them.
+ */
+const isWhole = (m: { kind?: string }) => m.kind !== "decimal";
 
 // Targets belong to the CEO's «تارگت» section and are stored per month in
 // their own table. This sheet never writes them — for anyone, CEO included —
@@ -26,7 +32,7 @@ const props = withDefaults(defineProps<{ channel?: string; title?: string }>(), 
   title: "ورود اطلاعات فروش",
 });
 
-const periods = ref<{ id: number; label: string }[]>([]);
+const periods = ref<Period[]>([]);
 const selectedMonth = ref<number | null>(null);
 const data = ref<SalesInput | null>(null);
 const loading = ref(true);
@@ -429,9 +435,17 @@ async function save(submit: boolean) {
   }
 }
 
+/** After an Excel import: the dots and the sheet, on the day being viewed. */
+async function afterImport() {
+  await Promise.all([refreshProgress(), load()]);
+}
+
 onMounted(async () => {
   periods.value = await salesApi.periods();
-  selectedMonth.value = periods.value[0]?.id ?? null;
+  // Today's month — where daily figures go. This used to open on the first
+  // row of the table (فروردین), while the dashboard opened on the latest
+  // month: the two pages started out looking at different months.
+  selectedMonth.value = currentPeriodId(periods.value);
   await loadMonth();
   await load();
 });
@@ -455,6 +469,21 @@ watch(selectedDay, load);
       </div>
       <div class="flex items-center gap-3">
         <span class="text-sm" :class="saving.startsWith('خطا') ? 'text-red-500' : 'text-accent-600'">{{ saving }}</span>
+        <template v-if="!readonly">
+          <ExcelImport
+            :import-key="`sales-daily-${channel}`"
+            label="ورود فروشندگان از اکسل"
+            :params="{ action: 'draft' }"
+            @done="afterImport"
+          />
+          <ExcelImport
+            v-if="!ownOnly"
+            :import-key="`sales-province-${channel}`"
+            label="ورود استان‌ها از اکسل"
+            :params="{ action: 'draft' }"
+            @done="afterImport"
+          />
+        </template>
         <ExportActions :excel="false" />
         <select v-model.number="selectedMonth" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
@@ -680,16 +709,12 @@ watch(selectedDay, load);
                     :title="isLocked(m.field) ? 'تارگت توسط مدیرعامل تعیین می‌شود' : entryBlock || 'جمع هفته‌ها — برای ویرایش یک هفته را انتخاب کنید'"
                   >{{ num(Number(c[m.field] || 0)) }}</div>
                   <MoneyInput
-                    v-else-if="isMoney(m.field)"
-                    v-model="c[m.field]"
-                    class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                  />
-                  <input
                     v-else
-                    v-model="c[m.field]" type="number" step="any"
-                    class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition"
-                  @focus="selectIfZero"
-                    />
+                    v-model="c[m.field]"
+                    :integer="isWhole(m)"
+                    :signed="!!m.signed"
+                    class="cell-input ltr-nums text-center"
+                  />
                 </td>
                 <td class="sum-cell py-1.5 px-3 text-center font-bold ltr-nums sticky left-0 z-20 border-r border-slate-100">
                   {{ num(rowTotal(m.field)) }}
@@ -778,8 +803,8 @@ watch(selectedDay, load);
                   <div v-if="frozen" class="px-2 py-1.5 text-left ltr-nums text-ink">{{ num(Number(p.sales_rial || 0)) }}</div>
                   <MoneyInput
                     v-else
-                    v-model="p.sales_rial" placeholder="۰"
-                    class="w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-left ltr-nums outline-none"
+                    v-model="p.sales_rial" integer :signed="false"
+                    class="cell-input ltr-nums text-left"
                   />
                 </td>
                 <td class="py-1 text-left ltr-nums text-slate-400 px-2" title="در بخش «تارگت» تعیین می‌شود">
@@ -911,20 +936,15 @@ watch(selectedDay, load);
               <td class="py-1.5 text-ink">{{ g.name }}</td>
               <td class="py-1.5">
                 <span v-if="frozen" class="ltr-nums">{{ num(Number(g.sales_rial || 0)) }}</span>
-                <MoneyInput v-else v-model="g.sales_rial" class="w-full" />
+                <MoneyInput v-else v-model="g.sales_rial" integer :signed="false" class="cell-input ltr-nums text-left" />
               </td>
               <td class="py-1.5">
                 <span v-if="frozen" class="ltr-nums">{{ num(Number(g.profit_rial || 0)) }}</span>
-                <MoneyInput v-else v-model="g.profit_rial" class="w-full" />
+                <MoneyInput v-else v-model="g.profit_rial" integer class="cell-input ltr-nums text-left" />
               </td>
               <td class="py-1.5">
                 <span v-if="frozen" class="ltr-nums">{{ num(Number(g.invoice_count || 0)) }}</span>
-                <input
-                  v-else
-                  v-model="g.invoice_count"
-                  type="number" min="0"
-                  class="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-left ltr-nums bg-surface focus:outline-none focus:ring-2 focus:ring-accent-500/30 transition"
-                />
+                <MoneyInput v-else v-model="g.invoice_count" integer :signed="false" class="cell-input ltr-nums text-left" />
               </td>
               <td class="py-1.5 text-left text-xs text-slate-500 ltr-nums">
                 {{ groupShare(g) === null ? "—" : pct(groupShare(g)!) }}
@@ -986,3 +1006,11 @@ watch(selectedDay, load);
     </div>
   </div>
 </template>
+
+<style scoped>
+/* One look for every figure cell on the sheet — salespeople, provinces and
+   customer groups used to be three different boxes. */
+.cell-input {
+  @apply w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 outline-none transition;
+}
+</style>

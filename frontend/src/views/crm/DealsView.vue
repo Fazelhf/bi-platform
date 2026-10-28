@@ -33,6 +33,8 @@ const search = ref("");
 const status = ref("won");
 const page = ref(1);
 const PAGE_SIZE = 30;
+/** «فقط بدون استان» — work through the deals the map cannot place. */
+const noProvince = ref(false);
 
 const { ordering, sortBy, dir } = useSort("");
 
@@ -44,6 +46,7 @@ const params = computed(() => ({
   date_basis: status.value === "open" ? "opened" : status.value === "" ? "opened" : "closed",
   search: search.value,
   ordering: ordering.value,
+  no_province: noProvince.value ? "1" : "",
 }));
 
 async function load() {
@@ -70,13 +73,42 @@ watch(() => crm.revision, load);
  *  list no longer means anything. */
 function restart() { page.value = 1; selected.value = new Set(); load(); }
 watch(() => crm.query, restart, { deep: true });
-watch([status, ordering], restart);
+watch([status, ordering, noProvince], restart);
 watch(page, load);
 
 let t: number | undefined;
 watch(search, () => { window.clearTimeout(t); t = window.setTimeout(restart, 350); });
 
 const pages = computed(() => Math.max(Math.ceil(total.value / PAGE_SIZE), 1));
+
+// ---- province, set from the list -------------------------------------------------
+/**
+ * The province belongs to the customer, not the deal — so setting it here sets
+ * it for every one of that customer's deals, and the rows on screen follow.
+ */
+const provinces = computed(() => crm.options?.provinces ?? []);
+const savingProvince = ref<number | null>(null);
+
+async function setProvince(d: Deal, value: string) {
+  if (!d.customer) return;
+  const id = value ? Number(value) : null;
+  savingProvince.value = d.id;
+  try {
+    await crmApi.saveCustomer({ province: id }, d.customer);
+    const name = provinces.value.find((p) => p.id === id)?.name_fa ?? "";
+    for (const r of rows.value) {
+      if (r.customer === d.customer) {
+        r.province_id = id;
+        r.province_name = name;
+      }
+    }
+    toast.success(`استان «${d.customer_name}» ${name ? `شد «${name}»` : "پاک شد"}`);
+  } catch (e: any) {
+    toast.error(e?.response?.data?.detail ?? "استان ذخیره نشد.");
+  } finally {
+    savingProvince.value = null;
+  }
+}
 
 const showForm = ref(false);
 function onSaved(id: number) {
@@ -105,7 +137,9 @@ const COLUMNS = [
   { key: "amount", label: "مبلغ" },
   { key: "profit", label: "سود" },
   { key: "margin", label: "حاشیه" },
-  { key: "province", label: "استان", default: false },
+  // A deal has no province of its own: this is the customer's, and editing it
+  // re-files every deal and invoice of that customer.
+  { key: "province", label: "استان مشتری" },
   { key: "source", label: "منبع سرنخ", default: false },
   { key: "expected", label: "موعد بسته‌شدن", default: false },
   { key: "date", label: "تاریخ" },
@@ -146,6 +180,13 @@ const assignTo = ref<number | "">("");
 const lostReason = ref<number | "">("");
 
 const moveStage = computed(() => crm.options?.stages.find((s) => s.id === moveTo.value));
+/** The pipeline of the ticked deals; a mix of books shows every list, each
+ *  stage named with its book (the server skips a deal whose board lacks it). */
+const moveStages = computed(() => {
+  const books = new Set(rows.value.filter((r) => selected.value.has(r.id)).map((r) => r.channel ?? ""));
+  if (books.size === 1) return crm.stagesFor([...books][0]).map((s) => ({ id: s.id, label: s.name_fa }));
+  return (crm.options?.stages ?? []).map((s) => ({ id: s.id, label: s.channel ? `${s.channel_display} · ${s.name_fa}` : s.name_fa }));
+});
 
 async function bulkMove() {
   if (!moveTo.value) return;
@@ -226,6 +267,10 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
         </div>
       </div>
 
+      <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer shrink-0">
+        <input v-model="noProvince" type="checkbox" class="accent-slate-700" />
+        فقط بدون استان
+      </label>
       <CrmExportButton kind="deals" :params="params" :total="total" title="معاملات" />
       <button
         v-if="crm.canEdit"
@@ -334,7 +379,21 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
                 <span class="text-[11px] rounded-full px-2 py-0.5" :class="statusClass[d.status]">{{ d.status_display }}</span>
                 <span v-if="d.reason_name" class="text-[10px] text-red-400 block mt-0.5">{{ d.reason_name }}</span>
               </td>
-              <td v-if="col('province')" class="px-3 text-slate-500 text-xs">{{ d.province_name || "—" }}</td>
+              <td v-if="col('province')" class="px-3 text-xs" @click.stop>
+                <select
+                  v-if="crm.canEdit && d.customer"
+                  class="bg-transparent rounded-lg px-1.5 py-1 border outline-none focus:ring-2 focus:ring-slate-300 max-w-[130px]"
+                  :class="d.province_id ? 'border-transparent hover:border-slate-200 text-slate-600' : 'border-amber-300 text-amber-700 bg-amber-50'"
+                  :value="d.province_id ?? ''"
+                  :disabled="savingProvince === d.id"
+                  :title="`استان مشتری «${d.customer_name}» — تغییرش در پرونده‌ی مشتری ذخیره می‌شود و همه‌ی معامله‌ها و فاکتورهای او را جابه‌جا می‌کند`"
+                  @change="setProvince(d, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="">— بدون استان —</option>
+                  <option v-for="p in provinces" :key="p.id" :value="p.id">{{ p.name_fa }}</option>
+                </select>
+                <span v-else class="text-slate-500">{{ d.province_name || "—" }}</span>
+              </td>
               <td v-if="col('source')" class="px-3 text-slate-500 text-xs">{{ d.source_name || "—" }}</td>
               <td v-if="col('amount')" class="px-3 text-left text-ink whitespace-nowrap ltr-nums">{{ rial(d.amount_rial) }}</td>
               <td v-if="col('profit')" class="px-3 text-left whitespace-nowrap ltr-nums" :class="Number(d.profit_rial) >= 0 ? 'text-emerald-600' : 'text-red-500'">{{ rial(d.profit_rial) }}</td>
@@ -365,7 +424,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
         <template v-if="crm.canEdit">
           <select v-model="moveTo" class="bg-white/10 rounded-lg px-2 py-1.5 text-xs outline-none">
             <option value="" class="text-ink">انتقال به مرحله…</option>
-            <option v-for="s in crm.options?.stages ?? []" :key="s.id" :value="s.id" class="text-ink">{{ s.name_fa }}</option>
+            <option v-for="s in moveStages" :key="s.id" :value="s.id" class="text-ink">{{ s.label }}</option>
           </select>
           <select v-if="moveStage?.kind === 'lost'" v-model="lostReason" class="bg-white/10 rounded-lg px-2 py-1.5 text-xs outline-none">
             <option value="" class="text-ink">دلیل…</option>
@@ -378,7 +437,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
           <span class="w-px h-5 bg-white/20 mx-1"></span>
           <select v-model="assignTo" class="bg-white/10 rounded-lg px-2 py-1.5 text-xs outline-none">
             <option value="" class="text-ink">سپردن به کارشناس…</option>
-            <option v-for="e in crm.options?.employees ?? []" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
+            <option v-for="e in crm.rosterEmployees" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
           </select>
           <button v-if="assignTo" class="text-xs rounded-lg px-3 py-1.5 bg-white text-ink disabled:opacity-50" :disabled="bulkBusy" @click="bulkAssign">ثبت</button>
         </template>

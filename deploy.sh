@@ -6,6 +6,19 @@
 #
 #   cd ~/bi-platform && git fetch origin && git show origin/main:deploy.sh > /tmp/bi-deploy.sh && bash /tmp/bi-deploy.sh
 #
+# Going back to an earlier version is the same command with the version (as
+# the site shows it) or a commit after it, and coming back is the plain
+# command again:
+#
+#   … && bash /tmp/bi-deploy.sh 1.50      # the site as it was before PR #51
+#   … && bash /tmp/bi-deploy.sh 3f2a9c1   # any commit
+#   … && bash /tmp/bi-deploy.sh           # back to the latest main
+#
+# An older version goes through every check below, exactly like a new one.
+# Its migrations are not undone — that would drop the data the newer version
+# stored — so the database stays ahead of the code; the run lists what the
+# older code does not know about.
+#
 # Why it is shaped like this. The deploy of ۲۳ شهریور ۱۴۰۵ took the whole site
 # down: `git pull` put new code under the live app, every request came back as
 # LiteSpeed's «Internal Error», and the site stayed down until the code was
@@ -20,8 +33,8 @@
 #   4. The live site has to answer. If it does not, the live folder goes back
 #      to the previous commit on its own, restarts, and the log is printed.
 #
-# Data loads (CRM / آرپا) run last and can never block or undo a deploy: a
-# failed import is reported, the site stays up.
+# A deploy never loads data: CRM's آرپا and دیدار data come in through the
+# site's own upload pages, by the system admin.
 
 set -uo pipefail
 
@@ -104,8 +117,43 @@ fi
 
 PREV=$(git rev-parse HEAD)
 say "گرفتن آخرین کد از گیت‌هاب…"
-git fetch origin "$BRANCH" --quiet || { echo "❌ fetch ناموفق بود"; exit 1; }
-NEW=$(git rev-parse "origin/$BRANCH")
+git fetch origin "$BRANCH" --tags --quiet || { echo "❌ fetch ناموفق بود"; exit 1; }
+
+# What to deploy: the latest main, or the version / commit given as $1.
+# «1.N» is the site as it stood just before PR N+1 was merged: the first
+# parent of the oldest merge of a later PR. A tag v1.N wins over that rule —
+# it pins a version whose history the rule reads wrong (1.50: main was
+# fast-forwarded onto the PR branch before its merge commit was made).
+resolve_target() {
+  local want="$1" n merge
+  if [[ "$want" =~ ^1\.([0-9]+)$ ]]; then
+    n="${BASH_REMATCH[1]}"
+    if git rev-parse -q --verify "refs/tags/v$want^{commit}" >/dev/null; then
+      git rev-parse "refs/tags/v$want^{commit}"; return
+    fi
+    merge=$(git log "origin/$BRANCH" --merges --reverse --format='%H %s' \
+      | awk -v n="$n" 'match($0, /Merge pull request #[0-9]+/) {
+          pr = substr($0, RSTART + 20, RLENGTH - 20) + 0
+          if (pr > n) { print $1; exit } }')
+    if [ -n "$merge" ]; then
+      git rev-parse "$merge^1"
+    else
+      git rev-parse "origin/$BRANCH"   # 1.N is the latest version
+    fi
+  else
+    git rev-parse -q --verify "$want^{commit}"
+  fi
+}
+
+TARGET="${1:-}"
+if [ -n "$TARGET" ]; then
+  NEW=$(resolve_target "$TARGET") || NEW=""
+  [ -n "$NEW" ] || { echo "❌ نسخه یا کامیت «$TARGET» پیدا نشد"; exit 1; }
+  git merge-base --is-ancestor "$NEW" "origin/$BRANCH" \
+    || { echo "❌ «$TARGET» روی $BRANCH نیست؛ فقط نسخه‌های مرج‌شده قابل دیپلوی‌اند"; exit 1; }
+else
+  NEW=$(git rev-parse "origin/$BRANCH")
+fi
 echo "   نسخه‌ی فعلی: $(git log --oneline -1 "$PREV")"
 echo "   نسخه‌ی جدید:  $(git log --oneline -1 "$NEW")"
 
@@ -136,6 +184,22 @@ python manage.py shell -c "from django.db import connection; connection.ensure_c
 say "اعمال مایگریشن‌ها (فقط افزودنی‌اند؛ نسخه‌ی فعلی سایت با آن‌ها کار می‌کند)…"
 python manage.py migrate --noinput || fail "مایگریشن ناموفق بود"
 
+if [ -n "$TARGET" ]; then
+  # An older version: the database may hold migrations this code has never
+  # heard of. They stay (undoing them drops data), and they are named here so
+  # a failure on the old version can be traced to them.
+  python manage.py shell -c "
+from django.db import connection
+from django.db.migrations.loader import MigrationLoader
+loader = MigrationLoader(connection)
+ahead = sorted(set(loader.applied_migrations) - set(loader.disk_migrations))
+if ahead:
+    print('   ⚠️ دیتابیس جلوتر از این نسخه است؛ این مایگریشن‌ها اعمال‌شده می‌مانند:')
+    for app, name in ahead:
+        print('     ', app, name)
+"
+fi
+
 say "درخواست واقعی به نسخه‌ی جدید، روی دیتابیس واقعی…"
 DEPLOY_HOST="$SITE_HOST" python manage.py shell -c "
 import os, sys
@@ -152,7 +216,14 @@ sys.exit(0 if home == 200 and api in (200, 401, 403) else 1)
 say "انتقال سایت به نسخه‌ی جدید…"
 cd "$APP_DIR" || fail "پوشه‌ی سایت باز نشد"
 cleanup_stage
-if ! { git checkout --quiet "$BRANCH" && git merge --ff-only --quiet "origin/$BRANCH"; }; then
+if [ -n "$TARGET" ]; then
+  # Detached, so local main stays where it is and the plain command brings
+  # the latest back.
+  go_live() { git checkout --quiet --detach "$NEW"; }
+else
+  go_live() { git checkout --quiet "$BRANCH" && git merge --ff-only --quiet "origin/$BRANCH"; }
+fi
+if ! go_live; then
   git checkout --quiet --detach "$PREV" || true
   fail "جابه‌جایی کد سایت ناموفق بود"
 fi
@@ -188,25 +259,15 @@ restart_app
 say "بررسی سایت زنده…"
 site_is_up || rollback "سایت بعد از ری‌استارت جواب نداد"
 
-# --- 3. data loads: reported, never fatal ------------------------------------------------
-# Both importers are idempotent by key and no-ops once their data exists; the
-# workbooks are uploaded by hand and may not be there. A failure here says so
-# and leaves the (already healthy) site alone.
-say "بارگذاری داده‌ی CRM (فقط بار اول)…"
-python manage.py import_didar_crm --if-empty || echo "⚠️ بارگذاری CRM خطا داد — سایت سالم است."
-
-# آرپا is deliberately NOT loaded here any more.
-#
-# It used to be, on the theory that both importers are idempotent. They are
-# idempotent against the *workbook* — not against what people do in the app
-# between two deploys. Every deploy re-read the same export and so:
-#   * brought back customers the team had deleted (18 of 20 in a test: the
-#     delete takes the آرپا id with it, so the party looks new again);
-#   * rewrote ~1,800 customers from the file, undoing hand edits;
-# and did it on a schedule set by code changes, which has nothing to do with
-# when accounting data changes. Loading accounting data is its own act, run
-# when a fresh export has been uploaded — see backend/data/arpa/README.md.
+# --- 3. no data loads ----------------------------------------------------------------------
+# A deploy ships code and nothing else. CRM data comes in only through the
+# site — «ورود از آرپا» and «ورود از دیدار» — when the system admin uploads an
+# export. Loading data here used to undo deletes and hand edits made in the
+# app on every release, on a schedule set by code changes.
 
 echo
 echo "✅ به‌روزرسانی انجام شد و سایت جواب می‌دهد: $SITE_URL"
 echo "   نسخه: $(git -C "$APP_DIR" log --oneline -1)"
+if [ -n "$TARGET" ]; then
+  echo "   سایت روی نسخه‌ی «$TARGET» است. برای برگشت به آخرین نسخه همین دستور را بدون شماره اجرا کنید."
+fi

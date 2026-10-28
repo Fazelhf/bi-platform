@@ -18,13 +18,17 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Count, DecimalField, F, Max, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -32,13 +36,13 @@ from rest_framework.views import APIView
 from apps.crm import merge as crm_merge, reports as rpt
 from apps.crm.jalali import jalali_month_of, jalali_str, month_bounds, month_label, period_for
 from apps.crm.models import (
-    CustomerMatchCandidate, Dataset, SalesInvoice,
+    CustomerMatchCandidate, Dataset, SalesInvoice, SalesZone, TerritoryAssignment,
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
-    ProductCategory, Tag, Task,
+    ProductCategory, Tag, Task, fit_stage, stages_for, stages_in_view,
 )
 from apps.crm.serializers import (
-    MatchCandidateSerializer, SalesInvoiceSerializer,
+    MatchCandidateSerializer, SalesInvoiceSerializer, TerritoryAssignmentSerializer,
     ActivitySerializer, CustomerDetailSerializer, CustomerFeedbackSerializer,
     CustomerGroupSerializer, CustomerListSerializer, CustomerWriteSerializer,
     DealDetailSerializer, DealItemSerializer, DealListSerializer,
@@ -116,6 +120,14 @@ def is_crm_manager(user) -> bool:
         user
         and user.is_authenticated
         and (user.is_superuser or user.role in MANAGER_ROLES)
+    )
+
+
+def is_system_admin(user) -> bool:
+    """مدیر سیستم: a superuser or the `admin` role. Runs the imports."""
+    return bool(
+        user and user.is_authenticated
+        and (user.is_superuser or getattr(user, "role", "") == "admin")
     )
 
 
@@ -210,6 +222,18 @@ class CrmAccess(BasePermission):
         return can_read_crm(request.user)
 
 
+class SystemAdminOnly(BasePermission):
+    """
+    ورود از آرپا: it writes the company's sales record and rules on فروش
+    سوری, so it belongs to the system admin alone — not to every manager.
+    """
+
+    message = "این بخش فقط برای مدیر سیستم است."
+
+    def has_permission(self, request, view):
+        return is_system_admin(request.user)
+
+
 class GatedAPIView(APIView):
     """Base for the CRM's non-viewset endpoints."""
 
@@ -245,25 +269,30 @@ def employee_options(request):
     who has never worked their book — a row that then shows up in nobody's
     reports, because the rest of the system agrees the two are separate.
     """
+    from django.db.models import BooleanField, ExpressionWrapper
+
+    from apps.crm.people import sales_roster
+
     qs = (
         DimEmployee.objects.select_related("team")
         .filter(is_active=True, is_placeholder=False)
         .exclude(full_name_fa__in=["", "0"])
     )
     channels = channels_for(request.user)
-    if channels is not None:
-        wanted = list(channels)
-        # The roster, *plus* anyone who already owns something in this book.
-        # Nine of the nineteen active salespeople have no membership row —
-        # the roster was added long after the customer file — and dropping
-        # them would mean opening an existing customer and finding its owner
-        # missing from the list that is supposed to contain it.
-        qs = qs.filter(
-            Q(memberships__channel__in=wanted, memberships__is_active=True)
-            | Q(customers__channel__in=wanted)
-            | Q(deals__channel__in=wanted)
-        ).distinct()
-    return qs
+    # Every sales book for an account with no department (the CEO). It used
+    # to mean every employee in the company — finance and production too.
+    wanted = list(channels) if channels is not None else [c for c, _ in SalesChannel.choices]
+    # The roster, *plus* anyone who already owns something in this book, so an
+    # existing customer's owner is still on the list that labels it. Those
+    # extra rows come back with `in_roster` false: shown, not offered for new
+    # assignments — `sales_roster` is what a save is checked against.
+    # Ids, not membership rows: a سرپرست or مدیر فروش is on the roster by seat.
+    roster = list(sales_roster(wanted).values_list("pk", flat=True))
+    return qs.filter(
+        Q(pk__in=roster)
+        | Q(customers__channel__in=wanted)
+        | Q(deals__channel__in=wanted)
+    ).annotate(in_roster=ExpressionWrapper(Q(pk__in=roster), output_field=BooleanField())).distinct()
 
 
 def apply_ordering(qs, request, allowed: dict[str, str]):
@@ -306,9 +335,21 @@ def query_filters(request) -> rpt.Filters:
     prevent, reintroduced one call site at a time. One helper is harder to
     forget than one argument.
     """
-    return rpt.Filters.from_query(
-        request.query_params, active_dataset(request), crm_scope(request.user)
-    )
+    # A date the parser cannot read used to leave that side of the window
+    # open — «from 1405/07/01» silently meant «from the beginning of time»,
+    # and every card on the page summed a different period from the one on
+    # screen. Refused instead.
+    q = request.query_params
+    bad = {
+        k: ["تاریخ نامعتبر است؛ قالب میلادی YYYY-MM-DD لازم است."]
+        for k in ("date_from", "date_to") if q.get(k) and rpt._parse_date(q.get(k)) is None
+    }
+    if bad:
+        raise ValidationError(bad)
+    f = rpt.Filters.from_query(q, active_dataset(request), crm_scope(request.user))
+    if f.start and f.end and f.start >= f.end:
+        raise ValidationError({"date_to": ["پایان بازه پیش از شروع آن است."]})
+    return f
 
 
 class CrmPagination(PageNumberPagination):
@@ -461,8 +502,156 @@ class _Base(viewsets.ModelViewSet):
 
 
 class CustomerGroupViewSet(_Base):
+    """
+    گروه‌های مشتری. Everyone reads them; a manager creates, renames, moves
+    customers between them and deletes them.
+
+    Moving and deleting touch only customers in the manager's own books: a
+    group is shared reference data, but فروش همکار's manager re-filing
+    بانکی's customers is not theirs to do. A group that still holds someone
+    else's customers after the move is therefore not deleted.
+    """
+
     queryset = CustomerGroup.objects.all()
     serializer_class = CustomerGroupSerializer
+
+    def get_queryset(self):
+        # Counted as the customer list will show them — in the caller's own
+        # books. A group-wide count beside a book-scoped list read as «2000
+        # customers here, none on the list».
+        live = Q(customers__merged_into__isnull=True)
+        channels = crm_scope(self.request.user).channels
+        if channels is not None:
+            live &= Q(customers__channel__in=channels)
+        return super().get_queryset().annotate(customer_count=Count("customers", filter=live, distinct=True))
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["channels"] = crm_scope(self.request.user).channels
+        if self.action == "list":
+            names = dict(SalesChannel.choices)
+            by_book: dict[int, list] = {}
+            for gid, ch, n in (Customer.objects.filter(group__isnull=False, merged_into__isnull=True)
+                               .values_list("group_id", "channel").annotate(n=Count("id")).order_by("-n")):
+                by_book.setdefault(gid, []).append({"channel": ch, "label": names.get(ch, ch), "count": n})
+            ctx["by_book"] = by_book
+        return ctx
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        # A book's own group is its managers' to change; a shared one is anyone's.
+        mine = crm_scope(request.user).channels
+        if request.method not in SAFE_METHODS and obj.channel and mine is not None and obj.channel not in mine:
+            self.permission_denied(request, message=f"این گروه متعلق به دفتر «{obj.get_channel_display()}» است.")
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in SAFE_METHODS and not is_crm_manager(request.user):
+            self.permission_denied(request, message="مدیریت گروه‌ها با مدیر فروش است.")
+
+    def perform_create(self, serializer):
+        from django.utils.text import slugify
+
+        base = "cg-" + (slugify(serializer.validated_data.get("code") or serializer.validated_data["name_fa"],
+                                allow_unicode=True)[:40] or "group")
+        code, n = base, 1
+        while CustomerGroup.objects.filter(code=code).exists():
+            n += 1
+            code = f"{base}-{n}"
+        # A book manager's new group is their book's; the CEO's is shared
+        # unless set.
+        mine = crm_scope(self.request.user).channels
+        extra = {"channel": mine[0]} if mine and len(mine) == 1 and "channel" not in serializer.validated_data else {}
+        serializer.save(code=code, **extra, **self.create_defaults(serializer))
+
+    def _mine(self, group):
+        qs = Customer.objects.filter(group=group)
+        channels = crm_scope(self.request.user).channels
+        return qs if channels is None else qs.filter(channel__in=channels)
+
+    def _target(self, group):
+        raw = self.request.data.get("move_to") or self.request.query_params.get("move_to")
+        if not raw:
+            return None
+        target = CustomerGroup.objects.filter(pk=raw, dataset=group.dataset).first()
+        if target is None or target.pk == group.pk:
+            raise ValidationError({"move_to": ["گروه مقصد معتبر نیست."]})
+        return target
+
+    @staticmethod
+    def _align(groups) -> int:
+        """
+        File each owned group's customers in the owning book — with their
+        deals, since a deal is meant to sit in its customer's book (the
+        «دپارتمان معامله با دپارتمان مشتری» check). آرپا's invoices keep the
+        book the sale was recorded in: that is history, not filing.
+        """
+        moved = 0
+        with transaction.atomic():
+            for g in groups:
+                if not g.channel:
+                    continue
+                stray = Customer.objects.filter(group=g, merged_into__isnull=True).exclude(channel=g.channel)
+                ids = list(stray.values_list("pk", flat=True))
+                if not ids:
+                    continue
+                Customer.objects.filter(pk__in=ids).update(channel=g.channel)
+                for deal in Deal.objects.filter(customer_id__in=ids).exclude(channel=g.channel).select_related("stage"):
+                    deal.channel = g.channel
+                    deal.stage = fit_stage(deal.stage, deal.channel, deal.dataset)
+                    deal.save(update_fields=["channel", "stage", "updated_at"])
+                moved += len(ids)
+        return moved
+
+    def _ceo_only(self, request):
+        if crm_scope(request.user).channels is not None:
+            self.permission_denied(request, message="بردن مشتری‌ها از یک دفتر به دفتر دیگر با مدیرعامل است.")
+
+    @action(detail=True, methods=["post"])
+    def align(self, request, pk=None):
+        """This group's customers (and their deals) into the group's own book."""
+        self._ceo_only(request)
+        group = self.get_object()
+        if not group.channel:
+            return Response({"detail": "این گروه مشترک است و دفتر مالک ندارد."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"moved": self._align([group])})
+
+    @action(detail=False, methods=["post"], url_path="align-all")
+    def align_all(self, request):
+        """Every owned group at once; shared groups are left as they are."""
+        self._ceo_only(request)
+        return Response({"moved": self._align(CustomerGroup.objects.exclude(channel=""))})
+
+    @action(detail=True, methods=["post"])
+    def move(self, request, pk=None):
+        """All of this group's customers (in the caller's books) to `move_to`."""
+        group = self.get_object()
+        target = self._target(group)
+        if target is None:
+            return Response({"move_to": ["گروه مقصد را انتخاب کنید."]}, status=status.HTTP_400_BAD_REQUEST)
+        moved = self._mine(group).update(group=target)
+        return Response({"moved": moved, "to": target.name_fa})
+
+    def destroy(self, request, *args, **kwargs):
+        group = self.get_object()
+        if group.is_system:
+            return Response({"detail": f"«{group.name_fa}» گروه سیستمی است و حذف نمی‌شود؛ فقط نامش قابل تغییر است."},
+                            status=status.HTTP_409_CONFLICT)
+        held = group.customers.count()
+        target = self._target(group)
+        if held and target is None:
+            return Response({"detail": f"{held} مشتری در این گروه است؛ گروه مقصد را انتخاب کنید.",
+                             "customers": held}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            moved = self._mine(group).update(group=target) if held else 0
+            left = group.customers.count()
+            if left:
+                transaction.set_rollback(True)
+                return Response({"detail": f"{left} مشتری این گروه در دفتر واحد دیگری است؛ "
+                                           "گروه حذف نشد. مدیر آن واحد باید آن‌ها را منتقل کند."},
+                                status=status.HTTP_409_CONFLICT)
+            group.delete()
+        return Response({"moved": moved, "deleted": True})
 
 
 class TagViewSet(_Base):
@@ -549,27 +738,39 @@ class CustomerViewSet(_Base):
                 first_contact_at__lt=rpt._aware(f.end),
             )
 
-        if f.owner:
-            qs = qs.filter(owner_id=f.owner)
-        if f.group:
-            qs = qs.filter(group_id=f.group)
-        if f.province:
-            qs = qs.filter(province_id=f.province)
-        if f.source:
-            qs = qs.filter(lead_source_id=f.source)
+        if f.owner is not None:
+            qs = qs.filter(owner_id=f.owner or None)
+        if f.group is not None:
+            qs = qs.filter(group_id=f.group or None)
+        if f.province is not None:
+            qs = qs.filter(province_id=f.province or None)
+        if f.zone:
+            qs = qs.filter(rpt.zone_q(f.zone))
+        if f.source is not None:
+            qs = qs.filter(lead_source_id=f.source or None)
         if f.tag:
             qs = qs.filter(tags__id=f.tag)
         if q.get("status") in dict(Customer.Status.choices):
             qs = qs.filter(status=q["status"])
         search = (q.get("search") or "").strip()
         if search:
-            qs = qs.filter(
+            from apps.crm.matching import fold, name_key, phone_key
+
+            # The folded key as well as the raw column: «علي» typed in Arabic
+            # letters has to find «علی» stored in Persian, and the reverse.
+            cond = (
                 Q(name_fa__icontains=search)
                 | Q(contact_name__icontains=search)
                 | Q(phone__icontains=search)
                 | Q(mobile__icontains=search)
                 | Q(code__icontains=search)
             )
+            if name_key(search):
+                cond |= Q(name_key__icontains=name_key(search))
+            digits = "".join(ch for ch in fold(search) if ch.isdigit())
+            if len(digits) >= 8:
+                cond |= Q(mobile_key=phone_key(digits)) | Q(phone_key=phone_key(digits))
+            qs = qs.filter(cond)
         ids = id_list(self.request)
         if ids:
             qs = qs.filter(pk__in=ids)
@@ -635,12 +836,182 @@ class CustomerViewSet(_Base):
         return Response({"activities": acts, "deals": deals})
 
 
+    def perform_update(self, serializer):
+        # Which department's book a customer is filed in is a manager's call.
+        if not is_crm_manager(self.request.user):
+            serializer.validated_data.pop("channel", None)
+        super().perform_update(serializer)
+
     # -- bulk actions on the list -------------------------------------------
     @action(detail=False, methods=["post"], url_path="bulk-assign")
     def bulk_assign(self, request):
         return bulk_assign(request, self.scoped(
             Customer.objects.filter(dataset=active_dataset(request))
         ))
+
+    @action(detail=False, methods=["post"], url_path="bulk-update")
+    def bulk_update(self, request):
+        """
+        One value onto many customers — group, province, owner, status, lead
+        source or city — in one request and one UPDATE. Validated by the same
+        serializer as a single edit, and limited to rows the caller may edit.
+        """
+        ids = [i for i in (request.data.get("ids") or []) if isinstance(i, int)]
+        fields = request.data.get("fields") or {}
+        if not ids or not isinstance(fields, dict) or not fields:
+            return Response({"detail": "ردیف‌ها و مقدار تازه را انتخاب کنید."}, status=status.HTTP_400_BAD_REQUEST)
+        bad = set(fields) - set(CustomerWriteSerializer.BULK)
+        if bad:
+            return Response({"detail": "این فیلدها گروهی ویرایش نمی‌شوند: " + "، ".join(sorted(bad))},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if "owner" in fields and not is_crm_manager(request.user):
+            return Response({"detail": "تغییر کارشناس فقط برای مدیران فروش است."}, status=status.HTTP_403_FORBIDDEN)
+        rows = self.scoped(Customer.objects.filter(
+            dataset=active_dataset(request), merged_into__isnull=True, pk__in=ids,
+        ))
+        first = rows.first()
+        if first is None:
+            return Response({"detail": "مشتری معتبری در انتخاب نبود."}, status=status.HTTP_400_BAD_REQUEST)
+        ser = CustomerWriteSerializer(first, data=fields, partial=True, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        values = {k: ser.validated_data[k] for k in fields if k in ser.validated_data}
+        updated = rows.update(**values)
+        return Response({"updated": updated})
+
+    @action(detail=True, methods=["get"])
+    def similar(self, request, pk=None):
+        """
+        Customers that may be this one: same شناسه/کد ملی, same mobile or
+        phone, or a name that shares its words. A suggestion for the person
+        deciding a merge — never a decision; nothing here merges.
+        """
+        from difflib import SequenceMatcher
+
+        from apps.crm.models import CrmConfig
+
+        me = self.get_object()
+        # A manager is looking for duplicates anywhere in the file — the
+        # twin of a بانکی customer is often filed under همکار. An expert
+        # still sees only their own book.
+        base = (
+            Customer.objects.filter(dataset=active_dataset(request))
+            if is_crm_manager(request.user) else self.scoped(Customer.objects.all())
+        )
+        live = base.filter(merged_into__isnull=True).exclude(pk=me.pk)
+        cfg = CrmConfig.get()
+        found: dict[int, dict] = {}
+
+        def add(qs, why):
+            for c in qs.select_related("owner", "province")[:10]:
+                row = found.setdefault(c.pk, {
+                    "id": c.pk, "name_fa": c.name_fa, "city": c.city,
+                    "province": c.province.name_fa if c.province_id else "",
+                    "owner": c.owner.full_name_fa if c.owner_id else "",
+                    "phone": c.mobile or c.phone, "national_id": c.national_id,
+                    "deals": c.deals.count(), "invoices": c.invoices.count(),
+                    "why": [],
+                })
+                if why not in row["why"]:
+                    row["why"].append(why)
+
+        # Every comparison is on the stored keys, folded the same way on both
+        # sides. Comparing them against the raw columns is what used to miss
+        # «آقاي سلطاني» (آرپا's Arabic letters) against «آقای سلطانی».
+        if me.nid_key:
+            add(live.filter(nid_key=me.nid_key), "شناسه/کد ملی یکسان")
+        if cfg.match_phone:
+            for value in {me.mobile_key, me.phone_key} - {""}:
+                add(live.filter(Q(mobile_key=value) | Q(phone_key=value)), "تلفن یکسان")
+        if me.name_key:
+            add(live.filter(name_key=me.name_key), "نام یکسان")
+            words = [w for w in me.name_key.split() if len(w) > 2]
+            if words:
+                q = Q()
+                for w in words:
+                    q &= Q(name_key__icontains=w)
+                add(live.filter(q), "نام شبیه")
+            if len(me.name_key) >= 4:
+                threshold = float(cfg.fuzzy_threshold)
+                close = [
+                    pk for pk, key in live.filter(name_key__startswith=me.name_key[:4])
+                    .values_list("pk", "name_key")[:500]
+                    if key != me.name_key
+                    and SequenceMatcher(None, key, me.name_key).ratio() >= threshold
+                ]
+                add(live.filter(pk__in=close), "نام مشابه")
+        rows = sorted(found.values(), key=lambda r: -len(r["why"]))[:15]
+        return Response(rows)
+
+    @action(detail=True, methods=["get"])
+    def merges(self, request, pk=None):
+        """سابقه ادغام — merges this customer took part in, newest first."""
+        from apps.crm.models import CustomerMerge
+
+        me = self.get_object()
+        rows = CustomerMerge.objects.filter(
+            Q(survivor=me) | Q(absorbed=me)
+        ).select_related("survivor", "absorbed", "by")
+        return Response([
+            {
+                "id": m.pk, "at": m.created_at, "at_jalali": jalali_str(m.created_at),
+                "by": m.by.get_full_name() or m.by.username if m.by else "",
+                "survivor": {"id": m.survivor_id, "name_fa": m.survivor.name_fa},
+                "absorbed": {"id": m.absorbed_id, "name_fa": m.absorbed.name_fa,
+                             "code": m.absorbed.code},
+                "moved": {k: len(v) for k, v in m.moved.items()},
+                "before": m.before,
+            }
+            for m in rows
+        ])
+
+    @action(detail=True, methods=["post"])
+    def merge(self, request, pk=None):
+        """
+        «این دو یک مشتری‌اند» — from the customer page itself.
+
+        `other` is the second customer; `keep` says which survives ("this" or
+        "other"). Everything the absorbed one had — deals, invoices,
+        activities, tasks, its آرپا/دیدار codes — moves to the survivor, which
+        also takes any field it was missing. The absorbed row is kept and
+        marked, not deleted. The pair is filed in بازبینی تطبیق as decided, so
+        there is a record of who merged what.
+        """
+        if not is_crm_manager(request.user):
+            return Response({"detail": "ادغام مشتری با مدیر فروش است."}, status=status.HTTP_403_FORBIDDEN)
+        me = self.get_object()
+        try:
+            # Any book, as in `similar`: the twin may be filed under another
+            # channel. Recorded in CustomerMerge, so it stays traceable.
+            other = Customer.objects.filter(dataset=active_dataset(request)).get(
+                pk=int(request.data.get("other") or 0)
+            )
+        except (Customer.DoesNotExist, ValueError):
+            return Response({"detail": "مشتری دوم پیدا نشد."}, status=status.HTTP_400_BAD_REQUEST)
+        survivor, absorbed = (me, other) if request.data.get("keep", "this") == "this" else (other, me)
+        try:
+            with transaction.atomic():
+                candidate = crm_merge.queue_pair(survivor, absorbed)
+                if candidate is None:
+                    candidate = CustomerMatchCandidate.objects.filter(
+                        source="crm", state=CustomerMatchCandidate.State.PENDING,
+                        customer_id__in=(survivor.pk, absorbed.pk),
+                        duplicate_id__in=(survivor.pk, absorbed.pk),
+                    ).first()
+                if candidate is not None:
+                    crm_merge.accept(candidate, request.user, customer=survivor)
+                else:
+                    crm_merge.absorb(survivor, absorbed, request.user)
+        except crm_merge.MergeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        from apps.crm.models import CustomerMerge
+
+        survivor.refresh_from_db()
+        record = CustomerMerge.objects.filter(survivor=survivor, absorbed=absorbed).first()
+        return Response({
+            "id": survivor.pk, "name_fa": survivor.name_fa, "absorbed": absorbed.pk,
+            "moved": {k: len(v) for k, v in (record.moved if record else {}).items()},
+            "last_activity_at": survivor.last_activity_at,
+        })
 
     @action(detail=False, methods=["post"], url_path="bulk-review")
     def bulk_review(self, request):
@@ -686,32 +1057,6 @@ class CustomerViewSet(_Base):
         else:
             queued, skipped = crm_merge.queue_scan(rows, dataset)
 
-        return self._queued(queued, skipped)
-
-    @action(detail=False, methods=["post"], url_path="scan-duplicates")
-    def scan_duplicates(self, request):
-        """
-        Sweep the whole customer file for duplicates, in one request.
-
-        Selecting rows only ever reached one page of the list; the duplicates
-        are spread across all of it. Queues, never merges — the same rule as
-        `bulk_review`. Managers only, like the queue it fills.
-        """
-        if not is_crm_manager(request.user):
-            return Response(
-                {"detail": "فقط مدیر فروش می‌تواند کل فهرست را بررسی کند."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        dataset = active_dataset(request)
-        rows = list(Customer.objects.filter(dataset=dataset, merged_into__isnull=True))
-        queued, skipped = crm_merge.queue_scan(rows, dataset)
-        return Response({
-            "scanned": len(rows),
-            "queued": len(queued),
-            "certain": sum(1 for c in queued if c.score == 1),
-        })
-
-    def _queued(self, queued, skipped):
         return Response({
             "queued": len(queued),
             "pairs": [
@@ -742,9 +1087,11 @@ class CustomerViewSet(_Base):
                 {"detail": "هیچ مشتری‌ای انتخاب نشده است."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        rows = Customer.objects.filter(
+        # Scoped like every other write: an expert deletes only their own rows,
+        # a department only its own book.
+        rows = self.scoped(Customer.objects.filter(
             pk__in=ids, dataset=active_dataset(request)
-        ).annotate(
+        )).annotate(
             n_deals=Count("deals", distinct=True),
             n_invoices=Count("invoices", distinct=True),
             n_activities=Count("activities", distinct=True),
@@ -802,8 +1149,8 @@ class CustomerFeedbackViewSet(_Base):
             qs = qs.filter(at__gte=rpt._aware(f.start))
         if f.end:
             qs = qs.filter(at__lt=rpt._aware(f.end))
-        if f.owner:
-            qs = qs.filter(employee_id=f.owner)
+        if f.owner is not None:
+            qs = qs.filter(employee_id=f.owner or None)
         if f.customer:
             qs = qs.filter(customer_id=f.customer)
         if self.request.query_params.get("unhappy") == "1":
@@ -833,7 +1180,7 @@ def customer_insights(customer) -> dict:
     now = timezone.now()
     today = now.date()
 
-    invoices = SalesInvoice.objects.filter(customer=customer, is_intercompany=False)
+    invoices = SalesInvoice.objects.counted().filter(customer=customer, is_intercompany=False)
     inv = invoices.aggregate(
         count=Count("id"),
         amount=Sum("amount_rial"),
@@ -960,7 +1307,7 @@ def bulk_assign(request, scoped_qs):
         return Response({"detail": "تغییر کارشناس فقط برای مدیران فروش است."}, status=403)
     ids = [i for i in (request.data.get("ids") or []) if isinstance(i, int)]
     owner_id = request.data.get("owner")
-    owner = employee_options(request).filter(pk=owner_id).first() if owner_id else None
+    owner = employee_options(request).filter(pk=owner_id, in_roster=True).first() if owner_id else None
     if not ids or not owner:
         return Response({"detail": "ردیف‌ها و کارشناس جدید را انتخاب کنید."}, status=400)
     updated = scoped_qs.filter(pk__in=ids).update(owner=owner)
@@ -1048,6 +1395,9 @@ class DealViewSet(_Base):
                 | Q(customer__name_fa__icontains=search)
                 | Q(code__icontains=search)
             )
+        # «فقط بدون استان» — the deals whose customer the map cannot place yet.
+        if q.get("no_province") == "1":
+            qs = qs.filter(customer__province__isnull=True)
         ids = id_list(self.request)
         if ids:
             qs = qs.filter(pk__in=ids)
@@ -1084,11 +1434,11 @@ class DealViewSet(_Base):
         if not data.get("opened_at"):
             extra["opened_at"] = timezone.now()
         if not data.get("stage"):
-            # Default to the first open stage so a new deal always appears on
-            # the board rather than in a stage-less limbo.
-            first = PipelineStage.objects.filter(
-                dataset=active_dataset(self.request),
-                is_active=True, kind=PipelineStage.Kind.OPEN
+            # Default to the first open stage of the deal's own book, so a new
+            # deal always appears on its board rather than in a stage-less limbo.
+            channel = data["customer"].channel if data.get("customer") else data.get("channel", "")
+            first = stages_for(channel, active_dataset(self.request)).filter(
+                kind=PipelineStage.Kind.OPEN
             ).order_by("order").first()
             if first:
                 extra["stage"] = first
@@ -1140,6 +1490,8 @@ class DealViewSet(_Base):
             )
         if obj.status == Deal.Status.WON and previous_status != Deal.Status.WON:
             self._mark_customer_won(obj)
+        elif previous_status == Deal.Status.WON and obj.status != Deal.Status.WON:
+            Customer.refresh_rollups([obj.customer_id])
 
     @staticmethod
     def _sync_close(deal: Deal) -> None:
@@ -1149,6 +1501,8 @@ class DealViewSet(_Base):
         report that measures on the closing date, and a deal moved back to an
         open stage while still flagged won would be counted as revenue twice.
         """
+        # A deal moved to another book leaves that book's pipeline behind.
+        deal.stage = fit_stage(deal.stage, deal.channel, deal.dataset)
         if deal.stage:
             deal.status = {
                 PipelineStage.Kind.WON: Deal.Status.WON,
@@ -1185,6 +1539,8 @@ class DealViewSet(_Base):
         stage, error = self._target_stage(request)
         if error:
             return error
+        if not stages_for(deal.channel, deal.dataset).filter(pk=stage.pk).exists():
+            return Response({"detail": "این مرحله از قیف این دفتر نیست."}, status=400)
         self._apply_move(deal, stage, request)
         return Response(DealDetailSerializer(deal).data)
 
@@ -1209,6 +1565,7 @@ class DealViewSet(_Base):
         """One deal to one stage, with its stage event — shared by the single
         move and the bulk one so neither can skip the log the funnel reads."""
         previous = deal.stage
+        was_won = deal.status == Deal.Status.WON
         now = timezone.now()
         last = deal.stage_events.order_by("-at").first()
         days = max((now - (last.at if last else deal.opened_at)).days, 0)
@@ -1235,6 +1592,8 @@ class DealViewSet(_Base):
             deal.closed_at = None
             deal.close_period = None
         deal.save()
+        if was_won and deal.status != Deal.Status.WON:
+            Customer.refresh_rollups([deal.customer_id])
 
         DealStageEvent.objects.create(
             deal=deal, from_stage=previous, to_stage=stage, at=now,
@@ -1266,7 +1625,8 @@ class DealViewSet(_Base):
         ).select_related("stage", "customer")
         moved = 0
         for deal in deals:
-            if deal.stage_id == stage.id:
+            # Another book's deal stays put: the stage is not on its board.
+            if deal.stage_id == stage.id or not stages_for(deal.channel, deal.dataset).filter(pk=stage.pk).exists():
                 continue
             self._apply_move(deal, stage, request)
             moved += 1
@@ -1357,16 +1717,22 @@ class ActivityViewSet(_Base):
         obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
-        # Re-derived rather than overwritten with `obj.at`: a call logged
-        # today for last month used to drag the customer's last touch back.
-        obj.customer.refresh_last_activity()
+        # Recomputed, not overwritten: a call logged today for last week must
+        # not pull «آخرین فعالیت» back past yesterday's meeting.
+        Customer.refresh_rollups([obj.customer_id])
 
     def perform_update(self, serializer):
+        previous = serializer.instance.customer_id
         super().perform_update(serializer)
         obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
-        obj.customer.refresh_last_activity()
+        Customer.refresh_rollups({previous, obj.customer_id})
+
+    def perform_destroy(self, instance):
+        customer_id = instance.customer_id
+        super().perform_destroy(instance)
+        Customer.refresh_rollups([customer_id])
 
     @action(detail=False, methods=["get"])
     def summary(self, request):
@@ -1463,7 +1829,73 @@ class CrmGeoView(GatedAPIView):
             "start": f.start.isoformat() if f.start else None,
             "end": f.end.isoformat() if f.end else None,
         }
+        if request.query_params.get("export") == "1":
+            return _geo_workbook(data, request)
         return Response(data)
+
+
+def _geo_workbook(data: dict, request):
+    """فروش جغرافیایی → اکسل, exactly what the map shows: the country, or one province."""
+    from apps.crm.export import sheets_workbook
+
+    lbl = {"key": "label", "label": "عنوان", "fmt": "text"}
+    amt = {"key": "amount", "label": "فروش (ریال)", "fmt": "rial"}
+    context = export_context(request)
+    if "customers" not in data:
+        sheet = {
+            "name": "استان‌ها", "title": "فروش به تفکیک استان",
+            "columns": [
+                {"key": "label", "label": "استان", "fmt": "text"}, amt,
+                {"key": "share_pct", "label": "سهم از کل", "fmt": "pct"},
+                {"key": "count", "label": "فاکتور", "fmt": "count"},
+                {"key": "customers", "label": "مشتری خریدار", "fmt": "count"},
+                {"key": "customer_base", "label": "کل مشتریان", "fmt": "count"},
+                {"key": "target", "label": "تارگت (ریال)", "fmt": "rial"},
+                {"key": "achievement_pct", "label": "تحقق", "fmt": "pct"},
+                {"key": "owner_label", "label": "کارشناسان", "fmt": "text"},
+            ],
+            "rows": data["rows"],
+            "total": {"label": "جمع کل", "amount": data["total"]},
+        }
+        return xlsx_response(sheets_workbook("فروش جغرافیایی", [sheet], context), "فروش جغرافیایی")
+
+    name = data["label"]
+    sheets = [
+        {"name": "مشتریان", "title": f"مشتریان {name}", "columns": [
+            {"key": "label", "label": "مشتری", "fmt": "text"},
+            {"key": "city", "label": "شهر", "fmt": "text"},
+            {"key": "owner", "label": "کارشناس", "fmt": "text"},
+            {"key": "group", "label": "گروه", "fmt": "text"},
+            {"key": "amount", "label": "خرید (ریال)", "fmt": "rial"},
+            {"key": "count", "label": "فاکتور", "fmt": "count"},
+            {"key": "unsettled", "label": "مانده (ریال)", "fmt": "rial"},
+            {"key": "last_purchase", "label": "آخرین خرید", "fmt": "text"},
+        ], "rows": [
+            {**c, "last_purchase": jalali_str(dt_date(c["last_purchase"])) if c["last_purchase"] else ""}
+            for c in data["customers"]
+        ], "total": {"label": "جمع کل", "amount": data["amount"], "unsettled": data["unsettled"]}},
+        {"name": "آخرین خریدها", "title": f"آخرین خریدهای {name}", "columns": [
+            {"key": "number", "label": "برگه", "fmt": "text"},
+            {"key": "date", "label": "تاریخ", "fmt": "text"},
+            {"key": "customer", "label": "مشتری", "fmt": "text"},
+            {"key": "amount", "label": "مبلغ (ریال)", "fmt": "rial"},
+            {"key": "unsettled", "label": "مانده (ریال)", "fmt": "rial"},
+        ], "rows": [{**r, "date": jalali_str(dt_date(r["date"]))} for r in data["recent"]]},
+        {"name": "کالاها", "title": f"پرفروش‌ترین کالاهای {name}", "columns": [
+            lbl, amt, {"key": "quantity", "label": "تعداد", "fmt": "count"},
+        ], "rows": data["products"]},
+        {"name": "شهرها", "title": f"فروش شهرهای {name}", "columns": [
+            lbl, amt, {"key": "buyers", "label": "خریدار", "fmt": "count"},
+        ], "rows": data["cities"]},
+        {"name": "کارشناسان", "title": f"کارشناسان {name}", "columns": [lbl, amt], "rows": data["reps"]},
+    ]
+    return xlsx_response(sheets_workbook(f"فروش {name}", sheets, context), f"فروش {name}")
+
+
+def dt_date(iso: str):
+    from datetime import date
+
+    return date.fromisoformat(iso[:10])
 
 
 class CrmReportView(GatedAPIView):
@@ -1767,7 +2199,7 @@ class CrmTodayView(GatedAPIView):
             count=Count("id"),
             amount=Sum("amount_rial"),
             weighted=Sum(
-                F("amount_rial") * F("stage__probability_pct") / Value(100),
+                F("amount_rial") * Coalesce("probability_pct", "stage__probability_pct") / Value(100),
                 output_field=DecimalField(max_digits=20, decimal_places=2),
             ),
         )
@@ -1861,6 +2293,7 @@ DRILL_VIEWSETS = {
     "activities": "ActivityViewSet",
     "feedback": "CustomerFeedbackViewSet",
     "invoices": "SalesInvoiceViewSet",
+    "tasks": "TaskViewSet",
 }
 
 
@@ -1882,7 +2315,9 @@ class CrmDrillExportView(GatedAPIView):
     def get(self, request):
         from apps.crm.export import KIND_TITLE, drill_workbook
 
-        kind = request.query_params.get("kind") or "deals"
+        # `export_kind`, not `kind`: the list's own filters read `kind` (an
+        # activity's type), so the two must not share a name.
+        kind = request.query_params.get("export_kind") or "deals"
         if kind not in DRILL_VIEWSETS:
             return Response(
                 {"detail": f"نوع «{kind}» تعریف نشده است."},
@@ -1899,6 +2334,13 @@ class CrmDrillExportView(GatedAPIView):
 
         total = qs.count()
         rows = viewset.get_serializer(qs[: self.MAX_ROWS], many=True).data
+        if kind == "tasks":
+            now = timezone.now().isoformat()
+            rows = [
+                {**r, "state": "انجام شده" if r.get("is_done")
+                 else ("عقب‌افتاده" if (r.get("due_at") or "") < now else "باز")}
+                for r in rows
+            ]
 
         title = request.query_params.get("title") or KIND_TITLE.get(kind, "ریز اطلاعات")
         extra: list[tuple[str, str]] = []
@@ -1940,12 +2382,12 @@ class PipelineBoardView(GatedAPIView):
         qs = Deal.objects.none() if f.blind else f.by_channel(
             Deal.objects.filter(status=Deal.Status.OPEN, dataset=ds)
         )
-        if f.owner:
-            qs = qs.filter(owner_id=f.owner)
-        if f.group:
-            qs = qs.filter(customer__group_id=f.group)
-        if f.province:
-            qs = qs.filter(customer__province_id=f.province)
+        if f.owner is not None:
+            qs = qs.filter(owner_id=f.owner or None)
+        if f.group is not None:
+            qs = qs.filter(customer__group_id=f.group or None)
+        if f.province is not None:
+            qs = qs.filter(customer__province_id=f.province or None)
         search = (request.query_params.get("search") or "").strip()
         if search:
             qs = qs.filter(
@@ -1971,13 +2413,12 @@ class PipelineBoardView(GatedAPIView):
         )
 
         columns = []
-        for st in PipelineStage.objects.filter(
-            is_active=True, dataset=ds
-        ).order_by("order"):
+        for st, label in stages_in_view(f.channels, ds):
             deals = by_stage.get(st.id, [])
             columns.append({
                 "id": st.id,
-                "name_fa": st.name_fa,
+                "name_fa": label,
+                "channel": st.channel,
                 "kind": st.kind,
                 "order": st.order,
                 "probability_pct": st.probability_pct,
@@ -2075,6 +2516,15 @@ def has_sample_data() -> bool:
 class CrmOptionsView(GatedAPIView):
     """Every filter dropdown the CRM UI needs, in one request."""
 
+    @staticmethod
+    def _zones() -> list[dict]:
+        SalesZone.ensure_tehran()
+        return [
+            {"id": z.id, "name_fa": z.name_fa, "province": z.province_id,
+             "channel": z.channel, "is_default": z.is_default}
+            for z in SalesZone.objects.all()
+        ]
+
     def get(self, request):
         # The month list is served rather than computed in the browser so the
         # Jalali calendar lives in exactly one place.
@@ -2100,11 +2550,15 @@ class CrmOptionsView(GatedAPIView):
                 {"id": p.id, "name_fa": p.name_fa}
                 for p in DimProvince.objects.all()
             ],
+            "zones": self._zones(),
             # The employee dimension carries a placeholder row with no real
             # name; it must not show up in a filter dropdown.
             "employees": [
                 {"id": e.id, "name": e.full_name_fa,
-                 "team": e.team.name_fa if e.team else ""}
+                 "team": e.team.name_fa if e.team else "",
+                 # False: owns records here but is no longer on the sales
+                 # roster — a label for old rows, not a choice for new ones.
+                 "active": e.in_roster}
                 for e in employee_options(request)
             ],
             "groups": CustomerGroupSerializer(
@@ -2157,11 +2611,10 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
 
     pagination_class = CrmPagination
 
-    permission_classes = [CrmManagerOnly, CrmWritePermission]
+    permission_classes = [SystemAdminOnly]
     serializer_class = MatchCandidateSerializer
     queryset = CustomerMatchCandidate.objects.select_related(
-        "customer", "customer__province", "customer__owner", "decided_by",
-        "duplicate",
+        "customer", "customer__province", "customer__owner", "decided_by"
     )
 
     def get_queryset(self):
@@ -2182,6 +2635,9 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
         method = self.request.query_params.get("method")
         if method:
             qs = qs.filter(method=method)
+        confidence = self.request.query_params.get("confidence")
+        if confidence:
+            qs = qs.filter(confidence=confidence)
         search = self.request.query_params.get("search")
         if search:
             qs = qs.filter(
@@ -2202,7 +2658,12 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             .annotate(n=Count("id"))
         )
         by_state = dict(qs.values_list("state").annotate(n=Count("id")))
+        by_confidence = dict(
+            qs.filter(state=CustomerMatchCandidate.State.PENDING)
+            .values_list("confidence").annotate(n=Count("id"))
+        )
         return Response({
+            "by_confidence": by_confidence,
             "by_method": [
                 {"key": k, "label": label, "count": by_method.get(k, 0)}
                 for k, label in CustomerMatchCandidate.Method.choices
@@ -2212,20 +2673,21 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             "pending": by_state.get(CustomerMatchCandidate.State.PENDING, 0),
         })
 
-    @action(detail=False, methods=["get", "post"], url_path="accept-certain")
-    def accept_certain(self, request):
+    @action(detail=False, methods=["post"])
+    def scan(self, request):
         """
-        Approve every certain CRM pair at once — same name *and* a shared
-        phone or national id, judged on the rows as they stand now.
+        «جست‌وجوی تکراری‌ها» — the whole customer file against itself.
 
-        GET counts them, so the button can say how many it will merge before
-        anyone presses it; POST does it. Everything weaker stays in the queue.
+        `dry_run` counts without queueing. Queued pairs wait for a person;
+        nothing here merges, however sure the match.
         """
-        result = crm_merge.accept_certain(
-            active_dataset(request), request.user,
-            dry_run=request.method == "GET",
-        )
-        return Response(result)
+        pairs, crowded = crm_merge.find_pairs(active_dataset(request))
+        definite = sum(1 for p in pairs if p["confidence"] == "definite")
+        queued = 0 if request.data.get("dry_run") else crm_merge.queue_found(pairs)
+        return Response({
+            "found": len(pairs), "definite": definite, "suspect": len(pairs) - definite,
+            "queued": queued, "crowded": crowded,
+        })
 
     @action(detail=True, methods=["get"])
     def alternatives(self, request, pk=None):
@@ -2292,6 +2754,91 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
+class TerritoryAssignmentViewSet(viewsets.ModelViewSet):
+    """
+    مسئولان استان‌ها و محدوده‌ها. Everyone in CRM reads them (the map shows
+    them); a manager assigns. Only roster members can be assigned, and a
+    department manager assigns only in their own books.
+    """
+
+    permission_classes = [CrmAccess]
+    pagination_class = None
+    serializer_class = TerritoryAssignmentSerializer
+    queryset = TerritoryAssignment.objects.select_related("province", "zone", "employee")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        channels = crm_scope(self.request.user).channels
+        return qs if channels is None else qs.filter(channel__in=channels)
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in SAFE_METHODS and not is_crm_manager(request.user):
+            self.permission_denied(request, message="تعیین مسئول استان با مدیر فروش است.")
+
+    def perform_create(self, serializer):
+        from apps.crm.people import sales_roster
+
+        channels = crm_scope(self.request.user).channels
+        channel = serializer.validated_data.get("channel") or (channels[0] if channels else SalesChannel.TEAM)
+        if channels is not None and channel not in channels:
+            raise ValidationError({"channel": ["این دفتر در دسترس شما نیست."]})
+        emp = serializer.validated_data["employee"]
+        if not sales_roster([channel]).filter(pk=emp.pk).exists():
+            raise ValidationError({"employee": [f"«{emp.full_name_fa}» در فهرست کارشناسان فعال این واحد فروش نیست."]})
+        zone = serializer.validated_data.get("zone")
+        if zone and zone.province_id != serializer.validated_data["province"].pk:
+            raise ValidationError({"zone": ["محدوده به این استان تعلق ندارد."]})
+        if serializer.validated_data.get("role") == TerritoryAssignment.Role.MANAGER:
+            # One manager per province (zone) and channel: assigning a new one
+            # replaces the old, which is what «change manager» means.
+            TerritoryAssignment.objects.filter(
+                province=serializer.validated_data["province"], zone=zone,
+                channel=channel, role=TerritoryAssignment.Role.MANAGER,
+            ).delete()
+        serializer.save(channel=channel)
+
+
+class CrmConfigView(GatedAPIView):
+    """تنظیمات تشخیص تکراری — read by everyone in CRM, changed by a manager."""
+
+    FIELDS = ("fuzzy_threshold", "match_phone", "queue_on_import")
+
+    def _out(self, cfg):
+        return {
+            "fuzzy_threshold": float(cfg.fuzzy_threshold),
+            "match_phone": cfg.match_phone,
+            "queue_on_import": cfg.queue_on_import,
+        }
+
+    def get(self, request):
+        from apps.crm.models import CrmConfig
+
+        return Response(self._out(CrmConfig.get()))
+
+    def patch(self, request):
+        from apps.crm.models import CrmConfig
+
+        if not is_crm_manager(request.user):
+            return Response({"detail": "تنظیمات با مدیر فروش است."}, status=status.HTTP_403_FORBIDDEN)
+        cfg = CrmConfig.get()
+        data = request.data
+        if "fuzzy_threshold" in data:
+            try:
+                value = Decimal(str(data["fuzzy_threshold"]))
+            except Exception:
+                value = None
+            if value is None or not Decimal("0.5") <= value <= Decimal("1"):
+                return Response({"fuzzy_threshold": ["عددی بین ۰٫۵ و ۱ وارد کنید."]},
+                                status=status.HTTP_400_BAD_REQUEST)
+            cfg.fuzzy_threshold = value.quantize(Decimal("0.01"))
+        for flag in ("match_phone", "queue_on_import"):
+            if flag in data:
+                setattr(cfg, flag, bool(data[flag]))
+        cfg.save()
+        return Response(self._out(cfg))
+
+
 # --------------------------------------------------------------------------
 # Invoices (read-only — they are owned by accounting)
 # --------------------------------------------------------------------------
@@ -2326,3 +2873,374 @@ class SalesInvoiceViewSet(viewsets.ReadOnlyModelViewSet):
                 | Q(party_name__icontains=search)
             )
         return qs.order_by("-issued_at", "-number")
+
+
+# --------------------------------------------------------------------------
+# ورود از آرپا — upload an export, and rule on فروش سوری
+# --------------------------------------------------------------------------
+MAX_UPLOAD = 25 * 1024 * 1024
+
+
+class ArpaImportView(GatedAPIView):
+    """
+    GET  — the upload history.
+    POST — `file`, `book`, `commit`. Without `commit=1` it is a preview: the
+    import runs and is rolled back, so the counts shown before «ثبت» are
+    exactly what «ثبت» does.
+    """
+
+    permission_classes = [SystemAdminOnly]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        from apps.crm.models import ImportBatch, Review
+
+        rows = [
+            {
+                "id": b.pk, "file_name": b.file_name, "book": b.book,
+                "book_display": b.get_book_display(), "at": b.created_at.isoformat(),
+                "by": getattr(b.uploaded_by, "display_name_fa", "") or getattr(b.uploaded_by, "username", ""),
+                "rows": b.rows, "created": b.created, "updated": b.updated,
+                "unchanged": b.unchanged, "skipped": b.skipped, "suspect": b.suspect,
+                "customers_created": b.customers_created, "amount": float(b.amount_rial),
+                "date_from": jalali_str(b.date_from) if b.date_from else "",
+                "date_to": jalali_str(b.date_to) if b.date_to else "",
+            }
+            for b in ImportBatch.objects.filter(source=ImportBatch.Source.ARPA).select_related("uploaded_by")[:40]
+        ]
+        return Response({
+            "imports": rows,
+            "pending_suspect": SalesInvoice.objects.filter(review=Review.SUSPECT).count(),
+        })
+
+    def post(self, request):
+        from apps.crm.arpa_file import ArpaFileError
+        from apps.crm.arpa_import import run
+
+        upload = request.FILES.get("file")
+        if not upload:
+            return Response({"detail": "فایلی انتخاب نشده است."}, status=400)
+        if upload.size > MAX_UPLOAD:
+            return Response({"detail": "حجم فایل بیش از ۲۵ مگابایت است."}, status=400)
+        commit = str(request.data.get("commit", "")).lower() in {"1", "true", "yes"}
+        try:
+            result = run(
+                upload.read(), upload.name, request.data.get("book") or "main",
+                user=request.user, commit=commit,
+            )
+        except ArpaFileError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(result)
+
+
+class SuspectInvoiceView(GatedAPIView):
+    """
+    فروش سوری: invoices whose «مسوول فروش» was not a sales group.
+
+    GET  — `state` = suspect (default) | real | fake, optional `search`.
+    POST — `ids`, `decision` = real | fake | suspect, and `channel` when
+    ruling real: the sales group is what was missing, so the person who
+    says «it is real» also says whose.
+    """
+
+    permission_classes = [SystemAdminOnly]
+    VALID_CHANNELS = {"team", "organizational", "b2b"}
+
+    def get(self, request):
+        from apps.crm.models import Review
+
+        state = request.query_params.get("state") or Review.SUSPECT
+        qs = SalesInvoice.objects.filter(review=state).select_related(
+            "customer", "owner", "reviewed_by",
+        )
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(number__icontains=search) | Q(party_name__icontains=search)
+                | Q(customer__name_fa__icontains=search)
+            )
+        counts = {
+            r["review"]: {"count": r["n"], "amount": float(r["a"] or 0)}
+            for r in SalesInvoice.objects.exclude(review="").values("review")
+            .annotate(n=Count("id"), a=Sum("amount_rial")).order_by()
+        }
+        rows = [
+            {
+                "id": i.pk, "number": i.number, "kind": i.kind,
+                "book": i.book, "book_display": i.get_book_display(),
+                "issued_jalali": jalali_str(i.issued_at),
+                "customer_id": i.customer_id,
+                "customer": i.customer.name_fa if i.customer_id else i.party_name,
+                "amount": float(i.amount_rial),
+                "owner": i.owner.full_name_fa if i.owner_id else "",
+                "created_by": i.created_by_name,
+                "responsible": i.sales_responsible,
+                "payment_terms": i.payment_terms,
+                "channel": i.channel,
+                "reviewed_by": getattr(i.reviewed_by, "username", "") if i.reviewed_by_id else "",
+                "reviewed_at": i.reviewed_at.isoformat() if i.reviewed_at else None,
+            }
+            for i in qs.order_by("-issued_at", "-number")[:500]
+        ]
+        if request.query_params.get("export") == "1":
+            from apps.crm.export import sheets_workbook
+
+            label = dict(Review.choices).get(state, state)
+            sheet = {
+                "name": "فروش سوری", "title": f"فروش سوری — {label}",
+                "subtitle": f"{len(rows):,} فاکتور",
+                "columns": [
+                    {"key": "number", "label": "شماره برگه", "fmt": "text"},
+                    {"key": "issued_jalali", "label": "تاریخ", "fmt": "text"},
+                    {"key": "book_display", "label": "دفتر", "fmt": "text"},
+                    {"key": "customer", "label": "مشتری", "fmt": "text"},
+                    {"key": "owner", "label": "بازاریاب", "fmt": "text"},
+                    {"key": "created_by", "label": "ایجادکننده", "fmt": "text"},
+                    {"key": "responsible", "label": "مسوول فروش", "fmt": "text"},
+                    {"key": "payment_terms", "label": "شرایط تسویه", "fmt": "text"},
+                    {"key": "amount", "label": "مبلغ فروش (ریال)", "fmt": "rial"},
+                ],
+                "rows": rows,
+                "total": {"number": "جمع کل", "amount": sum(r["amount"] for r in rows)},
+            }
+            return xlsx_response(sheets_workbook("فروش سوری", [sheet], []), "فروش سوری")
+        return Response({"state": state, "rows": rows, "counts": counts})
+
+    def post(self, request):
+        from apps.crm.models import Review
+
+        ids = [int(x) for x in request.data.get("ids") or [] if str(x).isdigit()]
+        decision = request.data.get("decision")
+        channel = request.data.get("channel") or ""
+        if not ids or decision not in Review.values:
+            return Response({"detail": "فاکتور و تصمیم را مشخص کنید."}, status=400)
+        if decision == Review.REAL and channel not in self.VALID_CHANNELS:
+            return Response({"detail": "برای فروش واقعی، گروه فروش را انتخاب کنید."}, status=400)
+        # Only invoices that came in as suspect can be ruled on here; an
+        # ordinary sale is not turned into a «سوری» one through this door.
+        qs = SalesInvoice.objects.filter(pk__in=ids).exclude(review="")
+        update = {"review": decision, "reviewed_by": request.user, "reviewed_at": timezone.now()}
+        if decision == Review.REAL:
+            update["channel"] = channel
+        elif decision == Review.SUSPECT:
+            update.update(reviewed_by=None, reviewed_at=None, channel="")
+        from apps.crm.arpa_import import sync_deal
+
+        targets = list(qs)
+        with transaction.atomic():
+            done = qs.update(**update)
+            # «واقعی» gives the invoice its won deal; «سوری» takes it away.
+            for invoice in SalesInvoice.objects.filter(pk__in=[i.pk for i in targets]):
+                sync_deal(invoice)
+        return Response({"updated": done})
+
+
+class DidarImportView(GatedAPIView):
+    """
+    ورود از دیدار — people, companies, deals, activities, notes; never
+    invoices. GET is the history; POST takes any number of `files` and
+    `commit` (without it, a preview that is rolled back).
+    """
+
+    permission_classes = [SystemAdminOnly]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        from apps.crm.models import ImportBatch
+
+        return Response({"imports": [
+            {
+                "id": b.pk, "file_name": b.file_name, "at": b.created_at.isoformat(),
+                "by": getattr(b.uploaded_by, "username", ""), "rows": b.rows,
+                "created": b.created, "updated": b.updated, "unchanged": b.unchanged,
+                "skipped": b.skipped, "customers_created": b.customers_created,
+            }
+            for b in ImportBatch.objects.filter(source=ImportBatch.Source.DIDAR)
+            .select_related("uploaded_by")[:40]
+        ]})
+
+    def post(self, request):
+        from apps.crm.arpa_file import ArpaFileError
+        from apps.crm.didar_import import run
+
+        uploads = request.FILES.getlist("files")
+        if not uploads:
+            return Response({"detail": "فایلی انتخاب نشده است."}, status=400)
+        if sum(u.size for u in uploads) > MAX_UPLOAD * 2:
+            return Response({"detail": "حجم فایل‌ها بیش از ۵۰ مگابایت است."}, status=400)
+        commit = str(request.data.get("commit", "")).lower() in {"1", "true", "yes"}
+        try:
+            result = run([(u.name, u.read()) for u in uploads], user=request.user, commit=commit)
+        except ArpaFileError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(result)
+
+
+class CrmWipeView(GatedAPIView):
+    """
+    پاک‌سازی داده. GET — what would go and what stays. POST with
+    `confirm` equal to the phrase — do it. Customers and products stay; see
+    `apps.crm.wipe`.
+    """
+
+    permission_classes = [SystemAdminOnly]
+
+    def get(self, request):
+        from apps.crm import wipe
+
+        return Response(wipe.counts())
+
+    def post(self, request):
+        from apps.crm import wipe
+
+        if (request.data.get("confirm") or "").strip() != wipe.CONFIRM:
+            return Response(
+                {"detail": f"برای تأیید، عبارت «{wipe.CONFIRM}» را دقیق بنویسید."}, status=400,
+            )
+        removed = wipe.wipe()
+        return Response({"removed": removed, **wipe.counts()})
+
+
+class TeamyarImportView(GatedAPIView):
+    """
+    ورود مشتریان از تیم‌یار. Rows land on the customer CRM already has, by
+    the آرپا/دیدار code in «آخرین توضیحات» or an id no one else shares —
+    see `apps.crm.teamyar_import`. Same preview-then-commit as the others.
+    """
+
+    permission_classes = [SystemAdminOnly]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        from apps.crm.models import ImportBatch
+
+        return Response({"imports": [
+            {
+                "id": b.pk, "file_name": b.file_name, "at": b.created_at.isoformat(),
+                "by": getattr(b.uploaded_by, "username", ""), "rows": b.rows,
+                "created": b.created, "updated": b.updated, "unchanged": b.unchanged,
+                "skipped": b.skipped,
+            }
+            for b in ImportBatch.objects.filter(source=ImportBatch.Source.TEAMYAR)
+            .select_related("uploaded_by")[:40]
+        ]})
+
+    def post(self, request):
+        from apps.crm.arpa_file import ArpaFileError
+        from apps.crm.teamyar_import import run
+
+        uploads = request.FILES.getlist("files")
+        if not uploads:
+            return Response({"detail": "فایلی انتخاب نشده است."}, status=400)
+        commit = str(request.data.get("commit", "")).lower() in {"1", "true", "yes"}
+        try:
+            result = run([(u.name, u.read()) for u in uploads], user=request.user, commit=commit)
+        except ArpaFileError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(result)
+
+
+class CrmChecksView(GatedAPIView):
+    """کنترل داده — every check, its count and the first records behind it."""
+
+    permission_classes = [SystemAdminOnly]
+
+    def get(self, request):
+        from apps.crm import checks
+
+        return Response(checks.run())
+
+
+def _dashboard_sheets(data: dict) -> list[dict]:
+    """The dashboard as tables: every tile with its previous period, then every widget."""
+    unit = {"rial": "ریال", "count": "تعداد", "percent": "درصد", "days": "روز"}
+    cards = []
+    for c in data["cards"]:
+        prev = c.get("prev")
+        change = None
+        if prev not in (None, 0) and c["unit"] != "percent":
+            change = round((float(c["value"]) - float(prev)) / abs(float(prev)) * 100, 1)
+        cards.append({"label": c["label"], "value": c["value"], "unit": unit.get(c["unit"], ""),
+                      "prev": prev, "change": change})
+
+    lbl = {"key": "label", "label": "عنوان", "fmt": "text"}
+    amt = {"key": "amount", "label": "مبلغ (ریال)", "fmt": "rial"}
+    cnt = {"key": "count", "label": "تعداد", "fmt": "count"}
+
+    def t(name, rows, cols):
+        return {"name": name, "columns": cols, "rows": rows}
+
+    return [
+        t("شاخص‌ها", cards, [
+            {"key": "label", "label": "شاخص", "fmt": "text"},
+            {"key": "value", "label": "مقدار", "fmt": "count"},
+            {"key": "unit", "label": "واحد", "fmt": "text"},
+            {"key": "prev", "label": "دوره قبل", "fmt": "count"},
+            {"key": "change", "label": "تغییر (٪)", "fmt": "pct"},
+        ]),
+        t("روند فروش", data["trend"], [lbl, amt, {"key": "profit", "label": "سود (ریال)", "fmt": "rial"}, cnt]),
+        t("فرصت‌های جدید", data["incoming_trend"], [
+            lbl, {"key": "won_count", "label": "موفق", "fmt": "count"},
+            {"key": "open_count", "label": "جاری", "fmt": "count"},
+            {"key": "lost_count", "label": "ناموفق", "fmt": "count"}]),
+        t("فروشندگان", data["top_sellers"], [lbl, amt, cnt]),
+        t("قیف فروش", data["funnel"], [lbl, cnt, amt]),
+        t("دلایل از دست رفتن", data["lost_reasons"], [lbl, cnt, amt]),
+        t("فعالیت‌ها", data["activities_by_kind"], [lbl, cnt]),
+        t("منابع سرنخ", data["sources"], [lbl, amt, {"key": "conversion_pct", "label": "نرخ تبدیل", "fmt": "pct"}]),
+        t("استان‌ها", data["provinces"], [
+            lbl, {"key": "owner_label", "label": "کارشناس", "fmt": "text"}, amt,
+            {"key": "target", "label": "تارگت (ریال)", "fmt": "rial"},
+            {"key": "achievement_pct", "label": "تحقق", "fmt": "pct"}]),
+        t("گروه مشتری", data["by_group"], [lbl, amt, cnt]),
+        t("مشتریان جدید", data["new_customers_by_user"], [lbl, cnt]),
+    ]
+
+
+class CrmDashboardExportView(GatedAPIView):
+    """داشبورد → اکسل: every tile (with the previous period) and every widget."""
+
+    def get(self, request):
+        from apps.crm.export import sheets_workbook
+
+        data = rpt.dashboard(query_filters(request))
+        wb = sheets_workbook("داشبورد CRM", _dashboard_sheets(data), export_context(request))
+        return xlsx_response(wb, "داشبورد CRM")
+
+
+class CrmChecksExportView(GatedAPIView):
+    """کنترل داده → اکسل: a summary, then a sheet per check that found something."""
+
+    permission_classes = [SystemAdminOnly]
+
+    def get(self, request):
+        from apps.crm import checks
+        from apps.crm.export import sheets_workbook
+
+        result = checks.run()
+        sev = {"high": "جدی", "medium": "مهم", "low": "تکمیلی"}
+        sheets = [{
+            "name": "خلاصه", "title": "کنترل داده‌ی CRM",
+            "columns": [
+                {"key": "label", "label": "بررسی", "fmt": "text"},
+                {"key": "severity", "label": "اهمیت", "fmt": "text"},
+                {"key": "count", "label": "تعداد", "fmt": "count"},
+                {"key": "why", "label": "توضیح", "fmt": "text"},
+            ],
+            "rows": [{**c, "severity": sev[c["severity"]]} for c in result["checks"]],
+        }]
+        for i, c in enumerate(r for r in result["checks"] if r["count"]):
+            shown = len(c["rows"])
+            sheets.append({
+                # Sheet names must be unique and at most 31 characters.
+                "name": f"{i + 1}. {c['label']}"[:31], "title": c["label"],
+                "subtitle": f"{c['count']:,} مورد" + (f" — {shown} مورد اول" if c["count"] > shown else ""),
+                "columns": [
+                    {"key": "title", "label": "رکورد", "fmt": "text"},
+                    {"key": "customer", "label": "مشتری", "fmt": "text"},
+                    {"key": "detail", "label": "جزئیات", "fmt": "text"},
+                    {"key": "id", "label": "شناسه", "fmt": "text"},
+                ],
+                "rows": c["rows"],
+            })
+        return xlsx_response(sheets_workbook("کنترل داده", sheets, []), "کنترل داده CRM")

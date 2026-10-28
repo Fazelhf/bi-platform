@@ -17,6 +17,11 @@ function isCrmManager(auth: { me: { role?: string; is_superuser?: boolean } | nu
   );
 }
 
+/** مدیر سیستم — see `apps.crm.views.is_system_admin`. */
+function isSystemAdmin(auth: { me: { role?: string; is_superuser?: boolean } | null }): boolean {
+  return !!(auth.me?.is_superuser || auth.me?.role === "admin");
+}
+
 export function homeRouteFor(department: string): string {
   switch (department) {
     case "production":
@@ -586,11 +591,24 @@ const router = createRouter({
           component: () => import("@/views/crm/GeoSalesView.vue"),
         },
         {
-          path: "match-review",
-          name: "crm-match-review",
-          meta: { crmManager: true },
-          component: () => import("@/views/crm/MatchReviewView.vue"),
+          // مدیریت فروش: customer groups and province responsibilities.
+          path: "manage",
+          name: "crm-manage",
+          component: () => import("@/views/crm/CrmManageView.vue"),
         },
+        {
+          // تنظیمات CRM: the imports, کنترل داده, بازبینی تطبیق and پاک‌سازی —
+          // one page for the system admin, the section in `?section=`.
+          path: "settings",
+          name: "crm-settings",
+          meta: { crmAdmin: true },
+          component: () => import("@/views/crm/CrmSettingsView.vue"),
+        },
+        // The pages that used to stand alone now open their tab there.
+        { path: "arpa-import", name: "crm-arpa-import", meta: { crmAdmin: true }, redirect: (to) => ({ name: "crm-settings", query: { ...to.query, section: "arpa" } }) },
+        { path: "didar-import", name: "crm-didar-import", meta: { crmAdmin: true }, redirect: { name: "crm-settings", query: { section: "didar" } } },
+        { path: "data-reset", name: "crm-data-reset", meta: { crmAdmin: true }, redirect: { name: "crm-settings", query: { section: "reset" } } },
+        { path: "match-review", name: "crm-match-review", meta: { crmAdmin: true }, redirect: { name: "crm-settings", query: { section: "match" } } },
       ],
     },
 
@@ -741,11 +759,18 @@ router.beforeEach(async (to) => {
     const canCrm =
       auth.isExecutive
       || !!auth.me?.is_superuser
-      || CRM_DEPARTMENTS.has(auth.department);
+      || CRM_DEPARTMENTS.has(auth.department)
+      // The system admin reaches CRM only for its import pages.
+      || (!!to.meta.crmAdmin && isSystemAdmin(auth));
     if (!canCrm) return sentHome(to);
     // بازبینی تطبیق compares every account with every other, so there is no
     // per-rep version of it and the API answers 403.
     if (to.meta.crmManager && !isCrmManager(auth)) {
+      return { name: "crm-dashboard" };
+    }
+    // ورود از آرپا / دیدار write the company's sales record; only the system
+    // admin runs them.
+    if (to.meta.crmAdmin && !isSystemAdmin(auth)) {
       return { name: "crm-dashboard" };
     }
   }

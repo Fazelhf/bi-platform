@@ -8,7 +8,7 @@ import { computed, ref, watch } from "vue";
 import { importsApi, type ImporterInfo, type ImportResult, type ImportStatus } from "@/api/imports";
 import { apiError } from "@/components/crm/formError";
 import { toast } from "@/composables/useUi";
-import { MONTH_NAMES, toJalali } from "@/utils/jalali";
+import { MONTH_NAMES, jalaliLabel, toJalali } from "@/utils/jalali";
 
 const props = withDefaults(defineProps<{
   importKey: string;
@@ -80,7 +80,10 @@ function cell(v: unknown) {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return v ? "بله" : "خیر";
   const s = String(v);
-  return /^\d{4,}$/.test(s) ? FA.format(Number(s)) : s;
+  // Dates come back as ISO (the stored value); they are shown in Jalali,
+  // the way they were typed in the file.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return jalaliLabel(s);
+  return /^-?\d+(\.\d+)?$/.test(s) ? FA.format(Number(s)) : s;
 }
 </script>
 

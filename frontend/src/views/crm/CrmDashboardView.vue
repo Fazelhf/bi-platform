@@ -5,6 +5,7 @@ import { crmApi, type CrmDashboard, type DashCard, type ReportRow } from "@/api/
 import { useCrmStore } from "@/stores/crm";
 import { num, pct, rial } from "@/utils/format";
 import CrmChart from "@/components/crm/CrmChart.vue";
+import CrmExportButton from "@/components/crm/CrmExportButton.vue";
 import FunnelChart from "@/components/crm/FunnelChart.vue";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
@@ -117,6 +118,9 @@ const CARD_TARGET: Record<string, { name: string; query?: Record<string, string>
  * news a manager wants, so the chip turns green going down for those.
  */
 const LOWER_IS_BETTER = new Set(["lost", "velocity", "overdue", "unbilled"]);
+/** Cards that are a snapshot of now, not a sum over the selected period. */
+const SNAPSHOT = new Set(["pipeline", "overdue"]);
+const SNAPSHOT_HINT = "لحظه‌ای: وضعیت همین الان است و به دوره‌ی انتخاب‌شده بستگی ندارد";
 
 /** The four that answer «how are we doing»; the rest are the detail. */
 const HERO = ["sales", "profit", "pipeline", "conversion"];
@@ -300,6 +304,9 @@ async function onSaved(id?: number) {
     <DealForm v-if="modal === 'deal'" @close="modal = null" @saved="onSaved" />
     <ActivityForm v-if="modal === 'activity'" @close="modal = null" @saved="onSaved" />
 
+    <div class="flex justify-end no-print -mb-2">
+      <CrmExportButton url="/crm/dashboard/export/" :params="crm.query" title="داشبورد CRM" :total="data?.cards.length ?? 0" subtle />
+    </div>
     <CrmFilterBar />
 
     <!-- ============ Headline KPIs ============ -->
@@ -323,6 +330,7 @@ async function onSaved(id?: number) {
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path :d="CARD_STYLE[c.key]?.icon" /></svg>
             </span>
             {{ c.label }}
+            <span v-if="SNAPSHOT.has(c.key)" class="text-[10px] bg-slate-100 text-slate-500 rounded-full px-1.5" :title="SNAPSHOT_HINT">لحظه‌ای</span>
           </span>
           <span
             v-if="delta(c)"
@@ -370,7 +378,9 @@ async function onSaved(id?: number) {
         :title="prevText(c)"
         @click="openCard(c)"
       >
-        <p class="text-[11px] text-slate-400 truncate">{{ c.label }}</p>
+        <p class="text-[11px] text-slate-400 truncate">
+          {{ c.label }}<span v-if="SNAPSHOT.has(c.key)" class="mr-1 text-[10px] text-slate-500" :title="SNAPSHOT_HINT">· لحظه‌ای</span>
+        </p>
         <div class="flex items-baseline justify-between gap-1 mt-1">
           <p class="text-base font-bold" :class="CARD_STYLE[c.key]?.accent ?? 'text-ink'">{{ cardValue(c) }}</p>
           <span
