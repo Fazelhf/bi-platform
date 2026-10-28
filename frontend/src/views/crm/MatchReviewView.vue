@@ -40,6 +40,7 @@ const config = ref<CrmConfig | null>(null);
 const showConfig = ref(false);
 const scanning = ref(false);
 const scanResult = ref<string>("");
+const definite = ref(0);
 const state = ref<"pending" | "accepted" | "rejected" | "all">("pending");
 const search = ref("");
 const alternatives = ref<Record<number, MatchSide[]>>({});
@@ -48,7 +49,7 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [list, sum] = await Promise.all([
+    const [list, sum, sure] = await Promise.all([
       crmApi.matchCandidates({
         state: state.value,
         method: method.value,
@@ -57,9 +58,11 @@ async function load() {
         page_size: 50,
       }),
       crmApi.matchSummary(),
+      crmApi.acceptDefinite(true),
     ]);
     rows.value = list.results;
     summary.value = sum;
+    definite.value = sure.definite;
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "خطا در خواندن صف بازبینی.";
   } finally {
@@ -85,6 +88,28 @@ async function scan() {
     await load();
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "جست‌وجو انجام نشد.";
+  } finally {
+    scanning.value = false;
+  }
+}
+
+/** Merge every definite pair. Each absorbed row stays behind with
+ *  `merged_into` and a merge record, so nothing here is a delete. */
+async function mergeDefinite() {
+  if (!window.confirm(
+    `${definite.value} جفت با نام یکسان و تلفن یا شناسه‌ی مشترک ادغام شوند؟ موارد مشکوک در صف می‌مانند.`,
+  )) return;
+  scanning.value = true;
+  error.value = "";
+  try {
+    const r = await crmApi.acceptDefinite();
+    scanResult.value = `${r.merged} جفت قطعی ادغام شد.`;
+    if (r.failed.length) {
+      error.value = r.failed.map((f) => `${f.name_fa}: ${f.reason}`).join(" · ");
+    }
+    await load();
+  } catch (e: any) {
+    error.value = e?.response?.data?.detail ?? "ادغام انجام نشد.";
   } finally {
     scanning.value = false;
   }
@@ -242,6 +267,12 @@ const total = computed(() => summary.value?.pending ?? 0);
         :disabled="scanning"
         @click="scan"
       >{{ scanning ? "در حال جست‌وجو…" : "جست‌وجوی تکراری‌ها" }}</button>
+      <button
+        v-if="definite"
+        class="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+        :disabled="scanning"
+        @click="mergeDefinite"
+      >ادغام {{ definite }} مورد قطعی</button>
       <button class="rounded-lg bg-slate-100 px-3 py-1.5 text-sm text-slate-600" @click="showConfig = !showConfig">
         تنظیمات تشخیص
       </button>

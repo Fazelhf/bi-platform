@@ -787,6 +787,17 @@ export const crmApi = {
     return data;
   },
 
+  /** How many open pairs are definite (`preview`), or merge all of them. */
+  async acceptDefinite(preview = false) {
+    const url = "/crm/match-candidates/accept-definite/";
+    const { data } = preview ? await api.get(url) : await api.post(url);
+    return data as {
+      definite: number;
+      merged: number;
+      failed: { name_fa: string; reason: string }[];
+    };
+  },
+
   async deleteCustomer(id: number) {
     await api.delete(`/crm/customers/${id}/`);
   },

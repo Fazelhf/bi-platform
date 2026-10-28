@@ -366,57 +366,97 @@ def queue_pair(primary: Customer, duplicate: Customer, method="manual",
 
 def queue_scan(customers, dataset: str):
     """
-    Hunt for each customer's twin and queue whatever turns up.
+    Hunt for the selected customers' twins and queue whatever turns up.
 
     For when someone suspects a row is a duplicate without knowing of what.
-    The same ladder the importer uses is run against the rest of the file, and
-    the same rule applies: nothing here merges. Even an exact-name hit — which
-    the importer would write unattended — is only queued, because the importer
-    is matching *across* systems where a repeated name means one company,
-    while inside one file it more often means someone typed it twice, and the
-    person who pressed the button is right there to say which.
+    It is `find_pairs` — the whole-file sweep — narrowed to pairs touching
+    the selection, so the two paths cannot disagree about what a duplicate is.
+
+    This used to run its own ladder with the selected rows left *out* of the
+    index, so two copies that were both selected could never find each other,
+    and each row stopped at its first match. Selecting a page of a file full
+    of duplicates queued almost nothing, which is why the button looked broken.
+
+    Nothing here merges: every pair waits for a person.
     """
-    from apps.crm.matching import confidence, configured_index
-
-    index = configured_index()
     picked = {c.pk for c in customers}
-    for pk, name, nid, eco, phone, mobile in Customer.objects.filter(
-        dataset=dataset, merged_into__isnull=True,
-    ).values_list(
-        "pk", "name_fa", "national_id", "economic_code", "phone", "mobile"
-    ):
-        if pk in picked:
-            continue
-        index.add(pk, name=name, nids=(nid, eco), phones=(phone, mobile))
+    pairs, _ = find_pairs(dataset)
+    mine = [p for p in pairs if p["a"]["pk"] in picked or p["b"]["pk"] in picked]
+    rows = Customer.objects.in_bulk({p["a"]["pk"] for p in mine} | {p["b"]["pk"] for p in mine})
 
-    queued, skipped = [], []
-    for customer in customers:
-        match = index.find(
-            source=ExternalSource.CRM,
-            external_id=f"cust-{customer.pk}",
-            name=customer.name_fa,
-            nids=(customer.national_id, customer.economic_code),
-            phones=(customer.phone, customer.mobile),
-        )
-        if not match.found:
-            skipped.append({
-                "name_fa": customer.name_fa,
-                "reason": "مشابهی پیدا نشد.",
-            })
-            continue
-        twin = Customer.objects.filter(pk=match.customer_id).first()
-        row = None
-        if twin:
-            sure, why = confidence(_as_dict(customer), _as_dict(twin))
-            row = queue_pair(customer, twin, match.method, sure, why)
+    queued, touched = [], set()
+    for p in mine:
+        touched |= {p["a"]["pk"], p["b"]["pk"]}
+        row = queue_pair(rows[p["a"]["pk"]], rows[p["b"]["pk"]],
+                         _method_for(p["reason"]), p["confidence"], p["reason"])
         if row:
             queued.append(row)
-        else:
-            skipped.append({
-                "name_fa": customer.name_fa,
-                "reason": "این جفت از قبل در صف است یا تعیین تکلیف شده.",
-            })
+    skipped = [
+        {"name_fa": c.name_fa,
+         "reason": "این جفت از قبل در صف است یا تعیین تکلیف شده."
+         if c.pk in touched else "مشابهی پیدا نشد."}
+        for c in customers
+        if c.pk not in {x.customer_id for x in queued} | {x.duplicate_id for x in queued}
+    ]
     return queued, skipped
+
+
+def survivor_of(a: Customer, b: Customer) -> tuple[Customer, Customer]:
+    """
+    Which of two rows to keep when nobody picked: (keep, absorb).
+
+    The row with trading history first — invoices, then deals — because that
+    is the one reports and the invoice import already point at. Then the
+    accounting row, whose code the next آرپا import looks for. Then the older.
+    """
+    def rank(c):
+        return (-c.invoices.count(), -c.deals.count(),
+                0 if c.code.startswith("arpa-") else 1, c.pk)
+    keep, other = sorted((a, b), key=rank)
+    return keep, other
+
+
+def accept_definite(dataset: str, user=None, dry_run=False) -> dict:
+    """
+    Merge every open CRM pair that is definite — the bulk half of review.
+
+    «Definite» is `matching.confidence` re-run on the two rows as they stand
+    *now*, not the label stored when the pair was queued: a phone corrected
+    since then must not be merged on. Each pair goes through `accept`, so each
+    is its own transaction, leaves the absorbed row behind with `merged_into`
+    and a `CustomerMerge` record, and one failure does not undo the others.
+    Suspect pairs are never touched.
+    """
+    from apps.crm.matching import confidence
+
+    def definite(c):
+        return bool(c.duplicate_id) and confidence(
+            _as_dict(c.customer), _as_dict(c.duplicate)
+        )[0] == "definite"
+
+    pending = CustomerMatchCandidate.objects.filter(
+        source=ExternalSource.CRM,
+        state=CustomerMatchCandidate.State.PENDING,
+        customer__dataset=dataset,
+    ).select_related("customer", "duplicate").order_by("pk")
+    sure = [c.pk for c in pending if definite(c)]
+    if dry_run:
+        return {"definite": len(sure), "merged": 0, "failed": []}
+
+    merged, failed = 0, []
+    for pk in sure:
+        # Re-read: an earlier merge in the same group re-points or closes
+        # the pairs that mentioned the row it absorbed.
+        c = CustomerMatchCandidate.objects.select_related("customer", "duplicate").get(pk=pk)
+        if c.state != CustomerMatchCandidate.State.PENDING or not definite(c):
+            continue
+        keep, _ = survivor_of(c.customer, c.duplicate)
+        try:
+            accept(c, user, keep)
+            merged += 1
+        except MergeError as exc:
+            failed.append({"name_fa": c.customer.name_fa, "reason": str(exc)})
+    return {"definite": len(sure), "merged": merged, "failed": failed}
 
 
 class ImportTwins:
@@ -492,7 +532,7 @@ def find_pairs(dataset: str):
     from difflib import SequenceMatcher
     from itertools import combinations
 
-    from apps.crm.matching import confidence, place_conflict
+    from apps.crm.matching import confidence, place_conflict, typo_apart
     from apps.crm.models import CrmConfig
 
     cfg = CrmConfig.get()
@@ -522,6 +562,10 @@ def find_pairs(dataset: str):
     for grp in heads.values():
         for a, b in combinations(grp, 2):
             if a["name_key"] == b["name_key"] or place_conflict(a["name_fa"], b["name_fa"]):
+                continue
+            # Overlap alone pairs every bank in a province with every other;
+            # only a typo-shaped difference is worth a reviewer's time.
+            if not typo_apart(a["name_key"], b["name_key"]):
                 continue
             if SequenceMatcher(None, a["name_key"], b["name_key"]).ratio() >= threshold:
                 pairs.setdefault(tuple(sorted((a["pk"], b["pk"]))), (a, b))

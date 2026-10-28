@@ -963,6 +963,101 @@ class BulkReviewTests(APITestCase):
         self.assertIsNone(self.b.merged_into_id)
 
 
+class DuplicateSweepFixTests(APITestCase):
+    """
+    What the selection scan, the place check and the fuzzy tier got wrong,
+    and bulk-merging the definite pairs.
+    """
+
+    def setUp(self):
+        self.now = timezone.now()
+
+        def make(code, name, **kw):
+            return Customer.objects.create(
+                code=code, name_fa=name, dataset=Dataset.REAL,
+                first_contact_at=self.now, **kw,
+            )
+
+        self.make = make
+        # One customer typed three times; all share the phone.
+        self.a = make("arpa-900", "آشپزخونه طهرون", phone="02122654910")
+        self.b = make("teamyar-900", "آشپزخونه طهرون", mobile="22654910")
+        self.c = make("didar-co-900", "آشپزخونه طهرون", phone="22654910")
+        # Same name, different phones: a question, not a certainty.
+        self.d = make("arpa-901", "آقای ابراهیمی", mobile="09114333020")
+        self.e = make("arpa-902", "آقای ابراهیمی", mobile="09120453743")
+        self.client.force_authenticate(_user("sweepfix", "manager", "sales_team"))
+        # The review queue — and so its bulk merge — is the system admin's.
+        self.admin = _user("sweepfix-admin", "admin")
+
+    def pairs(self):
+        return {
+            frozenset((c.customer_id, c.duplicate_id))
+            for c in CustomerMatchCandidate.objects.filter(source=ExternalSource.CRM)
+        }
+
+    def test_selected_rows_find_each_other(self):
+        """Selecting both copies used to hide each from the other."""
+        res = self.client.post(
+            "/api/crm/customers/bulk-review/",
+            {"ids": [self.a.pk, self.b.pk, self.c.pk, self.d.pk, self.e.pk]},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        for pair in ((self.a, self.b), (self.a, self.c), (self.b, self.c), (self.d, self.e)):
+            self.assertIn(frozenset(x.pk for x in pair), self.pairs())
+
+    def test_east_and_west_are_different_provinces(self):
+        self.assertTrue(matching.place_conflict(
+            "بانک سپه آذربایجان شرقی", "بانک سپه آذربایجان غربی"
+        ))
+        self.assertFalse(matching.place_conflict(
+            "بانک کشاورزی البرز-کرج", "بانک کشاورزی البرز"
+        ))
+
+    def test_fuzzy_means_typo_not_lookalike(self):
+        key = matching.name_key
+        self.assertTrue(matching.typo_apart(key("آقای زارع شیراز"), key("آقای زارعی شیراز")))
+        self.assertTrue(matching.typo_apart(key("موسسه اعتباری کوثر"), key("موسسه اعتباری کوثر قم")))
+        self.assertFalse(matching.typo_apart(key("بانک رفاه سیستان"), key("بانک صادرات سیستان")))
+        self.assertFalse(matching.typo_apart(key("JH-IRSA2101"), key("JH-IRSA2104")))
+        self.assertFalse(matching.typo_apart(key("سفارش 1024H"), key("سفارش 1024F")))
+
+    def test_lookalike_banks_are_not_suggested(self):
+        x = self.make("arpa-910", "بانک رفاه سیستان")
+        y = self.make("arpa-911", "بانک صادرات سیستان")
+        pairs, _ = crm_merge.find_pairs(Dataset.REAL)
+        self.assertNotIn(
+            frozenset((x.pk, y.pk)),
+            {frozenset((p["a"]["pk"], p["b"]["pk"])) for p in pairs},
+        )
+
+    def test_preview_counts_without_merging(self):
+        self.client.force_authenticate(self.admin)
+        self.client.post("/api/crm/match-candidates/scan/")
+        res = self.client.get("/api/crm/match-candidates/accept-definite/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["definite"], 3)  # a–b, a–c, b–c
+        self.assertEqual(res.data["merged"], 0)
+        self.assertFalse(Customer.objects.filter(merged_into__isnull=False).exists())
+
+    def test_bulk_merge_folds_the_group_and_leaves_suspects(self):
+        self.client.force_authenticate(self.admin)
+        self.client.post("/api/crm/match-candidates/scan/")
+        res = self.client.post("/api/crm/match-candidates/accept-definite/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["failed"], [])
+        rows = Customer.objects.filter(pk__in=[self.a.pk, self.b.pk, self.c.pk])
+        self.assertEqual(rows.filter(merged_into__isnull=True).count(), 1)
+        for row in (self.d, self.e):
+            row.refresh_from_db()
+            self.assertIsNone(row.merged_into_id)
+        self.assertTrue(CustomerMatchCandidate.objects.filter(
+            state=CustomerMatchCandidate.State.PENDING,
+            customer__in=[self.d, self.e],
+        ).exists())
+
+
 class BulkDeleteTests(APITestCase):
     """
     Deleting from the list, and refusing to when it would cost history.

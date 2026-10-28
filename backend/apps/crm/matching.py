@@ -155,14 +155,45 @@ def place_conflict(left, right) -> bool:
     True when the two names name *different* places.
 
     Silence on either side is not a conflict: «بانک سینا» and «بانک سینا
-    تهران» may well be one account. Two named and differing places is.
+    تهران» may well be one account. Nor is one name being more specific than
+    the other: «البرز-کرج» against «البرز». Two names that *each* name a place
+    the other does not is — and that has to hold even when they share one,
+    because «آذربایجان شرقی» and «آذربایجان غربی» share «آذربایجان» and are
+    two provinces. Requiring no overlap at all let every east/west pair through.
     """
     a, b = places(left), places(right)
-    return bool(a and b and not (a & b))
+    return bool(a - b and b - a)
 
 
 def similarity(left, right) -> float:
     return SequenceMatcher(None, name_key(left), name_key(right)).ratio()
+
+
+def typo_apart(left_key: str, right_key: str) -> bool:
+    """
+    Whether two name keys differ the way a typo or an omission does.
+
+    Character overlap alone ranks «بانک رفاه سیستان» next to «بانک صادرات
+    سیستان» — every bank in a province looks like every other. What a mistyped
+    name actually looks like is narrower: one word spelt slightly differently,
+    or one word added or dropped. Anything else is two names.
+
+    Numbers never count as a typo: «JH-IRSA2101» and «JH-IRSA2104», «سفارش
+    1024H» and «سفارش 1024F» are numbered things, not one thing typed twice.
+    """
+    a, b = left_key.split(), right_key.split()
+    if len(a) == len(b):
+        diff = [(x, y) for x, y in zip(a, b) if x != y]
+        if len(diff) != 1:
+            return False
+        x, y = diff[0]
+        if re.search(r"\d", x + y):
+            return False
+        return SequenceMatcher(None, x, y).ratio() >= 0.75
+    if abs(len(a) - len(b)) == 1:
+        short, long_ = (a, b) if len(a) < len(b) else (b, a)
+        return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+    return False
 
 
 # --------------------------------------------------------------------------

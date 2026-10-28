@@ -2689,6 +2689,20 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             "queued": queued, "crowded": crowded,
         })
 
+    @action(detail=False, methods=["get", "post"], url_path="accept-definite")
+    def accept_definite(self, request):
+        """
+        Merge every definite CRM pair at once — same name *and* a shared phone
+        or id, judged on the rows as they stand now.
+
+        GET only counts them, so the button can say how many it will merge
+        before anyone presses it; POST merges. Suspect pairs stay queued.
+        """
+        return Response(crm_merge.accept_definite(
+            active_dataset(request), request.user,
+            dry_run=request.method == "GET",
+        ))
+
     @action(detail=True, methods=["get"])
     def alternatives(self, request, pk=None):
         """
