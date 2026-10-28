@@ -150,10 +150,11 @@ class Filters:
                 return None
 
         f = cls(raw=dict(q.items()), dataset=dataset)
-        f.owner = num("owner")
+        # «بدون …» for each: 0 = blank, None = any (as group and province).
+        f.owner = 0 if q.get("owner") == "none" else num("owner")
         # «بدون گروه»: 0 means «no group», None means «any group».
         f.group = 0 if q.get("group") == "none" else num("group")
-        f.source = num("source")
+        f.source = 0 if q.get("source") == "none" else num("source")
         # «بدون استان», as «بدون گروه»: 0 = no province, None = any.
         f.province = 0 if q.get("province") == "none" else num("province")
         f.zone = num("zone")
@@ -226,12 +227,12 @@ class Filters:
             return Deal.objects.none()
         qs = self.by_channel(Deal.objects.filter(dataset=self.dataset))
         qs = self._window(qs, date_field)
-        if self.owner:
-            qs = qs.filter(owner_id=self.owner)
+        if self.owner is not None:
+            qs = qs.filter(owner_id=self.owner or None)
         if self.group is not None:
             qs = qs.filter(customer__group_id=self.group or None)
-        if self.source:
-            qs = qs.filter(lead_source_id=self.source)
+        if self.source is not None:
+            qs = qs.filter(lead_source_id=self.source or None)
         if self.province is not None:
             qs = qs.filter(customer__province_id=self.province or None)
         if self.stage:
@@ -263,8 +264,8 @@ class Filters:
             Activity.objects.filter(dataset=self.dataset), "customer__channel"
         )
         qs = self._window(qs, "at")
-        if self.owner:
-            qs = qs.filter(owner_id=self.owner)
+        if self.owner is not None:
+            qs = qs.filter(owner_id=self.owner or None)
         if self.group is not None:
             qs = qs.filter(customer__group_id=self.group or None)
         if self.province is not None:
@@ -287,12 +288,12 @@ class Filters:
         # A merged-away row is the survivor's history, not a second customer.
         qs = self.by_channel(Customer.objects.filter(dataset=self.dataset, merged_into__isnull=True))
         qs = self._window(qs, date_field)
-        if self.owner:
-            qs = qs.filter(owner_id=self.owner)
+        if self.owner is not None:
+            qs = qs.filter(owner_id=self.owner or None)
         if self.group is not None:
             qs = qs.filter(group_id=self.group or None)
-        if self.source:
-            qs = qs.filter(lead_source_id=self.source)
+        if self.source is not None:
+            qs = qs.filter(lead_source_id=self.source or None)
         if self.province is not None:
             qs = qs.filter(province_id=self.province or None)
         return qs
@@ -338,12 +339,12 @@ class Filters:
             qs = qs.filter(issued_at__gte=self.start)
         if self.end:
             qs = qs.filter(issued_at__lt=self.end)
-        if self.owner:
-            qs = qs.filter(rep_id=self.owner)
+        if self.owner is not None:
+            qs = qs.filter(rep_id=self.owner or None)
         if self.group is not None:
             qs = qs.filter(customer__group_id=self.group or None)
-        if self.source:
-            qs = qs.filter(customer__lead_source_id=self.source)
+        if self.source is not None:
+            qs = qs.filter(customer__lead_source_id=self.source or None)
         if self.province is not None:
             qs = qs.filter(customer__province_id=self.province or None)
         if self.zone:
@@ -385,10 +386,9 @@ class Filters:
             v = getattr(self, name)
             if v:
                 out[name] = v
-        if self.group == 0:
-            out["group"] = "none"
-        if self.province == 0:
-            out["province"] = "none"
+        for name in ("group", "province", "owner", "source"):
+            if getattr(self, name) == 0:
+                out[name] = "none"
         return out
 
 
@@ -1185,8 +1185,8 @@ def report_satisfaction(f: Filters, axis_key: str = "user") -> dict:
         qs = qs.filter(at__gte=_aware(f.start))
     if f.end:
         qs = qs.filter(at__lt=_aware(f.end))
-    if f.owner:
-        qs = qs.filter(employee_id=f.owner)
+    if f.owner is not None:
+        qs = qs.filter(employee_id=f.owner or None)
 
     rows_raw = (
         qs.values("employee_id", "employee__full_name_fa")
@@ -1628,7 +1628,7 @@ def sales_target(f: Filters) -> float:
     Plans are set per salesperson, so a slice the plan was never cut along
     (a customer group, a lead source) has no target: 0, not a misleading one.
     """
-    if f.blind or f.group is not None or f.province is not None or any((f.source, f.customer, f.product, f.tag)):
+    if f.blind or f.group is not None or f.province is not None or f.source is not None or any((f.customer, f.product, f.tag)):
         return 0.0
     months = Q(pk__in=[])
     for jy, jm, _, _ in _time_buckets(f):
@@ -1638,8 +1638,8 @@ def sales_target(f: Filters) -> float:
         period__in=DimPeriod.objects.filter(months, kind=PeriodKind.MONTH),
     )
     qs = f.by_channel(qs)
-    if f.owner:
-        qs = qs.filter(employee_id=f.owner)
+    if f.owner is not None:
+        qs = qs.filter(employee_id=f.owner or None)
     return _num(qs.aggregate(t=Sum("target_rial"))["t"])
 
 
@@ -1686,8 +1686,8 @@ def dashboard(f: Filters) -> dict:
     open_now = f.by_channel(
         Deal.objects.filter(status=Deal.Status.OPEN, dataset=f.dataset)
     )
-    if f.owner:
-        open_now = open_now.filter(owner_id=f.owner)
+    if f.owner is not None:
+        open_now = open_now.filter(owner_id=f.owner or None)
     if f.blind:
         open_now = open_now.none()
     pipeline_agg = open_now.aggregate(
@@ -1699,8 +1699,8 @@ def dashboard(f: Filters) -> dict:
     overdue_qs = CrmTask.objects.filter(
         done_at__isnull=True, due_at__lt=timezone.now(), dataset=f.dataset
     )
-    if f.owner:
-        overdue_qs = overdue_qs.filter(owner_id=f.owner)
+    if f.owner is not None:
+        overdue_qs = overdue_qs.filter(owner_id=f.owner or None)
     overdue = 0 if f.blind else overdue_qs.count()
 
     target = sales_target(f)
@@ -1879,8 +1879,8 @@ def geo_zones(f: Filters) -> dict | None:
     book = Customer.objects.filter(
         dataset=f.dataset, merged_into__isnull=True, province_id=province_id, channel=SalesChannel.TEAM,
     )
-    if f.owner:
-        book = book.filter(owner_id=f.owner)
+    if f.owner is not None:
+        book = book.filter(owner_id=f.owner or None)
     if f.blind:
         book = book.none()
     base = dict(book.values("zone_id").annotate(n=Count("id")).order_by().values_list("zone_id", "n"))
@@ -1940,8 +1940,8 @@ def geo_overview(f: Filters) -> dict:
     customers = f.by_channel(
         Customer.objects.filter(dataset=f.dataset, merged_into__isnull=True)
     )
-    if f.owner:
-        customers = customers.filter(owner_id=f.owner)
+    if f.owner is not None:
+        customers = customers.filter(owner_id=f.owner or None)
     if f.blind:
         customers = customers.none()
     base_by_province = dict(
@@ -2036,8 +2036,8 @@ def geo_province(f: Filters, province_id: int) -> dict | None:
     book = f.by_channel(Customer.objects.filter(
         dataset=f.dataset, merged_into__isnull=True, province_id=province_id,
     ))
-    if f.owner:
-        book = book.filter(Q(owner_id=f.owner) | Q(pk__in=list(bought)))
+    if f.owner is not None:
+        book = book.filter(Q(owner_id=f.owner or None) | Q(pk__in=list(bought)))
     if f.blind:
         book = book.none()
     customers = []

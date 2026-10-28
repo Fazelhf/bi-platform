@@ -105,6 +105,7 @@ const sel = "bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none bor
          would be a control that looks like it does something and does not. -->
     <select v-if="crm.seesAll" v-model="crm.filters.owner" :class="sel" @change="changed">
       <option value="">همه کارشناسان</option>
+      <option value="none">— بدون کارشناس</option>
       <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.name }}</option>
     </select>
 
@@ -116,6 +117,7 @@ const sel = "bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none bor
 
     <select v-model="crm.filters.source" :class="sel" @change="changed">
       <option value="">همه منابع سرنخ</option>
+      <option value="none">— بدون منبع سرنخ</option>
       <option v-for="s in sources" :key="s.id" :value="s.id">{{ s.name_fa }}</option>
     </select>
 

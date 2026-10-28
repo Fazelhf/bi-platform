@@ -671,16 +671,16 @@ class CustomerViewSet(_Base):
                 first_contact_at__lt=rpt._aware(f.end),
             )
 
-        if f.owner:
-            qs = qs.filter(owner_id=f.owner)
+        if f.owner is not None:
+            qs = qs.filter(owner_id=f.owner or None)
         if f.group is not None:
             qs = qs.filter(group_id=f.group or None)
         if f.province is not None:
             qs = qs.filter(province_id=f.province or None)
         if f.zone:
             qs = qs.filter(rpt.zone_q(f.zone))
-        if f.source:
-            qs = qs.filter(lead_source_id=f.source)
+        if f.source is not None:
+            qs = qs.filter(lead_source_id=f.source or None)
         if f.tag:
             qs = qs.filter(tags__id=f.tag)
         if q.get("status") in dict(Customer.Status.choices):
@@ -1082,8 +1082,8 @@ class CustomerFeedbackViewSet(_Base):
             qs = qs.filter(at__gte=rpt._aware(f.start))
         if f.end:
             qs = qs.filter(at__lt=rpt._aware(f.end))
-        if f.owner:
-            qs = qs.filter(employee_id=f.owner)
+        if f.owner is not None:
+            qs = qs.filter(employee_id=f.owner or None)
         if f.customer:
             qs = qs.filter(customer_id=f.customer)
         if self.request.query_params.get("unhappy") == "1":
@@ -2315,8 +2315,8 @@ class PipelineBoardView(GatedAPIView):
         qs = Deal.objects.none() if f.blind else f.by_channel(
             Deal.objects.filter(status=Deal.Status.OPEN, dataset=ds)
         )
-        if f.owner:
-            qs = qs.filter(owner_id=f.owner)
+        if f.owner is not None:
+            qs = qs.filter(owner_id=f.owner or None)
         if f.group is not None:
             qs = qs.filter(customer__group_id=f.group or None)
         if f.province is not None:
