@@ -21,7 +21,8 @@ interface Filters {
   /** "none": customers with no group. */
   group: number | "" | "none";
   source: number | "";
-  province: number | "";
+  /** "none": customers with no province. */
+  province: number | "" | "none";
 }
 
 /** The lookup fetch that is currently running, shared by concurrent callers. */

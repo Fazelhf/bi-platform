@@ -121,6 +121,7 @@ const sel = "bg-slate-100 rounded-xl px-3 py-2 text-sm text-ink outline-none bor
 
     <select v-model="crm.filters.province" :class="sel" @change="changed">
       <option value="">همه استان‌ها</option>
+      <option value="none">— بدون استان</option>
       <option v-for="p in provinces" :key="p.id" :value="p.id">{{ p.name_fa }}</option>
     </select>
 

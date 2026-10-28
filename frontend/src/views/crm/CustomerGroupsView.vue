@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { crmApi, type CustomerGroupRow } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
+import { useRouter } from "vue-router";
 import { num } from "@/utils/format";
 import { toast } from "@/composables/useUi";
 import Skeleton from "@/components/Skeleton.vue";
@@ -13,6 +14,7 @@ import Skeleton from "@/components/Skeleton.vue";
  * A system group can be renamed but not deleted.
  */
 const crm = useCrmStore();
+const router = useRouter();
 const groups = ref<CustomerGroupRow[]>([]);
 const loading = ref(true);
 const busy = ref(false);
@@ -24,6 +26,12 @@ const acting = ref<{ group: CustomerGroupRow; mode: "move" | "delete" } | null>(
 const target = ref<number | "">("");
 
 const canManage = computed(() => crm.canEdit && crm.isManager);
+
+/** The customer list, filtered to this group — the same customers it counts. */
+function showCustomers(g: CustomerGroupRow) {
+  crm.filters.group = g.id;
+  router.push({ name: "crm-customers" });
+}
 
 async function load() {
   loading.value = true;
@@ -138,7 +146,7 @@ async function confirmAct() {
             <input v-if="editing === g.id" v-model="editName" class="bg-white border border-sky-300 rounded-lg px-2 py-1 text-sm"
                    aria-label="نام گروه" @keydown.enter.prevent="rename(g)" @keydown.esc="editing = null" @blur="rename(g)" />
             <template v-else>
-              <span class="text-ink">{{ g.name_fa }}</span>
+              <button class="text-ink hover:text-sky-600 hover:underline" title="دیدن مشتری‌های این گروه" @click="showCustomers(g)">{{ g.name_fa }}</button>
               <span v-if="g.is_system" class="mr-2 text-[10px] bg-slate-100 text-slate-500 rounded-full px-2 py-0.5"
                     title="گروه سیستمی: نامش عوض می‌شود ولی حذف نمی‌شود">سیستمی</span>
             </template>

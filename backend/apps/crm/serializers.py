@@ -56,6 +56,17 @@ class CustomerGroupSerializer(serializers.ModelSerializer):
         read_only_fields = ("is_system",)
         extra_kwargs = {"code": {"required": False}}
 
+    def validate_name_fa(self, value):
+        # Two groups of one name split their customers between two filter
+        # entries that look the same; one of them always reads as empty.
+        from apps.crm.matching import name_key
+
+        key = name_key(value)
+        others = CustomerGroup.objects.exclude(pk=getattr(self.instance, "pk", None))
+        if any(name_key(n) == key for n in others.values_list("name_fa", flat=True)):
+            raise serializers.ValidationError("گروهی با همین نام هست.")
+        return value
+
 
 class TagSerializer(serializers.ModelSerializer):
     class Meta:
