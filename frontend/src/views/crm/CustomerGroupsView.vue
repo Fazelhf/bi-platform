@@ -27,6 +27,27 @@ const target = ref<number | "">("");
 
 const canManage = computed(() => crm.canEdit && crm.isManager);
 
+/** Customers of `g` filed in a book other than its owner's. */
+const strays = (g: CustomerGroupRow) =>
+  g.channel ? g.by_book.filter((b) => b.channel !== g.channel).reduce((n, b) => n + b.count, 0) : 0;
+const allStrays = computed(() => groups.value.reduce((n, g) => n + strays(g), 0));
+
+async function align(g?: CustomerGroupRow) {
+  const n = g ? strays(g) : allStrays.value;
+  const what = g ? `${num(n)} مشتری «${g.name_fa}» به دفتر «${g.channel_display}»` : `${num(n)} مشتری همه‌ی گروه‌ها به دفتر مالک گروهشان`;
+  if (!window.confirm(`${what} منتقل شوند؟ معامله‌هایشان هم با آن‌ها می‌روند؛ فاکتورهای آرپا دست نمی‌خورند.`)) return;
+  busy.value = true;
+  try {
+    const r = await crmApi.alignGroup(g?.id);
+    toast.success(`${num(r.moved)} مشتری به دفتر مالک منتقل شد`);
+    await refreshAll();
+  } catch (e) {
+    fail(e, "انتقال انجام نشد.");
+  } finally {
+    busy.value = false;
+  }
+}
+
 /** The sales books a group can belong to (the CEO picks; blank = shared). */
 const BOOKS = [
   { value: "team", label: "فروش همکار" },
@@ -137,6 +158,13 @@ async function confirmAct() {
       <p class="text-sm text-slate-500 mt-1">
         برای جابه‌جایی چند مشتری خاص، در فهرست مشتریان تیکشان بزنید و «ویرایش گروهی ← گروه» را بزنید.
       </p>
+      <p class="text-xs text-slate-400 mt-1">
+        «مشتری‌ها در هر دفتر»: مشتری‌های این گروه در پرونده‌ی کدام دفتر ثبت‌اند — هر مدیر فقط مشتری‌های دفتر خودش را می‌بیند.
+      </p>
+      <button v-if="crm.seesAll && canManage && allStrays" class="mt-2 text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-1.5 disabled:opacity-50"
+              :disabled="busy" @click="align()">
+        بردن {{ num(allStrays) }} مشتری همه‌ی گروه‌ها به دفتر مالک گروهشان
+      </button>
     </header>
 
     <form v-if="canManage" class="flex gap-2" @submit.prevent="create">
@@ -180,8 +208,11 @@ async function confirmAct() {
             <span v-else class="text-xs" :class="g.channel ? 'text-ink' : 'text-slate-400'">{{ g.channel_display || "مشترک" }}</span>
           </td>
           <td class="px-3 text-[11px] text-slate-500">
-            <span v-for="b in g.by_book" :key="b.channel" class="ml-2 whitespace-nowrap">{{ b.label }} {{ num(b.count) }}</span>
+            <span v-for="b in g.by_book" :key="b.channel" class="ml-2 whitespace-nowrap"
+                  :class="g.channel && b.channel !== g.channel ? 'text-amber-700' : ''">{{ b.label }} {{ num(b.count) }}</span>
             <span v-if="!g.by_book.length">—</span>
+            <button v-if="crm.seesAll && canManage && strays(g)" class="block text-[11px] text-sky-600 hover:underline mt-0.5 disabled:opacity-50"
+                    :disabled="busy" @click="align(g)">{{ num(strays(g)) }} مشتری به دفتر مالک</button>
           </td>
           <td class="px-3 text-left whitespace-nowrap">
             <span v-if="canManage && !g.editable" class="text-[11px] text-slate-400">فقط مدیر {{ g.channel_display }}</span>

@@ -739,6 +739,11 @@ export const crmApi = {
     const { data } = await api.post(`/crm/groups/${id}/move/`, { move_to: moveTo });
     return data;
   },
+  /** A group's customers (with their deals) into its owning book; no id = every owned group. */
+  async alignGroup(id?: number): Promise<{ moved: number }> {
+    const { data } = await api.post(id ? `/crm/groups/${id}/align/` : "/crm/groups/align-all/");
+    return data;
+  },
   async deleteGroup(id: number, moveTo?: number): Promise<{ moved: number }> {
     const { data } = await api.delete(`/crm/groups/${id}/`, { params: moveTo ? { move_to: moveTo } : {} });
     return data;
