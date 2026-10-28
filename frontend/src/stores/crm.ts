@@ -17,10 +17,12 @@ interface Filters {
   month: string;        // "1405-4" when range === "month"
   date_from: string;
   date_to: string;
-  owner: number | "";
+  /** "none": no کارشناس. */
+  owner: number | "" | "none";
   /** "none": customers with no group. */
   group: number | "" | "none";
-  source: number | "";
+  /** "none": no lead source. */
+  source: number | "" | "none";
   /** "none": customers with no province. */
   province: number | "" | "none";
 }

@@ -80,3 +80,20 @@ class PhoneFillTests(APITestCase):
         self.assertEqual(has.phone, "02144556677")
         self.assertEqual(survivor.mobile, "09350000000")
         self.assertEqual(Customer.objects.count(), 4)
+
+
+class BlankFilterTests(APITestCase):
+    def test_customers_without_owner_or_source(self):
+        from apps.crm.models import LeadSource
+        from apps.sales.models import DimEmployee
+
+        rep = DimEmployee.objects.create(code="bf-r", full_name_fa="کارشناس")
+        src = LeadSource.objects.create(code="bf-s", name_fa="نمایشگاه")
+        _customer("bf-1", owner=rep, lead_source=src)
+        _customer("bf-2")
+        self.client.force_authenticate(_user("bf-ceo"))
+        codes = lambda q: {r["code"] for r in self.client.get("/api/crm/customers/", q).data["results"]}
+        self.assertEqual(codes({"owner": "none"}), {"bf-2"})
+        self.assertEqual(codes({"source": "none"}), {"bf-2"})
+        self.assertEqual(codes({"owner": rep.pk, "source": src.pk}), {"bf-1"})
+        self.assertEqual(len(codes({})), 2)
