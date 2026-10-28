@@ -578,6 +578,50 @@ class CustomerGroupViewSet(_Base):
             raise ValidationError({"move_to": ["گروه مقصد معتبر نیست."]})
         return target
 
+    @staticmethod
+    def _align(groups) -> int:
+        """
+        File each owned group's customers in the owning book — with their
+        deals, since a deal is meant to sit in its customer's book (the
+        «دپارتمان معامله با دپارتمان مشتری» check). آرپا's invoices keep the
+        book the sale was recorded in: that is history, not filing.
+        """
+        moved = 0
+        with transaction.atomic():
+            for g in groups:
+                if not g.channel:
+                    continue
+                stray = Customer.objects.filter(group=g, merged_into__isnull=True).exclude(channel=g.channel)
+                ids = list(stray.values_list("pk", flat=True))
+                if not ids:
+                    continue
+                Customer.objects.filter(pk__in=ids).update(channel=g.channel)
+                for deal in Deal.objects.filter(customer_id__in=ids).exclude(channel=g.channel).select_related("stage"):
+                    deal.channel = g.channel
+                    deal.stage = fit_stage(deal.stage, deal.channel, deal.dataset)
+                    deal.save(update_fields=["channel", "stage", "updated_at"])
+                moved += len(ids)
+        return moved
+
+    def _ceo_only(self, request):
+        if crm_scope(request.user).channels is not None:
+            self.permission_denied(request, message="بردن مشتری‌ها از یک دفتر به دفتر دیگر با مدیرعامل است.")
+
+    @action(detail=True, methods=["post"])
+    def align(self, request, pk=None):
+        """This group's customers (and their deals) into the group's own book."""
+        self._ceo_only(request)
+        group = self.get_object()
+        if not group.channel:
+            return Response({"detail": "این گروه مشترک است و دفتر مالک ندارد."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"moved": self._align([group])})
+
+    @action(detail=False, methods=["post"], url_path="align-all")
+    def align_all(self, request):
+        """Every owned group at once; shared groups are left as they are."""
+        self._ceo_only(request)
+        return Response({"moved": self._align(CustomerGroup.objects.exclude(channel=""))})
+
     @action(detail=True, methods=["post"])
     def move(self, request, pk=None):
         """All of this group's customers (in the caller's books) to `move_to`."""

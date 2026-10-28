@@ -127,3 +127,30 @@ class GroupOwnerTests(APITestCase):
         self.client.force_authenticate(_user("o-ceo2"))
         res = self.client.patch(f"/api/crm/groups/{self.shared.pk}/", {"channel": "team"}, format="json")
         self.assertEqual(res.status_code, 200, res.data)
+
+
+class GroupAlignTests(APITestCase):
+    def setUp(self):
+        from apps.crm.models import Deal
+
+        self.bank = CustomerGroup.objects.create(code="a-b", name_fa="بانکی", channel="organizational")
+        self.shared = CustomerGroup.objects.create(code="a-s", name_fa="سایر")
+        self.stray = _customer("a-1", group=self.bank, channel="team")
+        self.home = _customer("a-2", group=self.bank, channel="organizational")
+        self.loose = _customer("a-3", group=self.shared, channel="team")
+        self.deal = Deal.objects.create(code="a-d", title="x", customer=self.stray, channel="team",
+                                        opened_at=timezone.now())
+
+    def test_the_ceo_files_a_groups_customers_and_deals_in_its_book(self):
+        self.client.force_authenticate(_user("a-ceo"))
+        res = self.client.post("/api/crm/groups/align-all/")
+        self.assertEqual(res.data["moved"], 1)
+        self.stray.refresh_from_db(); self.loose.refresh_from_db(); self.deal.refresh_from_db()
+        self.assertEqual((self.stray.channel, self.deal.channel), ("organizational", "organizational"))
+        self.assertEqual(self.loose.channel, "team")  # A shared group is left alone.
+
+    def test_a_book_manager_may_not(self):
+        self.client.force_authenticate(_user("a-bank", "manager", "sales_org"))
+        self.assertEqual(self.client.post(f"/api/crm/groups/{self.bank.pk}/align/").status_code, 403)
+        self.stray.refresh_from_db()
+        self.assertEqual(self.stray.channel, "team")
