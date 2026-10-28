@@ -432,14 +432,21 @@ class MatchCandidateSerializer(serializers.ModelSerializer):
     )
     crm = serializers.SerializerMethodField()
     arpa = serializers.SerializerMethodField()
+    certain = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerMatchCandidate
         fields = (
             "id", "source", "external_id", "external_name", "method",
             "method_display", "score", "state", "state_display",
-            "decided_at", "decided_by_name", "crm", "arpa",
+            "decided_at", "decided_by_name", "crm", "arpa", "certain",
         )
+
+    def get_certain(self, obj) -> bool:
+        """Whether the bulk «approve certain» button would merge this pair."""
+        from apps.crm.merge import is_certain
+
+        return obj.state == CustomerMatchCandidate.State.PENDING and is_certain(obj)
 
     def get_crm(self, obj) -> dict:
         c = obj.customer

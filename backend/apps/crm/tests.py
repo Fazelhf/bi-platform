@@ -991,6 +991,153 @@ class BulkReviewTests(APITestCase):
         self.assertIsNone(self.b.merged_into_id)
 
 
+class DuplicateSweepTests(APITestCase):
+    """
+    Finding duplicates across the whole file and approving the certain ones.
+
+    The list-page scan used to leave every selected row out of its own index,
+    so selecting a page of customers could never pair two of them — the
+    reason the button appeared to do nothing on a file full of duplicates.
+    """
+
+    def setUp(self):
+        now = timezone.now()
+        self.now = now
+
+        def make(code, name, **kw):
+            return Customer.objects.create(
+                code=code, name_fa=name, dataset=Dataset.REAL,
+                first_contact_at=now, **kw,
+            )
+
+        # One customer typed three times, two of them sharing a phone.
+        self.a = make("arpa-900", "آشپزخونه طهرون", phone="02122654910")
+        self.b = make("teamyar-900", "آشپزخونه طهرون", mobile="22654910")
+        self.c = make("didar-co-900", "آشپزخانه طهرون")
+        # Same name, different phones: a question, not a certainty.
+        self.d = make("arpa-901", "آقای ابراهیمی", mobile="09114333020")
+        self.e = make("arpa-902", "آقای ابراهیمی", mobile="09120453743")
+        # Two provinces that share a word.
+        self.f = make("arpa-903", "بانک سپه آذربایجان شرقی", phone="04133334444")
+        self.g = make("arpa-904", "بانک سپه آذربایجان غربی", phone="04133334444")
+        self.client.force_authenticate(_user("sweep", "manager", "sales_team"))
+
+    def pairs(self):
+        return {
+            frozenset((c.customer_id, c.duplicate_id))
+            for c in CustomerMatchCandidate.objects.filter(source=ExternalSource.CRM)
+        }
+
+    def test_selected_rows_find_each_other(self):
+        res = self.client.post(
+            "/api/crm/customers/bulk-review/",
+            {"ids": [self.a.pk, self.b.pk, self.d.pk, self.e.pk]}, format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertIn(frozenset((self.a.pk, self.b.pk)), self.pairs())
+        self.assertIn(frozenset((self.d.pk, self.e.pk)), self.pairs())
+
+    def test_the_whole_file_sweep_queues_every_twin_once(self):
+        res = self.client.post("/api/crm/customers/scan-duplicates/")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["scanned"], 7)
+        self.assertIn(frozenset((self.a.pk, self.b.pk)), self.pairs())
+        # Running it again adds nothing: the pairs are already known.
+        again = self.client.post("/api/crm/customers/scan-duplicates/")
+        self.assertEqual(again.data["queued"], 0)
+
+    def test_east_and_west_are_different_provinces(self):
+        self.assertTrue(matching.place_conflict(
+            "بانک سپه آذربایجان شرقی", "بانک سپه آذربایجان غربی"
+        ))
+        self.client.post("/api/crm/customers/scan-duplicates/")
+        pair = CustomerMatchCandidate.objects.filter(
+            customer__in=[self.f, self.g], duplicate__in=[self.f, self.g],
+        ).first()
+        # A shared switchboard may still raise the pair — but never as certain.
+        self.assertFalse(pair and crm_merge.is_certain(pair))
+
+    def test_fuzzy_means_typo_not_lookalike(self):
+        key = matching.name_key
+        self.assertTrue(matching.typo_apart(key("آقای زارع شیراز"), key("آقای زارعی شیراز")))
+        self.assertTrue(matching.typo_apart(key("موسسه اعتباری کوثر"), key("موسسه اعتباری کوثر قم")))
+        # Two banks in one province, and two numbered orders, are not typos.
+        self.assertFalse(matching.typo_apart(key("بانک رفاه سیستان"), key("بانک صادرات سیستان")))
+        self.assertFalse(matching.typo_apart(key("JH-IRSA2101"), key("JH-IRSA2104")))
+        self.assertFalse(matching.typo_apart(key("سفارش 1024H"), key("سفارش 1024F")))
+
+    def test_a_head_office_id_shared_by_branches_is_not_a_pair(self):
+        for i, city in enumerate(("کرمان", "زنجان", "قم", "یزد", "ساری", "اراک", "رشت")):
+            Customer.objects.create(
+                code=f"arpa-95{i}", name_fa=f"پست بانک {city}", dataset=Dataset.REAL,
+                first_contact_at=self.now, national_id="10100000001",
+            )
+        self.client.post("/api/crm/customers/scan-duplicates/")
+        self.assertFalse(CustomerMatchCandidate.objects.filter(
+            external_name__startswith="پست بانک",
+        ).exists())
+
+    def test_only_name_plus_identifier_is_certain(self):
+        self.client.post("/api/crm/customers/scan-duplicates/")
+        preview = self.client.get("/api/crm/match-candidates/accept-certain/")
+        self.assertEqual(preview.data["certain"], 1)  # a–b only
+        self.assertEqual(preview.data["merged"], 0)
+        self.b.refresh_from_db()
+        self.assertIsNone(self.b.merged_into_id, "a preview must not merge")
+
+    def test_bulk_approval_merges_certain_and_leaves_the_rest(self):
+        self.client.post("/api/crm/customers/scan-duplicates/")
+        res = self.client.post("/api/crm/match-candidates/accept-certain/")
+        self.assertEqual(res.data["merged"], 1, res.data)
+        for row in (self.a, self.b, self.d, self.e):
+            row.refresh_from_db()
+        self.assertEqual(crm_merge.live(self.a).pk, crm_merge.live(self.b).pk)
+        self.assertIsNone(self.d.merged_into_id)
+        self.assertIsNone(self.e.merged_into_id)
+        # The ambiguous pair is still waiting for a person.
+        self.assertTrue(CustomerMatchCandidate.objects.filter(
+            state=CustomerMatchCandidate.State.PENDING,
+            customer__in=[self.d, self.e],
+        ).exists())
+
+    def test_a_group_of_three_folds_into_one_without_contradictions(self):
+        for x, y in ((self.a, self.b), (self.a, self.c), (self.b, self.c)):
+            crm_merge.queue_pair(x, y)
+        ab, ac, bc = CustomerMatchCandidate.objects.order_by("pk")
+        crm_merge.accept(ac)
+        crm_merge.accept(ab)
+        bc.refresh_from_db()
+        # B–C was answered by the other two; it is closed as «same», not
+        # rejected as «different» and not left open.
+        self.assertEqual(bc.state, CustomerMatchCandidate.State.ACCEPTED)
+        for row in (self.b, self.c):
+            row.refresh_from_db()
+            self.assertEqual(crm_merge.live(row).pk, self.a.pk)
+
+    def test_merge_brings_the_last_activity_forward(self):
+        """The survivor said «258 days ago» over a call from last week."""
+        self.a.last_activity_at = self.now - timedelta(days=258)
+        self.a.save()
+        Activity.objects.create(
+            kind="call_out", customer=self.b, at=self.now - timedelta(days=3),
+            dataset=Dataset.REAL,
+        )
+        crm_merge.absorb(self.a, self.b)
+        self.a.refresh_from_db()
+        self.assertEqual(self.a.last_activity_at, self.now - timedelta(days=3))
+
+    def test_a_backdated_activity_does_not_drag_the_last_touch_back(self):
+        self.a.last_activity_at = self.now
+        self.a.save()
+        res = self.client.post("/api/crm/activities/", {
+            "kind": "call_out", "customer": self.a.pk,
+            "at": (self.now - timedelta(days=40)).isoformat(),
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.a.refresh_from_db()
+        self.assertEqual(self.a.last_activity_at, self.now)
+
+
 class BulkDeleteTests(APITestCase):
     """
     Deleting from the list, and refusing to when it would cost history.

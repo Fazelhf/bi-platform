@@ -38,11 +38,15 @@ const state = ref<"pending" | "accepted" | "rejected" | "all">("pending");
 const search = ref("");
 const alternatives = ref<Record<number, MatchSide[]>>({});
 
+const certain = ref(0);
+const sweeping = ref(false);
+const notice = ref("");
+
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [list, sum] = await Promise.all([
+    const [list, sum, sure] = await Promise.all([
       crmApi.matchCandidates({
         state: state.value,
         method: method.value,
@@ -50,9 +54,11 @@ async function load() {
         page_size: 50,
       }),
       crmApi.matchSummary(),
+      crmApi.acceptCertain(true),
     ]);
     rows.value = list.results;
     summary.value = sum;
+    certain.value = sure.certain;
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "خطا در خواندن صف بازبینی.";
   } finally {
@@ -98,6 +104,46 @@ async function reject(row: MatchCandidate) {
     error.value = e?.response?.data?.detail ?? "ثبت نشد.";
   } finally {
     busy.value = null;
+  }
+}
+
+/** Fill the queue from the whole customer file — selecting rows on the list
+ *  page only ever reached one page of it. */
+async function scanAll() {
+  sweeping.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    const r = await crmApi.scanDuplicates();
+    notice.value = `${r.scanned.toLocaleString("fa-IR")} مشتری بررسی شد — ${r.queued.toLocaleString("fa-IR")} جفت تازه به صف آمد.`;
+    await load();
+  } catch (e: any) {
+    error.value = e?.response?.data?.detail ?? "بررسی انجام نشد.";
+  } finally {
+    sweeping.value = false;
+  }
+}
+
+/** Merge every certain pair. Each absorbed row stays behind with
+ *  `merged_into`, so nothing here is a delete. */
+async function approveCertain() {
+  if (!window.confirm(
+    `${certain.value.toLocaleString("fa-IR")} جفت با نام یکسان و تلفن یا شناسه‌ی مشترک ادغام شوند؟ موارد دیگر در صف می‌مانند.`,
+  )) return;
+  sweeping.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    const r = await crmApi.acceptCertain();
+    notice.value = `${r.merged.toLocaleString("fa-IR")} جفت ادغام شد.`;
+    if (r.failed.length) {
+      error.value = r.failed.map((f) => `${f.name_fa}: ${f.reason}`).join(" · ");
+    }
+    await load();
+  } catch (e: any) {
+    error.value = e?.response?.data?.detail ?? "ادغام انجام نشد.";
+  } finally {
+    sweeping.value = false;
   }
 }
 
@@ -198,7 +244,22 @@ const total = computed(() => summary.value?.pending ?? 0);
         v-if="total"
         class="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-700"
       >{{ total }} مورد باز</span>
+      <button
+        class="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-700 disabled:opacity-50"
+        :disabled="sweeping"
+        @click="scanAll"
+      >بررسی تکراری‌ها در کل فهرست</button>
+      <button
+        v-if="certain"
+        class="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50"
+        :disabled="sweeping"
+        @click="approveCertain"
+      >ادغام {{ certain.toLocaleString("fa-IR") }} مورد قطعی</button>
     </header>
+
+    <p v-if="notice" class="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+      {{ notice }}
+    </p>
 
     <div class="flex flex-wrap items-center gap-2">
       <button
@@ -249,7 +310,11 @@ const total = computed(() => summary.value?.pending ?? 0);
           class="rounded-full px-2 py-0.5 text-xs font-bold"
           :class="methodTone[row.method] ?? 'bg-slate-100 text-slate-600'"
         >{{ row.method_display }}</span>
-        <span class="text-xs text-slate-400">کد آرپا: {{ row.external_id }}</span>
+        <span
+          v-if="row.certain"
+          class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700"
+        >قطعی</span>
+        <span v-if="row.source !== 'crm'" class="text-xs text-slate-400">کد آرپا: {{ row.external_id }}</span>
         <span v-if="row.state !== 'pending'" class="text-xs text-slate-500">
           — {{ row.state_display }}
           <template v-if="row.decided_by_name">توسط {{ row.decided_by_name }}</template>
@@ -271,7 +336,9 @@ const total = computed(() => summary.value?.pending ?? 0);
           </p>
         </section>
         <section class="rounded-lg bg-sky-50 p-3">
-          <p class="mb-1 text-xs text-slate-400">طرف‌حساب حسابداری</p>
+          <p class="mb-1 text-xs text-slate-400">
+            {{ row.source === "crm" ? "مشتری تکراری احتمالی در CRM" : "طرف‌حساب حسابداری" }}
+          </p>
           <p class="font-bold">{{ row.arpa.name_fa }}</p>
           <p class="mt-1 text-xs text-slate-500">
             {{ row.arpa.group }}

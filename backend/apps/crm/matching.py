@@ -140,14 +140,69 @@ def place_conflict(left, right) -> bool:
     True when the two names name *different* places.
 
     Silence on either side is not a conflict: «بانک سینا» and «بانک سینا
-    تهران» may well be one account. Two named and differing places is.
+    تهران» may well be one account. Nor is one name being more specific than
+    the other: «البرز-کرج» against «البرز». Two names that *each* name a place
+    the other does not is — and that has to hold even when they share one,
+    because «آذربایجان شرقی» and «آذربایجان غربی» share «آذربایجان» and are
+    two provinces. Requiring no overlap at all let every east/west pair through.
     """
     a, b = places(left), places(right)
-    return bool(a and b and not (a & b))
+    return bool(a - b and b - a)
 
 
 def similarity(left, right) -> float:
     return SequenceMatcher(None, name_key(left), name_key(right)).ratio()
+
+
+def typo_apart(left_key: str, right_key: str) -> bool:
+    """
+    Whether two name keys differ the way a typo or an omission does.
+
+    Character overlap alone ranks «بانک رفاه سیستان» next to «بانک صادرات
+    سیستان» — every bank in a province looks like every other. What a mistyped
+    name actually looks like is narrower: one word spelt slightly differently,
+    or one word added or dropped. Anything else is two names.
+
+    Numbers never count as a typo: «JH-IRSA2101» and «JH-IRSA2104», «سفارش
+    1024H» and «سفارش 1024F» are numbered things, not one thing typed twice.
+    """
+    a, b = left_key.split(), right_key.split()
+    if len(a) == len(b):
+        diff = [(x, y) for x, y in zip(a, b) if x != y]
+        if len(diff) != 1:
+            return False
+        x, y = diff[0]
+        if re.search(r"\d", x + y):
+            return False
+        return SequenceMatcher(None, x, y).ratio() >= 0.75
+    if abs(len(a) - len(b)) == 1:
+        short, long_ = (a, b) if len(a) < len(b) else (b, a)
+        return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+    return False
+
+
+def certain_pair(left: dict, right: dict) -> bool:
+    """
+    Whether two CRM rows are one customer beyond reasonable doubt.
+
+    Each side is a dict with `name`, `nids` and `phones`. The bar is two
+    independent pieces of evidence: the same normalised name *and* a shared
+    hard identifier — a phone number or a شناسه ملی. A name alone is not it
+    («آقای ابراهیمی» in رشت and in ساری), and a phone alone is not it (a
+    switchboard answers for a hospital and the clinic next door). Both
+    together, with no disagreement about place, is what the bulk approval is
+    allowed to act on; everything weaker stays a question for a person.
+    """
+    key = name_key(left.get("name"))
+    if not key or key != name_key(right.get("name")):
+        return False
+    if place_conflict(left.get("name"), right.get("name")):
+        return False
+    phones = {phone_key(p) for p in left.get("phones", ())} - {""}
+    if phones & ({phone_key(p) for p in right.get("phones", ())} - {""}):
+        return True
+    nids = {id_key(n) for n in left.get("nids", ())} - {""}
+    return bool(nids & ({id_key(n) for n in right.get("nids", ())} - {""}))
 
 
 # --------------------------------------------------------------------------
@@ -188,6 +243,10 @@ AUTO = frozenset({Method.EXISTING, Method.NAME})
 #: Below this, a name pair is not even worth a reviewer's attention.
 FUZZY_FLOOR = 0.86
 
+#: More holders than this and a phone number is a switchboard, and a national
+#: id a head office shared by its branches — neither is evidence of one account.
+PHONE_CROWD = 6
+
 
 @dataclass(frozen=True)
 class Match:
@@ -218,6 +277,9 @@ class CustomerIndex:
         self.by_nid: dict[str, int] = {}
         self.by_name: dict[str, list[int]] = {}
         self.by_phone: dict[str, list[int]] = {}
+        # Every holder of an id, not only the first: `twins` has to see all of
+        # them, where the import ladder deliberately sees one.
+        self.by_nid_all: dict[str, list[int]] = {}
         self.names: dict[int, str] = {}
 
     # -- building --------------------------------------------------------
@@ -232,6 +294,7 @@ class CustomerIndex:
             # reassigned, because the reassignment would be invisible.
             if k:
                 self.by_nid.setdefault(k, customer_id)
+                self.by_nid_all.setdefault(k, []).append(customer_id)
         for value in phones:
             k = phone_key(value)
             if k:
@@ -289,6 +352,67 @@ class CustomerIndex:
                 return Match(Method.PHONE, hits[0], 0.5)
 
         return self._fuzzy(name)
+
+    def twins(self, customer_id: int, *, name, nids=(), phones=()) -> list[Match]:
+        """
+        Every indexed customer that might be the same as this one — all of
+        them, each once, under the strongest rung that found it.
+
+        `find` answers the importer's question, «which one row is this party»,
+        and stops at the first answer. Hunting for duplicates inside the CRM is
+        a different question: a name typed four times has three twins, and
+        stopping at the first left the other two in the list for good. The
+        customer itself is skipped by id, so the whole file can be indexed and
+        two rows that are *both* being scanned still find each other.
+        """
+        found: dict[int, Match] = {}
+
+        def offer(other, method, score):
+            if other != customer_id and other not in found:
+                found[other] = Match(method, other, score)
+
+        for value in nids:
+            k = id_key(value)
+            holders = self.by_nid_all.get(k, ()) if k else ()
+            # A head office's شناسه ملی is carried by every branch — dozens of
+            # rows that are, by design, different customers. Held that widely
+            # an id says «same organisation», not «same account».
+            if len(holders) > PHONE_CROWD:
+                continue
+            for other in holders:
+                # Different place under one id is a branch: a different
+                # customer, so not a duplicate worth a reviewer's time here.
+                if not place_conflict(name, self.names.get(other, "")):
+                    offer(other, Method.NATIONAL_ID, 1.0)
+
+        key = name_key(name)
+        for other in self.by_name.get(key, ()) if key else ():
+            offer(other, Method.NAME, 1.0)
+
+        for value in phones:
+            k = phone_key(value)
+            hits = self.by_phone.get(k, ()) if k else ()
+            # A number held by a crowd is a switchboard, not a customer —
+            # pairing everyone on it with everyone else buries the queue.
+            if len(hits) > PHONE_CROWD:
+                continue
+            for other in hits:
+                offer(other, Method.PHONE, 0.5)
+
+        if key:
+            head = key[:4]
+            for other_key, ids in self.by_name.items():
+                if other_key == key or not other_key.startswith(head):
+                    continue
+                if not typo_apart(key, other_key):
+                    continue
+                score = SequenceMatcher(None, key, other_key).ratio()
+                if score < FUZZY_FLOOR:
+                    continue
+                for other in ids:
+                    if not place_conflict(name, self.names.get(other, "")):
+                        offer(other, Method.FUZZY, score)
+        return list(found.values())
 
     def _fuzzy(self, name) -> Match:
         key = name_key(name)

@@ -686,6 +686,32 @@ class CustomerViewSet(_Base):
         else:
             queued, skipped = crm_merge.queue_scan(rows, dataset)
 
+        return self._queued(queued, skipped)
+
+    @action(detail=False, methods=["post"], url_path="scan-duplicates")
+    def scan_duplicates(self, request):
+        """
+        Sweep the whole customer file for duplicates, in one request.
+
+        Selecting rows only ever reached one page of the list; the duplicates
+        are spread across all of it. Queues, never merges — the same rule as
+        `bulk_review`. Managers only, like the queue it fills.
+        """
+        if not is_crm_manager(request.user):
+            return Response(
+                {"detail": "فقط مدیر فروش می‌تواند کل فهرست را بررسی کند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        dataset = active_dataset(request)
+        rows = list(Customer.objects.filter(dataset=dataset, merged_into__isnull=True))
+        queued, skipped = crm_merge.queue_scan(rows, dataset)
+        return Response({
+            "scanned": len(rows),
+            "queued": len(queued),
+            "certain": sum(1 for c in queued if c.score == 1),
+        })
+
+    def _queued(self, queued, skipped):
         return Response({
             "queued": len(queued),
             "pairs": [
@@ -1331,13 +1357,16 @@ class ActivityViewSet(_Base):
         obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
-        Customer.objects.filter(pk=obj.customer_id).update(last_activity_at=obj.at)
+        # Re-derived rather than overwritten with `obj.at`: a call logged
+        # today for last month used to drag the customer's last touch back.
+        obj.customer.refresh_last_activity()
 
     def perform_update(self, serializer):
         super().perform_update(serializer)
         obj = serializer.instance
         obj.period = period_for(obj.at)
         obj.save(update_fields=["period"])
+        obj.customer.refresh_last_activity()
 
     @action(detail=False, methods=["get"])
     def summary(self, request):
@@ -2131,7 +2160,8 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [CrmManagerOnly, CrmWritePermission]
     serializer_class = MatchCandidateSerializer
     queryset = CustomerMatchCandidate.objects.select_related(
-        "customer", "customer__province", "customer__owner", "decided_by"
+        "customer", "customer__province", "customer__owner", "decided_by",
+        "duplicate",
     )
 
     def get_queryset(self):
@@ -2181,6 +2211,21 @@ class MatchCandidateViewSet(viewsets.ReadOnlyModelViewSet):
             "by_state": by_state,
             "pending": by_state.get(CustomerMatchCandidate.State.PENDING, 0),
         })
+
+    @action(detail=False, methods=["get", "post"], url_path="accept-certain")
+    def accept_certain(self, request):
+        """
+        Approve every certain CRM pair at once — same name *and* a shared
+        phone or national id, judged on the rows as they stand now.
+
+        GET counts them, so the button can say how many it will merge before
+        anyone presses it; POST does it. Everything weaker stays in the queue.
+        """
+        result = crm_merge.accept_certain(
+            active_dataset(request), request.user,
+            dry_run=request.method == "GET",
+        )
+        return Response(result)
 
     @action(detail=True, methods=["get"])
     def alternatives(self, request, pk=None):

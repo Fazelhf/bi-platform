@@ -325,6 +325,21 @@ class Customer(DatasetModel):
     def __str__(self) -> str:
         return self.name_fa
 
+    def refresh_last_activity(self) -> None:
+        """
+        Re-derive `last_activity_at` from the activities this row now holds.
+
+        The field is a cache, and a cache goes stale exactly when activities
+        move between customers (a merge) or are logged out of order (a call
+        entered today for last month). It only ever moves forward from what
+        the activities say: the دیدار import set it from data that may not
+        all have arrived as activity rows, and erasing that would be worse.
+        """
+        latest = self.activities.aggregate(m=models.Max("at"))["m"]
+        if latest and (not self.last_activity_at or latest > self.last_activity_at):
+            self.last_activity_at = latest
+            Customer.objects.filter(pk=self.pk).update(last_activity_at=latest)
+
 
 class DemoProvinceTarget(TimeStampedModel):
     """

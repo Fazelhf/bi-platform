@@ -391,6 +391,8 @@ export interface MatchCandidate {
   decided_by_name: string;
   crm: MatchSide;
   arpa: MatchSide;
+  /** Same name and a shared phone / national id — what bulk approval merges. */
+  certain: boolean;
 }
 
 export interface MatchSummary {
@@ -736,6 +738,23 @@ export const crmApi = {
   async acceptMatch(id: number, customer?: number) {
     const { data } = await api.post(`/crm/match-candidates/${id}/accept/`, { customer });
     return data as { state: string; customer: { id: number; name_fa: string } };
+  },
+
+  /** Sweep the whole customer file into the queue. Never merges. */
+  async scanDuplicates() {
+    const { data } = await api.post("/crm/customers/scan-duplicates/");
+    return data as { scanned: number; queued: number; certain: number };
+  },
+
+  /** How many open pairs are certain (`preview`), or approve all of them. */
+  async acceptCertain(preview = false) {
+    const url = "/crm/match-candidates/accept-certain/";
+    const { data } = preview ? await api.get(url) : await api.post(url);
+    return data as {
+      certain: number;
+      merged: number;
+      failed: { name_fa: string; reason: string }[];
+    };
   },
 
   /** «Different customers» — which creates the account, rather than dropping it. */

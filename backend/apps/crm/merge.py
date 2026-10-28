@@ -19,6 +19,7 @@ to be wrong, the ref moves — no history has been destroyed in the meantime.
 from __future__ import annotations
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.crm.models import (
@@ -39,6 +40,13 @@ def _settle(candidate, state, user, customer):
     candidate.save(update_fields=[
         "state", "customer", "decided_at", "decided_by", "updated_at",
     ])
+    # A CRM pair's `external_id` names only the second row, so «rivals» under
+    # it are other pairs about that row — in a group of three, B–C is a rival
+    # of A–C. Rejecting them would record «B and C are different customers»
+    # the moment someone said A and C are one, which is the opposite of what
+    # follows. Those pairs are closed by `_close_fused` instead.
+    if candidate.source == ExternalSource.CRM:
+        return
     # The same party may have been suggested against several customers — an
     # «ambig» name matches every customer carrying it. One decision settles
     # the party, so the rival suggestions are not left for someone to rule on
@@ -114,11 +122,62 @@ def absorb(primary: Customer, duplicate: Customer, user=None) -> Customer:
     ):
         primary.first_contact_at = duplicate.first_contact_at
     primary.save()
+    # The activities moved, but `last_activity_at` is a cache written when an
+    # activity is logged — the survivor's still said «258 days ago» while its
+    # timeline, now holding the duplicate's calls, showed one last week.
+    primary.refresh_last_activity()
 
     duplicate.merged_into = primary
     duplicate.is_active = False
     duplicate.save(update_fields=["merged_into", "is_active", "updated_at"])
     return primary
+
+
+def live(customer: Customer) -> Customer:
+    """Follow `merged_into` to the row that absorbed this one, if any."""
+    seen = set()
+    while customer.merged_into_id and customer.pk not in seen:
+        seen.add(customer.pk)
+        customer = customer.merged_into
+    return customer
+
+
+def survivor_of(a: Customer, b: Customer) -> tuple[Customer, Customer]:
+    """
+    Which of two rows to keep when nobody picked: (keep, absorb).
+
+    The row with the trading history first — invoices, then deals — because
+    that is the one reports and the invoice import already point at. Then the
+    accounting row, whose code the next آرپا import will look for. Then the
+    older row.
+    """
+    def rank(c):
+        return (
+            -c.invoices.count(), -c.deals.count(),
+            0 if c.code.startswith("arpa-") else 1, c.pk,
+        )
+    keep, other = sorted((a, b), key=rank)
+    return keep, other
+
+
+def _close_fused(user):
+    """
+    Settle open CRM pairs whose two sides are now one customer.
+
+    A group of three is three pairs; approving two of them fuses all three
+    rows, and the third pair is then a question that has already been answered.
+    """
+    for c in CustomerMatchCandidate.objects.filter(
+        source=ExternalSource.CRM, state=CustomerMatchCandidate.State.PENDING,
+    ).filter(
+        Q(customer__merged_into__isnull=False)
+        | Q(duplicate__merged_into__isnull=False)
+    ).select_related("customer", "duplicate"):
+        if c.duplicate_id and live(c.customer).pk == live(c.duplicate).pk:
+            # `customer` is left as it was: rewriting it to the survivor can
+            # collide with the pair that did the fusing, which already holds
+            # (source, external_id, survivor). The survivor is `live()` of it.
+            _settle(c, CustomerMatchCandidate.State.ACCEPTED, user, c.customer)
 
 
 @transaction.atomic
@@ -139,14 +198,20 @@ def accept(candidate: CustomerMatchCandidate, user=None, customer=None) -> Custo
     if candidate.source == ExternalSource.CRM:
         if not candidate.duplicate_id:
             raise MergeError("این مورد طرف دومی ندارد.")
-        primary = customer or candidate.customer
-        other = (
-            candidate.duplicate
-            if primary.pk != candidate.duplicate_id
-            else candidate.customer
-        )
-        survivor = absorb(primary, other, user)
-        _settle(candidate, CustomerMatchCandidate.State.ACCEPTED, user, survivor)
+        # Inside a group, an earlier approval may already have folded one
+        # side away. The pair still means «same customer», so it is applied
+        # to whatever each side became rather than refused.
+        sides = [live(candidate.customer), live(candidate.duplicate)]
+        primary = live(customer) if customer else sides[0]
+        # A reviewer may also pick a third row of the same name (the «ambig»
+        # alternatives); the duplicate then folds into that one, as before.
+        other = sides[0] if primary.pk == sides[1].pk else sides[1]
+        survivor = primary if primary.pk == other.pk else absorb(primary, other, user)
+        # The pair keeps its own `customer`: inside a group the survivor may
+        # be a third row already holding a pair under this external_id, and
+        # (source, external_id, customer) is unique. `live()` names the survivor.
+        _settle(candidate, CustomerMatchCandidate.State.ACCEPTED, user, candidate.customer)
+        _close_fused(user)
         return survivor
 
     target = customer or candidate.customer
@@ -210,7 +275,7 @@ def reject(candidate: CustomerMatchCandidate, user=None) -> Customer:
     return customer
 
 
-def queue_pair(primary: Customer, duplicate: Customer, method="manual"):
+def queue_pair(primary: Customer, duplicate: Customer, method="manual", score=None):
     """
     File two CRM rows as a suspected duplicate.
 
@@ -230,6 +295,8 @@ def queue_pair(primary: Customer, duplicate: Customer, method="manual"):
         source=ExternalSource.CRM, external_id=external_id, customer=primary,
     ).exists():
         return None
+    if score is None:
+        score = 1 if method == "manual" else 0
     return CustomerMatchCandidate.objects.create(
         source=ExternalSource.CRM,
         external_id=external_id,
@@ -239,60 +306,134 @@ def queue_pair(primary: Customer, duplicate: Customer, method="manual"):
         customer=primary,
         duplicate=duplicate,
         method=method,
-        score=1 if method == "manual" else 0,
+        score=score,
     )
+
+
+def _evidence(customer: Customer) -> dict:
+    """The fields `matching.certain_pair` weighs, read off a row."""
+    return {
+        "name": customer.name_fa,
+        "nids": (customer.national_id, customer.economic_code),
+        "phones": (customer.phone, customer.mobile),
+    }
+
+
+def is_certain(candidate: CustomerMatchCandidate) -> bool:
+    """
+    Whether a queued CRM pair clears the bar for bulk approval.
+
+    Judged on the two rows as they are *now*, never on the score stored when
+    the pair was queued: someone may have corrected a phone number in between,
+    and a bulk action that trusts a stale verdict merges on evidence that no
+    longer exists.
+    """
+    from apps.crm.matching import certain_pair
+
+    if candidate.source != ExternalSource.CRM or not candidate.duplicate_id:
+        return False
+    return certain_pair(_evidence(candidate.customer), _evidence(candidate.duplicate))
 
 
 def queue_scan(customers, dataset: str):
     """
-    Hunt for each customer's twin and queue whatever turns up.
+    Hunt for each customer's twins and queue whatever turns up.
 
-    For when someone suspects a row is a duplicate without knowing of what.
-    The same ladder the importer uses is run against the rest of the file, and
-    the same rule applies: nothing here merges. Even an exact-name hit — which
-    the importer would write unattended — is only queued, because the importer
-    is matching *across* systems where a repeated name means one company,
-    while inside one file it more often means someone typed it twice, and the
-    person who pressed the button is right there to say which.
+    For when someone suspects a row is a duplicate without knowing of what —
+    or, with every customer passed, for sweeping the whole file. The rest of
+    the file is indexed once and every twin of every row is queued: a name
+    typed four times yields all its pairs, not just the first one found.
+
+    Two mistakes this used to make, and why the button «did nothing»: the
+    selected rows were left *out* of the index, so selecting a page of
+    customers meant no two of them could ever find each other; and each row
+    stopped at its first match, so groups of three or more never emptied.
+
+    The same rule as ever applies: nothing here merges. Even a certain pair
+    is only queued — scored 1 so the screen can offer to approve those in one
+    go, which is a person's decision, not this function's.
     """
-    from apps.crm.matching import CustomerIndex
+    from apps.crm.matching import CustomerIndex, certain_pair
 
     index = CustomerIndex()
-    picked = {c.pk for c in customers}
-    for pk, name, nid, eco, phone, mobile in Customer.objects.filter(
-        dataset=dataset, merged_into__isnull=True,
-    ).values_list(
-        "pk", "name_fa", "national_id", "economic_code", "phone", "mobile"
-    ):
-        if pk in picked:
-            continue
-        index.add(pk, name=name, nids=(nid, eco), phones=(phone, mobile))
+    rows = {
+        c.pk: c for c in Customer.objects.filter(
+            dataset=dataset, merged_into__isnull=True,
+        ).only(
+            "pk", "name_fa", "national_id", "economic_code", "phone",
+            "mobile", "city", "code",
+        )
+    }
+    for c in rows.values():
+        index.add(c.pk, name=c.name_fa, nids=(c.national_id, c.economic_code),
+                  phones=(c.phone, c.mobile))
 
     queued, skipped = [], []
     for customer in customers:
-        match = index.find(
-            source=ExternalSource.CRM,
-            external_id=f"cust-{customer.pk}",
+        twins = index.twins(
+            customer.pk,
             name=customer.name_fa,
             nids=(customer.national_id, customer.economic_code),
             phones=(customer.phone, customer.mobile),
         )
-        if not match.found:
+        if not twins:
             skipped.append({
                 "name_fa": customer.name_fa,
                 "reason": "مشابهی پیدا نشد.",
             })
             continue
-        twin = Customer.objects.filter(pk=match.customer_id).first()
-        row = queue_pair(customer, twin, match.method) if twin else None
-        if row:
-            queued.append(row)
-        else:
+        added = 0
+        for match in twins:
+            twin = rows.get(match.customer_id)
+            if not twin:
+                continue
+            sure = certain_pair(_evidence(customer), _evidence(twin))
+            # 1 is reserved for certain pairs so the counts mean something;
+            # an exact name alone also scores 1.0 on the ladder.
+            row = queue_pair(customer, twin, match.method,
+                             score=1 if sure else min(match.score, 0.99))
+            if row:
+                queued.append(row)
+                added += 1
+        if not added:
             skipped.append({
                 "name_fa": customer.name_fa,
                 "reason": "این جفت از قبل در صف است یا تعیین تکلیف شده.",
             })
     return queued, skipped
+
+
+def accept_certain(dataset: str, user=None, dry_run=False) -> dict:
+    """
+    Approve every open CRM pair that `is_certain` — the bulk half of review.
+
+    Each pair goes through `accept`, so each one is its own transaction and
+    leaves the absorbed row behind with `merged_into` set: one pair failing
+    does not undo the others, and none of them is a delete. The survivor is
+    chosen by `survivor_of` since no one is picking per pair.
+    """
+    pending = CustomerMatchCandidate.objects.filter(
+        source=ExternalSource.CRM,
+        state=CustomerMatchCandidate.State.PENDING,
+        customer__dataset=dataset,
+    ).select_related("customer", "duplicate").order_by("pk")
+
+    sure = [c for c in pending if is_certain(c)]
+    if dry_run:
+        return {"certain": len(sure), "merged": 0, "failed": []}
+
+    merged, failed = 0, []
+    for c in sure:
+        c.refresh_from_db()
+        if c.state != CustomerMatchCandidate.State.PENDING:
+            continue  # closed by an earlier approval in this same group
+        keep, _ = survivor_of(live(c.customer), live(c.duplicate))
+        try:
+            accept(c, user, keep)
+            merged += 1
+        except MergeError as exc:
+            failed.append({"name_fa": c.customer.name_fa, "reason": str(exc)})
+    return {"certain": len(sure), "merged": merged, "failed": failed}
 
 
 def alternatives(candidate: CustomerMatchCandidate, limit: int = 6):
