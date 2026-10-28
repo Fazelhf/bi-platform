@@ -558,3 +558,62 @@ def import_files(paths, *, dry_run=False, default_owner=None, user=None) -> Repo
         if dry_run:
             transaction.set_rollback(True)
     return report
+
+
+# ---------------------------------------------------------------- undo
+#: Relations that make a customer someone's work, not the import's: one of
+#: these and the customer stays (and is listed), whoever made it.
+_KEEPS = ("deals", "activities", "tasks", "feedback", "external_refs", "invoices",
+          "sales2_documents", "sales2_receipts", "ledger_accounts", "merges_kept",
+          "merges_absorbed", "merged_from")
+
+
+def undo(*, dry_run=False) -> list[str]:
+    """
+    Take back what `import_files` brought in: its deals (with their lines,
+    stage history, notes and tasks), the B2B customers it created, and its
+    import record. Linked customers that existed before are kept; the blank
+    fields the import filled on them (city, contact, note) are not knowable
+    apart from a person's edit since, so they are listed, not cleared.
+    """
+    deals = Deal.objects.filter(dataset=DATASET, code__startswith="xl-b2b-")
+    made = Customer.objects.filter(dataset=DATASET, code__startswith="xl-b2b-c-")
+    linked = list(Customer.objects.filter(deals__in=deals).exclude(code__startswith="xl-b2b-c-")
+                  .distinct().values_list("pk", "name_fa"))
+    imported_notes = Activity.objects.filter(dataset=DATASET, external_key__startswith="xl-b2b-n-")
+    imported_tasks = Task.objects.filter(dataset=DATASET, external_key__startswith="xl-b2b-t-")
+    # Work a person added on an imported deal since — deleted with the deal.
+    added_acts = Activity.objects.filter(deal__in=deals).exclude(external_key__startswith="xl-b2b-").count()
+    added_tasks = Task.objects.filter(deal__in=deals).exclude(external_key__startswith="xl-b2b-").count()
+    lines = [("آزمایشی — چیزی پاک نشد" if dry_run else "پاک شد")]
+    with transaction.atomic():
+        n_deals = deals.count()
+        n_notes, n_tasks = imported_notes.count(), imported_tasks.count()
+        imported_notes.delete()
+        imported_tasks.delete()
+        deals.delete()
+        kept = []
+        gone = 0
+        for c in made.prefetch_related(None):
+            if c.merged_into_id or any(getattr(c, rel).exists() for rel in _KEEPS):
+                kept.append(c.name_fa)
+            else:
+                c.delete()
+                gone += 1
+        batches = ImportBatch.objects.filter(source=ImportBatch.Source.EXCEL).delete()[0]
+        Customer.refresh_rollups([pk for pk, _ in linked])
+        lines += [
+            f"معامله: {n_deals} (همراه اقلام و مسیر مراحل)",
+            f"یادداشت واردشده: {n_notes} — کار پیگیری واردشده: {n_tasks}",
+            f"فعالیت/کاری که بعداً روی همین معامله‌ها ثبت شده و همراهشان پاک شد: {added_acts} / {added_tasks}",
+            f"مشتری ساخته‌شده از اکسل: {gone} پاک شد، {len(kept)} ماند (سابقه‌ی دیگری دارد)",
+            f"رکورد ورود: {batches}",
+            f"مشتری از قبل موجود که معامله‌ی اکسل داشت: {len(linked)} — شهر/رابط/یادداشتی که اکسل در خانه‌ی خالی‌اش نوشته بود پاک نمی‌شود:",
+        ]
+        lines += [f"  {name}" for _, name in linked]
+        if kept:
+            lines.append("مشتری‌های ساخته‌شده که ماندند:")
+            lines += [f"  {name}" for name in kept]
+        if dry_run:
+            transaction.set_rollback(True)
+    return lines

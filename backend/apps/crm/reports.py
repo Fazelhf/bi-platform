@@ -1277,7 +1277,7 @@ def report_tender(f: Filters, axis_key: str) -> dict:
     # are not portable, so the pairing is done row by row first.)
     # Tenders are the business of a book with its own pipeline (B2B); a
     # همکار order is not a quote anyone bid against.
-    books = PipelineStage.objects.filter(dataset=f.dataset).exclude(channel="").values("channel")
+    books = PipelineStage.objects.filter(dataset=f.dataset, is_active=True).exclude(channel="").values("channel")
     qs = f.deals("opened_at").filter(channel__in=books).annotate(our_price=Subquery(first_price)).annotate(
         our_pair=Case(When(our_price__isnull=False, competitor_unit_price_rial__isnull=False,
                            then=F("our_price")), default=None),

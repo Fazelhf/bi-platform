@@ -224,3 +224,22 @@ class ExcelImportTests(APITestCase):
         months = rpt.Filters.from_query({"date_from": "2026-09-01", "date_to": "2026-11-30", "channel": "b2b"})
         rows = rpt.run_report("tender", months, "time")["rows"]
         self.assertEqual(sum(r["count"] for r in rows), 5)
+
+    def test_undo_takes_back_the_import_but_not_what_people_own(self):
+        from apps.crm.b2b_import import undo
+        from apps.crm.models import Activity, ImportBatch, Task
+
+        self._run()
+        # A new customer someone has since worked with stays.
+        worked = Customer.objects.get(name_fa="درمانگاه کهنه")
+        Activity.objects.create(customer=worked, kind="call_out", at=timezone.now())
+        before = Customer.objects.exclude(code__startswith="xl-b2b-c-").count()
+        lines = undo(dry_run=True)
+        self.assertTrue(Deal.objects.exists())
+        undo()
+        self.assertFalse(Deal.objects.filter(code__startswith="xl-b2b-").exists())
+        self.assertFalse(Task.objects.filter(external_key__startswith="xl-b2b-").exists())
+        self.assertFalse(ImportBatch.objects.exists())
+        self.assertEqual(set(Customer.objects.filter(code__startswith="xl-b2b-c-")), {worked})
+        self.assertEqual(Customer.objects.exclude(code__startswith="xl-b2b-c-").count(), before)
+        self.assertIn("بیمارستان میلاد", "\n".join(lines))  # A linked customer, listed.
