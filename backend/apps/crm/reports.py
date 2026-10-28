@@ -1275,7 +1275,10 @@ def report_tender(f: Filters, axis_key: str) -> dict:
     # Per deal, both prices or neither: an average over different quotes on
     # each side would compare nothing. (Filtered aggregates over a subquery
     # are not portable, so the pairing is done row by row first.)
-    qs = f.deals("opened_at").annotate(our_price=Subquery(first_price)).annotate(
+    # Tenders are the business of a book with its own pipeline (B2B); a
+    # همکار order is not a quote anyone bid against.
+    books = PipelineStage.objects.filter(dataset=f.dataset).exclude(channel="").values("channel")
+    qs = f.deals("opened_at").filter(channel__in=books).annotate(our_price=Subquery(first_price)).annotate(
         our_pair=Case(When(our_price__isnull=False, competitor_unit_price_rial__isnull=False,
                            then=F("our_price")), default=None),
         rival_pair=Case(When(our_price__isnull=False, competitor_unit_price_rial__isnull=False,
@@ -1315,6 +1318,9 @@ def report_tender(f: Filters, axis_key: str) -> dict:
     else:
         axis = DEAL_AXES.get(axis_key, DEAL_AXES["competitor"])
         rows = [enrich(r) for r in _grouped(qs, axis, measures)]
+        for r in rows:
+            if axis_key == "competitor" and not r["id"]:
+                r["label"] = "رقیب ثبت نشده"
         out = _shape("tender", axis_key, _finish(rows, f, axis, "count", "deals"))
     # Ratios from the totals, not summed; prices are averages, not totals.
     t = out["totals"]

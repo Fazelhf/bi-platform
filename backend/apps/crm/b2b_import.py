@@ -373,10 +373,15 @@ class Importer:
         if rial > gross:  # Billed above list × rolls: the rolls were more.
             qty, gross = Decimal(rial) / unit, Decimal(rial)
         discount = (Decimal(1) - Decimal(rial) / gross) * 100 if gross else Decimal(0)
-        DealItem.objects.create(
+        item = DealItem.objects.create(
             dataset=DATASET, deal=deal, product=product, quantity=qty.quantize(Decimal("0.01")),
             unit_price_rial=unit, discount_pct=discount.quantize(Decimal("0.01")),
+            # The cost snapshot, as the deal form takes it from the price list.
+            unit_cost_rial=product.unit_cost_rial,
         )
+        deal.cost_rial = item.line_cost
+        deal.profit_rial = deal.amount_rial - deal.cost_rial
+        deal.save(update_fields=["cost_rial", "profit_rial", "updated_at"])
         self.report.products_matched += 1
 
     def _events(self, deal, stages, at) -> None:
