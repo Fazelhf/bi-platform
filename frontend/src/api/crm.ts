@@ -275,6 +275,13 @@ export interface CustomerGroupRow {
   color: string;
   is_system: boolean;
   customer_count: number;
+  /** The owning book; blank = shared by every book. */
+  channel: string;
+  channel_display: string;
+  /** Its customers per book, across all books. */
+  by_book: { channel: string; label: string; count: number }[];
+  /** Whether this account may rename / move / delete it. */
+  editable: boolean;
 }
 
 export interface CustomerMergeRecord {

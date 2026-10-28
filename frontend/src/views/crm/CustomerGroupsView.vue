@@ -27,6 +27,23 @@ const target = ref<number | "">("");
 
 const canManage = computed(() => crm.canEdit && crm.isManager);
 
+/** The sales books a group can belong to (the CEO picks; blank = shared). */
+const BOOKS = [
+  { value: "team", label: "فروش همکار" },
+  { value: "organizational", label: "فروش بانکی" },
+  { value: "b2b", label: "فروش B2B" },
+  { value: "psp", label: "فروش PSP" },
+];
+
+async function setOwner(g: CustomerGroupRow, channel: string) {
+  try {
+    await crmApi.saveGroup({ channel } as any, g.id);
+    await refreshAll();
+  } catch (e) {
+    fail(e, "دفتر مالک ذخیره نشد.");
+  }
+}
+
 /** The customer list, filtered to this group — the same customers it counts. */
 function showCustomers(g: CustomerGroupRow) {
   crm.filters.group = g.id;
@@ -137,6 +154,8 @@ async function confirmAct() {
         <tr class="text-xs text-slate-400 bg-slate-50">
           <th class="text-right font-medium px-3 py-2">نام</th>
           <th class="text-right font-medium px-3">مشتری</th>
+          <th class="text-right font-medium px-3">دفتر مالک</th>
+          <th class="text-right font-medium px-3">مشتری‌ها در هر دفتر</th>
           <th class="px-3"></th>
         </tr>
       </thead>
@@ -152,8 +171,21 @@ async function confirmAct() {
             </template>
           </td>
           <td class="px-3 ltr-nums text-slate-500">{{ num(g.customer_count) }}</td>
+          <td class="px-3">
+            <select v-if="crm.seesAll && canManage" :value="g.channel" class="bg-slate-100 rounded-lg px-2 py-1 text-xs"
+                    aria-label="دفتر مالک" @change="setOwner(g, ($event.target as HTMLSelectElement).value)">
+              <option value="">مشترک</option>
+              <option v-for="b in BOOKS" :key="b.value" :value="b.value">{{ b.label }}</option>
+            </select>
+            <span v-else class="text-xs" :class="g.channel ? 'text-ink' : 'text-slate-400'">{{ g.channel_display || "مشترک" }}</span>
+          </td>
+          <td class="px-3 text-[11px] text-slate-500">
+            <span v-for="b in g.by_book" :key="b.channel" class="ml-2 whitespace-nowrap">{{ b.label }} {{ num(b.count) }}</span>
+            <span v-if="!g.by_book.length">—</span>
+          </td>
           <td class="px-3 text-left whitespace-nowrap">
-            <template v-if="canManage">
+            <span v-if="canManage && !g.editable" class="text-[11px] text-slate-400">فقط مدیر {{ g.channel_display }}</span>
+            <template v-else-if="canManage">
               <button class="text-xs text-sky-600 px-2" @click="editing = g.id; editName = g.name_fa">تغییر نام</button>
               <button class="text-xs text-sky-600 px-2 disabled:opacity-40" :disabled="!g.customer_count" @click="open(g, 'move')">
                 انتقال همه

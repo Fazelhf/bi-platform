@@ -73,6 +73,10 @@ class CustomerGroup(DatasetModel):
     #: A group code depends on (imports, reports) — renamable, not deletable.
     #: Set in the admin; the CRM screen only honours it.
     is_system = models.BooleanField(default=False)
+    #: The book that owns the group: its managers rename, move and delete it.
+    #: Blank = shared — every book files customers under it. Who may *see*
+    #: a customer is still the customer's own book, never the group's.
+    channel = models.CharField(max_length=16, choices=SalesChannel.choices, blank=True, default="")
 
     class Meta:
         ordering = ("name_fa",)

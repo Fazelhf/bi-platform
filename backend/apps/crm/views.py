@@ -525,6 +525,25 @@ class CustomerGroupViewSet(_Base):
             live &= Q(customers__channel__in=channels)
         return super().get_queryset().annotate(customer_count=Count("customers", filter=live, distinct=True))
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["channels"] = crm_scope(self.request.user).channels
+        if self.action == "list":
+            names = dict(SalesChannel.choices)
+            by_book: dict[int, list] = {}
+            for gid, ch, n in (Customer.objects.filter(group__isnull=False, merged_into__isnull=True)
+                               .values_list("group_id", "channel").annotate(n=Count("id")).order_by("-n")):
+                by_book.setdefault(gid, []).append({"channel": ch, "label": names.get(ch, ch), "count": n})
+            ctx["by_book"] = by_book
+        return ctx
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        # A book's own group is its managers' to change; a shared one is anyone's.
+        mine = crm_scope(request.user).channels
+        if request.method not in SAFE_METHODS and obj.channel and mine is not None and obj.channel not in mine:
+            self.permission_denied(request, message=f"این گروه متعلق به دفتر «{obj.get_channel_display()}» است.")
+
     def check_permissions(self, request):
         super().check_permissions(request)
         if request.method not in SAFE_METHODS and not is_crm_manager(request.user):
@@ -539,7 +558,11 @@ class CustomerGroupViewSet(_Base):
         while CustomerGroup.objects.filter(code=code).exists():
             n += 1
             code = f"{base}-{n}"
-        serializer.save(code=code, **self.create_defaults(serializer))
+        # A book manager's new group is their book's; the CEO's is shared
+        # unless set.
+        mine = crm_scope(self.request.user).channels
+        extra = {"channel": mine[0]} if mine and len(mine) == 1 and "channel" not in serializer.validated_data else {}
+        serializer.save(code=code, **extra, **self.create_defaults(serializer))
 
     def _mine(self, group):
         qs = Customer.objects.filter(group=group)

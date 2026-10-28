@@ -49,12 +49,35 @@ class RosterOwnerMixin:
 
 class CustomerGroupSerializer(serializers.ModelSerializer):
     customer_count = serializers.IntegerField(read_only=True, default=0)
+    channel_display = serializers.CharField(source="get_channel_display", read_only=True)
+    #: Its customers per book, across all books — where the group is used.
+    by_book = serializers.SerializerMethodField()
+    #: Whether the caller may rename / move / delete it.
+    editable = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerGroup
-        fields = ("id", "code", "name_fa", "color", "is_system", "customer_count")
+        fields = ("id", "code", "name_fa", "color", "is_system", "customer_count",
+                  "channel", "channel_display", "by_book", "editable")
         read_only_fields = ("is_system",)
         extra_kwargs = {"code": {"required": False}}
+
+    def get_by_book(self, obj):
+        return self.context.get("by_book", {}).get(obj.pk, [])
+
+    def get_editable(self, obj):
+        mine = self.context.get("channels", ())
+        return mine is None or not obj.channel or obj.channel in mine
+
+    def validate_channel(self, value):
+        # Handing a group to another book is the CEO's call, not a book's.
+        # A book may make a group its own, never take one over: claiming a
+        # shared group would lock the other books out of it.
+        mine = self.context.get("channels", ())
+        allowed = {self.instance.channel} if self.instance else {"", *(mine or ())}
+        if mine is not None and value not in allowed:
+            raise serializers.ValidationError("تعیین دفتر مالک گروه با مدیرعامل است.")
+        return value
 
     def validate_name_fa(self, value):
         # Two groups of one name split their customers between two filter

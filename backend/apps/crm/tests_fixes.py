@@ -97,3 +97,33 @@ class BlankFilterTests(APITestCase):
         self.assertEqual(codes({"source": "none"}), {"bf-2"})
         self.assertEqual(codes({"owner": rep.pk, "source": src.pk}), {"bf-1"})
         self.assertEqual(len(codes({})), 2)
+
+
+class GroupOwnerTests(APITestCase):
+    def setUp(self):
+        self.team_g = CustomerGroup.objects.create(code="o-t", name_fa="نمابر مهر همکار", channel="team")
+        self.shared = CustomerGroup.objects.create(code="o-s", name_fa="سایر")
+        _customer("o-1", group=self.team_g, channel="team")
+        _customer("o-2", group=self.shared, channel="team")
+        _customer("o-3", group=self.shared, channel="b2b")
+
+    def test_the_list_says_who_owns_it_and_where_it_is_used(self):
+        self.client.force_authenticate(_user("o-ceo"))
+        rows = {r["id"]: r for r in self.client.get("/api/crm/groups/").data["results"]}
+        self.assertEqual(rows[self.team_g.pk]["channel_display"], "فروش همکار")
+        self.assertEqual({b["channel"]: b["count"] for b in rows[self.shared.pk]["by_book"]}, {"team": 1, "b2b": 1})
+
+    def test_only_the_owning_book_changes_its_group(self):
+        self.client.force_authenticate(_user("o-b2b", "manager", "sales_b2b"))
+        rows = {r["id"]: r for r in self.client.get("/api/crm/groups/").data["results"]}
+        self.assertFalse(rows[self.team_g.pk]["editable"])
+        self.assertTrue(rows[self.shared.pk]["editable"])
+        res = self.client.patch(f"/api/crm/groups/{self.team_g.pk}/", {"name_fa": "x"}, format="json")
+        self.assertEqual(res.status_code, 403)
+        res = self.client.patch(f"/api/crm/groups/{self.shared.pk}/", {"channel": "b2b"}, format="json")
+        self.assertEqual(res.status_code, 400)  # Handing it to a book is the CEO's call.
+        res = self.client.post("/api/crm/groups/", {"name_fa": "بیمارستان‌ها"}, format="json")
+        self.assertEqual(CustomerGroup.objects.get(pk=res.data["id"]).channel, "b2b")
+        self.client.force_authenticate(_user("o-ceo2"))
+        res = self.client.patch(f"/api/crm/groups/{self.shared.pk}/", {"channel": "team"}, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
