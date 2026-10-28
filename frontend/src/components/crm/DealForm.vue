@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { crmApi, type Deal } from "@/api/crm";
 import { useCrmStore } from "@/stores/crm";
 import { pct, rial } from "@/utils/format";
@@ -68,7 +68,16 @@ const form = reactive({
   next_action_title: "",
   next_action_due: "",
   items: [] as Line[],
+  // B2B tender detail — asked only of a book with its own pipeline.
+  tender_channel: "" as "" | "system" | "direct",
+  tender_rank: "" as string | number,
+  competitor: "",
+  competitor_unit_price_rial: "",
+  probability_pct: "" as string | number,
 });
+/** The deal's book: its own on edit, else the chosen customer's. */
+const channel = ref<string>((props.deal as any)?.channel ?? "");
+const tender = computed(() => crm.hasOwnPipeline(channel.value));
 
 const products = computed(() => crm.options?.products ?? []);
 const productOptions = computed(() =>
@@ -78,7 +87,7 @@ const productOptions = computed(() =>
     badge: p.unit || undefined,
   })),
 );
-const stages = computed(() => crm.options?.stages ?? []);
+const stages = computed(() => crm.stagesFor(channel.value));
 const selectedStage = computed(() => stages.value.find((s) => s.id === form.stage));
 const isLostStage = computed(() => selectedStage.value?.kind === "lost");
 const isEdit = computed(() => !!props.deal);
@@ -109,6 +118,11 @@ onMounted(async () => {
       shipping_cost_rial: String(Number(d.shipping_cost_rial ?? 0)),
       other_cost_rial: String(Number(d.other_cost_rial ?? 0)),
       expected_close_date: d.expected_close_date ?? "",
+      tender_channel: d.tender_channel ?? "",
+      tender_rank: d.tender_rank ?? "",
+      competitor: d.competitor ?? "",
+      competitor_unit_price_rial: d.competitor_unit_price_rial ? String(Number(d.competitor_unit_price_rial)) : "",
+      probability_pct: d.probability_pct ?? "",
       items: (d.items ?? []).map((i: any) => ({
         product: i.product,
         quantity: String(Number(i.quantity)),
@@ -124,9 +138,22 @@ onMounted(async () => {
     if (props.customerId) {
       const c = await crmApi.customer(props.customerId);
       form.customer_label = c.name_fa;
+      channel.value = (c as any).channel ?? "";
       if ((c as any).lead_source) form.lead_source = (c as any).lead_source;
     }
     addLine();
+  }
+});
+
+// A new deal takes its customer's book — and that book's pipeline.
+watch(() => form.customer, async (id) => {
+  if (isEdit.value || !id) return;
+  const c = await crmApi.customer(Number(id)).catch(() => null);
+  channel.value = (c as any)?.channel ?? "";
+});
+watch(stages, (list) => {
+  if (form.stage && !list.some((s) => s.id === form.stage)) {
+    form.stage = list.find((s) => s.kind === "open")?.id ?? "";
   }
 });
 
@@ -232,6 +259,13 @@ async function save() {
       other_cost_rial: n(form.other_cost_rial),
       expected_close_date: form.expected_close_date || null,
       ...(needsNextAction.value ? { next_action_title: form.next_action_title.trim(), next_action_due: form.next_action_due } : {}),
+      ...(tender.value ? {
+        tender_channel: form.tender_channel,
+        tender_rank: form.tender_rank === "" ? null : n(form.tender_rank),
+        competitor: form.competitor.trim(),
+        competitor_unit_price_rial: form.competitor_unit_price_rial === "" ? null : Math.round(n(form.competitor_unit_price_rial)),
+        probability_pct: form.probability_pct === "" ? null : n(form.probability_pct),
+      } : {}),
       items: lines.map((l) => ({
         product: l.product,
         quantity: n(l.quantity),
@@ -400,6 +434,34 @@ const chipOff = "bg-slate-100 text-slate-600 hover:bg-slate-200";
     </div>
 
     <OwnerField v-model="form.owner" :invalid="bad === 'owner'" />
+
+    <!-- ===== Tender (B2B): what the quote was up against ===== -->
+    <div v-if="tender" class="grid sm:grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3">
+      <div>
+        <label :class="lbl">کانال دریافت سفارش</label>
+        <select v-model="form.tender_channel" :class="inp">
+          <option value="">—</option>
+          <option value="system">سامانه</option>
+          <option value="direct">مستقیم</option>
+        </select>
+      </div>
+      <div>
+        <label :class="lbl">رتبه در سامانه</label>
+        <input v-model="form.tender_rank" type="number" min="1" :class="inp" />
+      </div>
+      <div>
+        <label :class="lbl">احتمال موفقیت (٪) <span class="text-slate-300">(خالی = طبق مرحله)</span></label>
+        <input v-model="form.probability_pct" type="number" min="0" max="100" :class="inp" />
+      </div>
+      <div class="sm:col-span-2">
+        <label :class="lbl">رقیب / رقیب برنده</label>
+        <input v-model="form.competitor" :class="inp" />
+      </div>
+      <div>
+        <label :class="lbl">قیمت رقیب هر رول (ریال)</label>
+        <MoneyInput v-model="form.competitor_unit_price_rial" />
+      </div>
+    </div>
 
     <!-- ===== The rest ===== -->
     <MoreFields :filled="filledExtra" :start-open="isEdit">

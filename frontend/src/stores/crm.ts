@@ -108,6 +108,17 @@ export const useCrmStore = defineStore("crm", {
     employeeName: (state) => (id: number | null) =>
       state.options?.employees.find((e) => e.id === id)?.name ?? "—",
 
+    /** A book's pipeline: its own stages if it has any, else the shared list
+     *  — the rule `stages_for` applies on the server. */
+    stagesFor: (state) => (channel: string | null | undefined) => {
+      const all = state.options?.stages ?? [];
+      const own = channel ? all.filter((s) => s.channel === channel) : [];
+      return own.length ? own : all.filter((s) => !s.channel);
+    },
+    /** Whether a book runs its own pipeline (today B2B) — and so tenders. */
+    hasOwnPipeline: (state) => (channel: string | null | undefined) =>
+      !!channel && (state.options?.stages ?? []).some((s) => s.channel === channel),
+
     /** کارشناسان فعال واحد فروش — the only people a record may be given to. */
     rosterEmployees: (state) => (state.options?.employees ?? []).filter((e) => e.active !== false),
 

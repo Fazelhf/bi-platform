@@ -206,7 +206,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
       <div v-if="crm.canEdit" class="bg-surface rounded-card shadow-soft p-3 flex flex-wrap items-center gap-1.5 no-print">
         <span class="text-xs text-slate-400 px-2">انتقال به مرحله:</span>
         <button
-          v-for="s in crm.options?.stages" :key="s.id"
+          v-for="s in crm.stagesFor(deal.channel)" :key="s.id"
           class="text-xs rounded-lg px-2.5 py-1.5 transition disabled:opacity-40"
           :class="deal.stage === s.id ? 'bg-panel text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'"
           :disabled="moving || deal.stage === s.id"

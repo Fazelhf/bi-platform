@@ -115,6 +115,11 @@ async function onDrop(col: PipelineColumn) {
   dragOver.value = null;
   dragging.value = null;
   if (!deal || deal.stage === col.id) return;
+  // A column of another book's pipeline (the board shows several at once).
+  if (!crm.stagesFor(deal.channel).some((s) => s.id === col.id)) {
+    toast.error("این مرحله از قیف دفتر این معامله نیست.");
+    return;
+  }
 
   // Losing a deal without a reason would quietly poison the "دلایل از دست رفتن"
   // report, so the reason is asked for at the moment of the drop.

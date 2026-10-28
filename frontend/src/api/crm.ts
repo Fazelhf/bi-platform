@@ -208,6 +208,13 @@ export interface Deal {
   /** «اقدام بعدی + تاریخ» — the earliest open کار; null on a closed deal. */
   next_action?: { missing: true } | { missing: false; id: number; title: string; due_at: string; due_jalali: string; overdue: boolean } | null;
   items?: DealItem[];
+  channel?: string;
+  /** B2B tender detail (deal page and form only). */
+  tender_channel?: "" | "system" | "direct";
+  tender_rank?: number | null;
+  competitor?: string;
+  competitor_unit_price_rial?: string | null;
+  probability_pct?: number | null;
 }
 
 export interface DealItem {
@@ -350,7 +357,8 @@ export interface CrmOptions {
   groups: { id: number; name_fa: string }[];
   sources: { id: number; name_fa: string }[];
   reasons: { id: number; name_fa: string; is_controllable: boolean }[];
-  stages: { id: number; name_fa: string; kind: string; order: number; probability_pct: number }[];
+  /** `channel` blank = the shared pipeline; set = that book's own (B2B). */
+  stages: { id: number; name_fa: string; kind: string; order: number; probability_pct: number; channel: string; channel_display: string }[];
   products: { id: number; name_fa: string; unit: string; list_price_rial: string }[];
   tags: { id: number; name_fa: string; color: string }[];
   activity_kinds: { code: string; label: string }[];

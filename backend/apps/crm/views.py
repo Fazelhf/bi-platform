@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Count, DecimalField, F, Max, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -38,7 +39,7 @@ from apps.crm.models import (
     CustomerMatchCandidate, Dataset, SalesInvoice, SalesZone, TerritoryAssignment,
     Activity, Customer, CustomerFeedback, CustomerGroup, Deal, DealItem,
     DealStageEvent, LeadSource, LostReason, PipelineStage, Product,
-    ProductCategory, Tag, Task,
+    ProductCategory, Tag, Task, fit_stage, stages_for, stages_in_view,
 )
 from apps.crm.serializers import (
     MatchCandidateSerializer, SalesInvoiceSerializer, TerritoryAssignmentSerializer,
@@ -1361,11 +1362,11 @@ class DealViewSet(_Base):
         if not data.get("opened_at"):
             extra["opened_at"] = timezone.now()
         if not data.get("stage"):
-            # Default to the first open stage so a new deal always appears on
-            # the board rather than in a stage-less limbo.
-            first = PipelineStage.objects.filter(
-                dataset=active_dataset(self.request),
-                is_active=True, kind=PipelineStage.Kind.OPEN
+            # Default to the first open stage of the deal's own book, so a new
+            # deal always appears on its board rather than in a stage-less limbo.
+            channel = data["customer"].channel if data.get("customer") else data.get("channel", "")
+            first = stages_for(channel, active_dataset(self.request)).filter(
+                kind=PipelineStage.Kind.OPEN
             ).order_by("order").first()
             if first:
                 extra["stage"] = first
@@ -1428,6 +1429,8 @@ class DealViewSet(_Base):
         report that measures on the closing date, and a deal moved back to an
         open stage while still flagged won would be counted as revenue twice.
         """
+        # A deal moved to another book leaves that book's pipeline behind.
+        deal.stage = fit_stage(deal.stage, deal.channel, deal.dataset)
         if deal.stage:
             deal.status = {
                 PipelineStage.Kind.WON: Deal.Status.WON,
@@ -1464,6 +1467,8 @@ class DealViewSet(_Base):
         stage, error = self._target_stage(request)
         if error:
             return error
+        if not stages_for(deal.channel, deal.dataset).filter(pk=stage.pk).exists():
+            return Response({"detail": "این مرحله از قیف این دفتر نیست."}, status=400)
         self._apply_move(deal, stage, request)
         return Response(DealDetailSerializer(deal).data)
 
@@ -1548,7 +1553,8 @@ class DealViewSet(_Base):
         ).select_related("stage", "customer")
         moved = 0
         for deal in deals:
-            if deal.stage_id == stage.id:
+            # Another book's deal stays put: the stage is not on its board.
+            if deal.stage_id == stage.id or not stages_for(deal.channel, deal.dataset).filter(pk=stage.pk).exists():
                 continue
             self._apply_move(deal, stage, request)
             moved += 1
@@ -2121,7 +2127,7 @@ class CrmTodayView(GatedAPIView):
             count=Count("id"),
             amount=Sum("amount_rial"),
             weighted=Sum(
-                F("amount_rial") * F("stage__probability_pct") / Value(100),
+                F("amount_rial") * Coalesce("probability_pct", "stage__probability_pct") / Value(100),
                 output_field=DecimalField(max_digits=20, decimal_places=2),
             ),
         )
@@ -2335,13 +2341,12 @@ class PipelineBoardView(GatedAPIView):
         )
 
         columns = []
-        for st in PipelineStage.objects.filter(
-            is_active=True, dataset=ds
-        ).order_by("order"):
+        for st, label in stages_in_view(f.channels, ds):
             deals = by_stage.get(st.id, [])
             columns.append({
                 "id": st.id,
-                "name_fa": st.name_fa,
+                "name_fa": label,
+                "channel": st.channel,
                 "kind": st.kind,
                 "order": st.order,
                 "probability_pct": st.probability_pct,
