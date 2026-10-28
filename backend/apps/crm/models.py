@@ -1067,6 +1067,7 @@ class ImportBatch(TimeStampedModel):
         ARPA = "arpa", "آرپا"
         DIDAR = "didar", "دیدار"
         TEAMYAR = "teamyar", "تیم‌یار"
+        EXCEL = "excel", "اکسل B2B"
 
     source = models.CharField(max_length=8, choices=Source.choices, default=Source.ARPA)
     file_name = models.CharField(max_length=255)

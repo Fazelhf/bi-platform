@@ -89,3 +89,125 @@ class StagesPerBookTests(APITestCase):
         self.assertEqual([(r["label"], r["count"]) for r in out["rows"]], [("آلبالو", 1)])
         out = rpt.report_lost(rpt.Filters.from_query({"date_from": "2000-01-01"}), "tender_channel")
         self.assertEqual(out["rows"][0]["label"], "سامانه")
+
+
+class ExcelImportTests(APITestCase):
+    """`b2b_import` on a small workbook in his layout."""
+
+    def setUp(self):
+        import tempfile
+
+        from apps.crm.models import CustomerMatchCandidate, Product  # noqa: F401
+        from apps.sales.models import DimEmployee
+
+        self.tmp = tempfile.mkdtemp()
+        self.head = DimEmployee.objects.create(code="x-h", full_name_fa="سرپرست")
+        Product.objects.create(code="p-79-45", name_fa="79 - 45 - ساده")
+        Product.objects.create(code="p-79-45b", name_fa="79 - 45 - بنکيت - ساده")
+        self.known = Customer.objects.create(code="c-k", name_fa="بیمارستان میلاد", channel="b2b",
+                                             first_contact_at=timezone.now())
+        # A look-alike in another book: the new B2B one is queued against it.
+        Customer.objects.create(code="c-t", name_fa="فروشگاه شهروند", channel="team",
+                                first_contact_at=timezone.now())
+
+    def _book(self, name, sheets):
+        import os
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+        for title, header_row, rows in sheets:
+            ws = wb.create_sheet(title)
+            ws.cell(1, 1, title)
+            ws.cell(2, 1, "تاریخ بروزرسانی (شمسی):")
+            ws.cell(2, 3, "۱۴۰۵/۰۸/۰۵")
+            for r, values in enumerate(rows, start=header_row):
+                for c, v in enumerate(values, start=1):
+                    ws.cell(r, c, v)
+        path = os.path.join(self.tmp, name)
+        wb.save(path)
+        return path
+
+    def _files(self):
+        detail = self._book("pre.xlsx", [("پیش‌فاکتورهای مهر", 4, [
+            ["ردیف", "نام مجموعه", "تاریخ پیش‌فاکتور", "ماه صدور", "مبلغ پیش‌فاکتور (تومان)", "وضعیت (اصلی)",
+             "نتیجه (برنده / بازنده)", "توضیحات اصلی", "کالا / محصول", "قیمت پیشنهادی ما (تومان / رول)",
+             "قیمت برنده / رقیب (تومان / رول)", "کانال دریافت سفارش", "رتبه در سامانه",
+             "رقیب برنده / توضیح تکمیلی", "عرض (میلی‌متر)", "طول (متر)", "گرماژ (گرم)", "کد کالا", "تعداد رول (مبلغ ÷ قیمت)"],
+            [1, "بیمارستان میلاد", "1405/07/04", "مهر", 155800000, "تایید", "برنده", "خرید از سامانه",
+             "رول حرارتی 79*45", 135800, None, "سامانه", 1, None, 79, 45, 48, None, 1200],
+            [2, "فروشگاه  شهروند", "1405/07/05", "مهر", 140200000, "رد", "بازنده", "خرید از آلبالو",
+             "رول", 70100, 64000, "مستقیم", None, "آلبالو", 79, 45, 48, None, 2000],
+        ])])
+        monthly = self._book("sales.xlsx", [
+            ("پیش فاکتورها مهر", 4, [
+                ["ردیف", "نام مجموعه", "تاریخ", "مبلغ ", "وضعیت", "نتیجه / توضیحات", "", "", "کارشناس فروش"],
+                [1, "بیمارستان میلاد", "1405-07-04", 1558000000, "تایید", "", None, None, "مدیر واحد"],
+                [2, "درمانگاه نو", "1405-07-10", 500000000, "در انتظار تعیین وضعیت", "در انتظار بررسی", None, None, "کارشناس 1"],
+                [3, "درمانگاه کهنه", "1405-07-11", 300000000, "ابطال", "ابطال سامانه", None, None, ""],
+            ]),
+            ("پلن توسعه بازاریابی", 18, [
+                ["ردیف", "نام مجموعه", "تاریخ پیش‌فاکتور", "مبلغ (ریال)", "وضعیت در شیت پیش‌فاکتورها",
+                 "مرحله فعلی", "احتمال موفقیت (٪)", "اقدام بعدی", "مسئول پیگیری", "تاریخ پیگیری بعدی"],
+                [1, "درمانگاه نو", "1405/07/10", 500000000, "در انتظار", "", 75, "تماس با تدارکات", "مدیر واحد", "1405/08/20"],
+            ]),
+            ("قیف بازاریابی مهر", 36, [
+                ["ردیف", "نام شرکت", "شخص تماس / سمت", "شهر / استان", "مسئول پیگیری", "مرحله فعلی",
+                 "اقدام بعدی", "تاریخ پیگیری بعدی", "توضیحات", "ردیف مرحله (کمکی)"],
+                [1, "هایپر برکت", "آقای چراغی", "تهران", "", "", "پیگیری نشست حضوری", "", "مشتری جدید", 3],
+            ]),
+            ("فاکتورهای مهر", 4, [
+                ["ردیف", "نام مجموعه", "تاریخ ", "مبلغ (ریال)", "وضعیت", "وضعیت تسویه"],
+                [1, "بیمارستان میلاد", "1405-07-04", 1558000000, "تایید شده", "تسویه نشده"],
+            ]),
+        ])
+        return [detail, monthly]
+
+    def _run(self, **kw):
+        from apps.crm.b2b_import import import_files
+
+        return import_files(self._files(), default_owner=self.head, **kw)
+
+    def test_dry_run_saves_nothing(self):
+        report = self._run(dry_run=True)
+        self.assertEqual(report.deals_created, 4)
+        self.assertFalse(Deal.objects.exists())
+        self.assertEqual(Customer.objects.count(), 2)
+
+    def test_quotes_become_deals_on_the_b2b_pipeline(self):
+        from apps.crm.models import CustomerMatchCandidate, Task
+
+        report = self._run()
+        self.assertEqual((report.quotes_read, report.deals_created, report.deals_kept), (5, 4, 1))
+        won = Deal.objects.get(customer=self.known)  # Same quote in both files: one deal.
+        self.assertEqual((won.status, won.amount_rial, won.stage.code, won.owner),
+                         ("won", 1558000000, "b2b-won", self.head))
+        self.assertEqual((won.tender_channel, won.tender_rank), ("system", 1))
+        item = won.items.get()
+        self.assertEqual((item.product.code, item.unit_price_rial, item.quantity), ("p-79-45", 1358000, 1200))
+        lost = Deal.objects.get(competitor="آلبالو")
+        self.assertEqual((lost.status, lost.lost_reason.name_fa, lost.competitor_unit_price_rial),
+                         ("lost", "خرید از رقبا", 640000))
+        self.assertEqual(Deal.objects.get(customer__name_fa="درمانگاه کهنه").lost_reason.code, b2b.CANCELLED[0])
+        # «کارشناس 1» is a template slot; the plan sheet names the owner.
+        pending = Deal.objects.get(customer__name_fa="درمانگاه نو")
+        self.assertEqual((pending.status, pending.stage.code, pending.owner, pending.probability_pct),
+                         ("open", "b2b-4", self.head, 75))
+        self.assertTrue(Task.objects.filter(deal=pending, title="تماس با تدارکات").exists())
+        funnel = Deal.objects.get(customer__name_fa="هایپر برکت")
+        self.assertEqual(funnel.stage.code, "b2b-3")
+        self.assertEqual(funnel.customer.contact_name, "آقای چراغی")
+        self.assertEqual(report.customers_linked, 1)
+        self.assertTrue(CustomerMatchCandidate.objects.exists())
+        self.assertEqual(Customer.objects.filter(name_fa__contains="شهروند").count(), 2)  # Not merged.
+        self.assertEqual(report.invoices_read, 1)
+
+    def test_a_second_run_changes_nothing_and_keeps_edits(self):
+        self._run()
+        Deal.objects.filter(customer__name_fa="درمانگاه نو").update(probability_pct=10)
+        counts = (Deal.objects.count(), Customer.objects.count())
+        report = self._run()
+        self.assertEqual(report.deals_created + report.funnel_deals, 0)
+        self.assertEqual((Deal.objects.count(), Customer.objects.count()), counts)
+        self.assertEqual(Deal.objects.get(customer__name_fa="درمانگاه نو").probability_pct, 10)
