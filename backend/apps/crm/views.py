@@ -516,9 +516,14 @@ class CustomerGroupViewSet(_Base):
     serializer_class = CustomerGroupSerializer
 
     def get_queryset(self):
-        return super().get_queryset().annotate(customer_count=Count(
-            "customers", filter=Q(customers__merged_into__isnull=True), distinct=True,
-        ))
+        # Counted as the customer list will show them — in the caller's own
+        # books. A group-wide count beside a book-scoped list read as «2000
+        # customers here, none on the list».
+        live = Q(customers__merged_into__isnull=True)
+        channels = crm_scope(self.request.user).channels
+        if channels is not None:
+            live &= Q(customers__channel__in=channels)
+        return super().get_queryset().annotate(customer_count=Count("customers", filter=live, distinct=True))
 
     def check_permissions(self, request):
         super().check_permissions(request)
@@ -670,8 +675,8 @@ class CustomerViewSet(_Base):
             qs = qs.filter(owner_id=f.owner)
         if f.group is not None:
             qs = qs.filter(group_id=f.group or None)
-        if f.province:
-            qs = qs.filter(province_id=f.province)
+        if f.province is not None:
+            qs = qs.filter(province_id=f.province or None)
         if f.zone:
             qs = qs.filter(rpt.zone_q(f.zone))
         if f.source:
@@ -2314,8 +2319,8 @@ class PipelineBoardView(GatedAPIView):
             qs = qs.filter(owner_id=f.owner)
         if f.group is not None:
             qs = qs.filter(customer__group_id=f.group or None)
-        if f.province:
-            qs = qs.filter(customer__province_id=f.province)
+        if f.province is not None:
+            qs = qs.filter(customer__province_id=f.province or None)
         search = (request.query_params.get("search") or "").strip()
         if search:
             qs = qs.filter(
