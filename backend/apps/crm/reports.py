@@ -1256,6 +1256,75 @@ def report_sources(f: Filters, _axis_key: str = "source") -> dict:
 # --------------------------------------------------------------------------
 # Registry + envelope
 # --------------------------------------------------------------------------
+def report_tender(f: Filters, axis_key: str) -> dict:
+    """
+    پیش‌فاکتور و رقبا — B2B's quotes: how many turned into invoices, what was
+    lost to whom, and at what price against ours.
+      conversion_pct = won / all quotes opened in the window (as the B2B
+                       unit counts it: a pending quote is not yet a win)
+      gap_pct        = our price per roll vs the competitor's, on the quotes
+                       where both are known — the number that says whether a
+                       loss was about price.
+    ابطال (the buyer withdrew) is apart from a loss: nobody beat us.
+    """
+    from django.db.models import OuterRef, Subquery
+
+    from apps.crm.b2b import CANCELLED
+
+    first_price = DealItem.objects.filter(deal=OuterRef("pk")).order_by("id").values("unit_price_rial")[:1]
+    # Per deal, both prices or neither: an average over different quotes on
+    # each side would compare nothing. (Filtered aggregates over a subquery
+    # are not portable, so the pairing is done row by row first.)
+    qs = f.deals("opened_at").annotate(our_price=Subquery(first_price)).annotate(
+        our_pair=Case(When(our_price__isnull=False, competitor_unit_price_rial__isnull=False,
+                           then=F("our_price")), default=None),
+        rival_pair=Case(When(our_price__isnull=False, competitor_unit_price_rial__isnull=False,
+                             then=F("competitor_unit_price_rial")), default=None),
+    )
+    cancelled = Q(status="lost", lost_reason__code=CANCELLED[0])
+    measures = {
+        "count": Count("id", distinct=True),
+        "won": Count("id", filter=Q(status="won"), distinct=True),
+        "lost": Count("id", filter=Q(status="lost") & ~cancelled, distinct=True),
+        "cancelled": Count("id", filter=cancelled, distinct=True),
+        "open": Count("id", filter=Q(status="open"), distinct=True),
+        "won_amount": _money(Sum("amount_rial", filter=Q(status="won"))),
+        "our_price": Avg("our_pair"),
+        "rival_price": Avg("rival_pair"),
+    }
+
+    def enrich(r):
+        r["conversion_pct"] = _pct(r.get("won", 0), r.get("count", 0))
+        ours, theirs = _num(r.get("our_price")), _num(r.get("rival_price"))
+        r["our_price"], r["rival_price"] = round(ours), round(theirs)
+        r["gap_pct"] = round((ours - theirs) / theirs * 100, 1) if ours and theirs else 0.0
+        return r
+
+    if axis_key == "time":
+        rows = []
+        for jy, jm, s, e in _time_buckets(f):
+            bucket = qs.filter(opened_at__gte=_aware(s), opened_at__lt=_aware(e))
+            d = dict(f.drill_base())
+            d["date_from"], d["date_to"] = s.isoformat(), (e - dt.timedelta(days=1)).isoformat()
+            rows.append(enrich({
+                "id": f"{jy}-{jm}", "label": month_label(jy, jm),
+                **{k: _num(v) for k, v in bucket.aggregate(**measures).items()},
+                "drill": {"kind": "deals", "params": d},
+            }))
+        out = _shape("tender", "time", rows, chronological=True)
+    else:
+        axis = DEAL_AXES.get(axis_key, DEAL_AXES["competitor"])
+        rows = [enrich(r) for r in _grouped(qs, axis, measures)]
+        out = _shape("tender", axis_key, _finish(rows, f, axis, "count", "deals"))
+    # Ratios from the totals, not summed; prices are averages, not totals.
+    t = out["totals"]
+    whole = enrich({k: v for k, v in qs.aggregate(**measures).items()})
+    for k in ("our_price", "rival_price", "gap_pct"):
+        t[k] = whole[k]
+    t["conversion_pct"] = _pct(t.get("won", 0), t.get("count", 0))
+    return out
+
+
 REPORTS = {
     "sales": (report_sales, "گزارش کلی فروش", ["time", "user", "team", "province", "group", "source", "customer"]),
     "profit": (report_profit, "سود معاملات", ["user", "time", "group", "customer", "province"]),
@@ -1270,6 +1339,7 @@ REPORTS = {
     "provinces": (report_provinces, "فروش و تارگت استان", ["province"]),
     "satisfaction": (report_satisfaction, "رضایت مشتری", ["user"]),
     "sources": (report_sources, "بهترین منابع سرنخ", ["source"]),
+    "tender": (report_tender, "پیش‌فاکتور و رقبا", ["time", "competitor", "tender_channel", "user", "group"]),
 }
 
 #: The table layout of every report: which row keys become columns, in which
@@ -1284,6 +1354,18 @@ REPORTS = {
 #: measure — a footer total for an average or a ratio would be a lie, so those
 #: are left out and recomputed in `_shape`.
 REPORT_COLUMNS: dict[str, list[dict]] = {
+    "tender": [
+        {"k": "count", "label": "پیش‌فاکتور", "f": "count", "total": True},
+        {"k": "won", "label": "تایید", "f": "count", "total": True},
+        {"k": "lost", "label": "رد", "f": "count", "total": True},
+        {"k": "cancelled", "label": "ابطال", "f": "count", "total": True},
+        {"k": "open", "label": "در انتظار", "f": "count", "total": True},
+        {"k": "conversion_pct", "label": "نرخ تبدیل", "f": "pct"},
+        {"k": "won_amount", "label": "مبلغ تاییدشده", "f": "rial", "total": True},
+        {"k": "our_price", "label": "قیمت ما (هر رول)", "f": "rial"},
+        {"k": "rival_price", "label": "قیمت رقیب (هر رول)", "f": "rial"},
+        {"k": "gap_pct", "label": "اختلاف قیمت", "f": "pct"},
+    ],
     # Sales are the invoices: net of discount and returns, before VAT. Cost
     # and margin are not columns here because آرپا's invoices carry no cost —
     # they live on «سود معاملات», which is built from دیدار's deals.
@@ -1376,6 +1458,7 @@ AXIS_LABELS = {
     "province": "بر محور استان", "group": "بر محور گروه", "source": "بر محور منبع سرنخ",
     "stage": "بر محور مرحله فروش", "reason": "بر محور دلایل", "customer": "بر محور مشتری",
     "kind": "بر محور فعالیت", "team": "بر محور تیم",
+    "competitor": "بر محور رقیب", "tender_channel": "بر محور کانال دریافت سفارش",
 }
 
 
@@ -1391,7 +1474,7 @@ def _shape(key: str, axis: str, rows: list[dict], chronological: bool = False) -
     NOT_ADDITIVE = {
         "probability_pct", "avg_score", "days_to_win", "days_to_lose",
         "reach_pct", "rate", "success_rate", "margin_pct", "conversion_pct",
-        "unhappy_pct",
+        "unhappy_pct", "our_price", "rival_price", "gap_pct",
     }
     totals = {
         k: round(sum(_num(r.get(k)) for r in rows), 2)

@@ -211,3 +211,16 @@ class ExcelImportTests(APITestCase):
         self.assertEqual(report.deals_created + report.funnel_deals, 0)
         self.assertEqual((Deal.objects.count(), Customer.objects.count()), counts)
         self.assertEqual(Deal.objects.get(customer__name_fa="درمانگاه نو").probability_pct, 10)
+
+    def test_tender_report_counts_quotes_and_prices_against_the_rival(self):
+        self._run()
+        f = rpt.Filters.from_query({"date_from": "2000-01-01", "channel": "b2b"})
+        out = rpt.run_report("tender", f, "competitor")
+        t = out["totals"]
+        self.assertEqual((t["count"], t["won"], t["lost"], t["cancelled"], t["open"]), (5, 1, 1, 1, 2))
+        self.assertEqual(t["conversion_pct"], 20.0)
+        row = next(r for r in out["rows"] if r["label"] == "آلبالو")
+        self.assertEqual((row["our_price"], row["rival_price"], row["gap_pct"]), (701000, 640000, 9.5))
+        months = rpt.Filters.from_query({"date_from": "2026-09-01", "date_to": "2026-11-30", "channel": "b2b"})
+        rows = rpt.run_report("tender", months, "time")["rows"]
+        self.assertEqual(sum(r["count"] for r in rows), 5)

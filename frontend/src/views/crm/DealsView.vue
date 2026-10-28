@@ -180,6 +180,13 @@ const assignTo = ref<number | "">("");
 const lostReason = ref<number | "">("");
 
 const moveStage = computed(() => crm.options?.stages.find((s) => s.id === moveTo.value));
+/** The pipeline of the ticked deals; a mix of books shows every list, each
+ *  stage named with its book (the server skips a deal whose board lacks it). */
+const moveStages = computed(() => {
+  const books = new Set(rows.value.filter((r) => selected.value.has(r.id)).map((r) => r.channel ?? ""));
+  if (books.size === 1) return crm.stagesFor([...books][0]).map((s) => ({ id: s.id, label: s.name_fa }));
+  return (crm.options?.stages ?? []).map((s) => ({ id: s.id, label: s.channel ? `${s.channel_display} · ${s.name_fa}` : s.name_fa }));
+});
 
 async function bulkMove() {
   if (!moveTo.value) return;
@@ -417,7 +424,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
         <template v-if="crm.canEdit">
           <select v-model="moveTo" class="bg-white/10 rounded-lg px-2 py-1.5 text-xs outline-none">
             <option value="" class="text-ink">انتقال به مرحله…</option>
-            <option v-for="s in crm.options?.stages ?? []" :key="s.id" :value="s.id" class="text-ink">{{ s.name_fa }}</option>
+            <option v-for="s in moveStages" :key="s.id" :value="s.id" class="text-ink">{{ s.label }}</option>
           </select>
           <select v-if="moveStage?.kind === 'lost'" v-model="lostReason" class="bg-white/10 rounded-lg px-2 py-1.5 text-xs outline-none">
             <option value="" class="text-ink">دلیل…</option>

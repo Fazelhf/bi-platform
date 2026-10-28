@@ -97,12 +97,13 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class PipelineStageSerializer(serializers.ModelSerializer):
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    channel_display = serializers.CharField(source="get_channel_display", read_only=True)
 
     class Meta:
         model = PipelineStage
         fields = (
             "id", "code", "name_fa", "order", "kind", "kind_display",
-            "probability_pct", "is_active", "channel",
+            "probability_pct", "is_active", "channel", "channel_display",
         )
 
 
@@ -264,7 +265,10 @@ class DealDetailSerializer(DealListSerializer):
     tags = TagSerializer(many=True, read_only=True)
 
     class Meta(DealListSerializer.Meta):
-        fields = DealListSerializer.Meta.fields + ("items", "tags")
+        fields = DealListSerializer.Meta.fields + (
+            "items", "tags", "tender_channel", "tender_rank", "competitor",
+            "competitor_unit_price_rial", "probability_pct",
+        )
 
 
 class DealItemWriteSerializer(serializers.ModelSerializer):
