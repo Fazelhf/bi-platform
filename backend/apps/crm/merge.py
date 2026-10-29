@@ -459,6 +459,137 @@ def accept_definite(dataset: str, user=None, dry_run=False) -> dict:
     return {"definite": len(sure), "merged": merged, "failed": failed}
 
 
+_FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def _mark(value) -> str:
+    """A cell as a mark: «۱», 1, 1.0 and " 1 " are all the same mark."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value).translate(_FA_DIGITS).strip()
+
+
+def read_merge_marks(fileobj) -> tuple[list[dict], list[str]]:
+    """
+    The rows a reader marked in a customers export: [{mark, id, keep, row}].
+
+    The export carries an empty «ادغام» column. Rows given the same mark are
+    one customer; a mark ending in `*` («1*») says which row survives. The
+    header is looked for, not assumed at a fixed row, because the export has
+    a title block above it and a reader may delete or add rows there.
+    """
+    from openpyxl import load_workbook
+
+    from apps.crm.export import MERGE_ID_LABEL, MERGE_MARK_LABEL
+
+    try:
+        wb = load_workbook(fileobj, read_only=True, data_only=True)
+    except Exception:
+        raise MergeError("فایل اکسل خوانده نشد. همان فایل خروجی مشتریان را بفرستید.")
+
+    for ws in wb.worksheets:
+        rows = ws.iter_rows(values_only=True)
+        for n, header in enumerate(rows, 1):
+            labels = [str(v).strip() if v is not None else "" for v in header]
+            if MERGE_MARK_LABEL in labels and MERGE_ID_LABEL in labels:
+                break
+            if n > 20:
+                break
+        else:
+            continue
+        if MERGE_MARK_LABEL not in labels or MERGE_ID_LABEL not in labels:
+            continue
+        mark_col = labels.index(MERGE_MARK_LABEL)
+        id_col = labels.index(MERGE_ID_LABEL)
+        marked, problems = [], []
+        for r, values in enumerate(rows, n + 1):
+            mark = _mark(values[mark_col] if mark_col < len(values) else None)
+            if not mark:
+                continue
+            keep = mark.endswith("*")
+            mark = mark.rstrip("*").strip()
+            raw = _mark(values[id_col] if id_col < len(values) else None)
+            if not raw.isdigit():
+                problems.append(f"ردیف {r}: علامت «{mark}» دارد ولی شناسه‌ی مشتری ندارد.")
+                continue
+            marked.append({"mark": mark, "id": int(raw), "keep": keep, "row": r})
+        return marked, problems
+
+    raise MergeError(
+        "ستون‌های «ادغام» و «شناسه» در فایل نیست. خروجی تازه‌ی مشتریان را بگیرید، "
+        "ردیف‌های تکراری را در ستون «ادغام» با یک عدد مشترک علامت بزنید و همان را بفرستید."
+    )
+
+
+def merge_marked(marked: list[dict], dataset: str, user=None, dry_run=True) -> dict:
+    """
+    Merge each group of rows that share a mark — the reader already decided.
+
+    Nothing here guesses whether two rows are the same company; the mark is
+    the decision. What it does pick, unless a row is starred, is the survivor:
+    `survivor_of`'s order, so the row the invoices hang off stays. Each group
+    is its own transaction, so one bad group does not undo the rest, and every
+    merge goes through `absorb` — reversible, with a `CustomerMerge` record.
+    """
+    groups: dict[str, list[dict]] = {}
+    for m in marked:
+        groups.setdefault(m["mark"], []).append(m)
+
+    found = Customer.objects.filter(
+        dataset=dataset, pk__in=[m["id"] for m in marked]
+    ).in_bulk()
+
+    def side(c):
+        return {"id": c.pk, "code": c.code, "name_fa": c.name_fa}
+
+    out, merged = [], 0
+    for mark, items in groups.items():
+        entry = {"mark": mark, "keep": None, "absorb": [], "error": ""}
+        out.append(entry)
+        missing = [m["row"] for m in items if m["id"] not in found]
+        rows = list({m["id"]: found[m["id"]] for m in items if m["id"] in found}.values())
+        # A row merged earlier counts as the customer it went into.
+        rows = list({(c.merged_into or c).pk: (c.merged_into or c) for c in rows}.values())
+        if missing:
+            entry["error"] = "مشتری ردیف " + "، ".join(map(str, missing)) + " پیدا نشد."
+        elif len(rows) < 2:
+            entry["error"] = "فقط یک مشتری این علامت را دارد؛ دست‌کم دو ردیف لازم است."
+        starred = {m["id"] for m in items if m["keep"]}
+        if not entry["error"] and len(starred) > 1:
+            entry["error"] = "بیش از یک ردیف با * علامت خورده؛ فقط ماندنی را ستاره بزنید."
+        if entry["error"]:
+            entry["names"] = [c.name_fa for c in rows]
+            continue
+
+        keep = next((c for c in rows if c.pk in starred), None)
+        if keep is None:
+            keep = rows[0]
+            for c in rows[1:]:
+                keep, _ = survivor_of(keep, c)
+        others = [c for c in rows if c.pk != keep.pk]
+        entry["keep"] = side(keep)
+        entry["absorb"] = [side(c) for c in others]
+        if dry_run:
+            continue
+        try:
+            with transaction.atomic():
+                for c in others:
+                    absorb(keep, c, user)
+            merged += len(others)
+        except MergeError as exc:
+            entry["error"] = str(exc)
+
+    ready = [g for g in out if not g["error"]]
+    return {
+        "groups": out,
+        "ready": len(ready),
+        "rows": sum(len(g["absorb"]) for g in ready),
+        "merged": merged,
+    }
+
+
 class ImportTwins:
     """
     For importers: is the customer just created someone the CRM already has?

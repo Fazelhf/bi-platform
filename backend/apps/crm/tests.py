@@ -1133,6 +1133,84 @@ class BulkDeleteTests(APITestCase):
 # --------------------------------------------------------------------------
 # Row-level scope
 # --------------------------------------------------------------------------
+class MergeFromExcelTests(APITestCase):
+    """The customers export, marked in «ادغام» and uploaded back."""
+
+    def setUp(self):
+        now = timezone.now()
+
+        def make(code, name, **kw):
+            return Customer.objects.create(
+                code=code, name_fa=name, dataset=Dataset.REAL, first_contact_at=now, **kw,
+            )
+
+        self.a = make("arpa-950", "شرکت الف")
+        self.b = make("teamyar-950", "الف")
+        self.c = make("didar-co-950", "شرکت ب")
+        self.d = make("arpa-951", "شرکت ب تهران")
+        self.e = make("arpa-952", "تنها")
+        Deal.objects.create(code="d-950", title="d", customer=self.b, dataset=Dataset.REAL, opened_at=now)
+        self.client.force_authenticate(_user("xlmerge", "manager", "sales_team"))
+
+    def exported(self):
+        from io import BytesIO
+        from openpyxl import load_workbook
+
+        res = self.client.get("/api/crm/export/drill/", {"export_kind": "customers"})
+        self.assertEqual(res.status_code, 200)
+        return load_workbook(BytesIO(res.content))
+
+    def upload(self, wb, commit=False):
+        from io import BytesIO
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        buf = BytesIO()
+        wb.save(buf)
+        f = SimpleUploadedFile("m.xlsx", buf.getvalue())
+        return self.client.post(
+            "/api/crm/customers/merge-excel/", {"file": f, "commit": "1" if commit else "0"},
+            format="multipart",
+        )
+
+    def mark(self, wb, marks):
+        ws = wb.worksheets[0]
+        header = next(r for r in range(1, 10) if ws.cell(r, 1).value == "ادغام")
+        id_col = [c.value for c in ws[header]].index("شناسه") + 1
+        for r in range(header + 1, ws.max_row + 1):
+            pk = ws.cell(r, id_col).value
+            if pk in marks:
+                ws.cell(r, 1).value = marks[pk]
+
+    def test_preview_then_merge_marked_groups(self):
+        wb = self.exported()
+        self.mark(wb, {self.a.pk: 1, self.b.pk: "۱", self.c.pk: "2", self.d.pk: "2*", self.e.pk: 3})
+
+        res = self.upload(wb)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["ready"], 2)
+        self.assertEqual(Customer.objects.filter(merged_into__isnull=False).count(), 0)
+        groups = {g["mark"]: g for g in res.data["groups"]}
+        # The row with the deal survives; a star overrides.
+        self.assertEqual(groups["1"]["keep"]["id"], self.b.pk)
+        self.assertEqual(groups["2"]["keep"]["id"], self.d.pk)
+        self.assertTrue(groups["3"]["error"])
+
+        res = self.upload(wb, commit=True)
+        self.assertEqual(res.data["merged"], 2)
+        self.a.refresh_from_db()
+        self.c.refresh_from_db()
+        self.assertEqual(self.a.merged_into_id, self.b.pk)
+        self.assertEqual(self.c.merged_into_id, self.d.pk)
+        self.e.refresh_from_db()
+        self.assertIsNone(self.e.merged_into_id)
+
+    def test_a_file_without_the_columns_is_refused(self):
+        from openpyxl import Workbook
+
+        res = self.upload(Workbook())
+        self.assertEqual(res.status_code, 400)
+
+
 class ScopeTests(APITestCase):
     """
     Each کارشناس has their own login and their own book.

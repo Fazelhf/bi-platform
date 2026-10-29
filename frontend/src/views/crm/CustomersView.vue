@@ -10,6 +10,7 @@ import SortHeader from "@/components/crm/SortHeader.vue";
 import { useSort } from "@/composables/useListPrefs";
 import { toast } from "@/composables/useUi";
 import CustomerForm from "@/components/crm/CustomerForm.vue";
+import MergeExcelPanel from "@/components/crm/MergeExcelPanel.vue";
 import InlineCell from "@/components/crm/InlineCell.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -180,6 +181,7 @@ const canCurate = computed(() => crm.canEdit && crm.isManager);
 const canSelect = computed(() => crm.canEdit);
 
 const assignTo = ref<number | "">("");
+const showMergeExcel = ref(false);
 
 /** Hand the ticked accounts to another کارشناس — the manager's most common
  *  clean-up after someone leaves or a territory is redrawn. */
@@ -313,6 +315,11 @@ const statusClass: Record<string, string> = {
       </select>
       <CrmExportButton kind="customers" :params="exportParams" :total="total" title="مشتریان" />
       <button
+        v-if="canCurate"
+        class="bg-slate-100 text-ink rounded-xl px-3 py-2 text-sm shrink-0"
+        @click="showMergeExcel = !showMergeExcel"
+      >ادغام از اکسل</button>
+      <button
         v-if="crm.canEdit"
         class="bg-panel text-white rounded-xl px-4 py-2 text-sm shrink-0"
         @click="showForm = true"
@@ -382,6 +389,8 @@ const statusClass: Record<string, string> = {
         </li>
       </ul>
     </div>
+
+    <MergeExcelPanel v-if="showMergeExcel" @close="showMergeExcel = false" @merged="load" />
 
     <CustomerForm v-if="showForm" @close="showForm = false" @saved="onSaved" />
 

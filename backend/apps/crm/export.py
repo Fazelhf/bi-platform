@@ -41,6 +41,9 @@ COUNT_FMT = "#,##0"
 PCT_FMT = '0.0"٪"'
 DAYS_FMT = "0.0"
 
+MERGE_MARK_LABEL = "ادغام"
+MERGE_ID_LABEL = "شناسه"
+
 FORMATS = {"rial": RIAL_FMT, "count": COUNT_FMT, "pct": PCT_FMT, "days": DAYS_FMT}
 
 
@@ -190,6 +193,11 @@ DRILL_COLUMNS = {
         {"key": "closed_jalali", "label": "تاریخ بسته‌شدن", "fmt": "text"},
     ],
     "customers": [
+        # Left empty for the reader: rows given the same mark here are merged
+        # when the file is uploaded back (`merge.read_merge_marks`). «شناسه»
+        # is what the upload finds them by — codes can repeat across books.
+        {"key": "merge_mark", "label": MERGE_MARK_LABEL, "fmt": "text"},
+        {"key": "id", "label": MERGE_ID_LABEL, "fmt": "text"},
         {"key": "code", "label": "کد", "fmt": "text"},
         {"key": "name_fa", "label": "نام مشتری", "fmt": "text"},
         {"key": "group_name", "label": "گروه", "fmt": "text"},

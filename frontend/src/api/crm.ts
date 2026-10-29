@@ -573,6 +573,16 @@ export interface CrmTask {
   note: string;
 }
 
+export interface MergeExcelSide { id: number; code: string; name_fa: string }
+export interface MergeExcelResult {
+  groups: { mark: string; keep: MergeExcelSide | null; absorb: MergeExcelSide[]; error: string; names?: string[] }[];
+  ready: number;
+  rows: number;
+  merged: number;
+  problems: string[];
+  committed: boolean;
+}
+
 export const crmApi = {
   async options(): Promise<CrmOptions> {
     const { data } = await api.get("/crm/options/");
@@ -925,6 +935,15 @@ export const crmApi = {
     files.forEach((f) => fd.append("files", f));
     fd.append("commit", commit ? "1" : "0");
     const { data } = await api.post("/crm/teamyar-import/", fd, { timeout: 0 });
+    return data;
+  },
+
+  /** The customers export with «ادغام» marked, sent back. `commit` off = preview only. */
+  async mergeExcel(file: File, commit: boolean): Promise<MergeExcelResult> {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("commit", commit ? "1" : "0");
+    const { data } = await api.post("/crm/customers/merge-excel/", fd, { timeout: 0 });
     return data;
   },
 

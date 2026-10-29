@@ -1013,6 +1013,37 @@ class CustomerViewSet(_Base):
             "last_activity_at": survivor.last_activity_at,
         })
 
+    @action(detail=False, methods=["post"], url_path="merge-excel",
+            parser_classes=[MultiPartParser, FormParser])
+    def merge_excel(self, request):
+        """
+        ادغام از اکسل — the customers export, marked up and sent back.
+
+        Rows sharing a mark in the «ادغام» column are merged into one. With
+        `commit` off (the default) nothing changes: the reply lists each group
+        and which row would survive, so the screen can show it before the
+        manager confirms with the same file.
+        """
+        if not is_crm_manager(request.user):
+            return Response({"detail": "ادغام مشتری با مدیر فروش است."}, status=status.HTTP_403_FORBIDDEN)
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response({"detail": "فایلی فرستاده نشد."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            marked, problems = crm_merge.read_merge_marks(upload)
+        except crm_merge.MergeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not marked:
+            return Response(
+                {"detail": "هیچ ردیفی در ستون «ادغام» علامت نخورده است.", "problems": problems},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        commit = str(request.data.get("commit", "")).lower() in {"1", "true", "yes"}
+        result = crm_merge.merge_marked(
+            marked, active_dataset(request), request.user, dry_run=not commit
+        )
+        return Response({**result, "problems": problems, "committed": commit})
+
     @action(detail=False, methods=["post"], url_path="bulk-review")
     def bulk_review(self, request):
         """
