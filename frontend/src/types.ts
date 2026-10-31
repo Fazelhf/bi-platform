@@ -378,6 +378,10 @@ export interface ProductionDashboard {
   }[];
   costs: { category__name_fa: string; amount: number }[];
   other_cost_notes: { shift: "day" | "night"; shift_label: string; description: string; amount_rial: number }[];
+  line_notes: {
+    machine: string; kind: "cutting" | "print"; shift: "day" | "night"; shift_label: string;
+    period_label: string; description: string; print_design: string;
+  }[];
   revenue: { product: string; quantity: number; amount: number }[];
   print_colors: { color_count: number; area_sqm: number }[];
   days_in_month: number;

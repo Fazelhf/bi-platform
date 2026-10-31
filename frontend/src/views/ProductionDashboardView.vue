@@ -29,6 +29,9 @@ const n = (v: string | number | null | undefined) => (v == null ? null : Number(
 // Per-machine (cutting lines only) for the machine charts.
 const cutting = computed(() => (data.value?.machines ?? []).filter((m) => m.machine__kind === "cutting"));
 const machineNames = computed(() => cutting.value.map((m) => m.machine__name_fa));
+const lineNotes = computed(() => data.value?.line_notes ?? []);
+const printNotes = computed(() => lineNotes.value.filter((x) => x.kind === "print"));
+const cuttingNotes = computed(() => lineNotes.value.filter((x) => x.kind === "cutting" && x.description));
 const machineAvg = computed(() =>
   cutting.value.map((m) => (m.active_shifts ? Math.round(m.output_units / m.active_shifts) : 0)),
 );
@@ -237,6 +240,37 @@ function fmtCell(v: string | null, unit: string) {
             <b class="text-ink ltr-nums whitespace-nowrap">{{ rial(note.amount_rial) }}</b>
           </li>
         </ul>
+      </div>
+
+      <!-- The form's notes: what ran on the press, and what each line reported -->
+      <div v-if="cuttingNotes.length || printNotes.length" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div v-if="printNotes.length" class="bg-surface rounded-card shadow-soft p-4">
+          <h4 class="text-sm font-bold text-ink mb-2">چاپ — طرح‌ها و توضیحات</h4>
+          <ul class="space-y-2">
+            <li v-for="(note, i) in printNotes" :key="i" class="text-xs leading-relaxed">
+              <div class="flex items-center gap-1.5 text-slate-500">
+                <span class="w-1.5 h-1.5 rounded-full" :class="note.shift === 'night' ? 'bg-indigo-500' : 'bg-amber-500'"></span>
+                <span class="font-medium">{{ note.shift_label }}</span>
+                <span v-if="note.period_label !== data.period.label" class="text-slate-400">· {{ note.period_label }}</span>
+                <span v-if="note.print_design" class="mr-auto px-2 py-0.5 rounded-md bg-accent-50 text-accent-600 font-medium">
+                  طرح: {{ note.print_design }}
+                </span>
+              </div>
+              <p v-if="note.description" class="text-slate-600 mt-0.5 pr-3">{{ note.description }}</p>
+            </li>
+          </ul>
+        </div>
+        <div v-if="cuttingNotes.length" class="bg-surface rounded-card shadow-soft p-4">
+          <h4 class="text-sm font-bold text-ink mb-2">توضیحات خطوط برش</h4>
+          <ul class="space-y-1.5">
+            <li v-for="(note, i) in cuttingNotes" :key="i" class="text-xs leading-relaxed text-slate-600">
+              <span class="inline-flex items-center gap-1 ml-1.5 font-medium text-slate-500">
+                <span class="w-1.5 h-1.5 rounded-full" :class="note.shift === 'night' ? 'bg-indigo-500' : 'bg-amber-500'"></span>
+                {{ note.machine }} · {{ note.shift_label }}<template v-if="note.period_label !== data.period.label"> · {{ note.period_label }}</template>:
+              </span>{{ note.description }}
+            </li>
+          </ul>
+        </div>
       </div>
 
       <!-- Actual output by line, and productivity -->

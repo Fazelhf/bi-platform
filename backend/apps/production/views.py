@@ -238,6 +238,20 @@ class ProductionDashboardView(APIView):
             if c.description.strip()
         ]
 
+        # What the form's notes said: each line's remarks and the press's
+        # design, per shift and per week/day the month was recorded at.
+        line_notes = [
+            {"machine": f.machine.name_fa, "kind": f.machine.kind,
+             "shift": f.shift, "shift_label": f.get_shift_display(),
+             "period_label": f.period.label,
+             "description": f.description.strip(), "print_design": f.print_design.strip()}
+            for f in FactProduction.objects.filter(period_id__in=units)
+            .exclude(description="", print_design="")
+            .select_related("machine", "period")
+            .order_by("period__start_date", "machine__sort_order", "shift")
+            if f.description.strip() or f.print_design.strip()
+        ]
+
         # Roll counts: one line per product, both shifts (and every week or
         # day of the month) added together.
         revenue_by_product: dict[str, dict] = {}
@@ -309,6 +323,7 @@ class ProductionDashboardView(APIView):
                 "shifts_by_machine": shifts_by_machine,
                 "costs": costs,
                 "other_cost_notes": other_notes,
+                "line_notes": line_notes,
                 "revenue": revenue,
                 "print_colors": list(print_colors),
                 "days_in_month": bench.days_in_month,
@@ -341,6 +356,8 @@ CUT_FIELDS = [
     "waste_pct", "repair_count",
     "downtime_breakdown_shifts", "downtime_sizechange_shifts", "downtime_nowork_shifts",
 ]
+# Free text on a line's row: notes on any line, and the print unit's design.
+TEXT_FIELDS = ["description", "print_design"]
 
 
 class ProductionInputView(APIView):
@@ -384,6 +401,8 @@ class ProductionInputView(APIView):
                    "status": f.status if f else "draft"}
             for fld in CUT_FIELDS:
                 row[fld] = str(getattr(f, fld)) if f else "0"
+            for fld in TEXT_FIELDS:
+                row[fld] = getattr(f, fld) if f else ""
             return row
 
         def block(shift):
@@ -458,6 +477,8 @@ class ProductionInputView(APIView):
             rows = list(block.get("cutting", [])) + ([block["print"]] if block.get("print") else [])
             for row in rows:
                 defaults = {f: (row.get(f) or 0) for f in CUT_FIELDS}
+                # Sent only by clients that know the fields; older ones keep what is stored.
+                defaults.update({f: (row[f] or "").strip() for f in TEXT_FIELDS if f in row})
                 defaults["status"] = status
                 if submit:
                     defaults["submitted_by"] = user
