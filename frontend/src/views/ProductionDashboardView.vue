@@ -15,11 +15,14 @@ import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
 import { kpiValue, num, rial } from "@/utils/format";
 import SectionBoard from "@/components/boards/SectionBoard.vue";
+import ProductionDaily from "@/components/production/ProductionDaily.vue";
 
 const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
 const data = ref<ProductionDashboard | null>(null);
 const loading = ref(false);
+/** «ماهانه» is the dashboard as it was; «روزانه» the month day by day. */
+const view = ref<"month" | "daily">("month");
 
 function kpi(code: string): KpiResult | undefined {
   return data.value?.kpis.find((k) => k.kpi_code === code);
@@ -132,6 +135,10 @@ function fmtCell(v: string | null, unit: string) {
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold text-ink">داشبورد مدیریتی تولید</h2>
       <div class="flex items-center gap-2">
+        <div class="flex rounded-xl bg-slate-100 p-0.5 text-sm">
+          <button class="px-3 py-1 rounded-lg" :class="view === 'month' ? 'bg-surface shadow-sm text-ink' : 'text-slate-500'" @click="view = 'month'">ماهانه</button>
+          <button class="px-3 py-1 rounded-lg" :class="view === 'daily' ? 'bg-surface shadow-sm text-ink' : 'text-slate-500'" @click="view = 'daily'">روزانه</button>
+        </div>
         <ExportActions section="production" :period="selectedPeriod" />
         <select v-model.number="selectedPeriod" class="bg-surface border border-slate-200 rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.label }}</option>
@@ -139,7 +146,9 @@ function fmtCell(v: string | null, unit: string) {
       </div>
     </div>
 
-    <DashboardSkeleton v-if="loading || !data" :cards="3" :charts="4" />
+    <ProductionDaily v-if="view === 'daily'" :period="selectedPeriod" />
+
+    <DashboardSkeleton v-else-if="loading || !data" :cards="3" :charts="4" />
 
     <template v-else>
       <!-- Headline figures -->

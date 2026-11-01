@@ -19,6 +19,7 @@ urlpatterns = [
     path("input/", views.ProductionInputView.as_view(), name="production-input"),
     path("dashboard/summary/", views.ProductionDashboardView.as_view(),
          name="production-dashboard"),
+    path("dashboard/daily/", views.ProductionDailyView.as_view(), name="production-daily"),
     path("recompute/", views.RecomputeProductionView.as_view(),
          name="production-recompute"),
 ]
