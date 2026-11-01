@@ -221,6 +221,12 @@ export interface Deal {
   competitor?: string;
   competitor_unit_price_rial?: string | null;
   probability_pct?: number | null;
+  /** The آرپا invoice lines behind a deal made from an invoice. */
+  invoice_lines?: {
+    invoice: string; category: string; name: string; group: string; quantity: number; unit: string;
+    price: number; amount: number; net: number; paper: string; print: string; carton: string;
+    warehouse: string; width: number | null; length: number | null; note: string;
+  }[];
 }
 
 export interface DealItem {
@@ -328,6 +334,11 @@ export interface CustomerInsights {
   health: { score: number; label: string; reasons: { tone: "good" | "warn" | "bad"; text: string }[] };
   tasks: CrmTask[];
   invoices: CrmInvoice[];
+  /** What the customer bought, per آرپا product code (invoice lines). */
+  products: {
+    code: string; name: string; group: string; unit: string; quantity: number; amount: number;
+    invoices: number; avg_price: number; last_price: number; last: string; paper: string; print: string;
+  }[];
 }
 
 export interface CrmActivity {
@@ -530,6 +541,9 @@ export interface CrmInvoice {
   vat_rial: string;
   total_rial: string;
   unsettled_rial: string;
+  settled_rial: string;
+  /** آرپا's «دسته بندی»: رسمی / عمومی. */
+  category?: string;
   payment_terms: string;
 }
 

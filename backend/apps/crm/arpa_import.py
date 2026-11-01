@@ -316,7 +316,20 @@ def deal_code(invoice: SalesInvoice) -> str:
 UNITS = {"رول": Product.Unit.ROLL, "بسته": Product.Unit.PACK, "تن": Product.Unit.TON, "برگ": Product.Unit.SHEET}
 
 
-def product_for(code: str, name: str, unit: str, cache: dict) -> int | None:
+def category_for(group: str):
+    """The catalogue category of آرپا's «گروه کالا», added when missing."""
+    from apps.crm.models import ProductCategory
+
+    group = fold(group)
+    if not group:
+        return None
+    return ProductCategory.objects.get_or_create(
+        code=f"pc-{slugify(group, allow_unicode=True)}"[:50],
+        defaults={"name_fa": group[:100], "dataset": Dataset.REAL},
+    )[0]
+
+
+def product_for(code: str, name: str, unit: str, cache: dict, group: str = "") -> int | None:
     """
     The catalogue product of آرپا's کد کالا, added when the catalogue does not
     have it yet. The catalogue *is* آرپا's («pr-<کد کالا>»), so a line's code
@@ -327,10 +340,16 @@ def product_for(code: str, name: str, unit: str, cache: dict) -> int | None:
         return None
     key = f"pr-{slugify(code)}"[:50]
     if key not in cache:
-        cache[key] = Product.objects.get_or_create(
+        product, _ = Product.objects.get_or_create(
             code=key, defaults={"name_fa": (name or code)[:150], "unit": UNITS.get(fold(unit), Product.Unit.ROLL),
                                 "dataset": Dataset.REAL},
-        )[0].pk
+        )
+        # A product with no category takes آرپا's product group — so the
+        # catalogue groups the way the invoices do.
+        if not product.category_id and group:
+            product.category = category_for(group)
+            product.save(update_fields=["category", "updated_at"])
+        cache[key] = product.pk
     return cache[key]
 
 
@@ -604,7 +623,7 @@ class Importer:
         SalesInvoiceItem.objects.bulk_create([
             SalesInvoiceItem(
                 dataset=invoice.dataset, invoice=invoice,
-                product_id=product_for(ln["code"], ln["name"], ln["unit"], self.products),
+                product_id=product_for(ln["code"], ln["name"], ln["unit"], self.products, ln.get("group", "")),
                 product_code=ln["code"], product_name=ln["name"],
                 quantity=Decimal(ln["quantity"]), equivalent=Decimal(ln["equivalent"]),
                 sub_unit=ln["unit"], unit_price_rial=Decimal(ln["price"]),

@@ -1192,6 +1192,51 @@ class CustomerFeedbackViewSet(_Base):
 # --------------------------------------------------------------------------
 # Deal
 # --------------------------------------------------------------------------
+def customer_products(invoices) -> list[dict]:
+    """
+    What this customer has bought, product by product, from آرپا's invoice
+    lines: how much, at what price on average, when last, and the make-up
+    (paper, print) of the latest order — what a rep needs before the next call.
+    A return counts against the purchase.
+    """
+    from django.db.models import Case, Value, When
+    from django.db.models.functions import Abs
+
+    from apps.crm.models import SalesInvoiceItem
+
+    lines = SalesInvoiceItem.objects.filter(invoice__in=invoices.values("pk"))
+    sign = Case(When(invoice__kind=SalesInvoice.Kind.RETURN, then=Value(-1)), default=Value(1))
+    dec = DecimalField(max_digits=24, decimal_places=2)
+    rows = (
+        lines.values("product_code")
+        .annotate(
+            name=Max("product_name"), group=Max("accounting_group"), unit=Max("sub_unit"),
+            amount=Sum(sign * Abs("amount_rial"), output_field=dec),
+            quantity=Sum(sign * Abs("quantity"), output_field=dec),
+            invoices=Count("invoice_id", distinct=True), last=Max("invoice__issued_at"),
+        )
+        .order_by("-amount")
+    )
+    latest = {}
+    for code, paper, print_, price in (
+        lines.filter(invoice__kind=SalesInvoice.Kind.SALE)
+        .order_by("product_code", "-invoice__issued_at", "-id")
+        .values_list("product_code", "paper_type", "print_type", "unit_price_rial")
+    ):
+        latest.setdefault(code, (paper, print_, price))
+    out = []
+    for r in rows:
+        qty, amount = float(r["quantity"] or 0), float(r["amount"] or 0)
+        paper, print_, price = latest.get(r["product_code"], ("", "", 0))
+        out.append({
+            "code": r["product_code"], "name": r["name"] or r["product_code"], "group": r["group"] or "",
+            "unit": r["unit"] or "", "quantity": qty, "amount": amount, "invoices": r["invoices"],
+            "avg_price": round(amount / qty) if qty else 0, "last_price": float(price or 0),
+            "last": jalali_str(r["last"]) if r["last"] else "", "paper": paper, "print": print_,
+        })
+    return out
+
+
 def customer_insights(customer) -> dict:
     """
     What the customer page adds on top of the raw record — the part that
@@ -1310,6 +1355,7 @@ def customer_insights(customer) -> dict:
     recent_invoices = invoices.select_related("deal").order_by("-issued_at")[:50]
 
     return {
+        "products": customer_products(invoices),
         "invoiced": float(inv["amount"] or 0),
         "invoice_count": inv["count"] or 0,
         "unsettled": float(inv["unsettled"] or 0),

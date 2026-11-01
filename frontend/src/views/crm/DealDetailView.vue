@@ -340,6 +340,44 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             </div>
           </div>
 
+          <!-- What the آرپا invoice specified, line by line -->
+          <div v-if="deal.invoice_lines?.length" class="bg-surface rounded-card shadow-soft overflow-hidden">
+            <h3 class="text-sm font-semibold text-ink px-4 pt-4 pb-2">ردیف‌های فاکتور آرپا و مشخصات سفارش</h3>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs min-w-[760px]">
+                <thead>
+                  <tr class="text-slate-400 bg-slate-50">
+                    <th class="text-right font-medium px-4 py-2">کالا</th>
+                    <th class="text-left font-medium px-2">تعداد</th>
+                    <th class="text-left font-medium px-2">فی</th>
+                    <th class="text-left font-medium px-2">مبلغ خالص</th>
+                    <th class="text-right font-medium px-2">عرض × طول</th>
+                    <th class="text-right font-medium px-2">کاغذ</th>
+                    <th class="text-right font-medium px-2">چاپ</th>
+                    <th class="text-right font-medium px-2">کارتن</th>
+                    <th class="text-right font-medium px-4">انبار</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(l, i) in deal.invoice_lines" :key="i" class="border-t border-slate-100">
+                    <td class="px-4 py-2 text-ink">
+                      {{ l.name }}
+                      <span v-if="l.note && l.note !== '*'" class="block text-[10px] text-slate-400">{{ l.note }}</span>
+                    </td>
+                    <td class="px-2 text-left ltr-nums">{{ num(l.quantity) }} <span class="text-slate-400">{{ l.unit }}</span></td>
+                    <td class="px-2 text-left ltr-nums whitespace-nowrap">{{ rial(l.price) }}</td>
+                    <td class="px-2 text-left ltr-nums whitespace-nowrap text-ink">{{ rial(l.net) }}</td>
+                    <td class="px-2 ltr-nums text-slate-500">{{ l.width ? `${l.width} × ${l.length ?? "—"}` : "—" }}</td>
+                    <td class="px-2 text-slate-500">{{ l.paper || "—" }}</td>
+                    <td class="px-2 text-slate-500">{{ l.print || "—" }}</td>
+                    <td class="px-2 text-slate-500">{{ l.carton || "—" }}</td>
+                    <td class="px-4 text-slate-400 truncate max-w-[140px]">{{ l.warehouse || "—" }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <!-- Why the profit is what it is -->
           <div :class="card">
             <h3 class="text-sm font-semibold text-ink mb-3">تحلیل سود این معامله</h3>

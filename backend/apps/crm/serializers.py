@@ -297,12 +297,29 @@ class DealListSerializer(serializers.ModelSerializer):
 class DealDetailSerializer(DealListSerializer):
     items = DealItemSerializer(many=True, read_only=True)
     tags = TagSerializer(many=True, read_only=True)
+    #: The آرپا invoice lines behind a deal made from an invoice — with what
+    #: the order specified (paper, print, carton, warehouse), which the deal's
+    #: own lines do not carry.
+    invoice_lines = serializers.SerializerMethodField()
 
     class Meta(DealListSerializer.Meta):
         fields = DealListSerializer.Meta.fields + (
             "items", "tags", "tender_channel", "tender_rank", "competitor",
-            "competitor_unit_price_rial", "probability_pct",
+            "competitor_unit_price_rial", "probability_pct", "invoice_lines",
         )
+
+    def get_invoice_lines(self, deal):
+        from apps.crm.models import SalesInvoiceItem
+
+        return [
+            {"invoice": i.invoice.number, "category": i.invoice.category, "name": i.product_name or i.product_code,
+             "group": i.accounting_group, "quantity": float(i.quantity), "unit": i.sub_unit,
+             "price": float(i.unit_price_rial), "amount": float(i.amount_rial), "net": float(i.net_rial),
+             "paper": i.paper_type, "print": i.print_type, "carton": i.carton_type, "warehouse": i.warehouse,
+             "width": float(i.width_mm) if i.width_mm is not None else None,
+             "length": float(i.length_m) if i.length_m is not None else None, "note": i.note}
+            for i in SalesInvoiceItem.objects.filter(invoice__deal=deal).select_related("invoice").order_by("id")
+        ]
 
 
 class DealItemWriteSerializer(serializers.ModelSerializer):
@@ -642,8 +659,8 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             "id", "number", "kind", "kind_display", "issued_at", "issued_jalali",
             "customer", "customer_name", "party_code", "awaiting_match",
             "owner", "owner_name", "deal", "deal_title", "amount_rial",
-            "vat_rial", "total_rial", "unsettled_rial", "payment_terms",
-            "channel",
+            "vat_rial", "total_rial", "unsettled_rial", "settled_rial", "payment_terms",
+            "channel", "category",
         )
 
     def get_customer_name(self, obj) -> str:

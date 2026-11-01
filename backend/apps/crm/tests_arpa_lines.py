@@ -138,3 +138,31 @@ class LineDimensionTests(TestCase):
         self.assertEqual((month["settled"], month["unsettled"], month["roll_price"]), (650, 1000, 100))
         dash = rpt.dashboard(f)
         self.assertEqual({r["label"] for r in dash["paper_mix"]}, {"OPX04", "کاغذ GB"})
+
+
+class CustomerAndDealSpecsTests(TestCase):
+    def test_customer_products_and_deal_invoice_lines(self):
+        from apps.crm.models import Deal, SalesInvoiceItem
+        from apps.crm.serializers import DealDetailSerializer
+        from apps.crm.views import customer_products
+
+        c = Customer.objects.create(code="cs-1", name_fa="مشتری", first_contact_at=timezone.now())
+        deal = Deal.objects.create(code="cs-d", title="x", customer=c, opened_at=timezone.now(), status="won")
+        for code, kind, date, qty, amount, paper in (("i1", "sale", "1405/06/01", 10, 1000, "OPX04"),
+                                                     ("i2", "sale", "1405/07/01", 10, 1200, "GB"),
+                                                     ("r1", "return", "1405/07/05", -2, -240, "")):
+            inv = SalesInvoice.objects.create(code=code, number=code, kind=kind, customer=c, channel="team",
+                                              issued_at=jdate(date), deal=deal if code == "i2" else None)
+            SalesInvoiceItem.objects.create(invoice=inv, product_code="32040", product_name="79 - 40 - ساده",
+                                            quantity=qty, amount_rial=amount, unit_price_rial=abs(amount) // abs(qty),
+                                            paper_type=paper, width_mm=79, length_m=40)
+        row = customer_products(SalesInvoice.objects.filter(customer=c))[0]
+        self.assertEqual((row["quantity"], row["amount"], row["paper"], row["last_price"]), (18, 1960, "GB", 120))
+        lines = DealDetailSerializer(deal).data["invoice_lines"]
+        self.assertEqual([(l["paper"], l["width"], l["length"]) for l in lines], [("GB", 79.0, 40.0)])
+
+    def test_a_product_added_from_arpa_takes_its_group_as_category(self):
+        from apps.crm.arpa_import import product_for
+
+        pid = product_for("77777", "57 - 13 - ساده", "رول", {}, "پوز ساده")
+        self.assertEqual(Product.objects.get(pk=pid).category.name_fa, "پوز ساده")
