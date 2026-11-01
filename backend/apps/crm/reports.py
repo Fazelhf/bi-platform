@@ -1464,6 +1464,16 @@ def report_collection(f: Filters, axis_key: str) -> dict:
         r["collected_pct"] = _pct(_num(r.get("settled")), _num(r.get("total")))
         return r
 
+    if axis_key == "aging":
+        from apps.crm.reports_more import aging_rows
+
+        out = _shape("collection", "aging", aging_rows(f))
+        out["columns"] = [
+            {"k": "unsettled", "label": "مانده", "f": "rial", "total": True},
+            {"k": "count", "label": "فاکتور", "f": "count", "total": True},
+            {"k": "share_pct", "label": "سهم", "f": "pct"},
+        ]
+        return out
     if axis_key == "time":
         rows = []
         for jy, jm, s_, e in _time_buckets(f):
@@ -1537,7 +1547,7 @@ REPORTS = {
     "invoice_products": (report_invoice_products, "فروش کالا از فاکتورها",
                          ["product", "item_group", "size", "printed", "paper_type", "print_type", "width",
                           "warehouse", "customer", "user", "time"]),
-    "collection": (report_collection, "وصول و مطالبات", ["time", "user", "customer", "group", "province"]),
+    "collection": (report_collection, "وصول و مطالبات", ["time", "aging", "user", "customer", "group", "province"]),
     "tender": (report_tender, "پیش‌فاکتور و رقبا", ["time", "competitor", "tender_channel", "user", "group"]),
 }
 
@@ -1729,7 +1739,8 @@ def _shape(key: str, axis: str, rows: list[dict], chronological: bool = False) -
         "probability_pct", "avg_score", "days_to_win", "days_to_lose",
         "reach_pct", "rate", "success_rate", "margin_pct", "conversion_pct",
         "unhappy_pct", "our_price", "rival_price", "gap_pct", "avg_price", "discount_pct",
-        "collected_pct", "roll_price",
+        "collected_pct", "roll_price", "avg_invoice", "per_workday", "usual_days", "quiet_days",
+        "buyers_a", "avg_b_spend", "avg_revenue", "growth_pct", "yoy_pct",
     }
     totals = {
         k: round(sum(_num(r.get(k)) for r in rows), 2)
@@ -2397,3 +2408,7 @@ def geo_province(f: Filters, province_id: int) -> dict | None:
         "experts": assigned["experts"],
         "drill": {"kind": "invoices", "params": drill},
     }
+
+
+# The further reports register themselves into the tables above.
+from apps.crm import reports_more  # noqa: E402,F401

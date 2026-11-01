@@ -58,6 +58,13 @@ const CHART_KEY: Record<string, { amount: string; count: string; fmt: "rial" | "
   activities: { amount: "count", count: "count", fmt: "count" },
   calls: { amount: "success_rate", count: "calls", fmt: "percent" },
   invoice_products: { amount: "amount", count: "quantity", fmt: "rial" },
+  rep_scorecard: { amount: "sales", count: "customers", fmt: "rial" },
+  loyalty: { amount: "revenue", count: "customers", fmt: "rial" },
+  at_risk: { amount: "revenue_12m", count: "quiet_days", fmt: "rial" },
+  cross_sell: { amount: "opportunity", count: "opportunity", fmt: "count" },
+  compare: { amount: "current", count: "current", fmt: "rial" },
+  per_workday: { amount: "per_workday", count: "workdays", fmt: "rial" },
+  province_groups: { amount: "amount", count: "amount", fmt: "rial" },
   collection: { amount: "unsettled", count: "count", fmt: "rial" },
   products: { amount: "amount", count: "quantity", fmt: "rial" },
   provinces: { amount: "amount", count: "count", fmt: "rial" },
@@ -126,6 +133,28 @@ const series = computed(() => {
       { name: "ناموفق", stack: "s", color: "#ef4444", values: rows.map((r) => r.lost_count) },
     ];
   }
+  if (reportKey.value === "compare") {
+    return [
+      { name: "این بازه", values: rows.map((r) => r.current), color: "#22c55e" },
+      { name: "بازه‌ی قبل", values: rows.map((r) => r.previous), color: "#94a3b8" },
+      { name: "سال قبل", values: rows.map((r) => r.last_year), color: "#cbd5e1" },
+    ];
+  }
+  if (reportKey.value === "rep_scorecard") {
+    return [
+      { name: "فروش", values: rows.map((r) => r.sales), color: "#22c55e" },
+      { name: "تارگت", values: rows.map((r) => r.target), color: "#cbd5e1" },
+    ];
+  }
+  if (reportKey.value === "province_groups") {
+    const palette = ["#0ea5e9", "#22c55e", "#f59e0b", "#6366f1", "#ef4444", "#14b8a6", "#a855f7", "#64748b"];
+    return (data.value?.columns ?? []).filter((c) => c.k.startsWith("g")).map((c, i) => ({
+      name: c.label, stack: "g", color: palette[i % palette.length], values: rows.map((r) => r[c.k] ?? 0),
+    }));
+  }
+  if (reportKey.value === "collection" && axis.value === "aging") {
+    return [{ name: "مانده", values: rows.map((r) => r.unsettled), color: "#f59e0b" }];
+  }
   if (reportKey.value === "collection") {
     return [
       { name: "وصول‌شده", stack: "c", color: "#22c55e", values: rows.map((r) => r.settled) },
@@ -167,7 +196,7 @@ const chartFormat = computed(() => {
 });
 
 const isStacked = computed(() =>
-  ["incoming", "calls"].includes(reportKey.value) ||
+  ["incoming", "calls", "province_groups", "collection"].includes(reportKey.value) ||
   (reportKey.value === "lost" && axis.value === "time"),
 );
 
@@ -287,6 +316,7 @@ const tabBtn = (on: boolean) =>
           :format="chartFormat" :height="320"
           @pick="pick"
         />
+        <p v-if="data.headline" class="text-sm text-ink font-medium mt-3 text-center">{{ data.headline }}</p>
         <p v-if="data.rows.length" class="text-[11px] text-slate-300 mt-2 text-center no-print">
           روی هر ستون یا ردیف کلیک کنید تا ریز رکوردهای همان بخش باز شود
         </p>

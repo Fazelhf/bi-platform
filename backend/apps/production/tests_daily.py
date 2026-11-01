@@ -22,6 +22,9 @@ class DailyProductionTests(APITestCase):
             FactProduction.objects.create(period=self.d1, machine=self.cut, shift=shift,
                                           output_units=Decimal(out), active_shifts=Decimal(1))
         Holiday.objects.create(date=date(2026, 9, 26), title="تعطیل رسمی")  # شنبه
+        from apps.core.models import PeriodGrain
+
+        PeriodGrain.objects.update_or_create(month=self.month, department="production", defaults={"grain": "day"})
         user = get_user_model().objects.create_user(username="d-ceo", password="pw12345!", role="executive")
         self.client.force_authenticate(user)
 

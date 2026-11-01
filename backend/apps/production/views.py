@@ -185,7 +185,7 @@ class ProductionDailyView(APIView):
 
         from apps.core import jalali
         from apps.core.models import PeriodKind
-        from apps.core.periods import month_of
+        from apps.core.periods import grain_of, month_of
         from apps.office.workdays import day_info
 
         month = month_of(DimPeriod.objects.get(pk=request.query_params.get("month")))
@@ -194,6 +194,8 @@ class ProductionDailyView(APIView):
             start + timedelta(days=jalali.month_days(month.jalali_year, month.jalali_month)))
         info = day_info(start, end)
         today = timezone.localdate()
+        # A month production records weekly or monthly has no days to miss.
+        daily = grain_of(month, "production") == PeriodKind.DAY
         day_periods = {p.start_date: p for p in DimPeriod.objects.filter(
             kind=PeriodKind.DAY, start_date__gte=start, start_date__lt=end)}
 
@@ -226,7 +228,7 @@ class ProductionDailyView(APIView):
                 "weekday": jalali.weekday(d), "period": day_periods[d].pk if d in day_periods else None,
                 "workday": worked, "off": off, "entered": d in entered,
                 # A working day nobody entered — not a holiday, a gap.
-                "missing": worked and d not in entered and d <= today,
+                "missing": daily and worked and d not in entered and d <= today,
                 "output": float(r.get("output") or 0), "journal": float(r.get("journal") or 0),
                 "pos": float(r.get("pos") or 0), "receipt": float(r.get("receipt") or 0),
                 "active_shifts": float(r.get("active_shifts") or 0), "downtime": float(r.get("downtime") or 0),
@@ -241,7 +243,7 @@ class ProductionDailyView(APIView):
         bench = ProductionBenchmark.objects.filter(period=month).first()
         out = {
             "month": month.pk, "label": month.label,
-            "daily": bool(day_periods),
+            "daily": daily,
             "days": days,
             "summary": {
                 "output": total,

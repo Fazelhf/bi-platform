@@ -39,6 +39,8 @@ export interface ReportData {
   totals: Record<string, number>;
   chronological: boolean;
   stacks?: string[];
+  /** One line above the chart, e.g. the Pareto line of «مشتریان و وفاداری». */
+  headline?: string;
   kinds?: { code: string; label: string }[];
   axis_labels: Record<string, string>;
   /** The table layout, from the server — the export uses the same list. */

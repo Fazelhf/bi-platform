@@ -57,7 +57,8 @@ export const calendarApi = {
     return (await api.get("/office/calendar/calendars/")).data;
   },
   async month(jy: number, jm: number): Promise<CalendarMonth> {
-    return (await api.get("/office/calendar/month/", { params: { jy, jm } })).data;
+    // No month yet (0): the server answers with the current one.
+    return (await api.get("/office/calendar/month/", { params: jy && jm ? { jy, jm } : {} })).data;
   },
   async saveEvent(body: Partial<CalendarEvent>, id?: number): Promise<CalendarEvent> {
     const { data } = id
