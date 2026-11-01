@@ -99,7 +99,16 @@ LINE_HEADER = {
     "نام بازاریاب": "نام بازاریاب", "کد ملی": "کد ملی", "کد اقتصادی": "کد اقتصادی",
     "آدرس": "آدرس", "شماره تلفن": "تلفن", "موبایل": "موبایل",
     "نام مسول فروش": "مسوول فروش نام", "کد مسول فروش": "مسوول فروش کد",
+    "دسته بندی": "دسته بندی",
 }
+
+
+def _size(name: str) -> tuple[str, str]:
+    """Width (mm) and length (m) off a roll's name: «79 - 36 - ساده» → 79, 36."""
+    nums = re.findall(r"\d+(?:[./]\d+)?", fold(name))
+    if len(nums) < 2:
+        return "", ""
+    return nums[0].replace("/", "."), nums[1].replace("/", ".")
 
 RESPONSIBLE_NAME = "مسوول فروش نام"
 RESPONSIBLE_CODE = "مسوول فروش کد"
@@ -213,6 +222,15 @@ def _documents(lines: list[dict]) -> list[dict]:
             "price": str(dec(line.get("فی"))),
             "amount": str(dec(line.get("مبلغ"))),
             "group": fold(line.get("نام گروه کالا"))[:40],
+            "net": str(dec(line.get("مبلغ خالص"))),
+            "discount": str(dec(line.get("تخفیف ردیف")) + dec(line.get("سهم از تخفیف کل"))),
+            "vat": str(dec(line.get("مالیات")) + dec(line.get("عوارض"))),
+            "warehouse": fold(line.get("نام انبار"))[:80],
+            "paper": fold(line.get("نوع کاغذ"))[:60],
+            "print": fold(line.get("نوع چاپ"))[:60],
+            "carton": fold(line.get("نوع کارتن"))[:60],
+            "size": _size(line.get("نام ثابت کالا") or line.get("نام کالا")),
+            "note": fold(line.get("شرح ردیف"))[:200],
         })
     for doc in docs.values():
         for k in ("مبلغ فروش", "تخفیف کل", "جمع مالیات و عوارض", "مبلغ تسویه شده", "مبلغ تسویه نشده"):
@@ -226,8 +244,15 @@ def parse(data: bytes, filename: str) -> tuple[list[str], list[dict]]:
         raise ArpaFileError("فایل خالی است.")
     names, first = _headers(rows)
     if all(c in names for c in LINE_REQUIRED):
+        # آرپا repeats some headers («نوع چاپ», «عرض» …); the first copy holds
+        # the data, so a later one is renamed rather than allowed to overwrite it.
+        seen: dict[str, int] = {}
+        unique = []
+        for n in names:
+            seen[n] = seen.get(n, 0) + 1
+            unique.append(n if seen[n] == 1 else f"{n} {seen[n]}")
         lines = [
-            {names[i]: v for i, v in enumerate(r) if i < len(names)}
+            {unique[i]: v for i, v in enumerate(r) if i < len(unique)}
             for r in rows[first:] if any(v not in (None, "") for v in r)
         ]
         return names, _documents(lines)
@@ -243,6 +268,15 @@ def parse(data: bytes, filename: str) -> tuple[list[str], list[dict]]:
             continue
         out.append({names[i]: v for i, v in enumerate(r) if i < len(names)})
     return names, out
+
+
+def _num_or_none(text: str):
+    try:
+        value = Decimal(text) if text else None
+    except InvalidOperation:
+        return None
+    # Out of range for the field is a name that only looked like a size.
+    return value if value is not None and 0 < value < 100000 else None
 
 
 def _clean(v):
@@ -519,6 +553,7 @@ class Importer:
             "channel": channel,
             "branch": fold(raw.get("شعبه"))[:60],
             "tax_ref": fold(raw.get("شناسه سامانه مودیان"))[:40],
+            "category": fold(raw.get("دسته بندی"))[:20],
             "note": fold(raw.get("توضیحات برگه"))[:400],
             "sales_responsible": responsible[:60],
             "sales_responsible_code": fold(raw.get(RESPONSIBLE_CODE))[:20],
@@ -574,6 +609,11 @@ class Importer:
                 quantity=Decimal(ln["quantity"]), equivalent=Decimal(ln["equivalent"]),
                 sub_unit=ln["unit"], unit_price_rial=Decimal(ln["price"]),
                 amount_rial=Decimal(ln["amount"]), accounting_group=ln["group"],
+                net_rial=Decimal(ln.get("net") or ln["amount"]), discount_rial=Decimal(ln.get("discount") or 0),
+                vat_rial=Decimal(ln.get("vat") or 0), warehouse=ln.get("warehouse", ""),
+                paper_type=ln.get("paper", ""), print_type=ln.get("print", ""), carton_type=ln.get("carton", ""),
+                width_mm=_num_or_none((ln.get("size") or ("", ""))[0]),
+                length_m=_num_or_none((ln.get("size") or ("", ""))[1]), note=ln.get("note", ""),
             )
             for ln in lines
         ])

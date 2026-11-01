@@ -160,6 +160,12 @@ export interface CrmDashboard {
   top_active: ReportRow[];
   sources: ReportRow[];
   by_group: ReportRow[];
+  /** From آرپا's invoice lines. */
+  product_groups: ReportRow[];
+  top_products: ReportRow[];
+  paper_mix: ReportRow[];
+  print_mix: ReportRow[];
+  collection: ReportRow[];
   trend: ReportRow[];
   incoming_trend: ReportRow[];
   new_customers_by_user: ReportRow[];

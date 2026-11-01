@@ -116,3 +116,25 @@ class InvoiceProductReportTests(TestCase):
         # The drill lands on the invoices that carry that product.
         drilled = rpt.Filters.from_query({**rows["51300"]["drill"]["params"]}).invoices()
         self.assertEqual(list(drilled.values_list("code", flat=True)), ["i1"])
+
+
+class LineDimensionTests(TestCase):
+    def test_paper_axis_collection_and_dashboard(self):
+        from apps.crm import reports as rpt
+        from apps.crm.models import SalesInvoiceItem
+
+        inv = SalesInvoice.objects.create(code="d1", number="d1", kind="sale", channel="team",
+                                          issued_at=jdate("1405/07/11"), amount_rial=1500,
+                                          total_rial=1650, settled_rial=650, unsettled_rial=1000)
+        for paper, qty, amount in (("OPX04", 10, 1000), ("کاغذ GB", 5, 500)):
+            SalesInvoiceItem.objects.create(invoice=inv, product_code="1", paper_type=paper,
+                                            quantity=qty, amount_rial=amount, sub_unit="رول")
+        f = rpt.Filters.from_query({"date_from": "2026-09-01", "date_to": "2026-11-30"})
+        rows = {r["label"]: r for r in rpt.run_report("invoice_products", f, "paper_type")["rows"]}
+        self.assertEqual((rows["OPX04"]["amount"], rows["OPX04"]["avg_price"]), (1000, 100))
+        drilled = rpt.Filters.from_query(rows["کاغذ GB"]["drill"]["params"]).invoices()
+        self.assertEqual(list(drilled.values_list("code", flat=True)), ["d1"])
+        month = next(r for r in rpt.collection_trend(f) if r["total"])
+        self.assertEqual((month["settled"], month["unsettled"], month["roll_price"]), (650, 1000, 100))
+        dash = rpt.dashboard(f)
+        self.assertEqual({r["label"] for r in dash["paper_mix"]}, {"OPX04", "کاغذ GB"})

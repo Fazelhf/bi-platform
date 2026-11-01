@@ -1176,6 +1176,8 @@ class SalesInvoice(DatasetModel):
     )
     branch = models.CharField(max_length=60, blank=True)   # شعبه
     tax_ref = models.CharField(max_length=40, blank=True)  # شناسه سامانه مودیان
+    #: آرپا's «دسته بندی»: رسمی (official, with tax ID) or عمومی.
+    category = models.CharField(max_length=20, blank=True)
     note = models.CharField(max_length=400, blank=True)
 
     # ---- Where it came from (the «ورود از آرپا» upload) ---------------------
@@ -1257,6 +1259,22 @@ class SalesInvoiceItem(DatasetModel):
     unit_price_rial = models.DecimalField(max_digits=18, decimal_places=0, default=0)
     amount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     accounting_group = models.CharField(max_length=40, blank=True)
+
+    # ---- From آرپا's line export ------------------------------------------
+    #: After the line's discount and its share of the invoice discount.
+    net_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    discount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    vat_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    warehouse = models.CharField(max_length=80, blank=True)
+    #: The roll's make-up as the order specified it: the paper mill
+    #: («OPX04», «کاغذ GB»), the print («ساده», «بلک رفاه») and the carton.
+    paper_type = models.CharField(max_length=60, blank=True, db_index=True)
+    print_type = models.CharField(max_length=60, blank=True, db_index=True)
+    carton_type = models.CharField(max_length=60, blank=True)
+    #: Width (mm) and length (m), read off the product's name («79 - 36 - ساده»).
+    width_mm = models.DecimalField(max_digits=7, decimal_places=1, null=True, blank=True)
+    length_m = models.DecimalField(max_digits=8, decimal_places=1, null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True)
 
     class Meta:
         ordering = ("id",)

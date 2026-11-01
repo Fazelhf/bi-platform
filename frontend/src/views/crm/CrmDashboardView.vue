@@ -240,6 +240,28 @@ const newCustSeries = computed(() => [
   { name: "مشتری جدید", values: data.value?.new_customers_by_user.map((r) => r.count) ?? [], color: "#0d9488" },
 ]);
 
+// ---- کالا و وصول: آرپا's invoice lines ----------------------------------
+const pie = (rows?: ReportRow[]) => ({
+  cats: rows?.map((r) => r.label) ?? [],
+  series: [{ name: "فروش", values: rows?.map((r) => r.amount) ?? [] }],
+});
+const productGroups = computed(() => pie(data.value?.product_groups));
+const paperMix = computed(() => pie(data.value?.paper_mix));
+const printMix = computed(() => pie(data.value?.print_mix));
+const topProducts = computed(() => ({
+  cats: data.value?.top_products.map((r) => r.label) ?? [],
+  series: [{ name: "فروش", values: data.value?.top_products.map((r) => r.amount) ?? [], color: "#6366f1" }],
+}));
+const collectionCats = computed(() => data.value?.collection.map((r) => r.label) ?? []);
+const collectionSeries = computed(() => [
+  { name: "وصول‌شده", values: data.value?.collection.map((r) => r.settled) ?? [], stack: "c", color: "#22c55e" },
+  { name: "مانده", values: data.value?.collection.map((r) => r.unsettled) ?? [], stack: "c", color: "#f59e0b" },
+]);
+const rollPriceSeries = computed(() => [
+  { name: "میانگین قیمت هر رول", values: data.value?.collection.map((r) => r.roll_price || null) ?? [], color: "#0ea5e9" },
+]);
+const hasLines = computed(() => !!data.value?.top_products?.length);
+
 const groupCats = computed(() => data.value?.by_group.map((r) => r.label) ?? []);
 const groupSeries = computed(() => [
   { name: "فروش", values: data.value?.by_group.map((r) => r.amount) ?? [] },
@@ -573,6 +595,43 @@ async function onSaved(id?: number) {
           :categories="groupCats" :series="groupSeries" kind="pie" format="rial" :height="H_MAIN"
           @pick="(i) => openRow(data!.by_group, i, 'گروه مشتری')"
         />
+      </div>
+    </div>
+
+    <h2 class="section-title px-1 pt-2">کالا و وصول</h2>
+    <!-- ============ From آرپا's invoice lines (the line export) ============ -->
+    <p v-if="!hasLines" class="text-xs text-slate-400 px-1">
+      ردیف کالای فاکتورها هنوز نیامده؛ خروجی ردیف‌به‌ردیف آرپا را در «ورود از آرپا» بارگذاری کنید.
+    </p>
+    <div v-else class="grid lg:grid-cols-2 gap-4">
+      <div :class="card">
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('invoice_products', 'item_group')">فروش بر اساس گروه کالا</button>
+        <CrmChart :categories="productGroups.cats" :series="productGroups.series" kind="pie" format="rial" :height="H_MAIN"
+                  @pick="(i) => openRow(data!.product_groups, i, 'گروه کالا')" />
+      </div>
+      <div :class="card">
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('invoice_products', 'product')">پرفروش‌ترین کالاها</button>
+        <CrmChart :categories="topProducts.cats" :series="topProducts.series" kind="hbar" format="rial" :height="H_MAIN"
+                  @pick="(i) => openRow(data!.top_products, i, 'کالا')" />
+      </div>
+      <div :class="card">
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('invoice_products', 'paper_type')">فروش بر اساس نوع کاغذ</button>
+        <CrmChart :categories="paperMix.cats" :series="paperMix.series" kind="pie" format="rial" :height="H_MAIN"
+                  @pick="(i) => openRow(data!.paper_mix, i, 'نوع کاغذ')" />
+      </div>
+      <div :class="card">
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('invoice_products', 'print_type')">فروش بر اساس نوع چاپ</button>
+        <CrmChart :categories="printMix.cats" :series="printMix.series" kind="pie" format="rial" :height="H_MAIN"
+                  @pick="(i) => openRow(data!.print_mix, i, 'نوع چاپ')" />
+      </div>
+      <div :class="card">
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('sales', 'time')">وصول فاکتورها · وصول‌شده و مانده</button>
+        <CrmChart :categories="collectionCats" :series="collectionSeries" format="rial" :height="H_MAIN"
+                  @pick="(i) => openRow(data!.collection, i, 'فاکتورهای ماه')" />
+      </div>
+      <div :class="card">
+        <button type="button" class="widget-title text-sm font-semibold text-ink mb-3" @click="goReport('invoice_products', 'time')">روند میانگین قیمت هر رول</button>
+        <CrmChart :categories="collectionCats" :series="rollPriceSeries" kind="line" format="rial" :height="H_MAIN" />
       </div>
     </div>
 </div>
