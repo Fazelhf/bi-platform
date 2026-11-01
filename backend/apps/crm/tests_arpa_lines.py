@@ -166,3 +166,26 @@ class CustomerAndDealSpecsTests(TestCase):
 
         pid = product_for("77777", "57 - 13 - ساده", "رول", {}, "پوز ساده")
         self.assertEqual(Product.objects.get(pk=pid).category.name_fa, "پوز ساده")
+
+
+class ReportOrganisationTests(TestCase):
+    def test_collection_rolls_and_hidden_reports(self):
+        from apps.crm import reports as rpt
+        from apps.crm.models import SalesInvoiceItem
+
+        old = SalesInvoice.objects.create(code="c1", number="c1", kind="sale", channel="team",
+                                          issued_at=jdate("1405/07/01"), total_rial=1000, settled_rial=400,
+                                          unsettled_rial=600, grace_date=jdate("1405/07/10"))
+        SalesInvoiceItem.objects.create(invoice=old, product_code="1", product_name="79 - 40 - چاپی",
+                                        width_mm=79, length_m=40, quantity=1, amount_rial=1000)
+        f = rpt.Filters.from_query({"date_from": "2026-09-01", "date_to": "2026-11-30"})
+        t = rpt.run_report("collection", f, "customer")["totals"]
+        self.assertEqual((t["settled"], t["unsettled"], t["overdue"], t["collected_pct"]), (400, 600, 600, 40.0))
+        sizes = rpt.run_report("invoice_products", f, "size")["rows"]
+        self.assertEqual([r["label"] for r in sizes], ["79 × 40"])
+        printed = rpt.run_report("invoice_products", f, "printed")["rows"]
+        self.assertEqual([r["label"] for r in printed], ["چاپی"])
+        # No feedback, no costed deal, no B2B pipeline: those reports are not offered.
+        live = rpt.available_reports("real")
+        self.assertTrue({"satisfaction", "profit", "tender"}.isdisjoint(live))
+        self.assertIn("collection", live)

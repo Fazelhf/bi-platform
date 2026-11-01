@@ -57,6 +57,7 @@ watch(() => crm.revision, () => load());
 watch(() => JSON.stringify(crm.query), () => load());
 
 function cardValue(c: DashCard): string {
+  if (c.value === null || c.value === undefined) return "—";
   if (c.unit === "rial") return rial(c.value);
   if (c.unit === "percent") return pct(c.value);
   if (c.unit === "days") return `${num(c.value)} روز`;
@@ -78,7 +79,7 @@ function cardSub(c: DashCard): string {
   }
   if (c.key === "unbilled") return `${num(s.count)} معامله موفق بدون فاکتور`;
   if (s.amount !== undefined) return rial(s.amount);
-  if (s.margin_pct !== undefined) return `حاشیه ${pct(s.margin_pct)}`;
+  if (s.margin_pct !== undefined) return s.margin_pct === null ? "بهای تمام‌شده ثبت نشده" : `حاشیه ${pct(s.margin_pct)}`;
   if (s.won !== undefined) return `${num(s.won)} از ${num(s.closed)} معامله بسته‌شده`;
   if (s.calls !== undefined) return `${num(s.success)} موفق از ${num(s.calls)} تماس`;
   if (s.count !== undefined) return `${num(s.count)} معامله · وزنی ${rial(s.weighted ?? 0)}`;
@@ -124,14 +125,16 @@ const SNAPSHOT_HINT = "لحظه‌ای: وضعیت همین الان است و �
 
 /** The four that answer «how are we doing»; the rest are the detail. */
 const HERO = ["sales", "profit", "pipeline", "conversion"];
+// A profit with no cost behind it is not shown at all (see `dashboard`).
+const shown = (c?: DashCard) => !!c && !(c.key === "profit" && c.value === null);
 const heroCards = computed(() =>
-  HERO.map((k) => data.value?.cards.find((c) => c.key === k)).filter(Boolean) as DashCard[],
+  HERO.map((k) => data.value?.cards.find((c) => c.key === k)).filter(shown) as DashCard[],
 );
 const minorCards = computed(() => data.value?.cards.filter((c) => !HERO.includes(c.key)) ?? []);
 
 interface Delta { text: string; good: boolean; flat: boolean }
 function delta(c: DashCard): Delta | null {
-  if (c.prev === null || c.prev === undefined) return null;
+  if (c.prev === null || c.prev === undefined || c.value === null || c.value === undefined) return null;
   const now = Number(c.value), before = Number(c.prev);
   // A rate is compared in points; «۱۲٪ ← ۲۰٪» is +8 points, not +67%.
   if (c.unit === "percent") {

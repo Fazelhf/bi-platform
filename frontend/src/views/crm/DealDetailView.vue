@@ -196,7 +196,8 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             <p class="text-xs text-white/60">مبلغ معامله</p>
             <p class="text-2xl font-bold">{{ rial(deal.amount_rial) }}</p>
             <p class="text-sm mt-1" :class="Number(deal.profit_rial) >= 0 ? 'text-emerald-300' : 'text-red-300'">
-              سود {{ rial(deal.profit_rial) }} · حاشیه {{ pct(deal.margin_pct) }}
+              <template v-if="deal.margin_pct != null">سود {{ rial(deal.profit_rial) }} · حاشیه {{ pct(deal.margin_pct) }}</template>
+              <template v-else>سود: بهای تمام‌شده ثبت نشده</template>
             </p>
           </div>
         </div>
@@ -287,8 +288,8 @@ const card = "bg-surface rounded-card shadow-soft p-4";
               <li v-for="i in items" :key="`m-${i.id}`" class="px-4 py-3">
                 <div class="flex items-start justify-between gap-3">
                   <p class="text-ink min-w-0 truncate">{{ i.product_name }}</p>
-                  <span class="text-sm font-medium shrink-0 ltr-nums" :class="i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
-                    {{ pct(i.margin_pct) }}
+                  <span class="text-sm font-medium shrink-0 ltr-nums" :class="i.margin_pct == null ? 'text-slate-300' : i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
+                    {{ i.margin_pct == null ? "—" : pct(i.margin_pct) }}
                   </span>
                 </div>
                 <div class="text-xs text-slate-500 mt-1 ltr-nums">
@@ -331,8 +332,8 @@ const card = "bg-surface rounded-card shadow-soft p-4";
                     <td class="px-3 text-left whitespace-nowrap" :class="Number(i.line_profit) >= 0 ? 'text-emerald-600' : 'text-red-500'">
                       {{ rial(i.line_profit) }}
                     </td>
-                    <td class="px-4 text-left font-medium" :class="i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
-                      {{ pct(i.margin_pct) }}
+                    <td class="px-4 text-left font-medium" :class="i.margin_pct == null ? 'text-slate-300' : i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
+                      {{ i.margin_pct == null ? "—" : pct(i.margin_pct) }}
                     </td>
                   </tr>
                 </tbody>

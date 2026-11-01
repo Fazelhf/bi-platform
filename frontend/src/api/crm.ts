@@ -202,7 +202,7 @@ export interface Deal {
   discount_rial: string;
   shipping_cost_rial: string;
   other_cost_rial: string;
-  margin_pct: number;
+  margin_pct: number | null;
   age_days: number;
   /** Days since the last activity on it — the pipeline board sends this. */
   idle_days?: number | null;
@@ -241,7 +241,7 @@ export interface DealItem {
   line_total: string;
   line_cost: string;
   line_profit: string;
-  margin_pct: number;
+  margin_pct: number | null;
 }
 
 export interface CrmCustomer {
@@ -641,7 +641,11 @@ export const crmApi = {
     return data;
   },
 
-  async reportIndex(): Promise<{ reports: { key: string; title: string; axes: string[] }[]; axis_labels: Record<string, string> }> {
+  async reportIndex(): Promise<{
+    reports: { key: string; title: string; axes: string[]; section?: string }[];
+    sections?: string[];
+    axis_labels: Record<string, string>;
+  }> {
     const { data } = await api.get("/crm/reports/");
     return data;
   },
@@ -669,7 +673,7 @@ export const crmApi = {
 
   async dealSummary(params: Params = {}) {
     const { data } = await api.get("/crm/deals/summary/", { params: clean(params) });
-    return data as { count: number; amount: number; profit: number; cost: number; margin_pct: number };
+    return data as { count: number; amount: number; profit: number | null; cost: number; margin_pct: number | null };
   },
 
   async dealHistory(id: number) {

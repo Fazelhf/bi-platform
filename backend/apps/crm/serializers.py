@@ -238,7 +238,10 @@ class DealItemSerializer(serializers.ModelSerializer):
 
     def get_margin_pct(self, obj):
         total = obj.line_total
-        return round(float(obj.line_profit / total * 100), 1) if total else 0.0
+        # A line with no cost has an unknown margin, shown as «—», not 100%.
+        if not total or not obj.unit_cost_rial:
+            return None
+        return round(float(obj.line_profit / total * 100), 1)
 
 
 class DealListSerializer(serializers.ModelSerializer):

@@ -445,6 +445,7 @@ LINE_FIELDS = {
     "paper_type": ("paper_type", "نوع کاغذ"),
     "print_type": ("print_type", "نوع چاپ"),
     "width": ("width_mm", "عرض (میلی‌متر)"),
+    "length": ("length_m", "طول (متر)"),
     "warehouse": ("warehouse", "انبار"),
 }
 
@@ -702,11 +703,15 @@ def report_profit(f: Filters, axis_key: str) -> dict:
         rows = _grouped(qs, axis, DEAL_MEASURES)
         data = _shape("profit", axis_key, _finish(rows, f, axis, "profit", "deals", drill))
     for r in data["rows"]:
-        r["margin_pct"] = _pct(r["profit"], r["amount"])
+        # No cost on any of the row's deals: profit and margin are unknown, not 100%.
+        if not _num(r.get("cost")):
+            r["profit"], r["margin_pct"] = None, None
+        else:
+            r["margin_pct"] = _pct(r["profit"], r["amount"])
         # Net of the deal-level costs that eat the gross margin.
         r["overhead"] = _num(r.get("discount")) + _num(r.get("shipping"))
     if data["axis"] != "time":
-        data["rows"].sort(key=lambda r: r["profit"], reverse=True)
+        data["rows"].sort(key=lambda r: r["profit"] or 0, reverse=True)
     return data
 
 
@@ -1088,8 +1093,9 @@ def report_products(f: Filters, _axis_key: str = "product") -> dict:
             "deals": r["deals"],
             "amount": amount,
             "cost": cost,
-            "profit": amount - cost,
-            "margin_pct": _pct(amount - cost, amount),
+            # Unknown cost → unknown profit (shown «—»), not a 100% margin.
+            "profit": amount - cost if cost else None,
+            "margin_pct": _pct(amount - cost, amount) if cost else None,
             "drill": {"kind": "deals", "params": d},
         })
     rows.sort(key=lambda r: r["amount"], reverse=True)
@@ -1406,6 +1412,20 @@ def report_invoice_products(f: Filters, axis_key: str) -> dict:
         rows = [row(r, r[path], r["name"] or ("بدون مشتری" if param == "customer" else "بدون کارشناس"),
                     {param: r[path] or "none"})
                 for r in grouped]
+    elif axis_key == "size":
+        # A roll's size: width × length, the way the trade names a roll.
+        grouped = (lines.exclude(width_mm__isnull=True).values("width_mm", "length_m")
+                   .annotate(**measures).order_by())
+        rows = [row(r, f"{r['width_mm']}x{r['length_m']}",
+                    f"{r['width_mm'].normalize():f} × {r['length_m'].normalize():f}" if r["length_m"] is not None
+                    else f"{r['width_mm'].normalize():f}",
+                    {"width": str(r["width_mm"]), **({"length": str(r["length_m"])} if r["length_m"] is not None else {})})
+                for r in grouped]
+    elif axis_key == "printed":
+        # Plain against printed: آرپا names a printed roll «… چاپی».
+        kind = Case(When(product_name__contains="چاپ", then=Value("چاپی")), default=Value("ساده"))
+        grouped = lines.annotate(kind=kind).values("kind").annotate(**measures).order_by()
+        rows = [row(r, r["kind"], r["kind"], None) for r in grouped]
     elif axis_key in LINE_FIELDS and axis_key != "product_code":
         col, _label = LINE_FIELDS[axis_key]
         grouped = lines.values(col).annotate(**measures).order_by()
@@ -1422,6 +1442,53 @@ def report_invoice_products(f: Filters, axis_key: str) -> dict:
         axis_key = "product"
     rows.sort(key=lambda r: r["amount"], reverse=True)
     return _shape("invoice_products", axis_key, rows)
+
+
+def report_collection(f: Filters, axis_key: str) -> dict:
+    """
+    وصول و مطالبات — what was billed, what came in against it, and what is
+    still owed, per month, کارشناس or customer. «سررسیدگذشته» is the owed
+    part of invoices whose مهلت تسویه has passed: the follow-up list.
+    """
+    today = timezone.localdate()
+    sales = f.invoices()
+    measures = {
+        "count": Count("id", distinct=True),
+        "total": _money(Sum("total_rial")),
+        "settled": _money(Sum("settled_rial")),
+        "unsettled": _money(Sum("unsettled_rial")),
+        "overdue": _money(Sum("unsettled_rial", filter=Q(grace_date__lt=today) | Q(grace_date__isnull=True, due_date__lt=today))),
+    }
+
+    def enrich(r):
+        r["collected_pct"] = _pct(_num(r.get("settled")), _num(r.get("total")))
+        return r
+
+    if axis_key == "time":
+        rows = []
+        for jy, jm, s_, e in _time_buckets(f):
+            agg = sales.filter(issued_at__gte=s_, issued_at__lt=e).aggregate(**measures)
+            d = dict(f.drill_base())
+            d["date_from"], d["date_to"] = s_.isoformat(), (e - dt.timedelta(days=1)).isoformat()
+            rows.append(enrich({"id": f"{jy}-{jm}", "label": month_label(jy, jm),
+                                **{k: _num(v) for k, v in agg.items()}, "drill": {"kind": "invoices", "params": d}}))
+        out = _shape("collection", "time", rows, chronological=True)
+    else:
+        from apps.sales.models import DimEmployee
+
+        axis = SALES_AXES.get(axis_key, SALES_AXES["user"])
+        if axis.label_path:
+            rows = [enrich(r) for r in _grouped(sales, axis, measures)]
+        else:
+            # The rep is computed (`rep_id`); names are looked up after.
+            grouped = sales.values(axis.id_path).annotate(**measures).order_by()
+            names = dict(DimEmployee.objects.filter(pk__in=[r[axis.id_path] for r in grouped if r[axis.id_path]])
+                         .values_list("pk", "full_name_fa"))
+            rows = [enrich({"id": r[axis.id_path], "label": names.get(r[axis.id_path], "بدون کارشناس"),
+                            **{k: _num(r[k]) for k in measures}}) for r in grouped]
+        out = _shape("collection", axis_key, _finish(rows, f, axis, "unsettled", "invoices"))
+    out["totals"]["collected_pct"] = _pct(out["totals"].get("settled", 0), out["totals"].get("total", 0))
+    return out
 
 
 def collection_trend(f: Filters) -> list[dict]:
@@ -1468,10 +1535,45 @@ REPORTS = {
     "satisfaction": (report_satisfaction, "رضایت مشتری", ["user"]),
     "sources": (report_sources, "بهترین منابع سرنخ", ["source"]),
     "invoice_products": (report_invoice_products, "فروش کالا از فاکتورها",
-                         ["product", "item_group", "paper_type", "print_type", "width", "warehouse",
-                          "customer", "user", "time"]),
+                         ["product", "item_group", "size", "printed", "paper_type", "print_type", "width",
+                          "warehouse", "customer", "user", "time"]),
+    "collection": (report_collection, "وصول و مطالبات", ["time", "user", "customer", "group", "province"]),
     "tender": (report_tender, "پیش‌فاکتور و رقبا", ["time", "competitor", "tender_channel", "user", "group"]),
 }
+
+#: How the report menu is grouped — by what a sales manager here asks.
+SECTIONS = [
+    ("فروش و وصول", ["sales", "collection", "provinces", "profit"]),
+    ("کالا", ["invoice_products", "products", "tender"]),
+    ("کاریز و فرصت", ["funnel", "incoming", "conversion", "lost"]),
+    ("کارشناسان و فعالیت", ["activities", "calls"]),
+    ("مشتری", ["new_customers", "sources", "satisfaction"]),
+]
+
+
+def available_reports(dataset: str) -> set[str]:
+    """
+    The reports that have anything to show at all. A report over records
+    this company does not keep (feedback nobody collects, a profit with no
+    cost entered) is a blank page in the menu; it returns by itself the day
+    the records start.
+    """
+    from apps.crm.models import Activity, CustomerFeedback, DealItem, SalesInvoiceItem
+
+    out = set(REPORTS)
+    deals = Deal.objects.filter(dataset=dataset)
+    checks = {
+        "satisfaction": CustomerFeedback.objects.filter(dataset=dataset).exists(),
+        "sources": deals.filter(lead_source__isnull=False).exists(),
+        "calls": Activity.objects.filter(dataset=dataset, kind__startswith="call").exists(),
+        "activities": Activity.objects.filter(dataset=dataset).exists(),
+        "profit": deals.filter(cost_rial__gt=0).exists(),
+        "products": DealItem.objects.filter(dataset=dataset).exists(),
+        "invoice_products": SalesInvoiceItem.objects.filter(dataset=dataset).exists(),
+        "tender": PipelineStage.objects.filter(dataset=dataset, is_active=True).exclude(channel="").exists(),
+    }
+    return {k for k in out if checks.get(k, True)}
+
 
 #: The table layout of every report: which row keys become columns, in which
 #: order, how each is formatted and whether it may be added up.
@@ -1485,6 +1587,14 @@ REPORTS = {
 #: measure — a footer total for an average or a ratio would be a lie, so those
 #: are left out and recomputed in `_shape`.
 REPORT_COLUMNS: dict[str, list[dict]] = {
+    "collection": [
+        {"k": "count", "label": "فاکتور", "f": "count", "total": True},
+        {"k": "total", "label": "مبلغ فاکتورها", "f": "rial", "total": True},
+        {"k": "settled", "label": "وصول‌شده", "f": "rial", "total": True},
+        {"k": "unsettled", "label": "مانده", "f": "rial", "total": True},
+        {"k": "overdue", "label": "سررسیدگذشته", "f": "rial", "total": True},
+        {"k": "collected_pct", "label": "درصد وصول", "f": "pct"},
+    ],
     "invoice_products": [
         {"k": "amount", "label": "فروش", "f": "rial", "total": True},
         {"k": "share_pct", "label": "سهم از فروش", "f": "pct"},
@@ -1601,6 +1711,7 @@ AXIS_LABELS = {
     "kind": "بر محور فعالیت", "team": "بر محور تیم",
     "competitor": "بر محور رقیب", "tender_channel": "بر محور کانال دریافت سفارش",
     "item_group": "بر محور گروه کالا", "paper_type": "بر محور نوع کاغذ",
+    "size": "بر محور سایز رول", "printed": "ساده / چاپی",
     "print_type": "بر محور نوع چاپ", "width": "بر محور عرض", "warehouse": "بر محور انبار",
 }
 
@@ -1719,7 +1830,9 @@ def _headline(f: Filters) -> dict:
     won_agg = won.aggregate(
         n=Count("id", distinct=True),
         amount=_money(Sum("amount_rial")),
-        profit=_money(Sum("profit_rial")),
+        # Profit only where a cost is known; the rest would read as pure profit.
+        profit=_money(Sum("profit_rial", filter=Q(cost_rial__gt=0))),
+        costed=_money(Sum("amount_rial", filter=Q(cost_rial__gt=0))),
     )
     lost_agg = closed.filter(status=Deal.Status.LOST).aggregate(
         n=Count("id", distinct=True), amount=_money(Sum("amount_rial"))
@@ -1742,7 +1855,8 @@ def _headline(f: Filters) -> dict:
         "unsettled": _num(sales_agg["unsettled"]),
         "won": _num(won_agg["n"]),
         "won_amount": _num(won_agg["amount"]),
-        "profit": _num(won_agg["profit"]),
+        "profit": _num(won_agg["profit"]) if _num(won_agg["costed"]) else None,
+        "costed_amount": _num(won_agg["costed"]),
         "lost": _num(lost_agg["n"]),
         "lost_amount": _num(lost_agg["amount"]),
         "closed": closed_n,
@@ -1868,7 +1982,7 @@ def dashboard(f: Filters) -> dict:
              compare="sales"),
         card("profit", "سود معاملات", cur["profit"], "rial", "deals",
              {"status": "won"},
-             {"margin_pct": _pct(cur["profit"], cur["won_amount"])},
+             {"margin_pct": _pct(cur["profit"], cur["costed_amount"]) if cur["profit"] is not None else None},
              compare="profit"),
         card("pipeline", "فروش در جریان", _num(pipeline_agg["amount"]), "rial", "deals",
              {"status": "open"},

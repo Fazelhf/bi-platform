@@ -1398,17 +1398,20 @@ def deal_summary(qs) -> dict:
     agg = qs.aggregate(
         count=Count("id", distinct=True),
         amount=Sum("amount_rial"),
-        profit=Sum("profit_rial"),
+        profit=Sum("profit_rial", filter=Q(cost_rial__gt=0)),
+        costed=Sum("amount_rial", filter=Q(cost_rial__gt=0)),
         cost=Sum("cost_rial"),
     )
     amount = float(agg["amount"] or 0)
-    profit = float(agg["profit"] or 0)
+    costed = float(agg["costed"] or 0)
+    # Profit only over deals with a cost; with none, it is unknown, not 100%.
+    profit = float(agg["profit"] or 0) if costed else None
     return {
         "count": agg["count"] or 0,
         "amount": amount,
         "profit": profit,
         "cost": float(agg["cost"] or 0),
-        "margin_pct": round(profit / amount * 100, 1) if amount else 0.0,
+        "margin_pct": round(profit / costed * 100, 1) if costed else None,
     }
 
 
@@ -2442,10 +2445,14 @@ class CrmReportIndexView(GatedAPIView):
     """The report catalogue, so the UI builds its menu from the server."""
 
     def get(self, request):
+        live = rpt.available_reports(active_dataset(request))
+        section = {k: name for name, keys in rpt.SECTIONS for k in keys}
         return Response({
             "reports": [
-                {"key": k, "title": t, "axes": a} for k, (_fn, t, a) in rpt.REPORTS.items()
+                {"key": k, "title": t, "axes": a, "section": section.get(k, "سایر")}
+                for k, (_fn, t, a) in rpt.REPORTS.items() if k in live
             ],
+            "sections": [name for name, _keys in rpt.SECTIONS],
             "axis_labels": rpt.AXIS_LABELS,
         })
 

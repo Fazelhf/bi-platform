@@ -23,7 +23,7 @@ const router = useRouter();
 const loading = ref(false);
 const rows = ref<any[]>([]);
 const total = ref(0);
-const summary = ref<Record<string, number> | null>(null);
+const summary = ref<Record<string, number | null> | null>(null);
 const page = ref(1);
 const PAGE_SIZE = 25;
 
@@ -129,8 +129,8 @@ async function exportExcel() {
             <template v-if="kind === 'deals'">
               <div class="bg-surface p-3"><p class="text-[11px] text-slate-400">تعداد</p><p class="font-bold text-ink">{{ num(summary.count) }}</p></div>
               <div class="bg-surface p-3"><p class="text-[11px] text-slate-400">مبلغ</p><p class="font-bold text-ink">{{ rial(summary.amount) }}</p></div>
-              <div class="bg-surface p-3"><p class="text-[11px] text-slate-400">سود</p><p class="font-bold text-emerald-600">{{ rial(summary.profit) }}</p></div>
-              <div class="bg-surface p-3"><p class="text-[11px] text-slate-400">حاشیه سود</p><p class="font-bold text-ink">{{ pct(summary.margin_pct) }}</p></div>
+              <div class="bg-surface p-3"><p class="text-[11px] text-slate-400">سود</p><p class="font-bold text-emerald-600">{{ summary.profit == null ? "—" : rial(summary.profit) }}</p></div>
+              <div class="bg-surface p-3"><p class="text-[11px] text-slate-400">حاشیه سود</p><p class="font-bold text-ink">{{ summary.margin_pct == null ? "—" : pct(summary.margin_pct) }}</p></div>
             </template>
             <template v-else-if="kind === 'activities'">
               <div class="bg-surface p-3"><p class="text-[11px] text-slate-400">تعداد</p><p class="font-bold text-ink">{{ num(summary.count) }}</p></div>

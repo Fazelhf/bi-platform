@@ -223,6 +223,7 @@ def _documents(lines: list[dict]) -> list[dict]:
             "amount": str(dec(line.get("مبلغ"))),
             "group": fold(line.get("نام گروه کالا"))[:40],
             "net": str(dec(line.get("مبلغ خالص"))),
+            "cost": str(dec(line.get("بهای تمام شده"))),
             "discount": str(dec(line.get("تخفیف ردیف")) + dec(line.get("سهم از تخفیف کل"))),
             "vat": str(dec(line.get("مالیات")) + dec(line.get("عوارض"))),
             "warehouse": fold(line.get("نام انبار"))[:80],
@@ -360,6 +361,8 @@ def mirror_lines(invoice: SalesInvoice, deal: Deal) -> None:
     invoice's own lines. The price is the line's own (amount ÷ quantity);
     the cost is the catalogue's at the time, as the deal form takes it.
     """
+    from apps.sales2.pricing import accounting_cost
+
     lines = list(invoice.items.select_related("product").exclude(product__isnull=True))
     if not lines:
         return
@@ -367,10 +370,14 @@ def mirror_lines(invoice: SalesInvoice, deal: Deal) -> None:
     rows = []
     for ln in lines:
         qty = ln.quantity if ln.quantity else Decimal(1)
+        # The cost, best source first: آرپا's own «بهای تمام شده» on the line,
+        # then accounting's فی حسابداری for that month, then the catalogue.
+        cost = (ln.unit_cost_rial or accounting_cost(ln.product, None, invoice.issued_at)
+                or ln.product.unit_cost_rial)
         rows.append(DealItem(
             dataset=deal.dataset, deal=deal, product=ln.product, quantity=qty,
             unit_price_rial=(ln.amount_rial / qty).quantize(Decimal(1)),
-            unit_cost_rial=ln.product.unit_cost_rial,
+            unit_cost_rial=cost or 0,
         ))
     DealItem.objects.bulk_create(rows)
     cost = sum((r.quantity * r.unit_cost_rial for r in rows), Decimal(0)).quantize(Decimal(1))
@@ -629,6 +636,7 @@ class Importer:
                 sub_unit=ln["unit"], unit_price_rial=Decimal(ln["price"]),
                 amount_rial=Decimal(ln["amount"]), accounting_group=ln["group"],
                 net_rial=Decimal(ln.get("net") or ln["amount"]), discount_rial=Decimal(ln.get("discount") or 0),
+                unit_cost_rial=Decimal(ln.get("cost") or 0).quantize(Decimal(1)),
                 vat_rial=Decimal(ln.get("vat") or 0), warehouse=ln.get("warehouse", ""),
                 paper_type=ln.get("paper", ""), print_type=ln.get("print", ""), carton_type=ln.get("carton", ""),
                 width_mm=_num_or_none((ln.get("size") or ("", ""))[0]),

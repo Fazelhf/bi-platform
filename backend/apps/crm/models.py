@@ -606,9 +606,10 @@ class Deal(DatasetModel):
 
     # ---- Derived ----------------------------------------------------------
     @property
-    def margin_pct(self) -> float:
-        if not self.amount_rial:
-            return 0.0
+    def margin_pct(self) -> float | None:
+        # No cost recorded means no margin to state — not a 100% one.
+        if not self.amount_rial or not self.cost_rial:
+            return None
         return float(self.profit_rial / self.amount_rial * 100)
 
     @property
@@ -1263,6 +1264,8 @@ class SalesInvoiceItem(DatasetModel):
     # ---- From آرپا's line export ------------------------------------------
     #: After the line's discount and its share of the invoice discount.
     net_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
+    #: آرپا's «بهای تمام شده» for one unit, when the export carries it; 0 = unknown.
+    unit_cost_rial = models.DecimalField(max_digits=18, decimal_places=0, default=0)
     discount_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     vat_rial = models.DecimalField(max_digits=20, decimal_places=0, default=0)
     warehouse = models.CharField(max_length=80, blank=True)
