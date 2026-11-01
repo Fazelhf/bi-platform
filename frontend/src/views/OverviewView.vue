@@ -246,12 +246,8 @@ const alerts = computed(() => {
   for (const w of f?.cash.warnings ?? []) {
     out.push({ text: w.text, tone: w.level === "danger" ? "bad" : "warn" });
   }
-  if (f?.budget?.has_actuals && f.budget.material_bad) {
-    out.push({
-      text: `${num(f.budget.material_bad)} انحراف نامطلوب مهم در بودجهٔ ${f.month.label}`,
-      tone: f.budget.totals.net.verdict === "bad" ? "bad" : "warn",
-    });
-  }
+  // Budget deviations stay on the budget tile and its own dashboard: the CEO
+  // asked not to be alerted about them here.
   if (d.combined.production_margin < 0) {
     out.push({ text: `حاشیه تولید منفی است (${rial(d.combined.production_margin)})`, tone: "bad" });
   }
@@ -320,7 +316,8 @@ const status = computed(() => {
       title: "بودجه", icon: ICON.budget,
       value: !b ? "تعریف نشده" : !b.has_actuals ? "ثبت نشده" : b.material_bad ? `${num(b.material_bad)} انحراف مهم` : "طبق برنامه",
       note: b ? b.title : "بودجه‌ای برای این ماه نیست",
-      tone: !b || !b.has_actuals ? "none" : !b.material_bad ? "good" : b.totals.net.verdict === "bad" ? "bad" : "warn",
+      // Never amber or red: budget is shown, not alerted on (see `alerts`).
+      tone: b && b.has_actuals && !b.material_bad ? "good" : "none",
       // Straight to the deviations when there are any — the figure on the
       // tile is «۳ انحراف مهم», and the next question is which three.
       route: b && b.material_bad ? "finance-budget-variance" : "finance-budget",
