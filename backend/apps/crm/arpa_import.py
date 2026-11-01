@@ -31,12 +31,14 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import logging
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
 from django.db import models, transaction
+from django.dispatch import Signal
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -52,6 +54,8 @@ from apps.crm.models import (
 )
 from apps.crm.party_sync import INTERCOMPANY_MARKERS, PartyWriter
 from apps.crm.people import RepMatcher
+
+logger = logging.getLogger(__name__)
 from apps.sales.models import DimEmployee
 
 KIND = {
@@ -415,6 +419,11 @@ class Importer:
             r.created += 1
 
 
+#: Sent after an آرپا import is committed. فروش ۲ listens and copies the new
+#: invoices over; CRM itself does not depend on فروش ۲.
+arpa_imported = Signal()
+
+
 def run(data: bytes, filename: str, book: str, user=None, commit: bool = False) -> dict:
     """
     Read and import one export. With `commit=False` it is a preview: the
@@ -462,4 +471,12 @@ def run(data: bytes, filename: str, book: str, user=None, commit: bool = False) 
         {"at": previous.created_at.isoformat(), "by": getattr(previous.uploaded_by, "username", "")}
         if previous else None
     )
+    if commit:
+        # Robust: the import is already saved; a listener failing must not
+        # turn it into an error on screen.
+        for _, reply in arpa_imported.send_robust(sender=Importer):
+            if isinstance(reply, Exception):
+                logger.exception("arpa_imported listener failed", exc_info=reply)
+            elif isinstance(reply, dict):
+                out.update(reply)
     return out

@@ -708,6 +708,36 @@ class CutoverTests(Sales2Base):
         self.assertIsNotNone(old)
 
 
+class SyncTests(Sales2Base):
+    """فروش ۲ follows CRM: everything from the first invoice, after every آرپا import."""
+
+    def test_sync_brings_all_and_follows_settlement(self):
+        from apps.crm.arpa_import import Importer, arpa_imported
+        from apps.crm.models import SalesInvoice
+        from apps.sales2 import cutover
+
+        # An earlier dated cut-over left an opening balance for this period.
+        CustomerAccount.objects.update_or_create(
+            customer=self.customer,
+            defaults={"opening_balance_rial": 999, "opening_as_of": date(2026, 3, 21)})
+        inv = SalesInvoice.objects.create(code="s1", number="1", customer=self.customer,
+                                          issued_at=date(2026, 1, 5), amount_rial=1000,
+                                          total_rial=1000, unsettled_rial=1000)
+        rep = cutover.sync()
+        self.assertEqual(rep.invoices, 1)
+        acc = CustomerAccount.objects.get(customer=self.customer)
+        self.assertEqual(acc.opening_balance_rial, 0)  # not counted twice
+
+        # Paid in آرپا since; the next import's signal carries it over.
+        SalesInvoice.objects.filter(pk=inv.pk).update(settled_rial=1000, unsettled_rial=0)
+        SalesInvoice.objects.create(code="s2", number="2", customer=self.customer,
+                                    issued_at=date(2026, 2, 5), amount_rial=500, total_rial=500)
+        replies = [r for _, r in arpa_imported.send_robust(sender=Importer)]
+        self.assertEqual(replies[0]["sales2"]["invoices"], 1)
+        bal = self.client.get(f"{URL}/customers/{self.customer.id}/").data["balance"]
+        self.assertEqual(Decimal(bal["balance_rial"]), 500)
+
+
 class GradeAndDecisionTests(Sales2Base):
     """کتاب فروش: گرید مشتری، کارت تصمیم پیش از صدور و شاخص‌ها."""
 

@@ -56,13 +56,15 @@ class Report:
     skipped_existing: int = 0
     products_created: int = 0
     proformas: int = 0
+    receipts_updated: int = 0
     unmatched: list = field(default_factory=list)  # (number, party, total)
 
     def lines(self) -> list[str]:
         out = [
             f"مانده‌ی اول دوره: {self.opening_customers} مشتری · {int(self.opening_total):,} ریال",
             f"فاکتور: {self.invoices} · مرجوعی: {self.returns} · دریافت «تسویه در آرپا»: {self.receipts}",
-            f"از قبل منتقل‌شده (رد شد): {self.skipped_existing} · کالای تازه: {self.products_created}",
+            f"از قبل منتقل‌شده: {self.skipped_existing} · تسویه‌ی به‌روزشده: {self.receipts_updated}"
+            f" · کالای تازه: {self.products_created}",
             f"پیش‌فاکتور پیش‌نویس از معاملات باز: {self.proformas}",
         ]
         if self.unmatched:
@@ -108,8 +110,11 @@ def _opening(cutover: date, report: Report) -> None:
 
 def _invoice(inv: SalesInvoice, report: Report, created: list) -> None:
     ref = f"arpa:{inv.code}"
-    if SalesDocument.objects.filter(external_ref=ref).exists():
+    existing = SalesDocument.objects.filter(external_ref=ref).first()
+    if existing is not None:
         report.skipped_existing += 1
+        if existing.kind == Kind.INVOICE:
+            _settle(existing, inv, report)
         return
     is_return = inv.kind == SalesInvoice.Kind.RETURN
     jy, _, _ = jalali.from_gregorian(inv.issued_at)
@@ -174,17 +179,36 @@ def _invoice(inv: SalesInvoice, report: Report, created: list) -> None:
         report.returns += 1
         return
     report.invoices += 1
-    settled = min(abs(inv.settled_rial), total)
-    if settled > 0:
+    _settle(doc, inv, report)
+
+
+def _settle(doc: SalesDocument, inv: SalesInvoice, report: Report) -> None:
+    """
+    The «تسویه در آرپا» receipt on `doc`, at what آرپا says is settled *now*.
+
+    Run again after every آرپا import, so an invoice paid since it was brought
+    over stops showing as owed in مطالبات.
+    """
+    ref = f"arpa:{inv.code}"
+    settled = min(abs(inv.settled_rial), doc.total_rial)
+    r = Receipt.objects.filter(external_ref=ref).first()
+    if r is None:
+        if settled <= 0:
+            return
         r = Receipt.objects.create(
-            customer=c, received_on=inv.issued_at, method=Receipt.Method.ARPA,
-            amount_rial=settled, number=f"RCV-{number}", external_ref=ref,
+            customer=doc.customer, received_on=inv.issued_at, method=Receipt.Method.ARPA,
+            amount_rial=settled, number=f"RCV-{doc.number}", external_ref=ref,
             period=services.month_period(inv.issued_at),
             finance_status=Receipt.FinanceStatus.CONFIRMED, finance_at=timezone.now(),
-            finance_note="تسویه‌شده در آرپا پیش از انتقال", note=f"برگه‌ی آرپا {inv.number}",
+            finance_note="تسویه‌شده در آرپا", note=f"برگه‌ی آرپا {inv.number}",
         )
         ReceiptAllocation.objects.create(receipt=r, invoice=doc, amount_rial=settled)
         report.receipts += 1
+    elif r.amount_rial != settled:
+        r.amount_rial = settled
+        r.save(update_fields=["amount_rial", "updated_at"])
+        ReceiptAllocation.objects.filter(receipt=r).update(amount_rial=settled)
+        report.receipts_updated += 1
 
 
 def _deals(report: Report) -> None:
@@ -226,6 +250,38 @@ def run(cutover: date, dry_run: bool = False) -> Report:
                     continue
                 _invoice(inv, report, created)
             _deals(report)
+            report.products_created = len(created)
+            if dry_run:
+                raise _DryRun
+    except _DryRun:
+        pass
+    return report
+
+
+def sync(dry_run: bool = False) -> Report | None:
+    """
+    Every آرپا invoice in CRM, from the first one, into فروش ۲ — run after
+    each آرپا import so فروش ۲ never lags CRM.
+
+    Unlike a dated cut-over there is no «before» left, so an opening balance
+    an earlier cut-over set for a period whose invoices are now brought one by
+    one would count the same debt twice: those are cleared. Open deals are not
+    turned into proformas here; that stays a one-off of `run`.
+    """
+    first = SalesInvoice.objects.order_by("issued_at").values_list("issued_at", flat=True).first()
+    if first is None:
+        return None
+    report = Report()
+    created: list = []
+    try:
+        with transaction.atomic():
+            CustomerAccount.objects.filter(opening_as_of__gt=first).update(
+                opening_balance_rial=0, opening_as_of=None)
+            for inv in SalesInvoice.objects.filter(issued_at__gte=first)                     .select_related("customer", "owner").prefetch_related("items__product")                     .order_by("issued_at", "number"):
+                if inv.customer_id is None:
+                    report.unmatched.append((inv.number, inv.party_name, abs(inv.total_rial)))
+                    continue
+                _invoice(inv, report, created)
             report.products_created = len(created)
             if dry_run:
                 raise _DryRun
