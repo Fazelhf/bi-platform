@@ -44,6 +44,12 @@ from .models_work import (  # noqa: F401,E402  (re-export)
     TaskGroup,
     TaskTag,
 )
+from .models_calendar import (  # noqa: F401,E402  (re-export)
+    Calendar,
+    Event,
+    Holiday,
+    WorkWeek,
+)
 
 
 class LetterTag(TimeStampedModel):

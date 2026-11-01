@@ -630,6 +630,7 @@ const router = createRouter({
         { path: "letters/:id", name: "office-letter", component: () => import("@/views/office/LetterDetailView.vue") },
         { path: "tasks", name: "office-tasks", component: () => import("@/views/office/TasksView.vue") },
         { path: "projects", name: "office-projects", component: () => import("@/views/office/ProjectsView.vue") },
+        { path: "calendar", name: "office-calendar", component: () => import("@/views/office/CalendarView.vue") },
         { path: "projects/:id", name: "office-project", component: () => import("@/views/office/ProjectDetailView.vue") },
         // Same URLs as before, so links people already have keep working.
         { path: "/chat", name: "chat", component: () => import("@/views/ChatView.vue") },
