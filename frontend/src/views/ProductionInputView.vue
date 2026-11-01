@@ -171,6 +171,8 @@ const INPUT =
   "w-full bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-2 py-1.5 text-center ltr-nums outline-none transition";
 const FIELD =
   "w-40 bg-slate-50 focus:bg-surface border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-left ltr-nums outline-none transition";
+const TEXT =
+  "w-full bg-slate-50 focus:bg-surface text-ink border border-transparent focus:border-accent-500 rounded-lg px-3 py-1.5 text-sm outline-none transition";
 const CARD = "bg-surface rounded-card shadow-soft p-5 transition-colors duration-300";
 const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center justify-center font-bold";
 </script>
@@ -268,7 +270,7 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
             <h3 class="font-bold text-ink">خطوط برش</h3>
           </div>
           <div class="overflow-x-auto">
-            <table v-entry-table class="w-full text-sm min-w-[900px]">
+            <table v-entry-table class="w-full text-sm min-w-[1080px]">
               <thead>
                 <tr class="text-xs text-slate-400">
                   <th></th>
@@ -279,6 +281,7 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   </th>
                   <th :colspan="QUALITY_COLS.length" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">کیفیت</th>
                   <th :colspan="DOWNTIME_COLS.length" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">خواب (شیفت)</th>
+                  <th></th>
                 </tr>
                 <tr class="text-slate-400 border-b border-slate-100 text-xs">
                   <th class="text-right font-medium py-2 pr-2">خط تولید</th>
@@ -294,6 +297,7 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   <th v-for="(c, i) in DOWNTIME_COLS" :key="c.key" class="font-medium py-2 px-1.5 text-center" :class="i === 0 ? 'border-r border-slate-100' : ''">
                     <span class="sr-only">خواب — </span>{{ c.label }}
                   </th>
+                  <th class="text-right font-medium py-2 px-1.5 border-r border-slate-100 w-48">توضیحات</th>
                 </tr>
               </thead>
               <tbody>
@@ -317,6 +321,9 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   <td v-for="(c, i) in DOWNTIME_COLS" :key="c.key" class="py-1.5 px-1" :class="i === 0 ? 'border-r border-slate-100' : ''">
                     <input v-model="m[c.key]" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                   </td>
+                  <td class="py-1.5 px-1 border-r border-slate-100">
+                    <input v-model="m.description" type="text" :class="TEXT" placeholder="مثلاً علت توقف، سفارش خاص…" :aria-label="`توضیحات ${m.machine_name}`" />
+                  </td>
                 </tr>
               </tbody>
               <tfoot>
@@ -328,6 +335,7 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   <td class="py-2.5 text-center ltr-nums text-accent-600 font-bold">{{ num(curTotals.actual) }}</td>
                   <td v-for="c in QUALITY_COLS" :key="c.key" class="py-2.5 text-center text-slate-300">—</td>
                   <td v-for="c in DOWNTIME_COLS" :key="c.key" class="py-2.5 text-center ltr-nums">{{ num(curTotals[c.key]) }}</td>
+                  <td></td>
                 </tr>
               </tfoot>
             </table>
@@ -384,6 +392,16 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                 <span class="text-sm text-slate-600">شیفت فعال دستگاه چاپ</span>
                 <input v-model="cur.print.active_shifts" type="number" step="any" :class="FIELD" @focus="selectIfZero" />
               </label>
+              <template v-if="cur.print">
+                <label class="flex items-center justify-between gap-3">
+                  <span class="text-sm text-slate-600 whitespace-nowrap">طرح چاپ</span>
+                  <input v-model="cur.print.print_design" type="text" maxlength="200" placeholder="نام یا کد طرح" :class="[TEXT, '!w-40']" />
+                </label>
+                <label class="block">
+                  <span class="text-sm text-slate-600">توضیحات چاپ</span>
+                  <textarea v-model="cur.print.description" rows="2" placeholder="مثلاً مشتری، تغییر طرح، مشکل دستگاه…" :class="[TEXT, 'mt-1.5 resize-y']"></textarea>
+                </label>
+              </template>
             </div>
             <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
               <span class="text-slate-500">مجموع متراژ چاپ</span>

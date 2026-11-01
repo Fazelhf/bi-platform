@@ -164,6 +164,114 @@ class MaterialBalanceViewSet(viewsets.ModelViewSet):
     filterset_fields = ["period", "stream"]
 
 
+# -------------------- Daily production --------------------
+class ProductionDailyView(APIView):
+    """
+    تولید روزانه — a month day by day, and one day machine by machine.
+
+    Each day carries whether it is a working day (`apps.office.workdays`: the
+    weekly days off and the admin's holidays), so a holiday with no figures
+    reads as a holiday and a working day with none reads as «ثبت نشده».
+    `?day=<period id>` adds that day's lines and shifts.
+    """
+
+    @extend_schema(parameters=[OpenApiParameter("month", int, required=True),
+                               OpenApiParameter("day", int)], responses=dict)
+    def get(self, request):
+        from datetime import timedelta
+
+        from django.db.models import Avg
+        from django.utils import timezone
+
+        from apps.core import jalali
+        from apps.core.models import PeriodKind
+        from apps.core.periods import grain_of, month_of
+        from apps.office.workdays import day_info
+
+        month = month_of(DimPeriod.objects.get(pk=request.query_params.get("month")))
+        start = month.start_date or jalali.to_gregorian(month.jalali_year, month.jalali_month, 1)
+        end = (month.end_date + timedelta(days=1)) if month.end_date else (
+            start + timedelta(days=jalali.month_days(month.jalali_year, month.jalali_month)))
+        info = day_info(start, end)
+        today = timezone.localdate()
+        # A month production records weekly or monthly has no days to miss.
+        daily = grain_of(month, "production") == PeriodKind.DAY
+        day_periods = {p.start_date: p for p in DimPeriod.objects.filter(
+            kind=PeriodKind.DAY, start_date__gte=start, start_date__lt=end)}
+
+        cutting = FactProduction.objects.filter(
+            period__kind=PeriodKind.DAY, period__start_date__gte=start, period__start_date__lt=end,
+            machine__kind=DimMachine.Kind.CUTTING,
+        )
+        per_day = {
+            r["period__start_date"]: r for r in cutting.values("period__start_date").annotate(
+                output=Sum("output_units"), journal=Sum("actual_journal"), pos=Sum("actual_pos"),
+                receipt=Sum("actual_receipt"), active_shifts=Sum("active_shifts"), waste=Avg("waste_pct"),
+                downtime=Sum(F("downtime_breakdown_shifts") + F("downtime_sizechange_shifts")
+                             + F("downtime_nowork_shifts")),
+            )
+        }
+        per_shift = {}
+        for r in cutting.values("period__start_date", "shift").annotate(output=Sum("output_units")):
+            per_shift.setdefault(r["period__start_date"], {})[r["shift"]] = float(r["output"] or 0)
+        entered = set(FactProduction.objects.filter(
+            period__kind=PeriodKind.DAY, period__start_date__gte=start, period__start_date__lt=end,
+        ).values_list("period__start_date", flat=True))
+
+        days = []
+        for d in sorted(info):
+            worked, off = info[d]
+            r = per_day.get(d, {})
+            jy, jm, jd = jalali.from_gregorian(d)
+            days.append({
+                "date": d.isoformat(), "label": jalali.format_day(jy, jm, jd), "day": jd,
+                "weekday": jalali.weekday(d), "period": day_periods[d].pk if d in day_periods else None,
+                "workday": worked, "off": off, "entered": d in entered,
+                # A working day nobody entered — not a holiday, a gap.
+                "missing": daily and worked and d not in entered and d <= today,
+                "output": float(r.get("output") or 0), "journal": float(r.get("journal") or 0),
+                "pos": float(r.get("pos") or 0), "receipt": float(r.get("receipt") or 0),
+                "active_shifts": float(r.get("active_shifts") or 0), "downtime": float(r.get("downtime") or 0),
+                "waste_pct": round(float(r.get("waste") or 0), 2),
+                "day_shift": per_shift.get(d, {}).get(Shift.DAY, 0.0),
+                "night_shift": per_shift.get(d, {}).get(Shift.NIGHT, 0.0),
+            })
+
+        worked_days = [x for x in days if x["workday"] and x["entered"]]
+        total = sum(x["output"] for x in days)
+        shifts = sum(x["active_shifts"] for x in days)
+        bench = ProductionBenchmark.objects.filter(period=month).first()
+        out = {
+            "month": month.pk, "label": month.label,
+            "daily": daily,
+            "days": days,
+            "summary": {
+                "output": total,
+                "workdays": sum(1 for x in days if x["workday"]),
+                "entered_workdays": len(worked_days),
+                "missing": sum(1 for x in days if x["missing"]),
+                "per_workday": round(total / len(worked_days)) if worked_days else 0,
+                "per_shift": round(total / shifts) if shifts else 0,
+                "ideal_per_shift": bench.ideal_output_per_shift if bench else 0,
+            },
+        }
+        day_id = request.query_params.get("day")
+        if day_id:
+            out["detail"] = [
+                {"machine": f.machine.name_fa, "kind": f.machine.kind, "shift": f.shift,
+                 "shift_label": f.get_shift_display(), "output": float(f.output_units),
+                 "journal": float(f.actual_journal), "pos": float(f.actual_pos), "receipt": float(f.actual_receipt),
+                 "active_shifts": float(f.active_shifts), "waste_pct": float(f.waste_pct),
+                 "downtime_breakdown": float(f.downtime_breakdown_shifts),
+                 "downtime_sizechange": float(f.downtime_sizechange_shifts),
+                 "downtime_nowork": float(f.downtime_nowork_shifts),
+                 "description": f.description.strip(), "print_design": f.print_design.strip()}
+                for f in FactProduction.objects.filter(period_id=day_id).select_related("machine")
+                .order_by("machine__sort_order", "shift")
+            ]
+        return Response(out)
+
+
 # -------------------- Production dashboard --------------------
 class ProductionDashboardView(APIView):
     """Everything the production dashboard needs, in one call."""
@@ -238,6 +346,20 @@ class ProductionDashboardView(APIView):
             if c.description.strip()
         ]
 
+        # What the form's notes said: each line's remarks and the press's
+        # design, per shift and per week/day the month was recorded at.
+        line_notes = [
+            {"machine": f.machine.name_fa, "kind": f.machine.kind,
+             "shift": f.shift, "shift_label": f.get_shift_display(),
+             "period_label": f.period.label,
+             "description": f.description.strip(), "print_design": f.print_design.strip()}
+            for f in FactProduction.objects.filter(period_id__in=units)
+            .exclude(description="", print_design="")
+            .select_related("machine", "period")
+            .order_by("period__start_date", "machine__sort_order", "shift")
+            if f.description.strip() or f.print_design.strip()
+        ]
+
         # Roll counts: one line per product, both shifts (and every week or
         # day of the month) added together.
         revenue_by_product: dict[str, dict] = {}
@@ -309,6 +431,7 @@ class ProductionDashboardView(APIView):
                 "shifts_by_machine": shifts_by_machine,
                 "costs": costs,
                 "other_cost_notes": other_notes,
+                "line_notes": line_notes,
                 "revenue": revenue,
                 "print_colors": list(print_colors),
                 "days_in_month": bench.days_in_month,
@@ -341,6 +464,8 @@ CUT_FIELDS = [
     "waste_pct", "repair_count",
     "downtime_breakdown_shifts", "downtime_sizechange_shifts", "downtime_nowork_shifts",
 ]
+# Free text on a line's row: notes on any line, and the print unit's design.
+TEXT_FIELDS = ["description", "print_design"]
 
 
 class ProductionInputView(APIView):
@@ -384,6 +509,8 @@ class ProductionInputView(APIView):
                    "status": f.status if f else "draft"}
             for fld in CUT_FIELDS:
                 row[fld] = str(getattr(f, fld)) if f else "0"
+            for fld in TEXT_FIELDS:
+                row[fld] = getattr(f, fld) if f else ""
             return row
 
         def block(shift):
@@ -458,6 +585,8 @@ class ProductionInputView(APIView):
             rows = list(block.get("cutting", [])) + ([block["print"]] if block.get("print") else [])
             for row in rows:
                 defaults = {f: (row.get(f) or 0) for f in CUT_FIELDS}
+                # Sent only by clients that know the fields; older ones keep what is stored.
+                defaults.update({f: (row[f] or "").strip() for f in TEXT_FIELDS if f in row})
                 defaults["status"] = status
                 if submit:
                     defaults["submitted_by"] = user

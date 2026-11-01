@@ -186,6 +186,10 @@ class FactProduction(TimeStampedModel):
         max_digits=8, decimal_places=2, default=0, help_text="خواب به خاطر عدم کار"
     )
 
+    description = models.TextField(blank=True, default="", help_text="توضیحات خط در این شیفت")
+    # Only the print unit's row uses it: which design ran on the press.
+    print_design = models.CharField(max_length=200, blank=True, default="", help_text="طرح چاپ")
+
     status = models.CharField(
         max_length=16, choices=ApprovalStatus.choices, default=ApprovalStatus.DRAFT
     )

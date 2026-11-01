@@ -50,7 +50,7 @@ from apps.crm.matching import fold
 from apps.crm.merge import ImportTwins
 from apps.crm.models import (
     ImportBatch, Book, Customer, CustomerExternalRef, Dataset, Deal, ExternalSource,
-    NOT_COUNTED, Review, SalesInvoice,
+    NOT_COUNTED, DealItem, Product, Review, SalesInvoice, SalesInvoiceItem,
 )
 from apps.crm.party_sync import INTERCOMPANY_MARKERS, PartyWriter
 from apps.crm.people import RepMatcher
@@ -86,6 +86,33 @@ def jdate(value):
 
 #: Without these it is not a sales-invoice export, whatever else it holds.
 REQUIRED = ("کد طرف حساب", "نام طرف حساب", "نوع برگه", "تاریخ برگه", "شماره برگه", "مبلغ فروش")
+
+#: The line export («ریز فاکتور»): one row per product line, the document's
+#: type and number together in «نام برگه» («فاکتور فروش 512»). Recognised by
+#: these; folded into one document row per invoice by `_documents`.
+LINE_REQUIRED = ("نام برگه", "تاریخ برگه", "شماره برگه", "کد طرف حساب", "نام طرف حساب", "کد کالا", "مبلغ")
+
+#: Header columns of the line export, copied from the invoice's first line
+#: under the name the document export uses. A column absent here is absent
+#: from the document too, and `Importer.row` then leaves the stored value be.
+LINE_HEADER = {
+    "تاریخ برگه": "تاریخ برگه", "شماره برگه": "شماره برگه",
+    "کد طرف حساب": "کد طرف حساب", "نام طرف حساب": "نام طرف حساب",
+    "مبلغ برگه": "مبلغ برگه", "شرایط تسویه": "شرایط تسویه", "مهلت تسویه": "مهلت تسویه",
+    "توضیحات برگه": "توضیحات برگه", "شناسه سامانه مودیان": "شناسه سامانه مودیان",
+    "نام بازاریاب": "نام بازاریاب", "کد ملی": "کد ملی", "کد اقتصادی": "کد اقتصادی",
+    "آدرس": "آدرس", "شماره تلفن": "تلفن", "موبایل": "موبایل",
+    "نام مسول فروش": "مسوول فروش نام", "کد مسول فروش": "مسوول فروش کد",
+    "دسته بندی": "دسته بندی",
+}
+
+
+def _size(name: str) -> tuple[str, str]:
+    """Width (mm) and length (m) off a roll's name: «79 - 36 - ساده» → 79, 36."""
+    nums = re.findall(r"\d+(?:[./]\d+)?", fold(name))
+    if len(nums) < 2:
+        return "", ""
+    return nums[0].replace("/", "."), nums[1].replace("/", ".")
 
 RESPONSIBLE_NAME = "مسوول فروش نام"
 RESPONSIBLE_CODE = "مسوول فروش کد"
@@ -145,7 +172,8 @@ def _headers(rows: list[list]) -> tuple[list[str], int]:
     """
     top = [fold(v) for v in rows[0]]
     sub = [fold(v) for v in rows[1]] if len(rows) > 1 else []
-    kind_col = top.index("نوع برگه") if "نوع برگه" in top else None
+    # The document type sits in «نوع برگه», or in «نام برگه» on the line export.
+    kind_col = next((top.index(c) for c in ("نوع برگه", "نام برگه") if c in top), None)
     # The second row is a sub-header when it has labels but no document type.
     is_sub = bool(sub) and any(sub) and (kind_col is None or not sub[kind_col])
     names, parent = [], ""
@@ -159,11 +187,80 @@ def _headers(rows: list[list]) -> tuple[list[str], int]:
     return names, (2 if is_sub else 1)
 
 
+def _documents(lines: list[dict]) -> list[dict]:
+    """
+    The line export folded into the document export's shape: one row per
+    invoice, its sums worked out from its lines exactly as آرپا's document
+    report adds them (checked against 574 invoices already loaded from it),
+    and the lines themselves under `__lines`.
+    """
+    docs: dict[tuple, dict] = {}
+    for line in lines:
+        title = fold(line.get("نام برگه"))
+        number = fold(line.get("شماره برگه"))
+        if not number:
+            continue  # a totals or spacer row
+        key = (title, number, fold(line.get("تاریخ برگه")))
+        doc = docs.get(key)
+        if doc is None:
+            doc = docs[key] = {target: line.get(src) for src, target in LINE_HEADER.items() if src in line}
+            # «فاکتور فروش 512» → «فاکتور فروش»
+            doc["نوع برگه"] = re.sub(r"\s*\d+$", "", title)
+            doc.update({"مبلغ فروش": Decimal(0), "تخفیف کل": Decimal(0), "جمع مالیات و عوارض": Decimal(0)})
+            paid = dec(line.get("مبلغ پرداختی"))
+            doc["مبلغ تسویه شده"] = paid
+            doc["مبلغ تسویه نشده"] = dec(line.get("مبلغ برگه")) - paid
+            doc["__lines"] = []
+        for src, target in LINE_HEADER.items():  # first non-blank wins
+            if src in line and not fold(doc.get(target)) and fold(line.get(src)):
+                doc[target] = line.get(src)
+        doc["مبلغ فروش"] += dec(line.get("مبلغ"))
+        doc["تخفیف کل"] += dec(line.get("تخفیف ردیف")) + dec(line.get("سهم از تخفیف کل"))
+        doc["جمع مالیات و عوارض"] += dec(line.get("مالیات")) + dec(line.get("عوارض"))
+        doc["__lines"].append({
+            "code": fold(line.get("کد کالا"))[:40],
+            "name": fold(line.get("نام کالا"))[:200],
+            "quantity": str(dec(line.get("تعداد"))),
+            "equivalent": str(dec(line.get("معادل"))),
+            "unit": fold(line.get("نام واحد"))[:20],
+            "price": str(dec(line.get("فی"))),
+            "amount": str(dec(line.get("مبلغ"))),
+            "group": fold(line.get("نام گروه کالا"))[:40],
+            "net": str(dec(line.get("مبلغ خالص"))),
+            "cost": str(dec(line.get("بهای تمام شده"))),
+            "discount": str(dec(line.get("تخفیف ردیف")) + dec(line.get("سهم از تخفیف کل"))),
+            "vat": str(dec(line.get("مالیات")) + dec(line.get("عوارض"))),
+            "warehouse": fold(line.get("نام انبار"))[:80],
+            "paper": fold(line.get("نوع کاغذ"))[:60],
+            "print": fold(line.get("نوع چاپ"))[:60],
+            "carton": fold(line.get("نوع کارتن"))[:60],
+            "size": _size(line.get("نام ثابت کالا") or line.get("نام کالا")),
+            "note": fold(line.get("شرح ردیف"))[:200],
+        })
+    for doc in docs.values():
+        for k in ("مبلغ فروش", "تخفیف کل", "جمع مالیات و عوارض", "مبلغ تسویه شده", "مبلغ تسویه نشده"):
+            doc[k] = str(doc[k])
+    return list(docs.values())
+
+
 def parse(data: bytes, filename: str) -> tuple[list[str], list[dict]]:
     rows = read_sheet(data, filename)
     if len(rows) < 2:
         raise ArpaFileError("فایل خالی است.")
     names, first = _headers(rows)
+    if all(c in names for c in LINE_REQUIRED):
+        # آرپا repeats some headers («نوع چاپ», «عرض» …); the first copy holds
+        # the data, so a later one is renamed rather than allowed to overwrite it.
+        seen: dict[str, int] = {}
+        unique = []
+        for n in names:
+            seen[n] = seen.get(n, 0) + 1
+            unique.append(n if seen[n] == 1 else f"{n} {seen[n]}")
+        lines = [
+            {unique[i]: v for i, v in enumerate(r) if i < len(unique)}
+            for r in rows[first:] if any(v not in (None, "") for v in r)
+        ]
+        return names, _documents(lines)
     missing = [c for c in REQUIRED if c not in names]
     if missing:
         raise ArpaFileError(
@@ -176,6 +273,15 @@ def parse(data: bytes, filename: str) -> tuple[list[str], list[dict]]:
             continue
         out.append({names[i]: v for i, v in enumerate(r) if i < len(names)})
     return names, out
+
+
+def _num_or_none(text: str):
+    try:
+        value = Decimal(text) if text else None
+    except InvalidOperation:
+        return None
+    # Out of range for the field is a name that only looked like a size.
+    return value if value is not None and 0 < value < 100000 else None
 
 
 def _clean(v):
@@ -209,6 +315,77 @@ def invoice_code(book: str, kind: str, number: str, issued: dt.date) -> str:
 # ---------------------------------------------------------------------------
 def deal_code(invoice: SalesInvoice) -> str:
     return f"deal-{invoice.code}"[:50]
+
+
+#: آرپا's unit names onto the catalogue's.
+UNITS = {"رول": Product.Unit.ROLL, "بسته": Product.Unit.PACK, "تن": Product.Unit.TON, "برگ": Product.Unit.SHEET}
+
+
+def category_for(group: str):
+    """The catalogue category of آرپا's «گروه کالا», added when missing."""
+    from apps.crm.models import ProductCategory
+
+    group = fold(group)
+    if not group:
+        return None
+    return ProductCategory.objects.get_or_create(
+        code=f"pc-{slugify(group, allow_unicode=True)}"[:50],
+        defaults={"name_fa": group[:100], "dataset": Dataset.REAL},
+    )[0]
+
+
+def product_for(code: str, name: str, unit: str, cache: dict, group: str = "") -> int | None:
+    """
+    The catalogue product of آرپا's کد کالا, added when the catalogue does not
+    have it yet. The catalogue *is* آرپا's («pr-<کد کالا>»), so a line's code
+    is a product, not a guess; without one the line cannot reach the deal
+    behind its invoice, and the product report would be missing that sale.
+    """
+    if not code:
+        return None
+    key = f"pr-{slugify(code)}"[:50]
+    if key not in cache:
+        product, _ = Product.objects.get_or_create(
+            code=key, defaults={"name_fa": (name or code)[:150], "unit": UNITS.get(fold(unit), Product.Unit.ROLL),
+                                "dataset": Dataset.REAL},
+        )
+        # A product with no category takes آرپا's product group — so the
+        # catalogue groups the way the invoices do.
+        if not product.category_id and group:
+            product.category = category_for(group)
+            product.save(update_fields=["category", "updated_at"])
+        cache[key] = product.pk
+    return cache[key]
+
+
+def mirror_lines(invoice: SalesInvoice, deal: Deal) -> None:
+    """
+    The invoice's product lines as the deal's lines, so the deal page and
+    «فروش بر محور محصول» show what was sold. Replaced whole, like the
+    invoice's own lines. The price is the line's own (amount ÷ quantity);
+    the cost is the catalogue's at the time, as the deal form takes it.
+    """
+    from apps.sales2.pricing import accounting_cost
+
+    lines = list(invoice.items.select_related("product").exclude(product__isnull=True))
+    if not lines:
+        return
+    deal.items.all().delete()
+    rows = []
+    for ln in lines:
+        qty = ln.quantity if ln.quantity else Decimal(1)
+        # The cost, best source first: آرپا's own «بهای تمام شده» on the line,
+        # then accounting's فی حسابداری for that month, then the catalogue.
+        cost = (ln.unit_cost_rial or accounting_cost(ln.product, None, invoice.issued_at)
+                or ln.product.unit_cost_rial)
+        rows.append(DealItem(
+            dataset=deal.dataset, deal=deal, product=ln.product, quantity=qty,
+            unit_price_rial=(ln.amount_rial / qty).quantize(Decimal(1)),
+            unit_cost_rial=cost or 0,
+        ))
+    DealItem.objects.bulk_create(rows)
+    cost = sum((r.quantity * r.unit_cost_rial for r in rows), Decimal(0)).quantize(Decimal(1))
+    Deal.objects.filter(pk=deal.pk).update(cost_rial=cost, profit_rial=deal.amount_rial - cost)
 
 
 def sync_deal(invoice: SalesInvoice) -> Deal | None:
@@ -256,6 +433,7 @@ def sync_deal(invoice: SalesInvoice) -> Deal | None:
     if invoice.deal_id != deal.pk:
         SalesInvoice.objects.filter(pk=invoice.pk).update(deal=deal)
         invoice.deal_id = deal.pk
+    mirror_lines(invoice, deal)
     # «مشتری جدید» counts the month of a customer's first win.
     Customer.objects.filter(pk=invoice.customer_id).filter(
         models.Q(first_deal_won_at__isnull=True) | models.Q(first_deal_won_at__gt=when)
@@ -283,6 +461,9 @@ class Importer:
         self.channels = ChannelResolver()
         self.writer = PartyWriter(with_sales=None)
         self.twins = ImportTwins(Dataset.REAL)
+        # آرپا's کد کالا is the catalogue's code behind its «pr-» prefix.
+        self.products = dict(Product.objects.filter(code__startswith="pr-").values_list("code", "pk"))
+        self.products_before = len(self.products)
 
     # -- people -------------------------------------------------------------
     def rep(self, name) -> DimEmployee | None:
@@ -300,7 +481,7 @@ class Importer:
         party = {
             "کد": code, "نام": name, "کد ملی": row.get("کد ملی"),
             "کد اقتصادی": row.get("کد اقتصادی"), "کد پستی": row.get("کد پستی"),
-            "آدرس": fold(row.get("آدرس")), "شماره تلفن": row.get("تلفن"),
+            "آدرس": fold(row.get("آدرس")), "شماره تلفن": row.get("تلفن"), "موبایل": row.get("موبایل"),
             "نام گروه": fold(row.get("گروه طرف حساب")),
             # No استان: the export has none, and a province read off the
             # address is a guess. Left blank, the salesperson fills it in.
@@ -334,8 +515,9 @@ class Importer:
             r.skipped.append({"number": number, "reason": "تاریخ یا شماره برگه نامعتبر"})
             return
 
-        stored = {k: _clean(v) for k, v in raw.items()}
-        digest = fingerprint(stored)
+        # The lines count toward «changed?» but are kept as rows, not in arpa_row.
+        stored = {k: _clean(v) for k, v in raw.items() if k != "__lines"}
+        digest = fingerprint({**stored, "__lines": raw.get("__lines")} if "__lines" in raw else stored)
         amount = dec(raw.get("مبلغ فروش"))
         code = invoice_code(self.book, kind, number, issued)
         existing = SalesInvoice.objects.filter(code=code).first()
@@ -366,10 +548,12 @@ class Importer:
         elif review != Review.FAKE:
             r.by_channel[channel] += amount
 
-        if existing and existing.row_hash == digest and existing.review == review:
+        if existing and existing.row_hash == digest and existing.review == review and (
+            "__lines" not in raw or existing.items.exists()
+        ):
             r.unchanged += 1
-            if not existing.deal_id:
-                sync_deal(existing)  # loaded before invoices became deals
+            if not existing.deal_id or (existing.items.exists() and not existing.deal.items.exists()):
+                sync_deal(existing)  # loaded before invoices became deals, or before deals had lines
             return
 
         customer = self.customer(raw, rep)
@@ -399,6 +583,7 @@ class Importer:
             "channel": channel,
             "branch": fold(raw.get("شعبه"))[:60],
             "tax_ref": fold(raw.get("شناسه سامانه مودیان"))[:40],
+            "category": fold(raw.get("دسته بندی"))[:20],
             "note": fold(raw.get("توضیحات برگه"))[:400],
             "sales_responsible": responsible[:60],
             "sales_responsible_code": fold(raw.get(RESPONSIBLE_CODE))[:20],
@@ -408,15 +593,61 @@ class Importer:
             "import_batch": batch,
             "dataset": Dataset.REAL,
         }
+        # The line export has no موعد تسویه, روش حمل, شعبه or ایجاد کننده:
+        # what the document export stored for those stays.
+        if existing:
+            for field_name, column in (("due_date", "موعد تسویه"), ("shipping_method", "روش حمل"),
+                                       ("branch", "شعبه"), ("created_by_name", "ایجاد کننده")):
+                if column not in raw:
+                    fields.pop(field_name)
+        self._fill_contact(customer, raw)
         if existing:
             for k, v in fields.items():
                 setattr(existing, k, v)
             existing.save()
             r.updated += 1
-            sync_deal(existing)
+            invoice = existing
         else:
-            sync_deal(SalesInvoice.objects.create(code=code, **fields))
+            invoice = SalesInvoice.objects.create(code=code, **fields)
             r.created += 1
+        if "__lines" in raw:
+            self._write_lines(invoice, raw["__lines"])
+        sync_deal(invoice)
+
+    @staticmethod
+    def _fill_contact(customer, raw) -> None:
+        """آرپا's phone and mobile onto a customer that has none — never over
+        a number someone typed."""
+        changed = []
+        for field_name, column in (("phone", "تلفن"), ("mobile", "موبایل")):
+            value = fold(raw.get(column))
+            if value and not getattr(customer, field_name):
+                setattr(customer, field_name, value[: Customer._meta.get_field(field_name).max_length])
+                changed.append(field_name)
+        if changed:
+            customer.save()
+
+    def _write_lines(self, invoice, lines) -> None:
+        """The invoice's product lines, replaced wholesale: آرپا's lines are
+        the record, and an edited invoice is re-sent whole."""
+        invoice.items.all().delete()
+        SalesInvoiceItem.objects.bulk_create([
+            SalesInvoiceItem(
+                dataset=invoice.dataset, invoice=invoice,
+                product_id=product_for(ln["code"], ln["name"], ln["unit"], self.products, ln.get("group", "")),
+                product_code=ln["code"], product_name=ln["name"],
+                quantity=Decimal(ln["quantity"]), equivalent=Decimal(ln["equivalent"]),
+                sub_unit=ln["unit"], unit_price_rial=Decimal(ln["price"]),
+                amount_rial=Decimal(ln["amount"]), accounting_group=ln["group"],
+                net_rial=Decimal(ln.get("net") or ln["amount"]), discount_rial=Decimal(ln.get("discount") or 0),
+                unit_cost_rial=Decimal(ln.get("cost") or 0).quantize(Decimal(1)),
+                vat_rial=Decimal(ln.get("vat") or 0), warehouse=ln.get("warehouse", ""),
+                paper_type=ln.get("paper", ""), print_type=ln.get("print", ""), carton_type=ln.get("carton", ""),
+                width_mm=_num_or_none((ln.get("size") or ("", ""))[0]),
+                length_m=_num_or_none((ln.get("size") or ("", ""))[1]), note=ln.get("note", ""),
+            )
+            for ln in lines
+        ])
 
 
 #: Sent after an آرپا import is committed. فروش ۲ listens and copies the new

@@ -249,7 +249,7 @@ const tile = "bg-slate-50 rounded-xl p-3";
           </span>
           <p v-if="!file" class="mt-3 text-ink font-medium">خروجی «فاکتور فروش» آرپا را اینجا بکشید یا کلیک کنید</p>
           <p v-else class="mt-3 text-ink font-medium" dir="auto">{{ file.name }}</p>
-          <p class="text-xs text-slate-400 mt-1">فایل ‎.slk‎ همان‌طور که آرپا می‌دهد، یا ‎.xlsx‎ — هر ۵۲ ستون خوانده می‌شود</p>
+          <p class="text-xs text-slate-400 mt-1">فایل ‎.slk‎ همان‌طور که آرپا می‌دهد، یا ‎.xlsx‎ — خروجی برگه‌ها، یا خروجی ردیف‌به‌ردیف با کالا (هر ردیف کالا جدا ذخیره می‌شود)</p>
         </div>
 
         <div class="flex flex-wrap items-center gap-3 mt-4">

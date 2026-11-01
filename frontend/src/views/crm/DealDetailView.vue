@@ -196,7 +196,8 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             <p class="text-xs text-white/60">مبلغ معامله</p>
             <p class="text-2xl font-bold">{{ rial(deal.amount_rial) }}</p>
             <p class="text-sm mt-1" :class="Number(deal.profit_rial) >= 0 ? 'text-emerald-300' : 'text-red-300'">
-              سود {{ rial(deal.profit_rial) }} · حاشیه {{ pct(deal.margin_pct) }}
+              <template v-if="deal.margin_pct != null">سود {{ rial(deal.profit_rial) }} · حاشیه {{ pct(deal.margin_pct) }}</template>
+              <template v-else>سود: بهای تمام‌شده ثبت نشده</template>
             </p>
           </div>
         </div>
@@ -287,8 +288,8 @@ const card = "bg-surface rounded-card shadow-soft p-4";
               <li v-for="i in items" :key="`m-${i.id}`" class="px-4 py-3">
                 <div class="flex items-start justify-between gap-3">
                   <p class="text-ink min-w-0 truncate">{{ i.product_name }}</p>
-                  <span class="text-sm font-medium shrink-0 ltr-nums" :class="i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
-                    {{ pct(i.margin_pct) }}
+                  <span class="text-sm font-medium shrink-0 ltr-nums" :class="i.margin_pct == null ? 'text-slate-300' : i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
+                    {{ i.margin_pct == null ? "—" : pct(i.margin_pct) }}
                   </span>
                 </div>
                 <div class="text-xs text-slate-500 mt-1 ltr-nums">
@@ -331,9 +332,47 @@ const card = "bg-surface rounded-card shadow-soft p-4";
                     <td class="px-3 text-left whitespace-nowrap" :class="Number(i.line_profit) >= 0 ? 'text-emerald-600' : 'text-red-500'">
                       {{ rial(i.line_profit) }}
                     </td>
-                    <td class="px-4 text-left font-medium" :class="i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
-                      {{ pct(i.margin_pct) }}
+                    <td class="px-4 text-left font-medium" :class="i.margin_pct == null ? 'text-slate-300' : i.margin_pct >= 20 ? 'text-emerald-600' : i.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
+                      {{ i.margin_pct == null ? "—" : pct(i.margin_pct) }}
                     </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- What the آرپا invoice specified, line by line -->
+          <div v-if="deal.invoice_lines?.length" class="bg-surface rounded-card shadow-soft overflow-hidden">
+            <h3 class="text-sm font-semibold text-ink px-4 pt-4 pb-2">ردیف‌های فاکتور آرپا و مشخصات سفارش</h3>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs min-w-[760px]">
+                <thead>
+                  <tr class="text-slate-400 bg-slate-50">
+                    <th class="text-right font-medium px-4 py-2">کالا</th>
+                    <th class="text-left font-medium px-2">تعداد</th>
+                    <th class="text-left font-medium px-2">فی</th>
+                    <th class="text-left font-medium px-2">مبلغ خالص</th>
+                    <th class="text-right font-medium px-2">عرض × طول</th>
+                    <th class="text-right font-medium px-2">کاغذ</th>
+                    <th class="text-right font-medium px-2">چاپ</th>
+                    <th class="text-right font-medium px-2">کارتن</th>
+                    <th class="text-right font-medium px-4">انبار</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(l, i) in deal.invoice_lines" :key="i" class="border-t border-slate-100">
+                    <td class="px-4 py-2 text-ink">
+                      {{ l.name }}
+                      <span v-if="l.note && l.note !== '*'" class="block text-[10px] text-slate-400">{{ l.note }}</span>
+                    </td>
+                    <td class="px-2 text-left ltr-nums">{{ num(l.quantity) }} <span class="text-slate-400">{{ l.unit }}</span></td>
+                    <td class="px-2 text-left ltr-nums whitespace-nowrap">{{ rial(l.price) }}</td>
+                    <td class="px-2 text-left ltr-nums whitespace-nowrap text-ink">{{ rial(l.net) }}</td>
+                    <td class="px-2 ltr-nums text-slate-500">{{ l.width ? `${l.width} × ${l.length ?? "—"}` : "—" }}</td>
+                    <td class="px-2 text-slate-500">{{ l.paper || "—" }}</td>
+                    <td class="px-2 text-slate-500">{{ l.print || "—" }}</td>
+                    <td class="px-2 text-slate-500">{{ l.carton || "—" }}</td>
+                    <td class="px-4 text-slate-400 truncate max-w-[140px]">{{ l.warehouse || "—" }}</td>
                   </tr>
                 </tbody>
               </table>

@@ -192,6 +192,49 @@ class ProductionShiftInputTests(TestCase):
         self.assertEqual([(r["quantity"], r["amount"]) for r in dash["revenue"]],
                          [(Decimal("8"), Decimal("80"))])
 
+    def test_line_notes_and_print_design_are_kept_per_shift(self):
+        press = DimMachine.objects.create(
+            code="press-notes", name_fa="چاپ", kind=DimMachine.Kind.PRINT, sort_order=9,
+        )
+
+        def block(note, design, press_note):
+            return {
+                "cutting": [{"machine": self.line.id, "description": note}],
+                "print": {"machine": press.id, "print_design": design, "description": press_note},
+            }
+
+        res = self.client.post("/api/production/input/", {
+            "period": self.period.id, "submit": False,
+            "shifts": {"day": block(" خرابی تیغه ", "طرح الف", ""),
+                       "night": block("", "طرح ب", "تعویض زینک")},
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        got = self.client.get(f"/api/production/input/?period={self.period.id}").data["shifts"]
+        self.assertEqual(got["day"]["cutting"][0]["description"], "خرابی تیغه")
+        self.assertEqual(got["night"]["cutting"][0]["description"], "")
+        self.assertEqual((got["day"]["print"]["print_design"], got["night"]["print"]["print_design"]),
+                         ("طرح الف", "طرح ب"))
+        self.assertEqual(got["night"]["print"]["description"], "تعویض زینک")
+
+        dash = self.client.get(f"/api/production/dashboard/summary/?period={self.period.id}").data
+        self.assertEqual(
+            [(x["kind"], x["shift"], x["description"], x["print_design"]) for x in dash["line_notes"]],
+            [("cutting", "day", "خرابی تیغه", ""),
+             ("print", "day", "", "طرح الف"),
+             ("print", "night", "تعویض زینک", "طرح ب")],
+        )
+
+        # A client that does not send the notes leaves them as they are.
+        self.client.post("/api/production/input/", {
+            "period": self.period.id, "submit": False,
+            "shifts": {"day": {"cutting": [{"machine": self.line.id, "output_units": "5"}]}},
+        }, format="json")
+        self.assertEqual(
+            FactProduction.objects.get(period=self.period, machine=self.line, shift="day").description,
+            "خرابی تیغه",
+        )
+
     def test_two_shifts_count_as_one_line(self):
         from apps.production.services.kpi import _collect
 

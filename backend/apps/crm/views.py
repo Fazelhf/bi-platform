@@ -1192,6 +1192,51 @@ class CustomerFeedbackViewSet(_Base):
 # --------------------------------------------------------------------------
 # Deal
 # --------------------------------------------------------------------------
+def customer_products(invoices) -> list[dict]:
+    """
+    What this customer has bought, product by product, from آرپا's invoice
+    lines: how much, at what price on average, when last, and the make-up
+    (paper, print) of the latest order — what a rep needs before the next call.
+    A return counts against the purchase.
+    """
+    from django.db.models import Case, Value, When
+    from django.db.models.functions import Abs
+
+    from apps.crm.models import SalesInvoiceItem
+
+    lines = SalesInvoiceItem.objects.filter(invoice__in=invoices.values("pk"))
+    sign = Case(When(invoice__kind=SalesInvoice.Kind.RETURN, then=Value(-1)), default=Value(1))
+    dec = DecimalField(max_digits=24, decimal_places=2)
+    rows = (
+        lines.values("product_code")
+        .annotate(
+            name=Max("product_name"), group=Max("accounting_group"), unit=Max("sub_unit"),
+            amount=Sum(sign * Abs("amount_rial"), output_field=dec),
+            quantity=Sum(sign * Abs("quantity"), output_field=dec),
+            invoices=Count("invoice_id", distinct=True), last=Max("invoice__issued_at"),
+        )
+        .order_by("-amount")
+    )
+    latest = {}
+    for code, paper, print_, price in (
+        lines.filter(invoice__kind=SalesInvoice.Kind.SALE)
+        .order_by("product_code", "-invoice__issued_at", "-id")
+        .values_list("product_code", "paper_type", "print_type", "unit_price_rial")
+    ):
+        latest.setdefault(code, (paper, print_, price))
+    out = []
+    for r in rows:
+        qty, amount = float(r["quantity"] or 0), float(r["amount"] or 0)
+        paper, print_, price = latest.get(r["product_code"], ("", "", 0))
+        out.append({
+            "code": r["product_code"], "name": r["name"] or r["product_code"], "group": r["group"] or "",
+            "unit": r["unit"] or "", "quantity": qty, "amount": amount, "invoices": r["invoices"],
+            "avg_price": round(amount / qty) if qty else 0, "last_price": float(price or 0),
+            "last": jalali_str(r["last"]) if r["last"] else "", "paper": paper, "print": print_,
+        })
+    return out
+
+
 def customer_insights(customer) -> dict:
     """
     What the customer page adds on top of the raw record — the part that
@@ -1310,6 +1355,7 @@ def customer_insights(customer) -> dict:
     recent_invoices = invoices.select_related("deal").order_by("-issued_at")[:50]
 
     return {
+        "products": customer_products(invoices),
         "invoiced": float(inv["amount"] or 0),
         "invoice_count": inv["count"] or 0,
         "unsettled": float(inv["unsettled"] or 0),
@@ -1352,17 +1398,20 @@ def deal_summary(qs) -> dict:
     agg = qs.aggregate(
         count=Count("id", distinct=True),
         amount=Sum("amount_rial"),
-        profit=Sum("profit_rial"),
+        profit=Sum("profit_rial", filter=Q(cost_rial__gt=0)),
+        costed=Sum("amount_rial", filter=Q(cost_rial__gt=0)),
         cost=Sum("cost_rial"),
     )
     amount = float(agg["amount"] or 0)
-    profit = float(agg["profit"] or 0)
+    costed = float(agg["costed"] or 0)
+    # Profit only over deals with a cost; with none, it is unknown, not 100%.
+    profit = float(agg["profit"] or 0) if costed else None
     return {
         "count": agg["count"] or 0,
         "amount": amount,
         "profit": profit,
         "cost": float(agg["cost"] or 0),
-        "margin_pct": round(profit / amount * 100, 1) if amount else 0.0,
+        "margin_pct": round(profit / costed * 100, 1) if costed else None,
     }
 
 
@@ -2396,10 +2445,14 @@ class CrmReportIndexView(GatedAPIView):
     """The report catalogue, so the UI builds its menu from the server."""
 
     def get(self, request):
+        live = rpt.available_reports(active_dataset(request))
+        section = {k: name for name, keys in rpt.SECTIONS for k in keys}
         return Response({
             "reports": [
-                {"key": k, "title": t, "axes": a} for k, (_fn, t, a) in rpt.REPORTS.items()
+                {"key": k, "title": t, "axes": a, "section": section.get(k, "سایر")}
+                for k, (_fn, t, a) in rpt.REPORTS.items() if k in live
             ],
+            "sections": [name for name, _keys in rpt.SECTIONS],
             "axis_labels": rpt.AXIS_LABELS,
         })
 

@@ -30,7 +30,7 @@ const deals = ref<Deal[]>([]);
 const activities = ref<CrmActivity[]>([]);
 const loading = ref(true);
 const merges = ref<CustomerMergeRecord[]>([]);
-const tab = ref<"timeline" | "deals" | "invoices" | "tasks">("timeline");
+const tab = ref<"timeline" | "deals" | "invoices" | "products" | "tasks">("timeline");
 
 async function load() {
   loading.value = true;
@@ -286,6 +286,11 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             @click="tab = 'invoices'"
           >فاکتورها ({{ num(insights.invoice_count) }})</button>
           <button
+            v-if="insights?.products?.length"
+            class="text-sm rounded-xl px-4 py-2" :class="tab === 'products' ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100'"
+            @click="tab = 'products'"
+          >کالاهای خریداری‌شده ({{ num(insights.products.length) }})</button>
+          <button
             v-if="insights"
             class="text-sm rounded-xl px-4 py-2" :class="tab === 'tasks' ? 'bg-panel text-white' : 'text-slate-500 hover:bg-slate-100'"
             @click="tab = 'tasks'"
@@ -302,6 +307,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
                 <th class="text-right font-medium px-3">نوع</th>
                 <th class="text-right font-medium px-3">تاریخ</th>
                 <th class="text-left font-medium px-3">مبلغ</th>
+                <th class="text-left font-medium px-3">وصول‌شده</th>
                 <th class="text-left font-medium px-3">تسویه‌نشده</th>
                 <th class="text-right font-medium px-4">معامله</th>
               </tr>
@@ -309,14 +315,47 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             <tbody>
               <tr v-for="inv in insights.invoices" :key="inv.id" class="border-t border-slate-100">
                 <td class="px-4 py-2.5 text-ink ltr-nums">{{ inv.number }}</td>
-                <td class="px-3 text-xs" :class="inv.kind === 'return' ? 'text-red-500' : 'text-slate-500'">{{ inv.kind_display }}</td>
+                <td class="px-3 text-xs" :class="inv.kind === 'return' ? 'text-red-500' : 'text-slate-500'">
+                  {{ inv.kind_display }}<span v-if="inv.category" class="mr-1 text-[10px] bg-slate-100 rounded-full px-1.5">{{ inv.category }}</span>
+                </td>
                 <td class="px-3 text-xs text-slate-400 whitespace-nowrap">{{ inv.issued_jalali }}</td>
                 <td class="px-3 text-left text-ink whitespace-nowrap ltr-nums">{{ rial(inv.amount_rial) }}</td>
+                <td class="px-3 text-left whitespace-nowrap ltr-nums text-emerald-700">{{ Number(inv.settled_rial) ? rial(inv.settled_rial) : "—" }}</td>
                 <td class="px-3 text-left whitespace-nowrap ltr-nums" :class="Number(inv.unsettled_rial) ? 'text-amber-600' : 'text-slate-300'">{{ Number(inv.unsettled_rial) ? rial(inv.unsettled_rial) : "—" }}</td>
                 <td class="px-4 text-xs text-slate-500 truncate max-w-[200px]">
                   <button v-if="inv.deal" class="hover:underline" @click="router.push({ name: 'crm-deal', params: { id: inv.deal } })">{{ inv.deal_title }}</button>
                   <span v-else class="text-slate-300">—</span>
                 </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Products bought (آرپا invoice lines) -->
+        <div v-else-if="tab === 'products' && insights" class="overflow-x-auto">
+          <table class="w-full text-sm min-w-[720px]">
+            <thead>
+              <tr class="text-xs text-slate-400 bg-slate-50">
+                <th class="text-right font-medium px-4 py-3">کالا</th>
+                <th class="text-right font-medium px-3">گروه</th>
+                <th class="text-left font-medium px-3">تعداد</th>
+                <th class="text-left font-medium px-3">مبلغ</th>
+                <th class="text-left font-medium px-3">میانگین قیمت</th>
+                <th class="text-left font-medium px-3">آخرین قیمت</th>
+                <th class="text-right font-medium px-3">آخرین خرید</th>
+                <th class="text-right font-medium px-4">کاغذ · چاپ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in insights.products" :key="p.code" class="border-t border-slate-100">
+                <td class="px-4 py-2.5 text-ink">{{ p.name }}</td>
+                <td class="px-3 text-xs text-slate-500">{{ p.group || "—" }}</td>
+                <td class="px-3 text-left ltr-nums">{{ num(p.quantity) }} <span class="text-[10px] text-slate-400">{{ p.unit }}</span></td>
+                <td class="px-3 text-left ltr-nums text-ink whitespace-nowrap">{{ rial(p.amount) }}</td>
+                <td class="px-3 text-left ltr-nums text-slate-500 whitespace-nowrap">{{ rial(p.avg_price) }}</td>
+                <td class="px-3 text-left ltr-nums text-slate-500 whitespace-nowrap">{{ p.last_price ? rial(p.last_price) : "—" }}</td>
+                <td class="px-3 text-xs text-slate-400 whitespace-nowrap">{{ p.last }}</td>
+                <td class="px-4 text-xs text-slate-500">{{ [p.paper, p.print].filter(Boolean).join(" · ") || "—" }}</td>
               </tr>
             </tbody>
           </table>

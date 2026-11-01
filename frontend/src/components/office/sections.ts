@@ -58,6 +58,13 @@ export const OFFICE_SECTIONS: OfficeSection[] = [
     hint: "کارهای گروهی و پیشرفتشان",
   },
   {
+    name: "office-calendar",
+    label: "تقویم کاری",
+    icon: "calendar",
+    color: "244 63 94",
+    hint: "تعطیلات، جلسات و برنامه‌ی واحدها و شرکت",
+  },
+  {
     name: "chat",
     label: "گفتگو",
     icon: "chat",

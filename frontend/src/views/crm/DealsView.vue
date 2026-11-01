@@ -322,8 +322,8 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
             <span class="text-xs ltr-nums" :class="Number(d.profit_rial) >= 0 ? 'text-emerald-600' : 'text-red-500'">
               سود {{ rial(d.profit_rial) }}
             </span>
-            <span class="text-xs ltr-nums" :class="d.margin_pct >= 20 ? 'text-emerald-600' : d.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
-              {{ pct(d.margin_pct) }}
+            <span class="text-xs ltr-nums" :class="d.margin_pct == null ? 'text-slate-300' : d.margin_pct >= 20 ? 'text-emerald-600' : d.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">
+              {{ d.margin_pct == null ? "—" : pct(d.margin_pct) }}
             </span>
           </div>
 
@@ -397,7 +397,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
               <td v-if="col('source')" class="px-3 text-slate-500 text-xs">{{ d.source_name || "—" }}</td>
               <td v-if="col('amount')" class="px-3 text-left text-ink whitespace-nowrap ltr-nums">{{ rial(d.amount_rial) }}</td>
               <td v-if="col('profit')" class="px-3 text-left whitespace-nowrap ltr-nums" :class="Number(d.profit_rial) >= 0 ? 'text-emerald-600' : 'text-red-500'">{{ rial(d.profit_rial) }}</td>
-              <td v-if="col('margin')" class="px-3 text-left ltr-nums" :class="d.margin_pct >= 20 ? 'text-emerald-600' : d.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">{{ pct(d.margin_pct) }}</td>
+              <td v-if="col('margin')" class="px-3 text-left ltr-nums" :class="d.margin_pct == null ? 'text-slate-300' : d.margin_pct >= 20 ? 'text-emerald-600' : d.margin_pct >= 10 ? 'text-amber-600' : 'text-red-500'">{{ d.margin_pct == null ? "—" : pct(d.margin_pct) }}</td>
               <td v-if="col('expected')" class="px-3 text-xs text-slate-400 whitespace-nowrap">{{ d.expected_close_date || "—" }}</td>
               <td v-if="col('date')" class="px-3 text-xs text-slate-400 whitespace-nowrap">{{ d.closed_jalali || d.opened_jalali }}</td>
             </tr>

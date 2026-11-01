@@ -7,6 +7,7 @@ import { num, pct, rial } from "@/utils/format";
 import { saveAsFile } from "@/utils/download";
 import { toast } from "@/composables/useUi";
 import CrmChart from "@/components/crm/CrmChart.vue";
+import FunnelChart from "@/components/crm/FunnelChart.vue";
 import CrmFilterBar from "@/components/crm/CrmFilterBar.vue";
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -22,7 +23,15 @@ const crm = useCrmStore();
 const route = useRoute();
 const router = useRouter();
 
-const index = ref<{ key: string; title: string; axes: string[] }[]>([]);
+const index = ref<{ key: string; title: string; axes: string[]; section?: string }[]>([]);
+const sections = ref<string[]>([]);
+/** The menu, grouped as the server orders it; a report with no section goes last. */
+const menu = computed(() => {
+  const names = [...sections.value, "سایر"];
+  return names
+    .map((name) => ({ name, reports: index.value.filter((r) => (r.section ?? "سایر") === name) }))
+    .filter((g) => g.reports.length);
+});
 const reportKey = ref<string>((route.query.report as string) || "sales");
 const axis = ref<string>((route.query.axis as string) || "");
 const data = ref<ReportData | null>(null);
@@ -48,6 +57,15 @@ const CHART_KEY: Record<string, { amount: string; count: string; fmt: "rial" | "
   new_customers: { amount: "count", count: "count", fmt: "count" },
   activities: { amount: "count", count: "count", fmt: "count" },
   calls: { amount: "success_rate", count: "calls", fmt: "percent" },
+  invoice_products: { amount: "amount", count: "quantity", fmt: "rial" },
+  rep_scorecard: { amount: "sales", count: "customers", fmt: "rial" },
+  loyalty: { amount: "revenue", count: "customers", fmt: "rial" },
+  at_risk: { amount: "revenue_12m", count: "quiet_days", fmt: "rial" },
+  cross_sell: { amount: "opportunity", count: "opportunity", fmt: "count" },
+  compare: { amount: "current", count: "current", fmt: "rial" },
+  per_workday: { amount: "per_workday", count: "workdays", fmt: "rial" },
+  province_groups: { amount: "amount", count: "amount", fmt: "rial" },
+  collection: { amount: "unsettled", count: "count", fmt: "rial" },
   products: { amount: "amount", count: "quantity", fmt: "rial" },
   provinces: { amount: "amount", count: "count", fmt: "rial" },
   satisfaction: { amount: "unhappy", count: "total", fmt: "count" },
@@ -69,7 +87,11 @@ async function load() {
 
 onMounted(async () => {
   await crm.loadOptions();
-  index.value = (await crmApi.reportIndex()).reports;
+  const idx = await crmApi.reportIndex();
+  index.value = idx.reports;
+  sections.value = idx.sections ?? [];
+  // A report the server no longer offers (no data for it) opens the first one.
+  if (index.value.length && !index.value.some((r) => r.key === reportKey.value)) reportKey.value = index.value[0].key;
   await load();
 });
 watch(() => crm.query, load, { deep: true });
@@ -111,6 +133,34 @@ const series = computed(() => {
       { name: "ناموفق", stack: "s", color: "#ef4444", values: rows.map((r) => r.lost_count) },
     ];
   }
+  if (reportKey.value === "compare") {
+    return [
+      { name: "این بازه", values: rows.map((r) => r.current), color: "#22c55e" },
+      { name: "بازه‌ی قبل", values: rows.map((r) => r.previous), color: "#94a3b8" },
+      { name: "سال قبل", values: rows.map((r) => r.last_year), color: "#cbd5e1" },
+    ];
+  }
+  if (reportKey.value === "rep_scorecard") {
+    return [
+      { name: "فروش", values: rows.map((r) => r.sales), color: "#22c55e" },
+      { name: "تارگت", values: rows.map((r) => r.target), color: "#cbd5e1" },
+    ];
+  }
+  if (reportKey.value === "province_groups") {
+    const palette = ["#0ea5e9", "#22c55e", "#f59e0b", "#6366f1", "#ef4444", "#14b8a6", "#a855f7", "#64748b"];
+    return (data.value?.columns ?? []).filter((c) => c.k.startsWith("g")).map((c, i) => ({
+      name: c.label, stack: "g", color: palette[i % palette.length], values: rows.map((r) => r[c.k] ?? 0),
+    }));
+  }
+  if (reportKey.value === "collection" && axis.value === "aging") {
+    return [{ name: "مانده", values: rows.map((r) => r.unsettled), color: "#f59e0b" }];
+  }
+  if (reportKey.value === "collection") {
+    return [
+      { name: "وصول‌شده", stack: "c", color: "#22c55e", values: rows.map((r) => r.settled) },
+      { name: "مانده", stack: "c", color: "#f59e0b", values: rows.map((r) => r.unsettled) },
+    ];
+  }
   if (reportKey.value === "sales") {
     return [
       { name: "فروش", values: rows.map((r) => r.amount), color: "#22c55e" },
@@ -146,9 +196,12 @@ const chartFormat = computed(() => {
 });
 
 const isStacked = computed(() =>
-  ["incoming", "calls"].includes(reportKey.value) ||
+  ["incoming", "calls", "province_groups", "collection"].includes(reportKey.value) ||
   (reportKey.value === "lost" && axis.value === "time"),
 );
+
+/** The open stages, drawn as the dashboard draws them. */
+const funnelStages = computed(() => (data.value?.rows ?? []).filter((r) => r.kind === "open"));
 
 function pick(i: number) {
   const row = chartRows.value[i];
@@ -185,13 +238,18 @@ const tabBtn = (on: boolean) =>
   <div class="space-y-4">
     <CrmFilterBar />
 
-    <!-- Report picker -->
-    <div class="bg-surface rounded-card shadow-soft p-2 flex flex-wrap gap-1 no-print">
-      <button
-        v-for="r in index" :key="r.key"
-        class="text-xs rounded-xl px-3 py-2 transition" :class="tabBtn(reportKey === r.key)"
-        @click="reportKey = r.key"
-      >{{ r.title }}</button>
+    <!-- Report picker, by section -->
+    <div class="bg-surface rounded-card shadow-soft p-3 grid sm:grid-cols-2 lg:grid-cols-5 gap-3 no-print">
+      <div v-for="g in menu" :key="g.name" class="min-w-0">
+        <p class="text-[11px] font-semibold text-slate-400 mb-1.5 px-1">{{ g.name }}</p>
+        <div class="flex flex-wrap gap-1">
+          <button
+            v-for="r in g.reports" :key="r.key"
+            class="text-xs rounded-xl px-3 py-1.5 transition" :class="tabBtn(reportKey === r.key)"
+            @click="reportKey = r.key"
+          >{{ r.title }}</button>
+        </div>
+      </div>
     </div>
 
     <div v-if="loading" class="space-y-3">
@@ -247,6 +305,10 @@ const tabBtn = (on: boolean) =>
         </div>
 
         <EmptyState v-if="!data.rows.length" title="در این بازه داده‌ای ثبت نشده است" />
+        <div v-else-if="reportKey === 'funnel'" class="max-w-2xl mx-auto py-2">
+          <p class="text-[11px] text-slate-400 mb-2">رسیده · همین‌جا</p>
+          <FunnelChart :stages="funnelStages" @pick="(s) => s.drill && crm.openDrill(s.drill, `مرحله فروش — ${s.label}`)" />
+        </div>
         <CrmChart
           v-else
           :categories="categories" :series="series"
@@ -254,6 +316,7 @@ const tabBtn = (on: boolean) =>
           :format="chartFormat" :height="320"
           @pick="pick"
         />
+        <p v-if="data.headline" class="text-sm text-ink font-medium mt-3 text-center">{{ data.headline }}</p>
         <p v-if="data.rows.length" class="text-[11px] text-slate-300 mt-2 text-center no-print">
           روی هر ستون یا ردیف کلیک کنید تا ریز رکوردهای همان بخش باز شود
         </p>

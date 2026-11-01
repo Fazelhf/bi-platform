@@ -39,6 +39,8 @@ export interface ReportData {
   totals: Record<string, number>;
   chronological: boolean;
   stacks?: string[];
+  /** One line above the chart, e.g. the Pareto line of «مشتریان و وفاداری». */
+  headline?: string;
   kinds?: { code: string; label: string }[];
   axis_labels: Record<string, string>;
   /** The table layout, from the server — the export uses the same list. */
@@ -160,6 +162,12 @@ export interface CrmDashboard {
   top_active: ReportRow[];
   sources: ReportRow[];
   by_group: ReportRow[];
+  /** From آرپا's invoice lines. */
+  product_groups: ReportRow[];
+  top_products: ReportRow[];
+  paper_mix: ReportRow[];
+  print_mix: ReportRow[];
+  collection: ReportRow[];
   trend: ReportRow[];
   incoming_trend: ReportRow[];
   new_customers_by_user: ReportRow[];
@@ -196,7 +204,7 @@ export interface Deal {
   discount_rial: string;
   shipping_cost_rial: string;
   other_cost_rial: string;
-  margin_pct: number;
+  margin_pct: number | null;
   age_days: number;
   /** Days since the last activity on it — the pipeline board sends this. */
   idle_days?: number | null;
@@ -215,6 +223,12 @@ export interface Deal {
   competitor?: string;
   competitor_unit_price_rial?: string | null;
   probability_pct?: number | null;
+  /** The آرپا invoice lines behind a deal made from an invoice. */
+  invoice_lines?: {
+    invoice: string; category: string; name: string; group: string; quantity: number; unit: string;
+    price: number; amount: number; net: number; paper: string; print: string; carton: string;
+    warehouse: string; width: number | null; length: number | null; note: string;
+  }[];
 }
 
 export interface DealItem {
@@ -229,7 +243,7 @@ export interface DealItem {
   line_total: string;
   line_cost: string;
   line_profit: string;
-  margin_pct: number;
+  margin_pct: number | null;
 }
 
 export interface CrmCustomer {
@@ -322,6 +336,11 @@ export interface CustomerInsights {
   health: { score: number; label: string; reasons: { tone: "good" | "warn" | "bad"; text: string }[] };
   tasks: CrmTask[];
   invoices: CrmInvoice[];
+  /** What the customer bought, per آرپا product code (invoice lines). */
+  products: {
+    code: string; name: string; group: string; unit: string; quantity: number; amount: number;
+    invoices: number; avg_price: number; last_price: number; last: string; paper: string; print: string;
+  }[];
 }
 
 export interface CrmActivity {
@@ -524,6 +543,9 @@ export interface CrmInvoice {
   vat_rial: string;
   total_rial: string;
   unsettled_rial: string;
+  settled_rial: string;
+  /** آرپا's «دسته بندی»: رسمی / عمومی. */
+  category?: string;
   payment_terms: string;
 }
 
@@ -621,7 +643,11 @@ export const crmApi = {
     return data;
   },
 
-  async reportIndex(): Promise<{ reports: { key: string; title: string; axes: string[] }[]; axis_labels: Record<string, string> }> {
+  async reportIndex(): Promise<{
+    reports: { key: string; title: string; axes: string[]; section?: string }[];
+    sections?: string[];
+    axis_labels: Record<string, string>;
+  }> {
     const { data } = await api.get("/crm/reports/");
     return data;
   },
@@ -649,7 +675,7 @@ export const crmApi = {
 
   async dealSummary(params: Params = {}) {
     const { data } = await api.get("/crm/deals/summary/", { params: clean(params) });
-    return data as { count: number; amount: number; profit: number; cost: number; margin_pct: number };
+    return data as { count: number; amount: number; profit: number | null; cost: number; margin_pct: number | null };
   },
 
   async dealHistory(id: number) {
