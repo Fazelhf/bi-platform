@@ -79,3 +79,29 @@ class LineExportTests(TestCase):
         run(_book([_line("512", "11210", 12, 1000)]), "lines2.xlsx", "main", commit=True)
         inv.refresh_from_db()
         self.assertEqual((inv.amount_rial, inv.shipping_method, inv.items.get().quantity), (12000, "باربری", 12))
+
+
+class InvoiceProductReportTests(TestCase):
+    def test_sales_per_product_and_group_with_returns_netted(self):
+        from apps.crm import reports as rpt
+        from apps.crm.models import SalesInvoiceItem
+
+        def invoice(code, kind, lines):
+            inv = SalesInvoice.objects.create(code=code, number=code, kind=kind, channel="team",
+                                              issued_at=jdate("1405/07/11"), amount_rial=0)
+            for pcode, group, qty, amount in lines:
+                SalesInvoiceItem.objects.create(invoice=inv, product_code=pcode, product_name=f"کالا {pcode}",
+                                                quantity=qty, amount_rial=amount, accounting_group=group)
+            return inv
+
+        invoice("i1", "sale", [("11210", "پوز ساده", 10, 1000), ("51300", "ژورنال", 5, 500)])
+        invoice("i2", "sale", [("11210", "پوز ساده", 2, 200)])
+        invoice("r1", "return", [("11210", "پوز ساده", -1, -100)])
+        f = rpt.Filters.from_query({"date_from": "2026-09-01", "date_to": "2026-11-30"})
+        rows = {r["id"]: r for r in rpt.run_report("invoice_products", f, "product")["rows"]}
+        self.assertEqual((rows["11210"]["amount"], rows["11210"]["quantity"], rows["11210"]["invoices"]), (1100, 11, 3))
+        groups = {r["label"]: r["amount"] for r in rpt.run_report("invoice_products", f, "item_group")["rows"]}
+        self.assertEqual(groups, {"پوز ساده": 1100, "ژورنال": 500})
+        # The drill lands on the invoices that carry that product.
+        drilled = rpt.Filters.from_query({**rows["51300"]["drill"]["params"]}).invoices()
+        self.assertEqual(list(drilled.values_list("code", flat=True)), ["i1"])

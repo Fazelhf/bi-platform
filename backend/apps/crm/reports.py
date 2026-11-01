@@ -116,6 +116,10 @@ class Filters:
     #: B2B tender slices: who we bid against, سامانه or مستقیم.
     competitor: str = ""
     tender_channel: str = ""
+    #: آرپا's own product code and product group on an invoice line — what
+    #: a line carries whether or not it is mapped to a CRM product.
+    product_code: str = ""
+    item_group: str = ""
 
     #: The channels in view; None means all of them. Set from the account (see
     #: `Scope.channels`); a `channel` query param may only narrow within what
@@ -167,6 +171,8 @@ class Filters:
         f.invoiced = (q.get("invoiced") or "").strip()
         f.competitor = (q.get("competitor") or "").strip()
         f.tender_channel = (q.get("tender_channel") or "").strip()
+        f.product_code = (q.get("product_code") or "").strip()
+        f.item_group = (q.get("item_group") or "").strip()
         f.result = (q.get("result") or "").strip()
         f.kind = (q.get("kind") or "").strip()
         f.granularity = (q.get("granularity") or "month").strip()
@@ -353,6 +359,10 @@ class Filters:
             qs = qs.filter(customer_id=self.customer)
         if self.product:
             qs = qs.filter(items__product_id=self.product).distinct()
+        if self.product_code:
+            qs = qs.filter(items__product_code=self.product_code).distinct()
+        if self.item_group:
+            qs = qs.filter(items__accounting_group=self.item_group).distinct()
         return qs
 
     def _window(self, qs, field_name: str):
@@ -382,7 +392,8 @@ class Filters:
             v = getattr(self, name)
             if v:
                 out[name] = v
-        for name in ("status", "result", "kind", "invoiced", "competitor", "tender_channel"):
+        for name in ("status", "result", "kind", "invoiced", "competitor", "tender_channel",
+                     "product_code", "item_group"):
             v = getattr(self, name)
             if v:
                 out[name] = v
@@ -1334,6 +1345,62 @@ def report_tender(f: Filters, axis_key: str) -> dict:
     return out
 
 
+def report_invoice_products(f: Filters, axis_key: str) -> dict:
+    """
+    فروش کالا از فاکتورها — what was billed, per product and product group,
+    from آرپا's invoice lines (the line export). Unlike «فروش بر محور محصول»,
+    which reads the won deals typed into CRM, this is every invoice, whether
+    or not a deal stands behind it, over the same invoices «گزارش کلی فروش»
+    counts. A return line counts against the sale (negative).
+    Lines are keyed on آرپا's کد کالا, so a product not yet in the CRM
+    catalogue is still a row.
+    """
+    from django.db.models.functions import Abs
+
+    from apps.crm.models import SalesInvoiceItem
+
+    lines = SalesInvoiceItem.objects.filter(invoice__in=f.invoices().values("pk"))
+    sign = Case(When(invoice__kind=SalesInvoice.Kind.RETURN, then=Value(-1)), default=Value(1))
+    dec = DecimalField(max_digits=24, decimal_places=2)
+    measures = {
+        "amount": Coalesce(Sum(sign * Abs("amount_rial"), output_field=dec), Value(0, output_field=dec)),
+        "quantity": Coalesce(Sum(sign * Abs("quantity"), output_field=dec), Value(0, output_field=dec)),
+        "equivalent": Coalesce(Sum(sign * Abs("equivalent"), output_field=dec), Value(0, output_field=dec)),
+        "invoices": Count("invoice_id", distinct=True),
+        "customers": Count("invoice__customer_id", distinct=True),
+    }
+    total = _num(lines.aggregate(t=measures["amount"])["t"])
+
+    def row(r, rid, label, drill):
+        d = dict(f.drill_base()); d.update(drill)
+        out = {"id": rid, "label": label or "بدون نام", **{k: _num(r[k]) for k in measures}}
+        out["share_pct"] = _pct(out["amount"], total)
+        out["drill"] = {"kind": "invoices", "params": d}
+        return out
+
+    if axis_key == "time":
+        rows = []
+        for jy, jm, s_, e in _time_buckets(f):
+            agg = lines.filter(invoice__issued_at__gte=s_, invoice__issued_at__lt=e).aggregate(**measures)
+            rows.append(row(agg, f"{jy}-{jm}", month_label(jy, jm), {
+                "date_from": s_.isoformat(), "date_to": (e - dt.timedelta(days=1)).isoformat()}))
+        return _shape("invoice_products", "time", rows, chronological=True)
+
+    if axis_key == "item_group":
+        grouped = lines.values("accounting_group").annotate(**measures).order_by()
+        rows = [row(r, r["accounting_group"] or "-", r["accounting_group"] or "بدون گروه کالا",
+                    {"item_group": r["accounting_group"]} if r["accounting_group"] else {})
+                for r in grouped]
+    else:
+        # One row per آرپا code; its name is the most recent one billed.
+        grouped = lines.values("product_code").annotate(name=Max("product_name"), **measures).order_by()
+        rows = [row(r, r["product_code"] or "-", r["name"],
+                    {"product_code": r["product_code"]} if r["product_code"] else {})
+                for r in grouped]
+    rows.sort(key=lambda r: r["amount"], reverse=True)
+    return _shape("invoice_products", axis_key, rows)
+
+
 REPORTS = {
     "sales": (report_sales, "گزارش کلی فروش", ["time", "user", "team", "province", "group", "source", "customer"]),
     "profit": (report_profit, "سود معاملات", ["user", "time", "group", "customer", "province"]),
@@ -1348,6 +1415,7 @@ REPORTS = {
     "provinces": (report_provinces, "فروش و تارگت استان", ["province"]),
     "satisfaction": (report_satisfaction, "رضایت مشتری", ["user"]),
     "sources": (report_sources, "بهترین منابع سرنخ", ["source"]),
+    "invoice_products": (report_invoice_products, "فروش کالا از فاکتورها", ["product", "item_group", "time"]),
     "tender": (report_tender, "پیش‌فاکتور و رقبا", ["time", "competitor", "tender_channel", "user", "group"]),
 }
 
@@ -1363,6 +1431,14 @@ REPORTS = {
 #: measure — a footer total for an average or a ratio would be a lie, so those
 #: are left out and recomputed in `_shape`.
 REPORT_COLUMNS: dict[str, list[dict]] = {
+    "invoice_products": [
+        {"k": "amount", "label": "فروش", "f": "rial", "total": True},
+        {"k": "share_pct", "label": "سهم از فروش", "f": "pct"},
+        {"k": "quantity", "label": "تعداد", "f": "count", "total": True},
+        {"k": "equivalent", "label": "معادل", "f": "count", "total": True},
+        {"k": "invoices", "label": "فاکتور", "f": "count", "total": True},
+        {"k": "customers", "label": "مشتری", "f": "count", "total": True},
+    ],
     "tender": [
         {"k": "count", "label": "پیش‌فاکتور", "f": "count", "total": True},
         {"k": "won", "label": "تایید", "f": "count", "total": True},
@@ -1468,6 +1544,7 @@ AXIS_LABELS = {
     "stage": "بر محور مرحله فروش", "reason": "بر محور دلایل", "customer": "بر محور مشتری",
     "kind": "بر محور فعالیت", "team": "بر محور تیم",
     "competitor": "بر محور رقیب", "tender_channel": "بر محور کانال دریافت سفارش",
+    "item_group": "بر محور گروه کالا",
 }
 
 
