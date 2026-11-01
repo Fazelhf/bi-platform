@@ -48,7 +48,7 @@ from apps.crm.matching import fold
 from apps.crm.merge import ImportTwins
 from apps.crm.models import (
     ImportBatch, Book, Customer, CustomerExternalRef, Dataset, Deal, ExternalSource,
-    NOT_COUNTED, Product, Review, SalesInvoice, SalesInvoiceItem,
+    NOT_COUNTED, DealItem, Product, Review, SalesInvoice, SalesInvoiceItem,
 )
 from apps.crm.party_sync import INTERCOMPANY_MARKERS, PartyWriter
 from apps.crm.people import RepMatcher
@@ -278,6 +278,52 @@ def deal_code(invoice: SalesInvoice) -> str:
     return f"deal-{invoice.code}"[:50]
 
 
+#: آرپا's unit names onto the catalogue's.
+UNITS = {"رول": Product.Unit.ROLL, "بسته": Product.Unit.PACK, "تن": Product.Unit.TON, "برگ": Product.Unit.SHEET}
+
+
+def product_for(code: str, name: str, unit: str, cache: dict) -> int | None:
+    """
+    The catalogue product of آرپا's کد کالا, added when the catalogue does not
+    have it yet. The catalogue *is* آرپا's («pr-<کد کالا>»), so a line's code
+    is a product, not a guess; without one the line cannot reach the deal
+    behind its invoice, and the product report would be missing that sale.
+    """
+    if not code:
+        return None
+    key = f"pr-{slugify(code)}"[:50]
+    if key not in cache:
+        cache[key] = Product.objects.get_or_create(
+            code=key, defaults={"name_fa": (name or code)[:150], "unit": UNITS.get(fold(unit), Product.Unit.ROLL),
+                                "dataset": Dataset.REAL},
+        )[0].pk
+    return cache[key]
+
+
+def mirror_lines(invoice: SalesInvoice, deal: Deal) -> None:
+    """
+    The invoice's product lines as the deal's lines, so the deal page and
+    «فروش بر محور محصول» show what was sold. Replaced whole, like the
+    invoice's own lines. The price is the line's own (amount ÷ quantity);
+    the cost is the catalogue's at the time, as the deal form takes it.
+    """
+    lines = list(invoice.items.select_related("product").exclude(product__isnull=True))
+    if not lines:
+        return
+    deal.items.all().delete()
+    rows = []
+    for ln in lines:
+        qty = ln.quantity if ln.quantity else Decimal(1)
+        rows.append(DealItem(
+            dataset=deal.dataset, deal=deal, product=ln.product, quantity=qty,
+            unit_price_rial=(ln.amount_rial / qty).quantize(Decimal(1)),
+            unit_cost_rial=ln.product.unit_cost_rial,
+        ))
+    DealItem.objects.bulk_create(rows)
+    cost = sum((r.quantity * r.unit_cost_rial for r in rows), Decimal(0)).quantize(Decimal(1))
+    Deal.objects.filter(pk=deal.pk).update(cost_rial=cost, profit_rial=deal.amount_rial - cost)
+
+
 def sync_deal(invoice: SalesInvoice) -> Deal | None:
     """
     Make the invoice's «معامله‌ی موفق» agree with it — or take it away.
@@ -323,6 +369,7 @@ def sync_deal(invoice: SalesInvoice) -> Deal | None:
     if invoice.deal_id != deal.pk:
         SalesInvoice.objects.filter(pk=invoice.pk).update(deal=deal)
         invoice.deal_id = deal.pk
+    mirror_lines(invoice, deal)
     # «مشتری جدید» counts the month of a customer's first win.
     Customer.objects.filter(pk=invoice.customer_id).filter(
         models.Q(first_deal_won_at__isnull=True) | models.Q(first_deal_won_at__gt=when)
@@ -352,6 +399,7 @@ class Importer:
         self.twins = ImportTwins(Dataset.REAL)
         # آرپا's کد کالا is the catalogue's code behind its «pr-» prefix.
         self.products = dict(Product.objects.filter(code__startswith="pr-").values_list("code", "pk"))
+        self.products_before = len(self.products)
 
     # -- people -------------------------------------------------------------
     def rep(self, name) -> DimEmployee | None:
@@ -440,8 +488,8 @@ class Importer:
             "__lines" not in raw or existing.items.exists()
         ):
             r.unchanged += 1
-            if not existing.deal_id:
-                sync_deal(existing)  # loaded before invoices became deals
+            if not existing.deal_id or (existing.items.exists() and not existing.deal.items.exists()):
+                sync_deal(existing)  # loaded before invoices became deals, or before deals had lines
             return
 
         customer = self.customer(raw, rep)
@@ -521,7 +569,7 @@ class Importer:
         SalesInvoiceItem.objects.bulk_create([
             SalesInvoiceItem(
                 dataset=invoice.dataset, invoice=invoice,
-                product_id=self.products.get(f"pr-{ln['code']}"),
+                product_id=product_for(ln["code"], ln["name"], ln["unit"], self.products),
                 product_code=ln["code"], product_name=ln["name"],
                 quantity=Decimal(ln["quantity"]), equivalent=Decimal(ln["equivalent"]),
                 sub_unit=ln["unit"], unit_price_rial=Decimal(ln["price"]),

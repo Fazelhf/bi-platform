@@ -61,8 +61,19 @@ class LineExportTests(TestCase):
         self.assertEqual((inv.settled_rial, inv.unsettled_rial), (1000, inv.total_rial - 1000))
         self.assertEqual(inv.channel, "team")
         lines = list(inv.items.order_by("id"))
+        # A code the catalogue lacked is added to it: the catalogue is آرپا's.
+        added = Product.objects.get(code="pr-99999")
         self.assertEqual([(i.product_id, i.product_code, i.quantity) for i in lines],
-                         [(self.product.pk, "11210", Decimal(10)), (None, "99999", Decimal(2))])
+                         [(self.product.pk, "11210", Decimal(10)), (added.pk, "99999", Decimal(2))])
+        # The won deal behind the invoice carries the same lines — and so the
+        # deal page and «فروش بر محور محصول».
+        self.assertEqual(sorted((d.product_id, d.quantity) for d in inv.deal.items.all()),
+                         sorted([(self.product.pk, Decimal(10)), (added.pk, Decimal(2))]))
+        from apps.crm import reports as rpt
+
+        f = rpt.Filters.from_query({"date_from": "2026-09-01", "date_to": "2026-11-30"})
+        report = {r["id"]: r for r in rpt.run_report("products", f, "product")["rows"]}
+        self.assertEqual(report[self.product.pk]["quantity"], 11)
         self.assertEqual(sum(i.amount_rial for i in lines), inv.amount_rial)
         self.customer.refresh_from_db()
         self.assertEqual(self.customer.mobile, "09121234567")
