@@ -437,8 +437,17 @@ export const databaseApi = {
     const { data } = await api.post(`${BASE}/backups/`, { scope, note });
     return data as BackupRow;
   },
-  async restoreBackup(id: number) {
-    const { data } = await api.post(`${BASE}/backups/${id}/restore/`, { confirm: true });
+  /** `replace` empties the database first, so it ends up exactly as the backup. */
+  async restoreBackup(id: number, replace = false) {
+    const { data } = await api.post(
+      `${BASE}/backups/${id}/restore/`, { confirm: true, replace }, { timeout: 0 },
+    );
+    return data as BackupRow;
+  },
+  async uploadBackup(file: File) {
+    const fd = new FormData();
+    fd.append("file", file);
+    const { data } = await api.post(`${BASE}/backups/upload/`, fd, { timeout: 0 });
     return data as BackupRow;
   },
   downloadBackup: (id: number, name: string) =>
