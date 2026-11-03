@@ -90,6 +90,7 @@ async function restore(record: BackupRow) {
       `«${record.filename}» بازگردانی شود؟ رکوردهای فعلی که شناسه مشترک دارند بازنویسی می‌شوند. ` +
       "توصیه: قبل از بازگردانی، یک پشتیبان تازه بگیرید.",
     danger: true,
+    okText: "بازگردانی",
   }))) return;
   try {
     await databaseApi.restoreBackup(record.id);
@@ -105,6 +106,7 @@ async function replaceAll(record: BackupRow) {
       `همه‌ی داده‌های فعلی پاک و «${record.filename}» جایگزین آن می‌شود ` +
       "(کاربران و رمزها هم همان‌های پشتیبان می‌شوند). این کار برگشت‌پذیر نیست.",
     danger: true,
+    okText: "جایگزینی",
   }))) return;
   try {
     await databaseApi.restoreBackup(record.id, true);
