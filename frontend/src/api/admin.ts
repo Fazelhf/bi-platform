@@ -56,7 +56,15 @@ async function list<T>(url: string, params: Query = {}): Promise<Paginated<T>> {
 
 /** Download a binary/inline export using the authenticated client. */
 export async function download(url: string, params: Query = {}, fallback = "export") {
-  const response = await api.get(url, { params, responseType: "blob" });
+  const response = await api.get(url, { params, responseType: "blob" }).catch(async (e) => {
+    // a blob request gets its error body as a Blob too; turn it back into JSON so the message shows
+    const body = e?.response?.data;
+    if (body instanceof Blob) {
+      try { e.response.data = JSON.parse(await body.text()); }
+      catch { e.response.data = `خطای سرور (${e.response.status})`; }
+    }
+    throw e;
+  });
   const disposition = String(response.headers["content-disposition"] || "");
   const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
   const name = match ? decodeURIComponent(match[1]) : fallback;
