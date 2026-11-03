@@ -687,7 +687,7 @@ class OpsTests(AdminPanelTestCase):
         self.as_admin()
         created = self.client.post("/api/admin/backups/", {"scope": "full"}, format="json")
         download = self.client.get(f"/api/admin/backups/{created.data['id']}/download/")
-        dump = b"".join(download.streaming_content)
+        dump = download.content
         self.client.delete(f"/api/admin/backups/{created.data['id']}/")
         User.objects.create_user(username="made-after-backup", password="x")
 
