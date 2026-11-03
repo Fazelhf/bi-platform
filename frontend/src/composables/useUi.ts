@@ -10,6 +10,8 @@ interface Dialog {
   placeholder: string;
   value: string;
   danger: boolean;
+  /** confirm button text; empty = «حذف» when danger, else «تأیید» */
+  okText: string;
   resolve: ((v: string | boolean | null) => void) | null;
 }
 
@@ -17,7 +19,7 @@ const state = reactive({
   toasts: [] as Toast[],
   dialog: {
     open: false, mode: "confirm", title: "", message: "",
-    placeholder: "", value: "", danger: false, resolve: null,
+    placeholder: "", value: "", danger: false, okText: "", resolve: null,
   } as Dialog,
 });
 
@@ -39,11 +41,11 @@ export const toast = {
 };
 
 /** Promise-based confirm — replaces window.confirm. */
-export function confirm(opts: { title?: string; message: string; danger?: boolean }): Promise<boolean> {
+export function confirm(opts: { title?: string; message: string; danger?: boolean; okText?: string }): Promise<boolean> {
   return new Promise((resolve) => {
     Object.assign(state.dialog, {
       open: true, mode: "confirm", title: opts.title ?? "تأیید",
-      message: opts.message, danger: !!opts.danger, value: "",
+      message: opts.message, danger: !!opts.danger, okText: opts.okText ?? "", value: "",
       resolve: (v: any) => resolve(!!v),
     });
   });
@@ -55,7 +57,7 @@ export function prompt(opts: { title?: string; message?: string; placeholder?: s
     Object.assign(state.dialog, {
       open: true, mode: "prompt", title: opts.title ?? "",
       message: opts.message ?? "", placeholder: opts.placeholder ?? "",
-      value: opts.value ?? "", danger: false,
+      value: opts.value ?? "", danger: false, okText: "",
       resolve: (v: any) => resolve(typeof v === "string" ? v : null),
     });
   });

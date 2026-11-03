@@ -13,6 +13,7 @@ from rest_framework.test import APITestCase
 
 from apps.accounts.models import Role, User
 from apps.adminpanel.models import (
+    BackupRecord,
     AppRole,
     Broadcast,
     LoginEvent,
@@ -681,6 +682,38 @@ class OpsTests(AdminPanelTestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.client.delete(f"/api/admin/backups/{created.data['id']}/")
+
+    def test_uploaded_backup_replaces_the_whole_database(self):
+        self.as_admin()
+        created = self.client.post("/api/admin/backups/", {"scope": "full"}, format="json")
+        download = self.client.get(f"/api/admin/backups/{created.data['id']}/download/")
+        dump = b"".join(download.streaming_content)
+        self.client.delete(f"/api/admin/backups/{created.data['id']}/")
+        User.objects.create_user(username="made-after-backup", password="x")
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        uploaded = self.client.post(
+            "/api/admin/backups/upload/",
+            {"file": SimpleUploadedFile("prod.json", dump, "application/json")},
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.data)
+        restored = self.client.post(
+            f"/api/admin/backups/{uploaded.data['id']}/restore/",
+            {"confirm": True, "replace": True}, format="json",
+        )
+        self.assertEqual(restored.status_code, 200, restored.data)
+        self.assertFalse(User.objects.filter(username="made-after-backup").exists())
+        self.assertTrue(BackupRecord.objects.filter(filename=uploaded.data["filename"]).exists())
+        self.client.delete(f"/api/admin/backups/{restored.data['id']}/")
+
+    def test_upload_rejects_a_file_that_is_not_a_dump(self):
+        self.as_admin()
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        response = self.client.post(
+            "/api/admin/backups/upload/",
+            {"file": SimpleUploadedFile("x.json", b'{"a": 1}', "application/json")},
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_report_preview_and_export(self):
         self.as_admin()

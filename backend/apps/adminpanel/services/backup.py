@@ -14,6 +14,7 @@ from datetime import datetime
 
 from django.conf import settings
 from django.core.management import call_command
+from django.db import transaction
 from django.utils import timezone
 
 from apps.adminpanel.models import BackupRecord
@@ -24,6 +25,8 @@ EXCLUDES = [
     "auth.Permission",
     "sessions.Session",
     "admin.LogEntry",
+    # points at files on this server only; another machine has none of them
+    "adminpanel.BackupRecord",
 ]
 
 #: What the UI offers as a scope.
@@ -80,14 +83,52 @@ def path_for(record: BackupRecord):
     return path
 
 
-def restore(record: BackupRecord, user) -> BackupRecord:
+def save_upload(upload, user) -> BackupRecord:
+    """Store a fixture taken on another server (e.g. production) so it can be restored here."""
+    if not upload.name.lower().endswith(".json"):
+        raise ValueError("فقط فایل JSON پشتیبان پذیرفته می‌شود.")
+    head = upload.read(64).lstrip()
+    if not head.startswith(b"["):
+        raise ValueError("این فایل، پشتیبان dumpdata نیست.")
+    upload.seek(0)
+    stamp = timezone.localtime().strftime("%Y%m%d-%H%M%S")
+    filename = f"backup-uploaded-{stamp}.json"
+    target = backups_dir() / filename
+    with target.open("wb") as out:
+        for chunk in upload.chunks():
+            out.write(chunk)
+    return BackupRecord.objects.create(
+        filename=filename,
+        size_bytes=target.stat().st_size,
+        scope="uploaded",
+        note=upload.name[:300],
+        created_by=user if getattr(user, "is_authenticated", False) else None,
+    )
+
+
+def restore(record: BackupRecord, user, replace: bool = False) -> BackupRecord:
     """
     Load a snapshot back in. loaddata upserts by primary key: rows in the
     fixture overwrite current ones, rows created since the backup are left
     alone (it is a merge, not a wipe).
+
+    replace=True empties every table first, so the database ends up exactly
+    as the snapshot (how a production copy is brought onto this machine).
+    Both steps share one transaction: a fixture that fails to load leaves the
+    current data untouched.
     """
     path = path_for(record)
-    call_command("loaddata", str(path), verbosity=0)
+    filename, size, scope, note = record.filename, record.size_bytes, record.scope, record.note
+    with transaction.atomic():
+        if replace:
+            call_command("flush", interactive=False, verbosity=0)
+        call_command("loaddata", str(path), verbosity=0)
+    if replace:
+        # flush removed this record too; put it back so the file stays listed
+        record, _ = BackupRecord.objects.update_or_create(
+            filename=filename,
+            defaults={"size_bytes": size, "scope": scope, "note": note},
+        )
     record.restored_at = timezone.now()
     record.save(update_fields=["restored_at"])
     return record

@@ -63,7 +63,7 @@ function cancel() {
             :data-danger="state.dialog.danger || undefined"
             :class="state.dialog.danger ? 'bg-rose-500 hover:bg-rose-600' : 'bg-brand-600 hover:bg-brand-700'"
             @click="ok"
-          >{{ state.dialog.danger ? 'حذف' : 'تأیید' }}</button>
+          >{{ state.dialog.okText || (state.dialog.danger ? 'حذف' : 'تأیید') }}</button>
         </div>
       </div>
     </div>

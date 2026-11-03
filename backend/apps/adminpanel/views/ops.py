@@ -8,6 +8,7 @@ from django.http import FileResponse
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -165,13 +166,30 @@ class BackupViewSet(AdminModelViewSet):
                            "برای ادامه confirm=true بفرستید."
             })
         record = self.get_object()
+        replace = bool(request.data.get("replace"))
         try:
-            backup_service.restore(record, request.user)
+            record = backup_service.restore(record, request.user, replace=replace)
         except Exception as exc:
             raise ValidationError({"detail": f"بازگردانی ناموفق بود: {exc}"})
         audit_log(request.user, record, AuditLog.Action.UPDATE,
-                  {"restored": {"before": None, "after": record.filename}})
+                  {"restored": {"before": "replace" if replace else "merge",
+                                "after": record.filename}})
         return Response(self.get_serializer(record).data)
+
+    @action(detail=False, methods=["post"], parser_classes=[MultiPartParser])
+    def upload(self, request):
+        """Bring in a backup file downloaded from another server."""
+        require(request.user, "db.restore")
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "فایلی ارسال نشده است."})
+        try:
+            record = backup_service.save_upload(upload, request.user)
+        except ValueError as exc:
+            raise ValidationError({"file": str(exc)})
+        audit_log(request.user, record, AuditLog.Action.CREATE,
+                  {"backup": {"before": None, "after": record.filename}})
+        return Response(self.get_serializer(record).data, status=201)
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
@@ -193,6 +211,7 @@ class BackupViewSet(AdminModelViewSet):
                 {"value": "business", "label": "داده‌های کسب‌وکار (فروش/تولید/شاخص‌ها)"},
                 {"value": "accounts", "label": "کاربران"},
                 {"value": "adminpanel", "label": "تنظیمات پنل مدیریت"},
+                {"value": "uploaded", "label": "بارگذاری‌شده از سرور دیگر"},
             ],
             "orphan_files": backup_service.discover_orphans(),
         })

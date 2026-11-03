@@ -90,12 +90,48 @@ async function restore(record: BackupRow) {
       `«${record.filename}» بازگردانی شود؟ رکوردهای فعلی که شناسه مشترک دارند بازنویسی می‌شوند. ` +
       "توصیه: قبل از بازگردانی، یک پشتیبان تازه بگیرید.",
     danger: true,
+    okText: "بازگردانی",
   }))) return;
   try {
     await databaseApi.restoreBackup(record.id);
     toast.success("بازگردانی انجام شد.");
     await load();
   } catch (e) { toast.error(apiError(e)); }
+}
+
+async function replaceAll(record: BackupRow) {
+  if (!(await confirm({
+    title: "جایگزینی کامل پایگاه داده",
+    message:
+      `همه‌ی داده‌های فعلی پاک و «${record.filename}» جایگزین آن می‌شود ` +
+      "(کاربران و رمزها هم همان‌های پشتیبان می‌شوند). این کار برگشت‌پذیر نیست.",
+    danger: true,
+    okText: "جایگزینی",
+  }))) return;
+  try {
+    await databaseApi.restoreBackup(record.id, true);
+    toast.success("پایگاه داده با پشتیبان جایگزین شد.");
+    await load();
+  } catch (e) { toast.error(apiError(e)); }
+}
+
+const uploadInput = ref<HTMLInputElement | null>(null);
+const uploading = ref(false);
+async function uploadBackup(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  uploading.value = true;
+  try {
+    await databaseApi.uploadBackup(file);
+    toast.success(`«${file.name}» بارگذاری شد؛ حالا «بازگردانی» یا «جایگزینی کامل» را بزنید.`);
+    await load();
+  } catch (e) {
+    toast.error(apiError(e));
+  } finally {
+    uploading.value = false;
+  }
 }
 
 async function removeBackup(record: BackupRow) {
@@ -148,6 +184,14 @@ async function runJob(job: string, label: string) {
   <div class="space-y-4">
     <PageHeader title="پایگاه داده" description="سلامت، حجم جدول‌ها، پشتیبان‌گیری و پاک‌سازی">
       <template #actions>
+        <template v-if="admin.can('db.restore')">
+          <input ref="uploadInput" type="file" accept=".json,application/json" class="hidden" @change="uploadBackup" />
+          <button
+            class="text-sm px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 transition disabled:opacity-50"
+            :disabled="uploading"
+            @click="uploadInput?.click()"
+          >{{ uploading ? "در حال بارگذاری…" : "ورود فایل پشتیبان" }}</button>
+        </template>
         <button
           v-if="admin.can('db.backup')"
           class="text-sm px-3 py-1.5 rounded-xl bg-brand-600 text-white hover:bg-brand-700 transition"
@@ -270,6 +314,11 @@ async function runJob(job: string, label: string) {
               class="text-amber-600 hover:underline"
               @click="restore(row)"
             >بازگردانی</button>
+            <button
+              v-if="admin.can('db.restore') && (row.scope === 'full' || row.scope === 'uploaded')"
+              class="text-red-600 hover:underline"
+              @click="replaceAll(row)"
+            >جایگزینی کامل</button>
             <button
               v-if="admin.can('db.backup')"
               class="text-red-500 hover:underline"
