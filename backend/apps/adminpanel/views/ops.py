@@ -1,6 +1,7 @@
 """11 · Reports, 12 · Database utilities, 13 · Workflow admin, 14 · Monitoring."""
 from __future__ import annotations
 
+import gzip
 from datetime import timedelta
 
 from django.db.models import Count
@@ -199,10 +200,10 @@ class BackupViewSet(AdminModelViewSet):
             path = backup_service.path_for(record)
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)})
-        # Plain bytes like every other download here: FileResponse's streamed
-        # body was cut off on the production host («Request aborted»).
-        response = HttpResponse(path.read_bytes(), content_type="application/json")
-        response["Content-Disposition"] = f'attachment; filename="{record.filename}"'
+        # Gzipped plain bytes: the production host cut off a 24 MB JSON body
+        # («Request aborted»), streamed or not; compressed it is about a tenth.
+        response = HttpResponse(gzip.compress(path.read_bytes()), content_type="application/gzip")
+        response["Content-Disposition"] = f'attachment; filename="{record.filename}.gz"'
         return response
 
     @action(detail=False, methods=["get"])

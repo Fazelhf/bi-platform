@@ -687,14 +687,14 @@ class OpsTests(AdminPanelTestCase):
         self.as_admin()
         created = self.client.post("/api/admin/backups/", {"scope": "full"}, format="json")
         download = self.client.get(f"/api/admin/backups/{created.data['id']}/download/")
-        dump = download.content
+        dump = download.content  # gzipped
         self.client.delete(f"/api/admin/backups/{created.data['id']}/")
         User.objects.create_user(username="made-after-backup", password="x")
 
         from django.core.files.uploadedfile import SimpleUploadedFile
         uploaded = self.client.post(
             "/api/admin/backups/upload/",
-            {"file": SimpleUploadedFile("prod.json", dump, "application/json")},
+            {"file": SimpleUploadedFile("prod.json.gz", dump, "application/gzip")},
         )
         self.assertEqual(uploaded.status_code, 201, uploaded.data)
         restored = self.client.post(

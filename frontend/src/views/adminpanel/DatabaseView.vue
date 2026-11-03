@@ -136,7 +136,7 @@ async function uploadBackup(event: Event) {
 
 async function downloadBackup(record: BackupRow) {
   try {
-    await databaseApi.downloadBackup(record.id, record.filename);
+    await databaseApi.downloadBackup(record.id, `${record.filename}.gz`);
   } catch (e) { toast.error(apiError(e)); }
 }
 
@@ -191,7 +191,7 @@ async function runJob(job: string, label: string) {
     <PageHeader title="پایگاه داده" description="سلامت، حجم جدول‌ها، پشتیبان‌گیری و پاک‌سازی">
       <template #actions>
         <template v-if="admin.can('db.restore')">
-          <input ref="uploadInput" type="file" accept=".json,application/json" class="hidden" @change="uploadBackup" />
+          <input ref="uploadInput" type="file" accept=".gz,.json" class="hidden" @change="uploadBackup" />
           <button
             class="text-sm px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-100 transition disabled:opacity-50"
             :disabled="uploading"
