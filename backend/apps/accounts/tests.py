@@ -3,7 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework.throttling import ScopedRateThrottle
@@ -606,3 +606,30 @@ class OwnPasswordChangeTests(APITestCase):
         self.client.force_authenticate(None)
         res = self.client.post(self.URL, {"current_password": "x", "new_password": "y"}, format="json")
         self.assertEqual(res.status_code, 401)
+
+
+class ReminderSmsLineTests(SimpleTestCase):
+    """Reminders from a dedicated line, while login codes stay on the shared one."""
+
+    @override_settings(SMS_USERNAME="u", SMS_PASSWORD="k", SMS_MODE="shared", SMS_BODY_ID="1",
+                       SMS_REMINDER_FROM="3000123456", SMS_REMINDER_BODY_ID="")
+    def test_dedicated_reminder_line_beats_the_shared_mode(self):
+        from unittest import mock
+
+        from apps.accounts import sms
+
+        self.assertTrue(sms.text_status()["ok"])
+        with mock.patch.object(sms, "_post", return_value="1234567890123") as post:
+            sms.send_text("09121112233", "یادآوری")
+        endpoint, params, _ = post.call_args.args
+        self.assertEqual((endpoint, params["from"], params["text"]), ("SendSMS", "3000123456", "یادآوری"))
+        self.assertTrue(sms.is_shared_line())  # The login codes are untouched.
+
+    @override_settings(SMS_USERNAME="u", SMS_PASSWORD="k", SMS_MODE="shared", SMS_REMINDER_FROM="",
+                       SMS_REMINDER_BODY_ID="")
+    def test_status_names_the_setting_to_add(self):
+        from apps.accounts import sms
+
+        st = sms.text_status()
+        self.assertFalse(st["ok"])
+        self.assertIn("SMS_REMINDER_FROM", st["detail"])

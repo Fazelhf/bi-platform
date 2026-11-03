@@ -185,34 +185,42 @@ def send_otp(phone: str, code: str) -> str:
     return _post("SendOtp", {**credentials, "from": settings.SMS_FROM, "code": code}, OTP_ERRORS)
 
 
+def _reminder_line() -> str:
+    """The dedicated number reminders go out from: SMS_REMINDER_FROM if set
+    (a line bought for notices, so the login codes keep whatever SMS_MODE
+    they work with), else SMS_FROM when the account is on a dedicated line."""
+    if settings.SMS_REMINDER_FROM:
+        return settings.SMS_REMINDER_FROM
+    return "" if is_shared_line() else settings.SMS_FROM
+
+
 def can_send_text() -> bool:
     """Free-text messages (calendar reminders): a dedicated line sends any
     text; a shared line only through its own approved template."""
     if not (settings.SMS_USERNAME and settings.SMS_PASSWORD):
         return False
-    return bool(settings.SMS_REMINDER_BODY_ID) if is_shared_line() else bool(settings.SMS_FROM)
+    return bool(_reminder_line() or (is_shared_line() and settings.SMS_REMINDER_BODY_ID))
 
 
 def text_status() -> dict:
     """What the settings screen shows: can reminders go out, and if not, what
     exactly is missing — in words someone setting up the host can act on."""
-    shared = is_shared_line()
-    line = "خط خدماتی اشتراکی" if shared else "خط اختصاصی"
     if not (settings.SMS_USERNAME and settings.SMS_PASSWORD):
         return {"ok": False, "line": "", "detail": "نام کاربری و کلید وب‌سرویس ملی‌پیامک (SMS_USERNAME و SMS_PASSWORD) روی سرور تنظیم نشده است."}
-    if shared and not settings.SMS_REMINDER_BODY_ID:
-        return {"ok": False, "line": line, "detail": "پنل روی خط خدماتی اشتراکی است؛ برای یادآوری باید یک الگوی متن در پنل ملی‌پیامک ثبت و تأیید شود و کد آن در SMS_REMINDER_BODY_ID قرار گیرد."}
-    if not shared and not settings.SMS_FROM:
-        return {"ok": False, "line": line, "detail": "شماره‌ی خط ارسال (SMS_FROM) روی سرور تنظیم نشده است."}
-    return {"ok": True, "line": line, "detail": f"آماده‌ی ارسال از {line}."}
+    line = _reminder_line()
+    if line:
+        return {"ok": True, "line": line, "detail": f"آماده‌ی ارسال از خط اختصاصی {line}."}
+    if is_shared_line() and settings.SMS_REMINDER_BODY_ID:
+        return {"ok": True, "line": "shared", "detail": "آماده‌ی ارسال از خط خدماتی اشتراکی (با الگوی تأییدشده)."}
+    return {"ok": False, "line": "", "detail": "شماره‌ی خط اختصاصی برای یادآوری‌ها روی سرور تنظیم نشده است — در فایل .env سرور SMS_REMINDER_FROM را برابر شماره‌ی خط قرار دهید. (یا روی خط اشتراکی: کد الگوی تأییدشده در SMS_REMINDER_BODY_ID.)"}
 
 
 def send_text(phone: str, text: str, template_values: list[str] | None = None) -> str:
     """
     Send a notice that is not a login code — a meeting reminder, tomorrow's
-    agenda. On a dedicated line the text goes as written (SendSMS); on a
-    shared line it fills the template SMS_REMINDER_BODY_ID, whose variables
-    are `template_values` in order ({0}, {1}, …).
+    agenda. From a dedicated line (`_reminder_line`) the text goes as written
+    (SendSMS); otherwise, on a shared line, it fills the template
+    SMS_REMINDER_BODY_ID, whose variables are `template_values` in order ({0}, {1}, …).
     """
     to = normalize_phone(phone)
     if not to:
@@ -223,13 +231,13 @@ def send_text(phone: str, text: str, template_values: list[str] | None = None) -
             return "dev-echo"
         raise SmsError("ارسال پیامک اطلاع‌رسانی پیکربندی نشده است.")
     credentials = {"username": settings.SMS_USERNAME, "password": settings.SMS_PASSWORD, "to": to}
-    if is_shared_line():
-        # «;» separates the template's variables, so it cannot appear inside one.
-        values = [str(v).replace(";", "،") for v in (template_values or [text])]
-        return _post("BaseServiceNumber", {**credentials, "text": ";".join(values),
-                                           "bodyId": settings.SMS_REMINDER_BODY_ID}, SHARED_ERRORS)
-    return _post("SendSMS", {**credentials, "from": settings.SMS_FROM, "text": text, "isflash": "false"},
-                 OTP_ERRORS)
+    line = _reminder_line()
+    if line:
+        return _post("SendSMS", {**credentials, "from": line, "text": text, "isflash": "false"}, OTP_ERRORS)
+    # «;» separates the template's variables, so it cannot appear inside one.
+    values = [str(v).replace(";", "،") for v in (template_values or [text])]
+    return _post("BaseServiceNumber", {**credentials, "text": ";".join(values),
+                                       "bodyId": settings.SMS_REMINDER_BODY_ID}, SHARED_ERRORS)
 
 
 def _post(endpoint: str, params: dict, errors: dict) -> str:
