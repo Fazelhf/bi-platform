@@ -134,6 +134,12 @@ async function uploadBackup(event: Event) {
   }
 }
 
+async function downloadBackup(record: BackupRow) {
+  try {
+    await databaseApi.downloadBackup(record.id, record.filename);
+  } catch (e) { toast.error(apiError(e)); }
+}
+
 async function removeBackup(record: BackupRow) {
   if (!(await confirm({
     title: "حذف پشتیبان",
@@ -307,7 +313,7 @@ async function runJob(job: string, label: string) {
           <div class="flex items-center gap-2 text-xs">
             <button
               class="text-brand-600 hover:underline"
-              @click="databaseApi.downloadBackup(row.id, row.filename)"
+              @click="downloadBackup(row)"
             >دانلود</button>
             <button
               v-if="admin.can('db.restore')"
