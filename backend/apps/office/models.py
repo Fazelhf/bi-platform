@@ -46,8 +46,11 @@ from .models_work import (  # noqa: F401,E402  (re-export)
 )
 from .models_calendar import (  # noqa: F401,E402  (re-export)
     Calendar,
+    CalendarSettings,
+    CalendarShare,
     Event,
     Holiday,
+    ReminderLog,
     WorkWeek,
 )
 
