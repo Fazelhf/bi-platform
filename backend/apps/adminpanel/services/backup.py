@@ -8,7 +8,9 @@ dead sessions.
 """
 from __future__ import annotations
 
+import gzip
 import io
+import shutil
 import re
 from datetime import datetime
 
@@ -84,19 +86,33 @@ def path_for(record: BackupRecord):
 
 
 def save_upload(upload, user) -> BackupRecord:
-    """Store a fixture taken on another server (e.g. production) so it can be restored here."""
-    if not upload.name.lower().endswith(".json"):
-        raise ValueError("فقط فایل JSON پشتیبان پذیرفته می‌شود.")
-    head = upload.read(64).lstrip()
-    if not head.startswith(b"["):
+    """
+    Store a fixture taken on another server (e.g. production) so it can be
+    restored here. Takes the .json.gz the download hands out, or a plain .json.
+    """
+    name = upload.name.lower()
+    if name.endswith(".json.gz"):
+        source = gzip.GzipFile(fileobj=upload)
+    elif name.endswith(".json"):
+        source = upload
+    else:
+        raise ValueError("فقط فایل پشتیبان ‎.json.gz‎ یا ‎.json‎ پذیرفته می‌شود.")
+    try:
+        head = source.read(64)
+    except OSError:
+        raise ValueError("فایل فشرده خراب است.")
+    if not head.lstrip().startswith(b"["):
         raise ValueError("این فایل، پشتیبان dumpdata نیست.")
-    upload.seek(0)
     stamp = timezone.localtime().strftime("%Y%m%d-%H%M%S")
     filename = f"backup-uploaded-{stamp}.json"
     target = backups_dir() / filename
-    with target.open("wb") as out:
-        for chunk in upload.chunks():
-            out.write(chunk)
+    try:
+        with target.open("wb") as out:
+            out.write(head)
+            shutil.copyfileobj(source, out)
+    except OSError:
+        target.unlink(missing_ok=True)
+        raise ValueError("فایل فشرده خراب است.")
     return BackupRecord.objects.create(
         filename=filename,
         size_bytes=target.stat().st_size,
