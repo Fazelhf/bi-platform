@@ -36,7 +36,8 @@ class DailyProductionTests(APITestCase):
         self.assertEqual((first["output"], first["day_shift"], first["night_shift"], first["missing"]), (160, 100, 60, False))
         self.assertEqual((days["2026-09-26"]["workday"], days["2026-09-26"]["off"], days["2026-09-26"]["missing"]),
                          (False, "تعطیل رسمی", False))
-        self.assertEqual(days["2026-09-24"]["off"], "تعطیل هفتگی")  # پنج‌شنبه
+        self.assertEqual(days["2026-09-24"]["off"], "")  # پنج‌شنبه — the factory works it
+        self.assertEqual(days["2026-09-25"]["off"], "تعطیل هفتگی")  # جمعه
         self.assertTrue(days["2026-09-27"]["missing"])  # یکشنبه, worked, nothing entered
         self.assertEqual(res.data["summary"]["per_shift"], 80)
         self.assertEqual(len(res.data["detail"]), 2)

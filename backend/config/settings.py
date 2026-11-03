@@ -285,6 +285,9 @@ SMS_PASSWORD = env("SMS_PASSWORD", default="")
 SMS_MODE = env("SMS_MODE", default="otp")
 SMS_FROM = env("SMS_FROM", default="")
 SMS_BODY_ID = env("SMS_BODY_ID", default="")
+# Shared line only: the approved template calendar reminders fill — e.g.
+# «یادآوری: {0} — {1}» ({0} = title, {1} = the full notice).
+SMS_REMINDER_BODY_ID = env("SMS_REMINDER_BODY_ID", default="")
 SMS_BASE_URL = env("SMS_BASE_URL", default="https://rest.payamak-panel.com/api/SendSMS")
 SMS_TIMEOUT = env.int("SMS_TIMEOUT", default=10)
 
