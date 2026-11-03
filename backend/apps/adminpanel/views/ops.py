@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from django.db.models import Count
-from django.http import FileResponse
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -199,9 +199,11 @@ class BackupViewSet(AdminModelViewSet):
             path = backup_service.path_for(record)
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)})
-        return FileResponse(
-            path.open("rb"), as_attachment=True, filename=record.filename
-        )
+        # Plain bytes like every other download here: FileResponse's streamed
+        # body was cut off on the production host («Request aborted»).
+        response = HttpResponse(path.read_bytes(), content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="{record.filename}"'
+        return response
 
     @action(detail=False, methods=["get"])
     def scopes(self, request):
