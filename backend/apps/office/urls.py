@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from . import views, views_calendar, views_chat, views_work
+from . import views, views_calendar, views_chat, views_meetings, views_work
 
 router = DefaultRouter()
 router.register("letters", views.LetterViewSet, basename="letter")
@@ -11,7 +11,7 @@ router.register("tasks", views_work.TaskViewSet, basename="task")
 router.register("task-groups", views_work.TaskGroupViewSet, basename="task-group")
 router.register("task-tags", views_work.TaskTagViewSet, basename="task-tag")
 router.register("chat-groups", views_chat.ChatGroupViewSet, basename="chat-group")
-router.register("calendar/events", views_calendar.EventViewSet, basename="calendar-event")
+router.register("calendar/events", views_meetings.MeetingViewSet, basename="calendar-event")
 router.register("calendar/holidays", views_calendar.HolidayViewSet, basename="calendar-holiday")
 
 urlpatterns = [
@@ -26,6 +26,10 @@ urlpatterns = [
     path("calendar/month/", views_calendar.MonthView.as_view(), name="office-calendar-month"),
     path("calendar/range/", views_calendar.RangeView.as_view(), name="office-calendar-range"),
     path("calendar/settings/", views_calendar.CalendarSettingsView.as_view(), name="office-calendar-settings"),
+    path("calendar/invitations/", views_meetings.InvitationsView.as_view(), name="office-calendar-invitations"),
+    path("calendar/conflicts/", views_meetings.ConflictsView.as_view(), name="office-calendar-conflicts"),
+    path("calendar/preferences/", views_meetings.PreferencesView.as_view(), name="office-calendar-preferences"),
+    path("calendar/ics/", views_meetings.IcsFeedView.as_view(), name="office-calendar-ics"),
     path("calendar/freebusy/", views_calendar.FreeBusyView.as_view(), name="office-calendar-freebusy"),
     path("calendar/sms-test/", views_calendar.SmsTestView.as_view(), name="office-calendar-sms-test"),
     path("calendar/digest-preview/", views_calendar.DigestPreviewView.as_view(), name="office-calendar-digest"),

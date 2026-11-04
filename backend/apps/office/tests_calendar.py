@@ -229,7 +229,7 @@ class InvitationTests(APITestCase):
 
         self.assertEqual({r["status"] for r in self.ev["responses"]}, {"pending"})
         self.client.force_authenticate(self.a)
-        r = self.client.post(self._url("respond/"), {"status": "declined", "note": "سفر هستم",
+        r = self.client.post(self._url("respond/"), {"status": "proposed", "note": "سفر هستم",
                                                      "proposed_start": "2026-11-11T09:00:00Z"}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         self.assertTrue(str(r.data["proposed_end"]).startswith("2026-11-11"))  # Same length as the event.
@@ -255,9 +255,13 @@ class InvitationTests(APITestCase):
         self.assertEqual((len(rows), rows[0]["can_delete"]), (1, False))
         self.assertEqual(self.client.delete(self._url(f"comments/{rows[0]['id']}/")).status_code, 403)
         self.client.force_authenticate(self.b)
-        self.assertEqual(self.client.delete(self._url(f"comments/{rows[0]['id']}/")).status_code, 204)
+        self.assertEqual(self.client.delete(self._url(f"comments/{rows[0]['id']}/")).data, [])
 
     def test_free_busy_says_when_never_what(self):
+        from apps.office.views_calendar import personal_calendar
+
+        for u in (self.a, self.b):  # Both agreed to show when they are busy.
+            Calendar.objects.filter(pk=personal_calendar(u).pk).update(share_free_busy=True)
         self.client.force_authenticate(self.b)
         self.client.post(self._url("respond/"), {"status": "declined"}, format="json")
         self.client.force_authenticate(_user("i-org", role="manager"))
@@ -266,3 +270,174 @@ class InvitationTests(APITestCase):
         self.assertEqual(len(r.data[self.a.pk]), 1)
         self.assertEqual(r.data[self.b.pk], [])  # Declined: free.
         self.assertNotIn("بودجه", str(r.data))
+
+
+class MeetingWorkflowTests(APITestCase):
+    """The enterprise rules, one scenario each."""
+
+    def setUp(self):
+        from apps.office.views_calendar import personal_calendar
+
+        self.org = _user("w-org", role="manager", department="sales_team")
+        self.a = _user("w-a", department="production")
+        self.b = _user("w-b", department="finance")
+        self.out = _user("w-out", department="production")  # Not invited.
+        self.admin = _user("w-adm", role="admin")
+        self.own = personal_calendar(self.org)
+        self.client.force_authenticate(self.org)
+        self.ev = self.client.post("/api/office/calendar/events/", {
+            "calendar": self.own.pk, "title": "بازبینی استقرار", "start": "2026-11-15T06:30:00Z",
+            "end": "2026-11-15T07:30:00Z", "attendees": [self.a.pk, self.b.pk],
+            "online_link": "https://meet.example.com/x"}, format="json").data
+        self.private = self.client.post("/api/office/calendar/events/", {
+            "calendar": self.own.pk, "title": "کار شخصی", "start": "2026-11-16T06:30:00Z",
+            "end": "2026-11-16T07:30:00Z"}, format="json").data
+
+    def _u(self, tail="", ev=None):
+        return f"/api/office/calendar/events/{(ev or self.ev)['id']}/{tail}"
+
+    def _as(self, u):
+        self.client.force_authenticate(u)
+
+    def test_1_2_4_nobody_reads_someone_elses_calendar_not_even_the_admin(self):
+        for u in (self.a, self.admin, self.out):
+            self._as(u)
+            self.assertEqual(self.client.get(self._u(ev=self.private)).status_code, 404)  # Guessed id: nothing.
+            data = self.client.get("/api/office/calendar/range/", {"from": "2026-11-16", "to": "2026-11-17"}).data
+            self.assertFalse([e for e in data["events"] if e["id"] == self.private["id"]])
+
+    def test_3_9_an_invitee_sees_the_meeting_not_the_organisers_calendar(self):
+        self._as(self.a)
+        self.assertEqual(self.client.get(self._u()).status_code, 200)
+        self.assertEqual(self.client.get(self._u(ev=self.private)).status_code, 404)
+        self.assertEqual(self.client.post(self._u("comments/"), {"body": "سلام"}, format="json").status_code, 200)
+        self._as(self.out)
+        self.assertEqual(self.client.get(self._u("comments/")).status_code, 404)
+
+    def test_6_only_the_organiser_edits_or_cancels(self):
+        self._as(self.a)
+        self.assertEqual(self.client.patch(self._u(), {"title": "x"}, format="json").status_code, 403)
+        self.assertEqual(self.client.post(self._u("cancel/"), {"reason": "x"}, format="json").status_code, 403)
+        self._as(self.org)
+        # A meeting with invitees is cancelled, not deleted.
+        self.assertEqual(self.client.delete(self._u()).status_code, 403)
+        r = self.client.post(self._u("cancel/"), {"reason": "سفر کاری"}, format="json")
+        self.assertEqual((r.status_code, r.data["cancel_reason"]), (200, "سفر کاری"))
+        self._as(self.a)
+        self.assertEqual(self.client.post(self._u("respond/"), {"status": "accepted"}, format="json").status_code, 400)
+
+    def test_7_each_answers_independently_and_more_time_is_not_an_answer(self):
+        self._as(self.a)
+        self.assertEqual(self.client.post(self._u("respond/"), {"status": "more_time"}, format="json").status_code, 400)
+        r = self.client.post(self._u("respond/"), {"status": "more_time", "wait_until": "2030-01-01T10:00:00Z",
+                                                   "note": "باید با تیم هماهنگ کنم"}, format="json")
+        self.assertEqual(r.data["status"], "more_time")
+        self._as(self.b)
+        self.client.post(self._u("respond/"), {"status": "accepted"}, format="json")
+        self._as(self.org)
+        got = {x["user"]: x["status"] for x in self.client.get(self._u()).data["responses"]}
+        self.assertEqual(got, {self.a.pk: "more_time", self.b.pk: "accepted"})
+
+    def test_8_a_proposed_time_waits_for_the_organiser(self):
+        self._as(self.a)
+        self.client.post(self._u("respond/"), {"status": "proposed", "proposed_start": "2026-11-15T09:00:00Z"},
+                         format="json")
+        self._as(self.b)
+        self.client.post(self._u("respond/"), {"status": "accepted"}, format="json")
+        self._as(self.org)
+        self.assertTrue(self.client.get(self._u()).data["start"].startswith("2026-11-15T10:00"))  # Unmoved (Tehran).
+        self._as(self.b)
+        self.assertEqual(self.client.post(self._u("proposals/"), {"user": self.a.pk, "decision": "accept"},
+                                          format="json").status_code, 403)
+        # Even someone who may edit the calendar cannot approve their own proposal.
+        from apps.office.models_calendar import CalendarShare
+        CalendarShare.objects.create(calendar=self.own, user=self.a, level="manage")
+        self._as(self.a)
+        self.assertEqual(self.client.post(self._u("proposals/"), {"user": self.a.pk, "decision": "accept"},
+                                          format="json").status_code, 403)
+        self._as(self.org)
+        r = self.client.post(self._u("proposals/"), {"user": self.a.pk, "decision": "accept"}, format="json")
+        self.assertTrue(r.data["start"].startswith("2026-11-15T12:30"))
+        got = {x["user"]: x["status"] for x in r.data["responses"]}
+        self.assertEqual(got, {self.a.pk: "accepted", self.b.pk: "pending"})  # Everyone else is asked again.
+
+    def test_10_a_change_tells_the_invitees_and_is_in_the_history(self):
+        from apps.core.models import Notification
+
+        self.client.patch(self._u(), {"start": "2026-11-15T08:00:00Z", "end": "2026-11-15T09:00:00Z"}, format="json")
+        self.assertTrue(Notification.objects.filter(recipient=self.a, message__contains="تغییر کرد").exists())
+        self._as(self.a)
+        actions = [h["action"] for h in self.client.get(self._u("history/")).data]
+        self.assertEqual(actions[:3], ["created", "invited", "updated"])
+        self._as(self.out)
+        self.assertEqual(self.client.get(self._u("history/")).status_code, 404)
+
+    def test_11_one_occurrence_of_a_series_changes_alone(self):
+        series = self.client.post("/api/office/calendar/events/", {
+            "calendar": self.own.pk, "title": "هفتگی", "start": "2026-11-14T06:30:00Z", "end": "2026-11-14T07:30:00Z",
+            "repeat": "weekly", "attendees": [self.a.pk]}, format="json").data
+        week2 = "2026-11-21T10:00:00+03:30"
+        r = self.client.post(self._u("occurrence/", series), {"original_start": week2,
+                                                               "start": "2026-11-22T06:30:00Z", "end": "2026-11-22T07:30:00Z"},
+                             format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.client.post(self._u("cancel/", series), {"occurrence": "2026-11-28T10:00:00+03:30"}, format="json")
+        data = self.client.get("/api/office/calendar/range/", {"from": "2026-11-14", "to": "2026-12-06"}).data
+        days = sorted(e["start"][:10] for e in data["events"] if e["title"] == "هفتگی")
+        self.assertEqual(days, ["2026-11-14", "2026-11-22", "2026-12-05"])
+
+    def test_12_conflicts_read_only_the_callers_own_calendar(self):
+        self._as(self.a)
+        self.client.post(self._u("respond/"), {"status": "accepted"}, format="json")
+        r = self.client.get("/api/office/calendar/conflicts/", {"from": "2026-11-15T06:00:00Z", "to": "2026-11-15T08:00:00Z"})
+        self.assertEqual([c["id"] for c in r.data], [self.ev["id"]])
+        # Free/busy of someone who did not agree: unknown, not free.
+        r = self.client.get("/api/office/calendar/freebusy/", {"users": self.org.pk, "from": "2026-11-15T00:00:00Z",
+                                                               "to": "2026-11-16T00:00:00Z"})
+        self.assertIsNone(r.data[self.org.pk])
+
+    def test_discussion_replies_mentions_edits_files(self):
+        from apps.core.models import Notification
+
+        self._as(self.a)
+        first = self.client.post(self._u("comments/"), {"body": "گزارش آماده است", "mentions": [self.b.pk, self.out.pk],
+                                                        "attachments": [{"name": "r.txt", "mime": "text/plain",
+                                                                         "content": "data:text/plain;base64,aGk="}]},
+                                 format="json").data[0]
+        self.assertEqual([m["id"] for m in first["mentions"]], [self.b.pk])  # Not someone outside the meeting.
+        self.assertTrue(Notification.objects.filter(recipient=self.b, message__contains="نام برد").exists())
+        self._as(self.b)
+        rows = self.client.post(self._u("comments/"), {"body": "ممنون", "parent": first["id"]}, format="json").data
+        self.assertEqual(rows[1]["parent"], first["id"])
+        self.assertEqual(self.client.patch(self._u(f"comments/{first['id']}/"), {"body": "x"}, format="json").status_code, 403)
+        self._as(self.a)
+        rows = self.client.patch(self._u(f"comments/{first['id']}/"), {"body": "گزارش نهایی آماده است"}, format="json").data
+        self.assertEqual(rows[0]["versions"], 1)
+        att = rows[0]["attachments"][0]["id"]
+        self.assertTrue(self.client.get(self._u(f"attachments/{att}/")).data["content"].startswith("data:"))
+        self._as(self.out)
+        self.assertEqual(self.client.get(self._u(f"attachments/{att}/")).status_code, 404)
+
+    def test_minutes_make_tasks_for_their_owners(self):
+        from apps.office.models_work import Task
+
+        r = self.client.put(self._u("minutes/"), {"minutes": "تصمیم: استقرار هفته‌ی بعد",
+                                                  "action_items": [{"title": "آماده‌سازی سرور", "assignee": self.b.pk}]},
+                            format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertTrue(Task.objects.filter(title="آماده‌سازی سرور", assignee=self.b).exists())
+        self._as(self.a)
+        self.assertEqual(self.client.put(self._u("minutes/"), {"minutes": "x"}, format="json").status_code, 403)
+        self.assertEqual(self.client.get(self._u()).data["action_items"][0]["assignee"], self.b.pk)
+
+    def test_inbox_and_ics(self):
+        self._as(self.a)
+        got = self.client.get("/api/office/calendar/invitations/", {"box": "received"}).data
+        self.assertEqual([e["id"] for e in got], [self.ev["id"]])
+        self._as(self.org)
+        sent = self.client.get("/api/office/calendar/invitations/", {"box": "sent"}).data
+        self.assertEqual([e["id"] for e in sent], [self.ev["id"]])
+        ics = self.client.get("/api/office/calendar/ics/", {"from": "2026-11-01T00:00:00Z", "to": "2026-12-01T00:00:00Z"})
+        body = ics.content.decode()
+        self.assertIn("BEGIN:VCALENDAR", body)
+        self.assertIn("SUMMARY:کار شخصی", body)

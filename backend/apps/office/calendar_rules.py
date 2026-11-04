@@ -52,6 +52,7 @@ def occurrences(event: Event, start: datetime, end: datetime, off=None):
 
     first = timezone.localtime(event.start)
     until = event.repeat_until
+    skip = {timezone.localtime(datetime.fromisoformat(x)).isoformat() for x in (event.exdates or [])}
     days_off, holidays = off or _off()
     n = 0
     i = 0
@@ -67,11 +68,13 @@ def occurrences(event: Event, start: datetime, end: datetime, off=None):
         i += 1
         if until and day > until:
             return
-        s = timezone.make_aware(datetime.combine(day, first.time().replace(tzinfo=None)))
+        s = timezone.localtime(timezone.make_aware(datetime.combine(day, first.time().replace(tzinfo=None))))
         if s >= end:
             return
         if event.repeat == Event.Repeat.WEEKDAYS and (jalali.weekday(day) in days_off or day in holidays):
             continue
+        if s.isoformat() in skip:
+            continue  # Cancelled or moved out of the series.
         if s + length >= start:
             n += 1
             yield s, s + length
@@ -152,8 +155,9 @@ def run(now: datetime | None = None) -> dict:
     off = _off()
     team = set(sms_people(st))
     team_ids = {u.pk for u in team}
-    events = (Event.objects.filter(Q(repeat="", start__gte=now - STALE_AFTER, start__lt=window_end)
-                                   | (~Q(repeat="") & Q(start__lt=window_end)))
+    events = (Event.objects.filter(cancelled_at__isnull=True)
+              .filter(Q(repeat="", start__gte=now - STALE_AFTER, start__lt=window_end)
+                      | (~Q(repeat="") & Q(start__lt=window_end)))
               .select_related("calendar", "calendar__owner", "created_by").prefetch_related("attendees"))
     for ev in events:
         leads = lead_minutes(ev, rules)
@@ -199,6 +203,7 @@ def tomorrow_agenda(user, day: date, off=None) -> list[tuple[datetime, Event]]:
                # A unit's own meetings are its business, unless this person is invited.
                .filter(~Q(calendar__kind=Calendar.Kind.UNIT) | Q(attendees=user))
                .exclude(responses__user=user, responses__status="declined")
+               .filter(cancelled_at__isnull=True)
                .distinct().select_related("calendar")):
         for s, _ in occurrences(ev, start, end, off):
             out.append((s, ev))

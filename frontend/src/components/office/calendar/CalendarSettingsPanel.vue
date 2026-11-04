@@ -31,12 +31,23 @@ const emit = defineEmits<{ close: []; changed: [] }>();
 const WEEKDAYS = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنج‌شنبه", "جمعه"];
 const managed = computed(() => props.calendars.filter((c) => c.level === "manage"));
 const tabs = computed(() => [
+  { id: "mine", label: "ترجیحات من" },
   { id: "reminders", label: "یادآوری و پیامک" },
   ...(props.settings.can_name_office ? [{ id: "office", label: "مدیر دفتر" }] : []),
   ...(managed.value.length ? [{ id: "access", label: "دسترسی‌ها" }] : []),
   { id: "holidays", label: "روزهای کاری و تعطیلات" },
 ]);
-const tab = ref("reminders");
+const tab = ref("mine");
+
+// ---- my own: whether colleagues who invite me may see when I am busy ---------------
+const prefs = reactive({ share_free_busy: false, loaded: false });
+calendarApi.preferences().then((p) => Object.assign(prefs, p, { loaded: true })).catch(() => {});
+async function saveShare(v: boolean) {
+  try {
+    Object.assign(prefs, await calendarApi.savePreferences({ share_free_busy: v }));
+    toast.success(v ? "همکاران هنگام دعوت، زمان‌های مشغول شما را (بدون جزئیات) می‌بینند." : "زمان‌های مشغول شما دیگر نمایش داده نمی‌شود.");
+  } catch (e) { toast.error(apiError(e)); }
+}
 
 // ---- reminders ---------------------------------------------------------------
 const st = reactive(JSON.parse(JSON.stringify(props.settings)) as CalendarSettings);
@@ -184,8 +195,26 @@ const field = "bg-slate-100 rounded-xl px-3 py-2 text-sm";
                 :class="tab === t.id ? 'bg-panel text-white' : 'text-slate-600 hover:bg-slate-100'" @click="tab = t.id">{{ t.label }}</button>
       </div>
 
+      <!-- Mine -->
+      <section v-if="tab === 'mine'" class="space-y-3">
+        <div class="rounded-xl border border-slate-100 p-3 space-y-2">
+          <label class="flex items-start gap-2 text-sm">
+            <input type="checkbox" class="mt-1" :checked="prefs.share_free_busy" :disabled="!prefs.loaded" @change="saveShare(($event.target as HTMLInputElement).checked)" />
+            <span>
+              <b class="text-ink font-medium">نمایش زمان‌های مشغول من به همکاران هنگام دعوت به جلسه</b>
+              <span class="block text-xs text-slate-500 mt-0.5 leading-5">فقط «از چه ساعتی تا چه ساعتی مشغول‌اید» دیده می‌شود — هرگز عنوان، شرکت‌کنندگان یا جزئیات برنامه‌ها. پیش‌فرض خاموش است.</span>
+            </span>
+          </label>
+        </div>
+        <div class="rounded-xl border border-slate-100 p-3 text-xs text-slate-500 leading-6 space-y-1">
+          <p><b class="text-ink font-medium">حریم خصوصی تقویم:</b> تقویم شخصی شما فقط برای خودتان است؛ مدیران و ادمین هم آن را نمی‌بینند.</p>
+          <p>برای سپردن مدیریت تقویمتان به کسی (مثلاً مدیر دفتر)، از تب «دسترسی‌ها» تقویم خودتان را انتخاب کنید و به او دسترسی بدهید.</p>
+          <p>دعوت به یک جلسه فقط همان جلسه را به دعوت‌شده نشان می‌دهد، نه بقیه‌ی تقویم شما را.</p>
+        </div>
+      </section>
+
       <!-- Reminders -->
-      <section v-if="tab === 'reminders'" class="space-y-4">
+      <section v-else-if="tab === 'reminders'" class="space-y-4">
         <div class="text-xs rounded-lg px-3 py-2 flex items-start gap-2"
              :class="st.sms_status.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'">
           <NavIcon :name="st.sms_status.ok ? 'check' : 'alert'" :size="15" class="shrink-0 mt-px" />

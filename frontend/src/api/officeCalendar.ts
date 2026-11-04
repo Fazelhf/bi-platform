@@ -1,4 +1,5 @@
 import api from "./client";
+import { saveAsFile } from "@/utils/download";
 
 /** تقویم کاری — the shared calendars, holidays, the weekly days off and reminders. */
 export type Level = "read" | "write" | "manage";
@@ -21,7 +22,7 @@ export type EventKind = "meeting" | "event" | "task" | "reminder";
 export type Priority = "normal" | "important" | "urgent";
 export type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
 
-export type RsvpStatus = "pending" | "accepted" | "tentative" | "declined";
+export type RsvpStatus = "pending" | "accepted" | "tentative" | "declined" | "more_time" | "proposed";
 
 export interface Rsvp {
   user: number;
@@ -31,16 +32,73 @@ export interface Rsvp {
   note: string;
   proposed_start: string | null;
   proposed_end: string | null;
+  /** The organiser's answer to a proposed time. */
+  proposal_decision: "" | "accepted" | "rejected";
+  /** A «more time» request: by when they will answer. */
+  wait_until: string | null;
   responded_at: string | null;
+  /** Only on an acceptance: what it clashes with on the caller's own calendar. */
+  conflicts?: Busy[];
+}
+
+export interface Busy {
+  id: number;
+  title: string;
+  start: string;
+  end: string;
+}
+
+export interface FileMeta {
+  id: number;
+  name: string;
+  mime: string;
+  size_bytes: number;
+}
+
+export interface EventFile extends FileMeta {
+  comment: number | null;
+  uploaded_by: number | null;
+  uploaded_by_name: string;
+  at: string;
+}
+
+export interface ActionItem {
+  task: number;
+  title: string;
+  assignee: number | null;
+  assignee_name: string;
+  due_on: string | null;
+  done: boolean;
+}
+
+export interface HistoryRow {
+  action: string;
+  detail: string;
+  actor: string;
+  at: string;
 }
 
 export interface EventComment {
   id: number;
+  parent: number | null;
   author: number | null;
   author_name: string;
+  author_color: string;
   body: string;
   created_at: string;
+  edited_at: string | null;
+  /** How many earlier versions an edit kept. */
+  versions: number;
+  mentions: { id: number; name: string }[];
+  attachments: FileMeta[];
+  can_edit: boolean;
   can_delete: boolean;
+}
+
+export interface NewFile {
+  name: string;
+  mime: string;
+  content: string;
 }
 
 export interface CalendarEvent {
@@ -74,10 +132,25 @@ export interface CalendarEvent {
   /** The caller's own invitation, if they are on it. */
   my_response: Rsvp | null;
   comment_count: number;
+  online_link: string;
+  /** For the people in the meeting only (empty for everyone else). */
+  attachments: EventFile[];
+  action_items: ActionItem[];
+  minutes: string;
+  minutes_at: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string;
+  /** An occurrence edited on its own: the series it came from. */
+  series: number | null;
+  original_start: string | null;
+  /** The caller is the organiser, an invitee, or runs the calendar it is on: sees its discussion and files. */
+  in_meeting: boolean;
   /** The caller is an attendee. */
   invited?: boolean;
   /** Invited to an event on someone else's calendar: it shows on this one, the caller's own. */
   home_calendar?: number;
+  /** The organiser. */
+  created_by: number | null;
   created_by_name: string;
   can_edit: boolean;
 }
@@ -194,20 +267,73 @@ export const calendarApi = {
   async setWorkweek(body: Partial<Pick<WorkWeek, "days_off" | "factory_days_off">>): Promise<WorkWeek> {
     return (await api.put("/office/calendar/workweek/", body)).data;
   },
-  async respond(id: number, body: { status: RsvpStatus; note?: string; proposed_start?: string; proposed_end?: string }): Promise<Rsvp> {
+  async event(id: number): Promise<CalendarEvent> {
+    return (await api.get(`/office/calendar/events/${id}/`)).data;
+  },
+  async respond(id: number, body: {
+    status: RsvpStatus; note?: string; proposed_start?: string; proposed_end?: string; wait_until?: string;
+  }): Promise<Rsvp> {
     return (await api.post(`/office/calendar/events/${id}/respond/`, body)).data;
+  },
+  async decideProposal(id: number, user: number, decision: "accept" | "reject"): Promise<CalendarEvent> {
+    return (await api.post(`/office/calendar/events/${id}/proposals/`, { user, decision })).data;
+  },
+  async cancel(id: number, reason: string, occurrence?: string): Promise<CalendarEvent> {
+    return (await api.post(`/office/calendar/events/${id}/cancel/`, { reason, occurrence })).data;
+  },
+  /** Change one occurrence of a series on its own. */
+  async saveOccurrence(id: number, original_start: string, body: Partial<CalendarEvent>): Promise<CalendarEvent> {
+    return (await api.post(`/office/calendar/events/${id}/occurrence/`, { ...body, original_start })).data;
   },
   async comments(id: number): Promise<EventComment[]> {
     return (await api.get(`/office/calendar/events/${id}/comments/`)).data;
   },
-  async addComment(id: number, body: string): Promise<EventComment[]> {
-    return (await api.post(`/office/calendar/events/${id}/comments/`, { body })).data;
+  async addComment(id: number, body: { body: string; parent?: number | null; mentions?: number[]; attachments?: NewFile[] }): Promise<EventComment[]> {
+    return (await api.post(`/office/calendar/events/${id}/comments/`, body)).data;
   },
-  async deleteComment(id: number, cid: number): Promise<void> {
-    await api.delete(`/office/calendar/events/${id}/comments/${cid}/`);
+  async editComment(id: number, cid: number, body: string): Promise<EventComment[]> {
+    return (await api.patch(`/office/calendar/events/${id}/comments/${cid}/`, { body })).data;
   },
-  /** When each person is busy (never with what), ISO pairs. */
-  async freebusy(users: number[], from: string, to: string, exclude?: number): Promise<Record<number, [string, string][]>> {
+  async deleteComment(id: number, cid: number): Promise<EventComment[]> {
+    return (await api.delete(`/office/calendar/events/${id}/comments/${cid}/`)).data;
+  },
+  async commentVersions(id: number, cid: number): Promise<{ body: string; at: string }[]> {
+    return (await api.get(`/office/calendar/events/${id}/comments/${cid}/versions/`)).data;
+  },
+  async addFile(id: number, file: NewFile): Promise<CalendarEvent> {
+    return (await api.post(`/office/calendar/events/${id}/attachments/`, file)).data;
+  },
+  async file(id: number, aid: number): Promise<FileMeta & { content: string }> {
+    return (await api.get(`/office/calendar/events/${id}/attachments/${aid}/`)).data;
+  },
+  async deleteFile(id: number, aid: number): Promise<void> {
+    await api.delete(`/office/calendar/events/${id}/attachments/${aid}/`);
+  },
+  async saveMinutes(id: number, minutes: string, action_items: { title: string; assignee: number | null; due_on: string | null }[]): Promise<CalendarEvent> {
+    return (await api.put(`/office/calendar/events/${id}/minutes/`, { minutes, action_items })).data;
+  },
+  async history(id: number): Promise<HistoryRow[]> {
+    return (await api.get(`/office/calendar/events/${id}/history/`)).data;
+  },
+  async invitations(box: "received" | "sent"): Promise<CalendarEvent[]> {
+    return (await api.get("/office/calendar/invitations/", { params: { box } })).data;
+  },
+  /** What the caller already has then, on their own calendar. */
+  async conflicts(from: string, to: string, exclude?: number): Promise<Busy[]> {
+    return (await api.get("/office/calendar/conflicts/", { params: { from, to, exclude } })).data;
+  },
+  async preferences(): Promise<{ share_free_busy: boolean }> {
+    return (await api.get("/office/calendar/preferences/")).data;
+  },
+  async savePreferences(body: { share_free_busy: boolean }): Promise<{ share_free_busy: boolean }> {
+    return (await api.put("/office/calendar/preferences/", body)).data;
+  },
+  async downloadIcs(id?: number): Promise<void> {
+    const url = id ? `/office/calendar/events/${id}/ics/` : "/office/calendar/ics/";
+    saveAsFile(await api.get(url, { responseType: "blob" }), id ? `event-${id}.ics` : "calendar.ics");
+  },
+  /** When each person is busy (never with what), ISO pairs; null — they keep it private. */
+  async freebusy(users: number[], from: string, to: string, exclude?: number): Promise<Record<number, [string, string][] | null>> {
     const params: Record<string, string> = { users: users.join(","), from, to };
     if (exclude) params.exclude = String(exclude);
     return (await api.get("/office/calendar/freebusy/", { params })).data;
@@ -246,3 +372,26 @@ export function leadLabel(min: number): string {
   return `${fa(min)} دقیقه قبل`;
 }
 export const LEAD_CHOICES = [0, 5, 10, 15, 30, 60, 120, 180, 1440, 2880, 10080];
+
+export const RSVP_LABELS: Record<RsvpStatus, string> = {
+  pending: "در انتظار پاسخ", accepted: "می‌آید", tentative: "شاید", declined: "نمی‌آید",
+  more_time: "درخواست مهلت", proposed: "پیشنهاد زمان دیگر",
+};
+
+/** Read a picked file the way letters do: a data: URL the server stores as is. */
+export function readFile(file: File): Promise<NewFile> {
+  return new Promise((resolve, reject) => {
+    if (file.size > 5 * 1024 * 1024) return reject(new Error(`حجم «${file.name}» بیش از ۵ مگابایت است.`));
+    const r = new FileReader();
+    r.onload = () => resolve({ name: file.name, mime: file.type, content: String(r.result) });
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+export function openFile(f: { name: string; content: string }): void {
+  const a = document.createElement("a");
+  a.href = f.content;
+  a.download = f.name;
+  a.click();
+}

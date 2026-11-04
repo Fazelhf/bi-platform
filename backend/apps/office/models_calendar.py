@@ -78,6 +78,9 @@ class Calendar(TimeStampedModel):
     )
     name = models.CharField(max_length=80)
     color = models.CharField(max_length=7, default="#0ea5e9")
+    #: A personal calendar only: its owner lets colleagues who invite them see
+    #: *when* they are busy — never what with. Off unless the owner turns it on.
+    share_free_busy = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("kind", "name")
@@ -140,7 +143,22 @@ class Event(TimeStampedModel):
     #: Minutes before the start to remind; null = the priority's default from `CalendarSettings`.
     reminders = models.JSONField(null=True, blank=True)
     location = models.CharField(max_length=200, blank=True)
+    #: An online meeting's link (Skype, Google Meet, Teams, …).
+    online_link = models.URLField(max_length=500, blank=True)
+    #: The agenda: what the meeting is for and what it will go through.
     description = models.TextField(blank=True)
+    #: صورت‌جلسه — what was decided, written by the organiser afterwards.
+    minutes = models.TextField(blank=True)
+    minutes_at = models.DateTimeField(null=True, blank=True)
+    #: Cancelled is a state, not a deletion: the invitees keep seeing it, struck through, with why.
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.CharField(max_length=300, blank=True)
+    #: Occurrences of this series that were cancelled or moved out of it
+    #: (their original starts, ISO). A moved one is its own event, `series` → here.
+    exdates = models.JSONField(default=list, blank=True)
+    series = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE, related_name="exceptions")
+    #: For an occurrence edited on its own: which start of the series it replaces.
+    original_start = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="calendar_events",
     )
@@ -165,8 +183,17 @@ class EventResponse(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "بی‌پاسخ"
         ACCEPTED = "accepted", "می‌آیم"
-        TENTATIVE = "tentative", "شاید / بعداً اعلام می‌کنم"
+        TENTATIVE = "tentative", "شاید"
         DECLINED = "declined", "نمی‌آیم"
+        #: Not an answer: «I need until `wait_until` to say».
+        MORE_TIME = "more_time", "درخواست مهلت"
+        #: Not an answer either: «another time would suit me» — the organiser decides.
+        PROPOSED = "proposed", "پیشنهاد زمان دیگر"
+
+    class Decision(models.TextChoices):
+        NONE = "", "—"
+        ACCEPTED = "accepted", "پذیرفته شد"
+        REJECTED = "rejected", "رد شد"
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="responses")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="calendar_responses")
@@ -175,6 +202,10 @@ class EventResponse(models.Model):
     #: An answer of «another time would suit me»: when.
     proposed_start = models.DateTimeField(null=True, blank=True)
     proposed_end = models.DateTimeField(null=True, blank=True)
+    #: The organiser's answer to the proposed time.
+    proposal_decision = models.CharField(max_length=10, choices=Decision.choices, default="", blank=True)
+    #: A «more time» request: by when they will answer.
+    wait_until = models.DateTimeField(null=True, blank=True)
     responded_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -188,11 +219,62 @@ class EventComment(TimeStampedModel):
 
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="comments")
     author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    #: A reply: the comment it answers.
+    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE, related_name="replies")
     body = models.TextField(max_length=2000)
+    mentions = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name="+")
+    edited_at = models.DateTimeField(null=True, blank=True)
+    #: Earlier versions, oldest first: [{"body": …, "at": ISO}] — an edit never erases what was said.
+    history = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ("created_at",)
         verbose_name = "نظر رویداد"
+
+
+class EventAttachment(TimeStampedModel):
+    """A file on an event or on one of its comments. Stored as a base64
+    data-URL, as `LetterAttachment` is, for the same reason: the host has no
+    writable media directory."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="attachments")
+    comment = models.ForeignKey(EventComment, null=True, blank=True, on_delete=models.CASCADE,
+                                related_name="attachments")
+    name = models.CharField(max_length=200)
+    content = models.TextField(blank=True)
+    mime = models.CharField(max_length=120, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="+")
+
+    class Meta:
+        ordering = ("id",)
+        verbose_name = "پیوست رویداد"
+
+
+class EventLog(models.Model):
+    """The event's history — who did what to it, and when. Written by the
+    server only; nobody edits or deletes a row."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="log")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    action = models.CharField(max_length=30)
+    detail = models.CharField(max_length=300, blank=True)
+    at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("at", "id")
+        verbose_name = "تاریخچه رویداد"
+
+
+class EventTask(models.Model):
+    """An action item from a meeting's minutes — a task in «وظایف», kept tied to the meeting it came from."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="action_items")
+    task = models.OneToOneField("office.Task", on_delete=models.CASCADE, related_name="meeting_link")
+
+    class Meta:
+        verbose_name = "اقدام جلسه"
 
 
 def _default_rules():
