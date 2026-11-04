@@ -40,14 +40,14 @@ onMounted(reload);
 const pad = (n: number) => String(n).padStart(2, "0");
 const day = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const stamp = (iso: string) => { const d = new Date(iso); return `${day(iso)}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const whenText = (start: string, end: string, allDay = false) => {
   const a = jalaliLabel(day(start)), b = jalaliLabel(day(end));
   if (allDay) return a === b ? `${a} · تمام روز` : `${a} تا ${b}`;
   return a === b ? `${a} · ${timeOf(start)} تا ${timeOf(end)}` : `${a} ${timeOf(start)} تا ${b} ${timeOf(end)}`;
 };
 const atText = (iso: string) => `${jalaliLabel(day(iso))} ساعت ${timeOf(iso)}`;
-const ago = (iso: string) => new Date(iso).toLocaleString("fa-IR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const ago = (iso: string) => new Date(iso).toLocaleString("fa-IR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const kb = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} مگ` : `${Math.max(1, Math.round(n / 1024))} کیلو`);
 
 const PRIORITY_TONE: Record<string, string> = {

@@ -13,6 +13,7 @@ import Drawer from "@/components/admin/Drawer.vue";
 import PageHeader from "@/components/admin/PageHeader.vue";
 import Badge from "@/components/admin/Badge.vue";
 import Toggle from "@/components/admin/Toggle.vue";
+import JalaliDateField from "@/components/JalaliDateField.vue";
 import type {
   AnnouncementRow, ContentCategory, ContentTag,
   ContentTemplateRow, StaticPageRow,
@@ -133,11 +134,21 @@ function openCreate() {
   editorOpen.value = true;
 }
 
+function localStamp(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function openEdit(row: Record<string, any>) {
   editorKind.value = tab.value;
   editingId.value = row.id;
   const blank = BLANKS[tab.value]();
   form.value = Object.fromEntries(Object.keys(blank).map((k) => [k, row[k] ?? blank[k]]));
+  // The picker speaks local wall-clock "YYYY-MM-DDTHH:mm", not the API's ISO with an offset.
+  for (const key of ["starts_at", "ends_at"]) {
+    if (form.value[key]) form.value[key] = localStamp(form.value[key]);
+  }
   editorOpen.value = true;
 }
 
@@ -155,7 +166,7 @@ async function save() {
   try {
     const api = resourceFor(editorKind.value);
     const payload = { ...form.value };
-    // Empty datetime-local inputs come back as "" — the API wants null.
+    // An empty date picker comes back as "" — the API wants null.
     for (const key of ["starts_at", "ends_at"]) {
       if (payload[key] === "") payload[key] = null;
     }
@@ -372,17 +383,11 @@ async function previewTemplate(row: ContentTemplateRow) {
           </label>
           <label class="block">
             <span class="text-xs text-slate-500">نمایش از</span>
-            <input
-              v-model="form.starts_at" type="datetime-local"
-              class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface ltr-nums"
-            />
+            <JalaliDateField v-model="form.starts_at" with-time clearable placeholder="بدون محدودیت" class="mt-1" />
           </label>
           <label class="block">
             <span class="text-xs text-slate-500">نمایش تا</span>
-            <input
-              v-model="form.ends_at" type="datetime-local"
-              class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-surface ltr-nums"
-            />
+            <JalaliDateField v-model="form.ends_at" with-time clearable placeholder="بدون محدودیت" class="mt-1" />
           </label>
         </div>
         <div v-if="tags.length">

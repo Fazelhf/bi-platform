@@ -9,6 +9,7 @@ import { apiError } from "@/components/crm/formError";
 import { confirm, toast } from "@/composables/useUi";
 import JalaliDateField from "@/components/JalaliDateField.vue";
 import NavIcon from "@/components/NavIcon.vue";
+import TimeField from "@/components/TimeField.vue";
 import { jalaliLabel } from "@/utils/jalali";
 
 /**
@@ -47,7 +48,11 @@ const form = reactive({
   attendees: [] as number[], guests: [] as string[], location: "", online_link: "", description: "",
 });
 
+/** Set while the form is being filled from an event, so the watchers below leave it alone. */
+let filling = false;
 function reset() {
+  filling = true;
+  nextTick(() => { filling = false; });
   const e = props.event;
   if (e) {
     // The whole series is edited from its first occurrence, so it does not
@@ -82,6 +87,14 @@ watch(() => [props.event, props.at], reset, { immediate: true });
 const titleEl = ref<HTMLInputElement | null>(null);
 onMounted(() => nextTick(() => titleEl.value?.focus()));
 watch(() => form.startDate, (d, old) => { if (!form.endDate || form.endDate === old || form.endDate < d) form.endDate = d; });
+/** A new start keeps the meeting's length: the end moves with it. */
+const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+watch(() => form.startTime, (t, old) => {
+  if (filling || !t || !old || form.endDate !== form.startDate) return;
+  const length = Math.max(15, toMin(form.endTime) - toMin(old));
+  const end = Math.min(23 * 60 + 59, toMin(t) + length);
+  form.endTime = `${pad(Math.floor(end / 60))}:${pad(end % 60)}`;
+});
 
 const defaultLeads = computed(() => props.settings?.priority_rules?.[form.priority]?.minutes ?? []);
 const defaultSms = computed(() => !!props.settings?.priority_rules?.[form.priority]?.sms);
@@ -147,7 +160,7 @@ async function remove() {
   }
 }
 
-const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const field = "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300";
 
 function localStamp(iso: string) {
@@ -230,12 +243,12 @@ watch(() => [form.attendees.slice(), form.startDate, form.startTime, form.endDat
         <div class="space-y-2">
           <span class="text-xs text-slate-500">شروع</span>
           <JalaliDateField v-model="form.startDate" placeholder="تاریخ شروع" />
-          <input v-if="!form.all_day" v-model="form.startTime" type="time" :class="field" aria-label="ساعت شروع" />
+          <TimeField v-if="!form.all_day" v-model="form.startTime" aria-label="ساعت شروع" />
         </div>
         <div class="space-y-2">
           <span class="text-xs text-slate-500">پایان</span>
           <JalaliDateField v-model="form.endDate" placeholder="تاریخ پایان" />
-          <input v-if="!form.all_day" v-model="form.endTime" type="time" :class="field" aria-label="ساعت پایان" />
+          <TimeField v-if="!form.all_day" v-model="form.endTime" aria-label="ساعت پایان" />
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-4 text-sm">

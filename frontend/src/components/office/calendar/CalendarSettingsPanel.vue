@@ -9,6 +9,7 @@ import { apiError } from "@/components/crm/formError";
 import { confirm, toast } from "@/composables/useUi";
 import JalaliDateField from "@/components/JalaliDateField.vue";
 import NavIcon from "@/components/NavIcon.vue";
+import TimeField from "@/components/TimeField.vue";
 
 /**
  * تنظیمات تقویم, in tabs:
@@ -255,7 +256,7 @@ const field = "bg-slate-100 rounded-xl px-3 py-2 text-sm";
           <div class="rounded-xl border border-slate-100 p-3 space-y-2">
             <label class="flex items-center gap-2 font-medium text-ink"><input v-model="st.digest_enabled" type="checkbox" /> پیامک برنامه‌ی فردا برای گیرندگان</label>
             <div class="flex flex-wrap items-center gap-3 text-sm">
-              <label class="flex items-center gap-2">ساعت ارسال <input v-model="st.digest_time" type="time" :class="field" /></label>
+              <label class="flex items-center gap-2">ساعت ارسال <TimeField v-model="st.digest_time" class="w-28" aria-label="ساعت ارسال" /></label>
               <button type="button" class="text-xs text-sky-600 hover:underline" @click="showPreview">پیش‌نمایش پیامک فردا</button>
             </div>
             <pre v-if="preview" class="text-xs bg-slate-50 rounded-lg p-2 whitespace-pre-wrap font-sans">{{ preview }}</pre>

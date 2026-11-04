@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useClickOutside } from "@/composables/useClickOutside";
+import TimeField from "@/components/TimeField.vue";
 import { MODAL_LAYER } from "@/components/picker";
 import {
   MONTH_NAMES, WEEKDAY_NAMES, addMonths, faDigits, firstWeekdayColumn,
@@ -140,9 +141,8 @@ function pickToday() {
   if (!props.withTime) close();
 }
 
-function onTime(e: Event) {
-  const time = (e.target as HTMLInputElement).value || "00:00";
-  emitValue(datePart.value || todayIso(), time);
+function onTime(time: string) {
+  emitValue(datePart.value || todayIso(), time || "00:00");
 }
 
 function clear() {
@@ -272,10 +272,10 @@ const box =
 
           <template v-if="withTime">
             <label class="text-[11px] text-slate-400">ساعت</label>
-            <input
-              :value="timePart" type="time" dir="ltr"
-              class="bg-slate-100 rounded-lg px-2 py-1 text-xs text-ink outline-none"
-              @input="onTime"
+            <TimeField
+              :model-value="timePart" class="w-20" aria-label="ساعت"
+              input-class="w-full bg-slate-100 rounded-lg px-2 py-1 text-xs text-ink outline-none"
+              @update:model-value="onTime"
             />
             <button
               type="button"
