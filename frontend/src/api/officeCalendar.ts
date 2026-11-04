@@ -21,6 +21,28 @@ export type EventKind = "meeting" | "event" | "task" | "reminder";
 export type Priority = "normal" | "important" | "urgent";
 export type Repeat = "" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
 
+export type RsvpStatus = "pending" | "accepted" | "tentative" | "declined";
+
+export interface Rsvp {
+  user: number;
+  name: string;
+  status: RsvpStatus;
+  status_display: string;
+  note: string;
+  proposed_start: string | null;
+  proposed_end: string | null;
+  responded_at: string | null;
+}
+
+export interface EventComment {
+  id: number;
+  author: number | null;
+  author_name: string;
+  body: string;
+  created_at: string;
+  can_delete: boolean;
+}
+
 export interface CalendarEvent {
   id: number;
   calendar: number;
@@ -45,6 +67,13 @@ export interface CalendarEvent {
   attendee_names: string[];
   /** Outside the company, by name. */
   guests: string[];
+  /** Invitees are asked to answer by then. */
+  respond_by: string | null;
+  /** Every invitee's answer — the organiser's view of who is coming. */
+  responses: Rsvp[];
+  /** The caller's own invitation, if they are on it. */
+  my_response: Rsvp | null;
+  comment_count: number;
   /** The caller is an attendee. */
   invited?: boolean;
   /** Invited to an event on someone else's calendar: it shows on this one, the caller's own. */
@@ -61,6 +90,8 @@ export interface RangeDay {
   workday: boolean;
   /** Why it is not worked: the holiday's title or «تعطیل هفتگی». */
   off: string;
+  /** The factory keeps its own week (it runs پنج‌شنبه). */
+  factory_workday: boolean;
 }
 
 export interface CalendarRange {
@@ -69,6 +100,14 @@ export interface CalendarRange {
   days: RangeDay[];
   workdays: number;
   events: CalendarEvent[];
+}
+
+export interface WorkWeek {
+  /** The office's weekly days off, 0 = شنبه … 6 = جمعه. */
+  days_off: number[];
+  /** The factory's. */
+  factory_days_off: number[];
+  can_edit: boolean;
 }
 
 export interface HolidayRow {
@@ -149,11 +188,29 @@ export const calendarApi = {
   async deleteHoliday(id: number): Promise<void> {
     await api.delete(`/office/calendar/holidays/${id}/`);
   },
-  async workweek(): Promise<number[]> {
-    return (await api.get("/office/calendar/workweek/")).data.days_off;
+  async workweek(): Promise<WorkWeek> {
+    return (await api.get("/office/calendar/workweek/")).data;
   },
-  async setWorkweek(days_off: number[]): Promise<number[]> {
-    return (await api.put("/office/calendar/workweek/", { days_off })).data.days_off;
+  async setWorkweek(body: Partial<Pick<WorkWeek, "days_off" | "factory_days_off">>): Promise<WorkWeek> {
+    return (await api.put("/office/calendar/workweek/", body)).data;
+  },
+  async respond(id: number, body: { status: RsvpStatus; note?: string; proposed_start?: string; proposed_end?: string }): Promise<Rsvp> {
+    return (await api.post(`/office/calendar/events/${id}/respond/`, body)).data;
+  },
+  async comments(id: number): Promise<EventComment[]> {
+    return (await api.get(`/office/calendar/events/${id}/comments/`)).data;
+  },
+  async addComment(id: number, body: string): Promise<EventComment[]> {
+    return (await api.post(`/office/calendar/events/${id}/comments/`, { body })).data;
+  },
+  async deleteComment(id: number, cid: number): Promise<void> {
+    await api.delete(`/office/calendar/events/${id}/comments/${cid}/`);
+  },
+  /** When each person is busy (never with what), ISO pairs. */
+  async freebusy(users: number[], from: string, to: string, exclude?: number): Promise<Record<number, [string, string][]>> {
+    const params: Record<string, string> = { users: users.join(","), from, to };
+    if (exclude) params.exclude = String(exclude);
+    return (await api.get("/office/calendar/freebusy/", { params })).data;
   },
   async settings(): Promise<CalendarSettings> {
     return (await api.get("/office/calendar/settings/")).data;

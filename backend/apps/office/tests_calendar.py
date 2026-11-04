@@ -16,14 +16,18 @@ def _user(name, role="operator", department=""):
 
 class WorkdayTests(TestCase):
     def test_weekly_days_off_and_holidays(self):
-        WorkWeek.get()  # جمعه — the factory works پنج‌شنبه
+        WorkWeek.get()  # The office: پنج‌شنبه و جمعه. The factory: جمعه.
         sat, thu, fri = date(2026, 10, 31), date(2026, 11, 5), date(2026, 11, 6)
         self.assertTrue(is_workday(sat))
-        self.assertTrue(is_workday(thu))
+        self.assertFalse(is_workday(thu))
+        self.assertTrue(is_workday(thu, scope="factory"))
         self.assertFalse(is_workday(fri))
+        self.assertFalse(is_workday(fri, scope="factory"))
         Holiday.objects.create(date=sat, title="تعطیل رسمی")
         self.assertFalse(is_workday(sat))
-        self.assertEqual(len(workdays(date(2026, 10, 31), date(2026, 11, 7))), 5)
+        self.assertFalse(is_workday(sat, scope="factory"))  # Holidays are both's.
+        self.assertEqual(len(workdays(date(2026, 10, 31), date(2026, 11, 7))), 4)
+        self.assertEqual(len(workdays(date(2026, 10, 31), date(2026, 11, 7), scope="factory")), 5)
 
 
 class CalendarAccessTests(APITestCase):
@@ -88,13 +92,23 @@ class CalendarV2Tests(APITestCase):
         CalendarSettings.get().office_managers.add(self.office)
         CalendarSettings.get().sms_recipients.add(self.ceo)
 
-    def test_the_office_manager_runs_the_ceos_calendars(self):
+    def test_a_personal_calendar_is_private_until_its_owner_delegates_it(self):
         from apps.office.views_calendar import level_for, personal_calendar
 
         ceo_cal = personal_calendar(self.ceo)
-        self.assertEqual(level_for(self.office, ceo_cal), "manage")
+        admin = _user("v-adm", role="admin")
         self.assertEqual(level_for(self.office, self.mgmt), "manage")
-        self.assertEqual(level_for(self.worker, ceo_cal), "")
+        # Not the office manager, not a manager, not even the admin.
+        for other in (self.office, self.worker, admin, _user("v-mgr", role="manager")):
+            self.assertEqual(level_for(other, ceo_cal), "")
+        self.client.force_authenticate(admin)
+        ids = {c["id"] for c in self.client.get("/api/office/calendar/calendars/").data}
+        self.assertNotIn(ceo_cal.pk, ids)
+        # The owner delegates it.
+        self.client.force_authenticate(self.ceo)
+        self.assertEqual(self.client.patch(f"/api/office/calendar/calendars/{ceo_cal.pk}/", {
+            "shares": [{"user": self.office.pk, "level": "manage"}]}, format="json").status_code, 200)
+        self.assertEqual(level_for(self.office, ceo_cal), "manage")
         self.client.force_authenticate(self.office)
         cals = {c["id"]: c for c in self.client.get("/api/office/calendar/calendars/").data}
         self.assertTrue(cals[ceo_cal.pk]["mine"])
@@ -174,11 +188,10 @@ class CalendarV2Tests(APITestCase):
     def test_sms_goes_to_whoever_is_named_not_only_the_ceo(self):
         from apps.office.calendar_rules import run
         from apps.office.models_calendar import CalendarSettings
-        from apps.office.views_calendar import level_for, personal_calendar
+        from apps.office.views_calendar import personal_calendar
 
         board = _user("v-board", role="manager")  # A board member who is not the CEO.
         CalendarSettings.get().sms_recipients.add(board)
-        self.assertEqual(level_for(self.office, personal_calendar(board)), "manage")
         start = timezone.make_aware(datetime(2026, 11, 2, 10))
         Event.objects.create(calendar=personal_calendar(board), title="بازدید", start=start,
                              end=start + timezone.timedelta(hours=1))
@@ -192,3 +205,64 @@ class CalendarV2Tests(APITestCase):
         self.client.force_authenticate(self.worker)
         self.assertEqual(self.client.post("/api/office/calendar/sms-test/", {"user": self.ceo.pk},
                                           format="json").status_code, 403)
+
+
+class InvitationTests(APITestCase):
+    """An event with people on it is an invitation: they answer, they discuss it."""
+
+    def setUp(self):
+        self.boss = _user("i-boss", role="executive")
+        self.a = _user("i-a", department="production")
+        self.b = _user("i-b", department="sales_team")
+        self.mgmt = Calendar.objects.get(kind="management")
+        self.client.force_authenticate(self.boss)
+        self.ev = self.client.post("/api/office/calendar/events/", {
+            "calendar": self.mgmt.pk, "title": "بودجه", "start": "2026-11-10T09:00:00Z",
+            "end": "2026-11-10T10:00:00Z", "attendees": [self.a.pk, self.b.pk],
+            "respond_by": "2026-11-09T12:00:00Z"}, format="json").data
+
+    def _url(self, tail=""):
+        return f"/api/office/calendar/events/{self.ev['id']}/{tail}"
+
+    def test_invitees_answer_and_the_organiser_hears(self):
+        from apps.core.models import Notification
+
+        self.assertEqual({r["status"] for r in self.ev["responses"]}, {"pending"})
+        self.client.force_authenticate(self.a)
+        r = self.client.post(self._url("respond/"), {"status": "declined", "note": "سفر هستم",
+                                                     "proposed_start": "2026-11-11T09:00:00Z"}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertTrue(str(r.data["proposed_end"]).startswith("2026-11-11"))  # Same length as the event.
+        self.assertTrue(Notification.objects.filter(recipient=self.boss, message__contains="سفر هستم").exists())
+        # Someone not invited cannot answer.
+        self.client.force_authenticate(_user("i-x", role="manager"))
+        self.assertEqual(self.client.post(self._url("respond/"), {"status": "accepted"}, format="json").status_code, 403)
+
+    def test_a_new_time_asks_everyone_again(self):
+        self.client.force_authenticate(self.a)
+        self.client.post(self._url("respond/"), {"status": "accepted"}, format="json")
+        self.client.force_authenticate(self.boss)
+        r = self.client.patch(self._url(), {"start": "2026-11-10T11:00:00Z", "end": "2026-11-10T12:00:00Z"},
+                              format="json")
+        self.assertEqual({x["status"] for x in r.data["responses"]}, {"pending"})
+
+    def test_everyone_on_it_can_discuss_it(self):
+        self.client.force_authenticate(self.b)
+        self.assertEqual(self.client.post(self._url("comments/"), {"body": "گزارش را بیاورم؟"},
+                                          format="json").status_code, 200)
+        self.client.force_authenticate(self.a)
+        rows = self.client.get(self._url("comments/")).data
+        self.assertEqual((len(rows), rows[0]["can_delete"]), (1, False))
+        self.assertEqual(self.client.delete(self._url(f"comments/{rows[0]['id']}/")).status_code, 403)
+        self.client.force_authenticate(self.b)
+        self.assertEqual(self.client.delete(self._url(f"comments/{rows[0]['id']}/")).status_code, 204)
+
+    def test_free_busy_says_when_never_what(self):
+        self.client.force_authenticate(self.b)
+        self.client.post(self._url("respond/"), {"status": "declined"}, format="json")
+        self.client.force_authenticate(_user("i-org", role="manager"))
+        r = self.client.get("/api/office/calendar/freebusy/", {
+            "users": f"{self.a.pk},{self.b.pk}", "from": "2026-11-10T00:00:00Z", "to": "2026-11-11T00:00:00Z"})
+        self.assertEqual(len(r.data[self.a.pk]), 1)
+        self.assertEqual(r.data[self.b.pk], [])  # Declined: free.
+        self.assertNotIn("بودجه", str(r.data))

@@ -192,7 +192,7 @@ class ProductionDailyView(APIView):
         start = month.start_date or jalali.to_gregorian(month.jalali_year, month.jalali_month, 1)
         end = (month.end_date + timedelta(days=1)) if month.end_date else (
             start + timedelta(days=jalali.month_days(month.jalali_year, month.jalali_month)))
-        info = day_info(start, end)
+        info = day_info(start, end, scope="factory")
         today = timezone.localdate()
         # A month production records weekly or monthly has no days to miss.
         daily = grain_of(month, "production") == PeriodKind.DAY

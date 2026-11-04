@@ -7,12 +7,21 @@ each calendar — none, read, write (add events, edit their own) or manage
   • company calendar   — everyone reads; managers write;
   • management         — managers read and write; the CEO manages;
   • a unit's calendar  — its members and the managers read and write;
-  • a personal one     — its owner manages; nobody else sees it;
-  • the admin manages every calendar; an office manager (مدیر دفتر) manages
-    the company's, management's, and the own calendars of the management team
-    (the people named in `CalendarSettings.sms_recipients`).
+  • a personal one     — its owner's alone. Not the managers', not the
+    admin's: only a share the owner gives (delegating it, say, to the office
+    manager) lets anyone else in;
+  • the admin manages every shared calendar; an office manager (مدیر دفتر)
+    manages the company's and management's.
 A `CalendarShare` raises a person's level on one calendar, never lowers it.
-Holidays and the weekly days off are the admin's alone; everyone reads them.
+
+Beyond the calendars: an attendee is *invited* and sees the event on their own
+calendar whatever calendar it was made on; they answer it (`respond`) and
+everyone who sees it can discuss it (`comments`). Others' time can be seen as
+free / busy only — when, never what.
+
+The weekly days off (the office's and the factory's) and the holidays are
+set by whoever sets the calendar (the admin, the executives, the office
+managers); everyone reads them.
 """
 from __future__ import annotations
 
@@ -30,7 +39,11 @@ from apps.core import jalali
 from apps.core.models import Notification
 
 from .calendar_rules import digest_text, occurrences
-from .models_calendar import Calendar, CalendarSettings, CalendarShare, Event, Holiday, WorkWeek
+from rest_framework.decorators import action
+
+from .models_calendar import (
+    Calendar, CalendarSettings, CalendarShare, Event, EventComment, EventResponse, Holiday, WorkWeek,
+)
 from .views import OfficeAccess
 from .workdays import _off, day_info
 
@@ -55,25 +68,27 @@ def is_office_manager(user) -> bool:
     return CalendarSettings.get().office_managers.filter(pk=user.pk).exists()
 
 
-def team_ids() -> set[int]:
-    """The management team: the people the reminders and the digest are for."""
-    return set(CalendarSettings.get().sms_recipients.values_list("pk", flat=True))
+def sets_calendar(user) -> bool:
+    """Sets the calendar's rules: reminders, the weekly days off, the holidays."""
+    return is_admin(user) or is_ceo(user) or is_office_manager(user)
 
 
 def _top(*levels: str) -> str:
     return max(levels, key=LEVELS.index)
 
 
-def level_for(user, cal: Calendar, shares: dict | None = None, office: bool | None = None,
-              team: set | None = None) -> str:
+def level_for(user, cal: Calendar, shares: dict | None = None, office: bool | None = None) -> str:
     """'', 'read', 'write' or 'manage'. `shares` ({calendar id: level}) and
     `office` can be passed in when many calendars are judged at once."""
+    if shares is None:
+        shares = dict(CalendarShare.objects.filter(user=user, calendar=cal).values_list("calendar_id", "level"))
+    if cal.kind == Calendar.Kind.PERSONAL:
+        # Private: the owner, and whoever the owner shared it with. Nobody else.
+        return "manage" if cal.owner_id == user.pk else shares.get(cal.pk, "")
     if is_admin(user):
         return "manage"
     if office is None:
         office = is_office_manager(user)
-    if shares is None:
-        shares = dict(CalendarShare.objects.filter(user=user, calendar=cal).values_list("calendar_id", "level"))
     base = ""
     if cal.kind == Calendar.Kind.COMPANY:
         base = "manage" if office or is_ceo(user) else "write" if is_manager(user) else "read"
@@ -82,11 +97,6 @@ def level_for(user, cal: Calendar, shares: dict | None = None, office: bool | No
     elif cal.kind == Calendar.Kind.UNIT:
         if is_manager(user) or (cal.department and getattr(user, "department", "") == cal.department):
             base = "write"
-    elif cal.kind == Calendar.Kind.PERSONAL:
-        if cal.owner_id == user.pk:
-            base = "manage"
-        elif office and cal.owner_id in (team if team is not None else team_ids()):
-            base = "manage"
     return _top(base, shares.get(cal.pk, ""))
 
 
@@ -103,10 +113,9 @@ def calendar_levels(user) -> list[tuple[Calendar, str]]:
     personal_calendar(user)
     shares = dict(CalendarShare.objects.filter(user=user).values_list("calendar_id", "level"))
     office = is_office_manager(user)
-    team = team_ids()
     out = []
     for c in Calendar.objects.select_related("owner"):
-        lv = level_for(user, c, shares, office, team)
+        lv = level_for(user, c, shares, office)
         if lv:
             out.append((c, lv))
     return out
@@ -126,10 +135,11 @@ def personal_calendar(user) -> Calendar:
 
 
 def _is_mine(user, cal: Calendar) -> bool:
-    """Shown by default: the person's own calendars. Everything else they may
-    see sits under «سایر تقویم‌ها», off until they turn it on."""
+    """Shown by default: the person's own calendars (and one delegated to
+    them). Everything else they may see sits under «سایر تقویم‌ها», off until
+    they turn it on."""
     if cal.kind == Calendar.Kind.PERSONAL:
-        return cal.owner_id == user.pk or (is_office_manager(user) and cal.owner_id in team_ids())
+        return True  # Their own, or one its owner shared with them.
     if cal.kind == Calendar.Kind.COMPANY:
         return True
     if cal.kind == Calendar.Kind.MANAGEMENT:
@@ -198,18 +208,28 @@ class CalendarDetailView(APIView):
 
 
 # ---------------------------------------------------------------- events
+def _response(r: EventResponse) -> dict:
+    return {"user": r.user_id, "name": _name(r.user), "status": r.status, "status_display": r.get_status_display(),
+            "note": r.note, "proposed_start": r.proposed_start, "proposed_end": r.proposed_end,
+            "responded_at": r.responded_at}
+
+
 class EventSerializer(serializers.ModelSerializer):
     calendar_name = serializers.CharField(source="calendar.name", read_only=True)
     color = serializers.CharField(source="calendar.color", read_only=True)
     created_by_name = serializers.SerializerMethodField()
     attendee_names = serializers.SerializerMethodField()
+    responses = serializers.SerializerMethodField()
+    my_response = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = ("id", "calendar", "calendar_name", "color", "title", "kind", "priority", "start", "end",
-                  "all_day", "repeat", "repeat_until", "reminders", "location", "description", "attendees",
-                  "attendee_names", "guests", "created_by", "created_by_name", "can_edit")
+                  "all_day", "repeat", "repeat_until", "respond_by", "reminders", "location", "description",
+                  "attendees", "attendee_names", "guests", "responses", "my_response", "comment_count",
+                  "created_by", "created_by_name", "can_edit")
         read_only_fields = ("created_by",)
 
     def get_created_by_name(self, obj):
@@ -217,6 +237,17 @@ class EventSerializer(serializers.ModelSerializer):
 
     def get_attendee_names(self, obj):
         return [_name(u) for u in obj.attendees.all()]
+
+    def get_responses(self, obj):
+        return [_response(r) for r in obj.responses.all()]
+
+    def get_my_response(self, obj):
+        me = self.context["request"].user.pk
+        r = next((r for r in obj.responses.all() if r.user_id == me), None)
+        return _response(r) if r else None
+
+    def get_comment_count(self, obj):
+        return len(obj.comments.all())
 
     def get_can_edit(self, obj):
         user = self.context["request"].user
@@ -250,6 +281,9 @@ class EventSerializer(serializers.ModelSerializer):
         return attrs
 
 
+EVENT_PREFETCH = ("attendees", "responses__user", "comments")
+
+
 class EventViewSet(viewsets.ModelViewSet):
     permission_classes = [OfficeAccess]
     serializer_class = EventSerializer
@@ -257,7 +291,7 @@ class EventViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         ids = [c.pk for c in visible_calendars(self.request.user)]
         qs = (Event.objects.filter(Q(calendar_id__in=ids) | Q(attendees=self.request.user)).distinct()
-              .select_related("calendar", "created_by").prefetch_related("attendees"))
+              .select_related("calendar", "created_by").prefetch_related(*EVENT_PREFETCH))
         q = self.request.query_params
         # Events overlapping [from, to] (a repeating one may recur into it).
         if q.get("from"):
@@ -273,6 +307,7 @@ class EventViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         ev = serializer.save(created_by=self.request.user)
+        _sync_responses(ev)
         _invite(self.request.user, ev, ev.attendees.all())
 
     def _own(self, event):
@@ -282,25 +317,116 @@ class EventViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._own(serializer.instance)
-        before = set(serializer.instance.attendees.values_list("pk", flat=True))
+        old = serializer.instance
+        before = set(old.attendees.values_list("pk", flat=True))
+        was = (old.start, old.end, old.repeat)
         ev = serializer.save()
+        _sync_responses(ev)
         _invite(self.request.user, ev, ev.attendees.exclude(pk__in=before))
+        if (ev.start, ev.end, ev.repeat) != was:
+            # A new time is a new question: everyone answers again.
+            ev.responses.exclude(status=EventResponse.Status.PENDING).update(
+                status=EventResponse.Status.PENDING, note="", proposed_start=None, proposed_end=None,
+                responded_at=None)
+            _notify(self.request.user, ev.attendees.filter(pk__in=before), ev,
+                    f"زمان «{ev.title}» تغییر کرد — {_when_label(ev)}؛ لطفاً دوباره پاسخ دهید.")
 
     def perform_destroy(self, instance):
         self._own(instance)
+        _notify(self.request.user, instance.attendees.all(), instance,
+                f"«{instance.title}» ({_when_label(instance)}) لغو شد.", target=False)
         instance.delete()
+
+    # ---- invitation ----------------------------------------------------------------
+    @action(detail=True, methods=["post"])
+    def respond(self, request, pk=None):
+        """The invitee's answer: accepted / tentative / declined, a note, and
+        optionally another time that would suit them."""
+        ev = self.get_object()
+        r = ev.responses.filter(user=request.user).first()
+        if not r:
+            raise PermissionDenied("شما به این برنامه دعوت نشده‌اید.")
+        st = request.data.get("status")
+        if st not in (EventResponse.Status.ACCEPTED, EventResponse.Status.TENTATIVE, EventResponse.Status.DECLINED):
+            raise ValidationError({"status": "پاسخ نامعتبر است."})
+        r.status, r.note = st, str(request.data.get("note") or "").strip()[:300]
+        r.proposed_start = r.proposed_end = None
+        if request.data.get("proposed_start"):
+            f = serializers.DateTimeField()
+            r.proposed_start = f.to_internal_value(request.data["proposed_start"])
+            r.proposed_end = (f.to_internal_value(request.data["proposed_end"]) if request.data.get("proposed_end")
+                              else r.proposed_start + (ev.end - ev.start))
+            if r.proposed_end < r.proposed_start:
+                raise ValidationError({"proposed_end": "پایان پیش از شروع است."})
+        r.responded_at = timezone.now()
+        r.save()
+        verb = {"accepted": "پذیرفت", "tentative": "پاسخ قطعی را به بعد موکول کرد", "declined": "رد کرد"}[st]
+        msg = f"{_name(request.user)} دعوت «{ev.title}» را {verb}"
+        if r.proposed_start:
+            msg += f" و زمان دیگری پیشنهاد داد: {_when_label(ev, r.proposed_start)}"
+        if r.note:
+            msg += f" — «{r.note}»"
+        if ev.created_by:
+            _notify(request.user, [ev.created_by], ev, msg)
+        return Response(_response(r))
+
+    @action(detail=True, methods=["get", "post"])
+    def comments(self, request, pk=None):
+        ev = self.get_object()
+        if request.method == "POST":
+            body = str(request.data.get("body") or "").strip()
+            if not body:
+                raise ValidationError({"body": "متن نظر را بنویسید."})
+            EventComment.objects.create(event=ev, author=request.user, body=body[:2000])
+            people = set(ev.attendees.all()) | ({ev.created_by} if ev.created_by else set())
+            _notify(request.user, people, ev, f"{_name(request.user)} درباره‌ی «{ev.title}» نوشت: {body[:120]}")
+        return Response([_comment(c, request.user, ev) for c in ev.comments.select_related("author")])
+
+    @action(detail=True, methods=["delete"], url_path=r"comments/(?P<cid>\d+)")
+    def delete_comment(self, request, pk=None, cid=None):
+        ev = self.get_object()
+        c = ev.comments.filter(pk=cid).first()
+        if not c:
+            raise ValidationError({"comment": "نظر پیدا نشد."})
+        if not _comment(c, request.user, ev)["can_delete"]:
+            raise PermissionDenied("فقط نویسنده‌ی نظر یا مدیر تقویم آن را حذف می‌کند.")
+        c.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _comment(c: EventComment, user, ev: Event) -> dict:
+    return {"id": c.pk, "author": c.author_id, "author_name": _name(c.author), "body": c.body,
+            "created_at": c.created_at,
+            "can_delete": c.author_id == user.pk or level_for(user, ev.calendar) == "manage"}
+
+
+def _sync_responses(ev: Event) -> None:
+    """One invitation per attendee: new ones unanswered, removed ones gone."""
+    ids = set(ev.attendees.values_list("pk", flat=True))
+    ev.responses.exclude(user_id__in=ids).delete()
+    have = set(ev.responses.values_list("user_id", flat=True))
+    EventResponse.objects.bulk_create([EventResponse(event=ev, user_id=u) for u in ids - have])
+
+
+def _when_label(ev: Event, at=None) -> str:
+    when = timezone.localtime(at or ev.start)
+    label = jalali.format_day(*jalali.from_gregorian(when.date()))
+    return label if ev.all_day and at is None else f"{label} ساعت {when:%H:%M}"
+
+
+def _notify(actor, people, ev: Event, message: str, target: bool = True) -> None:
+    Notification.objects.bulk_create([
+        Notification(recipient=u, actor=actor, verb="calendar", message=message[:300],
+                     target_label="office.Event" if target else "", target_id=str(ev.pk) if target else "")
+        for u in people if u.pk != actor.pk
+    ])
 
 
 def _invite(actor, ev: Event, people) -> None:
-    when = timezone.localtime(ev.start)
-    label = jalali.format_day(*jalali.from_gregorian(when.date()))
-    at = "" if ev.all_day else f" ساعت {when:%H:%M}"
-    Notification.objects.bulk_create([
-        Notification(recipient=u, actor=actor, verb="calendar",
-                     message=f"دعوت به {ev.get_kind_display()}: «{ev.title}» — {label}{at}"[:300],
-                     target_label="office.Event", target_id=str(ev.pk))
-        for u in people if u.pk != actor.pk
-    ])
+    by = ""
+    if ev.respond_by:
+        by = f" — لطفاً تا {_when_label(ev, ev.respond_by)} پاسخ دهید"
+    _notify(actor, people, ev, f"دعوت {_name(actor)} به {ev.get_kind_display()}: «{ev.title}» — {_when_label(ev)}{by}")
 
 
 def _day_start(iso: str) -> datetime:
@@ -331,26 +457,33 @@ class HolidayViewSet(viewsets.ModelViewSet):
 
     def check_permissions(self, request):
         super().check_permissions(request)
-        if request.method not in ("GET", "HEAD", "OPTIONS") and not is_admin(request.user):
-            raise PermissionDenied("تعیین تعطیلات با ادمین است.")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not sets_calendar(request.user):
+            raise PermissionDenied("تعیین تعطیلات با ادمین، مدیران ارشد و مدیر دفتر است.")
 
 
 class WorkWeekView(APIView):
     permission_classes = [OfficeAccess]
 
+    """The office's weekly days off (`days_off`) and the factory's (`factory_days_off`)."""
+
     def get(self, request):
-        return Response({"days_off": WorkWeek.get().days_off})
+        ww = WorkWeek.get()
+        return Response({"days_off": ww.days_off, "factory_days_off": ww.factory_days_off,
+                         "can_edit": sets_calendar(request.user)})
 
     def put(self, request):
-        if not is_admin(request.user):
-            raise PermissionDenied("تعیین تعطیلی هفتگی با ادمین است.")
-        days = request.data.get("days_off")
-        if not isinstance(days, list) or any(not isinstance(d, int) or not 0 <= d <= 6 for d in days):
-            return Response({"days_off": ["روزهای ۰ (شنبه) تا ۶ (جمعه)."]}, status=status.HTTP_400_BAD_REQUEST)
+        if not sets_calendar(request.user):
+            raise PermissionDenied("تعیین تعطیلی هفتگی با ادمین، مدیران ارشد و مدیر دفتر است.")
         ww = WorkWeek.get()
-        ww.days_off = sorted(set(days))
+        for field in ("days_off", "factory_days_off"):
+            if field not in request.data:
+                continue
+            days = request.data[field]
+            if not isinstance(days, list) or any(not isinstance(d, int) or not 0 <= d <= 6 for d in days):
+                return Response({field: ["روزهای ۰ (شنبه) تا ۶ (جمعه)."]}, status=status.HTTP_400_BAD_REQUEST)
+            setattr(ww, field, sorted(set(days)))
         ww.save()
-        return Response({"days_off": ww.days_off})
+        return self.get(request)
 
 
 # ---------------------------------------------------------------- a window of days
@@ -358,15 +491,16 @@ def _layout(request, start: date, end: date) -> dict:
     """Each day in [start, end), whether it is worked, and every occurrence of
     the events the caller may see — everything a day/week/month/year view draws."""
     info = day_info(start, end)
+    factory = day_info(start, end, scope="factory")
     days = [{"date": d.isoformat(), "jalali": list(jalali.from_gregorian(d)), "weekday": jalali.weekday(d),
-             "workday": info[d][0], "off": info[d][1]} for d in sorted(info)]
+             "workday": info[d][0], "off": info[d][1], "factory_workday": factory[d][0]} for d in sorted(info)]
     user = request.user
     levels = dict((c.pk, lv) for c, lv in calendar_levels(user))
     own = personal_calendar(user)
     lo, hi = _day_start(start.isoformat()), _day_start(end.isoformat())
     events = (Event.objects.filter(Q(calendar_id__in=levels) | Q(attendees=user)).distinct()
               .filter(start__lt=hi).filter(Q(repeat="", end__gte=lo) | ~Q(repeat=""))
-              .select_related("calendar", "created_by").prefetch_related("attendees"))
+              .select_related("calendar", "created_by").prefetch_related(*EVENT_PREFETCH))
     off = _off()
     ser = EventSerializer(context={"request": request, "levels": levels})
     out = []
@@ -422,6 +556,37 @@ class MonthView(APIView):
         return Response({"jy": jy, "jm": jm, **out})
 
 
+class FreeBusyView(APIView):
+    """?users=1,2&from=ISO&to=ISO → when each person is busy, never what with:
+    what an organiser sees while picking a time. Busy is what sits on their own
+    calendar and what they are invited to and have not declined."""
+
+    permission_classes = [OfficeAccess]
+
+    def get(self, request):
+        q = request.query_params
+        ids = [int(x) for x in str(q.get("users", "")).split(",") if x.isdigit()][:30]
+        f = serializers.DateTimeField()
+        try:
+            lo, hi = f.to_internal_value(q.get("from")), f.to_internal_value(q.get("to"))
+        except serializers.ValidationError:
+            raise ValidationError({"from": "بازه‌ی زمانی نامعتبر است."})
+        if not timedelta(0) < hi - lo <= timedelta(days=31):
+            raise ValidationError({"from": "بازه‌ی زمانی نامعتبر است."})
+        skip = q.get("exclude")
+        off = _off()
+        out = {}
+        for uid in ids:
+            evs = (Event.objects.filter(Q(calendar__kind=Calendar.Kind.PERSONAL, calendar__owner_id=uid)
+                                        | (Q(responses__user_id=uid) & ~Q(responses__status="declined")))
+                   .filter(start__lt=hi).filter(Q(repeat="", end__gt=lo) | ~Q(repeat="")).distinct())
+            if skip and skip.isdigit():
+                evs = evs.exclude(pk=int(skip))
+            out[uid] = sorted([s.isoformat(), e.isoformat()] for ev in evs for s, e in occurrences(ev, lo, hi, off)
+                              if e > lo)
+        return Response(out)
+
+
 # ---------------------------------------------------------------- reminder settings
 def _person(u) -> dict:
     from apps.accounts import sms
@@ -453,6 +618,7 @@ class CalendarSettingsView(APIView):
             "sms_status": sms.text_status(),
             "can_edit": self._can_edit(user, st),
             "can_name_office": is_admin(user) or is_ceo(user),
+            "can_edit_workdays": sets_calendar(user),
             "is_office_manager": any(u.pk == user.pk for u in office),
         }
 

@@ -41,7 +41,7 @@ const localParts = (iso: string) => {
 const form = reactive({
   calendar: 0, title: "", kind: "meeting" as EventKind, priority: "normal" as Priority,
   startDate: "", startTime: "09:00", endDate: "", endTime: "10:00", all_day: false,
-  repeat: "" as Repeat, repeat_until: "", customReminders: false, reminders: [] as number[],
+  repeat: "" as Repeat, repeat_until: "", respond_by: "", customReminders: false, reminders: [] as number[],
   attendees: [] as number[], guests: [] as string[], location: "", description: "",
 });
 
@@ -55,7 +55,8 @@ function reset() {
     Object.assign(form, {
       calendar: e.calendar, title: e.title, kind: e.kind, priority: e.priority,
       startDate: s.date, startTime: s.time, endDate: en.date, endTime: en.time, all_day: e.all_day,
-      repeat: e.repeat, repeat_until: e.repeat_until ?? "", customReminders: e.reminders !== null,
+      repeat: e.repeat, repeat_until: e.repeat_until ?? "", respond_by: e.respond_by ? localStamp(e.respond_by) : "",
+      customReminders: e.reminders !== null,
       reminders: [...(e.reminders ?? [])], attendees: [...e.attendees], guests: [...(e.guests ?? [])], location: e.location, description: e.description,
     });
     return;
@@ -68,7 +69,7 @@ function reset() {
   Object.assign(form, {
     calendar: own?.id ?? 0, title: "", kind: "meeting", priority: "normal",
     startDate: date, startTime, endDate: date, endTime, all_day: false,
-    repeat: "", repeat_until: "", customReminders: false, reminders: [], attendees: [], guests: [], location: "", description: "",
+    repeat: "", repeat_until: "", respond_by: "", customReminders: false, reminders: [], attendees: [], guests: [], location: "", description: "",
   });
 }
 watch(() => [props.event, props.at], reset, { immediate: true });
@@ -109,6 +110,7 @@ async function save() {
       start, end, all_day: form.all_day, repeat: form.repeat, repeat_until: form.repeat ? form.repeat_until || null : null,
       reminders: form.customReminders ? form.reminders : null, attendees: form.attendees,
       guests: [...form.guests, ...(guest.value.trim() ? [guest.value.trim()] : [])],
+      respond_by: form.attendees.length && form.respond_by ? form.respond_by : null,
       location: form.location, description: form.description,
     }, props.event?.id);
     toast.success(props.event ? "برنامه ویرایش شد." : "برنامه ثبت شد.");
@@ -135,6 +137,28 @@ async function remove() {
 
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
 const field = "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300";
+
+function localStamp(iso: string) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// ---- who is busy then: when, never with what -----------------------------------------
+const busy = ref<string[]>([]);
+let fbTimer = 0;
+watch(() => [form.attendees.slice(), form.startDate, form.startTime, form.endDate, form.endTime, form.all_day], () => {
+  clearTimeout(fbTimer);
+  fbTimer = window.setTimeout(async () => {
+    if (!form.attendees.length || !form.startDate) { busy.value = []; return; }
+    const from = new Date(`${form.startDate}T${form.all_day ? "00:00" : form.startTime}`);
+    const to = new Date(`${form.endDate || form.startDate}T${form.all_day ? "23:59" : form.endTime}`);
+    if (!(to > from)) { busy.value = []; return; }
+    try {
+      const fb = await calendarApi.freebusy(form.attendees, from.toISOString(), to.toISOString(), props.event?.id);
+      busy.value = form.attendees.filter((id) => (fb[id] ?? []).length).map((id) => peopleById.value.get(id)?.name ?? "؟");
+    } catch { busy.value = []; }
+  }, 400);
+}, { immediate: true });
 </script>
 
 <template>
@@ -268,6 +292,15 @@ const field = "w-full bg-slate-100 rounded-xl px-3 py-2 text-sm focus:outline-no
             </span>
           </div>
         </div>
+      </div>
+
+      <p v-if="busy.length" class="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-2 flex items-start gap-1.5">
+        <NavIcon name="alert" :size="14" class="shrink-0 mt-px" />
+        <span>در این زمان برنامه‌ی دیگری دارند: {{ busy.join("، ") }}</span>
+      </p>
+      <div v-if="form.attendees.length" class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-xs text-slate-500 flex items-center gap-1"><NavIcon name="clock" :size="14" /> مهلت پاسخ به دعوت</span>
+        <div class="w-56"><JalaliDateField v-model="form.respond_by" with-time placeholder="بدون مهلت" clearable /></div>
       </div>
 
       <input v-model="form.location" placeholder="مکان (اتاق جلسه، آدرس، لینک)" :class="field" />

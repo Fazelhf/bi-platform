@@ -87,7 +87,9 @@ def recipients(event: Event, team: set | None = None):
     """Who an event reminds: its attendees, whoever made it, the owner of the
     personal calendar it is on, and for the management calendar the whole
     management team (`sms_recipients`)."""
-    people = set(event.attendees.filter(is_active=True))
+    # Whoever declined is not reminded.
+    declined = set(event.responses.filter(status="declined").values_list("user_id", flat=True))
+    people = {u for u in event.attendees.filter(is_active=True) if u.pk not in declined}
     if event.created_by and event.created_by.is_active:
         people.add(event.created_by)
     cal = event.calendar
@@ -196,6 +198,7 @@ def tomorrow_agenda(user, day: date, off=None) -> list[tuple[datetime, Event]]:
                .filter(Q(repeat="", end__gte=start) | ~Q(repeat=""))
                # A unit's own meetings are its business, unless this person is invited.
                .filter(~Q(calendar__kind=Calendar.Kind.UNIT) | Q(attendees=user))
+               .exclude(responses__user=user, responses__status="declined")
                .distinct().select_related("calendar")):
         for s, _ in occurrences(ev, start, end, off):
             out.append((s, ev))
@@ -210,7 +213,7 @@ def digest_text(user, day: date, now: datetime, off=None) -> str:
     lines = [f"برنامه‌ی فردا ({label}) — {len(agenda)} مورد:"]
     for s, ev in agenda:
         at = "تمام روز" if ev.all_day else timezone.localtime(s).strftime("%H:%M")
-        mark = " ❗" if ev.priority == Event.Priority.URGENT else ""
+        mark = " (فوری)" if ev.priority == Event.Priority.URGENT else ""
         lines.append(f"{at} {ev.title}{mark}")
     return "\n".join(lines)
 
