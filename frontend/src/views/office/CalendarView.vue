@@ -50,7 +50,7 @@ const localDay = (iso: string) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 const minutesOf = (iso: string) => { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes(); };
-const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const jFirst = (iso: string) => { const j = isoToJalali(iso)!; return jalaliToIso({ jy: j.jy, jm: j.jm, jd: 1 }); };
 
 const today = ref(todayIso());
@@ -445,6 +445,9 @@ function onKey(e: KeyboardEvent) {
   else if (e.key === "n" || e.key === "c") create(cursor.value);
   else if (e.key === "ArrowLeft" || e.key === "j") shift(1);
   else if (e.key === "ArrowRight" || e.key === "k") shift(-1);
+  else return;
+  // Handled: the key is a command, not text for the form it may just have opened.
+  e.preventDefault();
 }
 
 const PRIORITY_RING: Record<string, string> = { normal: "", important: "ring-2 ring-amber-300", urgent: "ring-2 ring-rose-400" };

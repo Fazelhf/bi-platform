@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 MAX_OCCURRENCES = 800
 #: A reminder that came due longer ago than this (the cron was down) is dropped, not sent late.
 STALE_AFTER = timedelta(hours=2)
+#: An SMS held back by the quiet hours may wait this long for them to end.
+SMS_HOLD = timedelta(hours=12)
+
+
+def sms_allowed(now: datetime, st: CalendarSettings) -> bool:
+    """Inside the hours SMS may go out (08:00–22:00 unless set otherwise)."""
+    t = timezone.localtime(now).time()
+    return st.sms_from <= t < st.sms_until if st.sms_from <= st.sms_until else (t >= st.sms_from or t < st.sms_until)
 
 
 # ---------------------------------------------------------------- occurrences
@@ -155,6 +163,8 @@ def run(now: datetime | None = None) -> dict:
     off = _off()
     team = set(sms_people(st))
     team_ids = {u.pk for u in team}
+    sms_open = sms_allowed(now, st)
+    look_back = max(STALE_AFTER, SMS_HOLD)
     events = (Event.objects.filter(cancelled_at__isnull=True)
               .filter(Q(repeat="", start__gte=now - STALE_AFTER, start__lt=window_end)
                       | (~Q(repeat="") & Q(start__lt=window_end)))
@@ -164,25 +174,30 @@ def run(now: datetime | None = None) -> dict:
         if not leads:
             continue
         sms_on = bool(rules.get(ev.priority, {}).get("sms"))
-        for s, _ in occurrences(ev, now - STALE_AFTER, window_end, off):
+        for s, _ in occurrences(ev, now - look_back, window_end, off):
+            if s < now - timedelta(minutes=1):
+                continue  # Already begun: a reminder now would only be noise.
             for lead in leads:
                 due = s - timedelta(minutes=lead)
-                if not (now - STALE_AFTER < due <= now) or s < now - timedelta(minutes=1):
-                    continue
-                if not _log_once(f"r:{ev.pk}:{int(s.timestamp())}:{lead}"):
+                if due > now:
                     continue
                 text = f"یادآوری {ev.get_kind_display()}: «{ev.title}» — {_when(s, now)}"
                 if ev.location:
                     text += f" — {ev.location}"
-                people = recipients(ev, team)
-                Notification.objects.bulk_create([
-                    Notification(recipient=u, verb="calendar", message=text[:300],
-                                 target_label="office.Event", target_id=str(ev.pk))
-                    for u in people
-                ])
-                sent["reminders"] += len(people)
-                if sms_on:
-                    for u in people:
+                stamp = f"{ev.pk}:{int(s.timestamp())}:{lead}"
+                people = None
+                # In the app: as soon as it is due, whatever the hour.
+                if now - STALE_AFTER < due and _log_once(f"r:{stamp}"):
+                    people = recipients(ev, team)
+                    Notification.objects.bulk_create([
+                        Notification(recipient=u, verb="calendar", message=text[:300],
+                                     target_label="office.Event", target_id=str(ev.pk))
+                        for u in people
+                    ])
+                    sent["reminders"] += len(people)
+                # By SMS: only within the allowed hours — one due at 06:30 goes at 08:00.
+                if sms_on and sms_open and now - SMS_HOLD < due and _log_once(f"s:{stamp}"):
+                    for u in people if people is not None else recipients(ev, team):
                         if (u.pk in team_ids or st.sms_attendees) and _send_sms(u, text, ev.title):
                             sent["sms"] += 1
 
@@ -230,9 +245,17 @@ def send_digest(now: datetime, st: CalendarSettings, off=None) -> int:
     if local.time() < st.digest_time:
         return 0
     tomorrow = local.date() + timedelta(days=1)
-    people = list(sms_people(st))
+    team = list(sms_people(st))
+    team_ids = {u.pk for u in team}
+    # Everyone with a meeting tomorrow hears about it the evening before —
+    # its organiser, its invitees (unless they declined), whoever owns the
+    # calendar it is on — and the management team about their whole day.
+    people = {u.pk: u for u in team}
+    for u in tomorrow_participants(tomorrow, off):
+        people.setdefault(u.pk, u)
+    sms_open = sms_allowed(now, st)
     n = 0
-    for u in people:
+    for u in people.values():
         if not _log_once(f"d:{u.pk}:{tomorrow.isoformat()}"):
             continue
         text = digest_text(u, tomorrow, now, off)
@@ -240,6 +263,26 @@ def send_digest(now: datetime, st: CalendarSettings, off=None) -> int:
             continue
         Notification.objects.create(recipient=u, verb="calendar", message=text[:300],
                                     target_label="office.Calendar", target_id="")
-        _send_sms(u, text, "برنامه‌ی فردا")
+        if sms_open and (u.pk in team_ids or st.sms_attendees):
+            _send_sms(u, text, "برنامه‌ی فردا")
         n += 1
     return n
+
+
+def tomorrow_participants(day: date, off=None) -> list:
+    """Everyone a meeting on `day` involves: organisers, invitees who have not
+    declined, owners of the personal calendars the meetings sit on."""
+    start = timezone.make_aware(datetime.combine(day, datetime.min.time()))
+    end = start + timedelta(days=1)
+    out = {}
+    evs = (Event.objects.filter(cancelled_at__isnull=True, start__lt=end)
+           .filter(Q(repeat="", end__gte=start) | ~Q(repeat=""))
+           .select_related("created_by", "calendar__owner").prefetch_related("attendees", "responses"))
+    for ev in evs:
+        if not any(True for _ in occurrences(ev, start, end, off)):
+            continue
+        declined = {r.user_id for r in ev.responses.all() if r.status == "declined"}
+        for u in [ev.created_by, ev.calendar.owner, *ev.attendees.all()]:
+            if u and u.is_active and u.pk not in declined:
+                out[u.pk] = u
+    return list(out.values())

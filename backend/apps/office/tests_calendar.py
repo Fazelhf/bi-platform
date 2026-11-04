@@ -165,8 +165,34 @@ class CalendarV2Tests(APITestCase):
         self.assertGreaterEqual(first["reminders"], 2)  # The CEO and the attendee.
         self.assertEqual(run(at)["reminders"], 0)       # …and only once.
         night = timezone.make_aware(datetime(2026, 11, 1, 20, 5))
-        self.assertEqual(run(night)["digests"], 1)
-        self.assertTrue(Notification.objects.filter(recipient=self.ceo, message__contains="هیئت‌مدیره").exists())
+        # The evening before: the CEO (the management team) and the invitee both.
+        self.assertEqual(run(night)["digests"], 2)
+        for u in (self.ceo, self.office):
+            self.assertTrue(Notification.objects.filter(recipient=u, message__contains="برنامه‌ی فردا").exists())
+
+    def test_no_sms_outside_the_allowed_hours_it_waits_for_eight(self):
+        from unittest import mock
+
+        from apps.core.models import Notification
+        from apps.office import calendar_rules
+        from apps.office.models_calendar import CalendarSettings
+
+        CalendarSettings.get()  # 08:00–22:00
+        start = timezone.make_aware(datetime(2026, 11, 2, 9, 0))
+        ev = Event.objects.create(calendar=self.mgmt, title="صبحگاهی", priority="urgent",
+                                  start=start, end=start + timezone.timedelta(hours=1))
+        with mock.patch.object(calendar_rules, "_send_sms", return_value=True) as sms:
+            early = timezone.make_aware(datetime(2026, 11, 2, 7, 5))  # The 2-hour reminder came due at 07:00.
+            got = calendar_rules.run(early)
+            self.assertGreater(got["reminders"], 0)  # In the app: at once.
+            self.assertEqual(sms.call_count, 0)      # By SMS: not before 08:00.
+            got = calendar_rules.run(timezone.make_aware(datetime(2026, 11, 2, 8, 0)))
+            self.assertEqual(got["reminders"], 0)    # Not told twice in the app…
+            self.assertGreater(sms.call_count, 0)    # …and the SMS goes at 08:00.
+            sms.reset_mock()
+            calendar_rules.run(timezone.make_aware(datetime(2026, 11, 2, 8, 5)))
+            self.assertEqual(sms.call_count, 0)      # Once.
+        self.assertTrue(Notification.objects.filter(message__contains="صبحگاهی").exists())
 
     def test_an_invited_member_sees_it_on_their_own_calendar(self):
         from apps.office.views_calendar import personal_calendar
