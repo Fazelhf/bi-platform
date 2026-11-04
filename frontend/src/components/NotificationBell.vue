@@ -26,6 +26,7 @@ const VERB_ICON: Record<string, string> = {
   paraph: "✍️",
   letter_note: "🔒",
   task: "📋",
+  calendar: "📅",
   task_done: "✅",
   task_comment: "💬",
 };

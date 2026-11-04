@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import {
   calendarApi, KIND_LABELS, PRIORITY_LABELS, RSVP_LABELS,
   type CalendarEvent, type CalendarRange, type CalendarRow, type CalendarSettings, type RangeDay,
@@ -155,6 +156,7 @@ onMounted(async () => {
   window.addEventListener("keydown", onKey);
   tick = window.setInterval(() => { now.value = new Date(); today.value = todayIso(); }, 60_000);
   scrollToMorning();
+  openFromRoute();
 });
 onBeforeUnmount(() => { window.removeEventListener("keydown", onKey); clearInterval(tick); });
 
@@ -270,6 +272,23 @@ function create(at: string) { if (canWrite.value) dialog.value = { event: null, 
 /** A click shows the event (the invitation, its answers, its discussion); editing is a button there. */
 const preview = ref<CalendarEvent | null>(null);
 function openEvent(e: CalendarEvent) { preview.value = e; }
+/** A notification links here as ?event=<id>: go to its day and open it. */
+const route = useRoute();
+const router = useRouter();
+async function openFromRoute() {
+  const id = Number(route.query.event);
+  if (!id) return;
+  try {
+    const e = await calendarApi.event(id);
+    cursor.value = localDay(e.start);
+    preview.value = { ...e, key: `${e.id}@link` };
+  } catch {
+    toast.error("این برنامه پیدا نشد؛ ممکن است حذف شده باشد یا به آن دسترسی نداشته باشید.");
+  }
+  router.replace({ query: { ...route.query, event: undefined } });
+}
+watch(() => route.query.event, (v) => { if (v) openFromRoute(); });
+
 function editEvent(e: CalendarEvent, scope: "series" | "occurrence") {
   preview.value = null;
   dialog.value = { event: e, at: "", occurrence: scope === "occurrence" ? e.start : undefined };
