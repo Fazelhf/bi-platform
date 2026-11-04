@@ -625,6 +625,36 @@ class ReminderSmsLineTests(SimpleTestCase):
         self.assertEqual((endpoint, params["from"], params["text"]), ("SendSMS", "3000123456", "یادآوری"))
         self.assertTrue(sms.is_shared_line())  # The login codes are untouched.
 
+    @override_settings(SMS_USERNAME="u", SMS_PASSWORD="k", SMS_MODE="shared",
+                       SMS_REMINDER_FROM="50004001213328, ۵۰۰۰۴۰۰۰۰۷۹۹۱۶,50004001213328")
+    def test_a_refused_line_falls_back_to_the_next(self):
+        from unittest import mock
+
+        from apps.accounts import sms
+
+        self.assertEqual(sms._reminder_lines(), ["50004001213328", "50004000079916"])
+        tried = []
+
+        def post(endpoint, params, errors):
+            tried.append(params["from"])
+            if params["from"] == "50004001213328":
+                raise sms.SmsError("blacklisted", "35")  # This recipient blocked the first line.
+            return "1234567890123"
+
+        with mock.patch.object(sms, "_post", side_effect=post):
+            self.assertEqual(sms.send_text("09121112233", "یادآوری"), "1234567890123")
+        self.assertEqual(tried, ["50004001213328", "50004000079916"])
+
+        tried.clear()
+
+        def no_credit(endpoint, params, errors):
+            tried.append(params["from"])
+            raise sms.SmsError("credit", "2")
+
+        with mock.patch.object(sms, "_post", side_effect=no_credit), self.assertRaises(sms.SmsError):
+            sms.send_text("09121112233", "یادآوری")
+        self.assertEqual(tried, ["50004001213328"])  # No credit is no credit on every line.
+
     @override_settings(SMS_USERNAME="u", SMS_PASSWORD="k", SMS_MODE="shared", SMS_REMINDER_FROM="",
                        SMS_REMINDER_BODY_ID="")
     def test_status_names_the_setting_to_add(self):

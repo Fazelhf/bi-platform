@@ -305,6 +305,10 @@ class CalendarSettings(models.Model):
     priority_rules = models.JSONField(default=_default_rules)
     #: Reminder SMS go to the other attendees too, not only to `sms_recipients`.
     sms_attendees = models.BooleanField(default=False)
+    #: No SMS outside [quiet_start, quiet_end): one that comes due then waits for
+    #: quiet_start (if its meeting has not begun). In-app notices are not held.
+    sms_from = models.TimeField(default=time(8, 0))
+    sms_until = models.TimeField(default=time(22, 0))
 
     class Meta:
         verbose_name = "تنظیمات تقویم"

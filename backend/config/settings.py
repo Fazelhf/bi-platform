@@ -288,8 +288,10 @@ SMS_BODY_ID = env("SMS_BODY_ID", default="")
 # Shared line only: the approved template calendar reminders fill — e.g.
 # «یادآوری: {0} — {1}» ({0} = title, {1} = the full notice).
 SMS_REMINDER_BODY_ID = env("SMS_REMINDER_BODY_ID", default="")
-# A dedicated line (خط اختصاصی) for calendar reminders. When set, reminders go
-# out from it as free text (SendSMS), whatever SMS_MODE the login codes use.
+# The dedicated lines (خط اختصاصی) calendar reminders go out from, comma
+# separated, in order: if a recipient has blocked one, the next is tried.
+# Reminders go as free text (SendSMS), whatever SMS_MODE the login codes use.
+#   SMS_REMINDER_FROM=50004001213328,50004000079916
 SMS_REMINDER_FROM = env("SMS_REMINDER_FROM", default="")
 SMS_BASE_URL = env("SMS_BASE_URL", default="https://rest.payamak-panel.com/api/SendSMS")
 SMS_TIMEOUT = env.int("SMS_TIMEOUT", default=10)

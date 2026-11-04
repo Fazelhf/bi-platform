@@ -185,13 +185,29 @@ def send_otp(phone: str, code: str) -> str:
     return _post("SendOtp", {**credentials, "from": settings.SMS_FROM, "code": code}, OTP_ERRORS)
 
 
+#: Failures no other sender line would cure — the account, the credit, the
+#: server's IP, the daily cap. Any other refusal (the recipient blocked this
+#: line, it is filtered for them…) is worth trying again from the next line.
+ACCOUNT_ERRORS = {"-111", "-110", "-109", "-108", "0", "2", "6", "10", "12", "19", "18"}
+
+
+def _reminder_lines() -> list[str]:
+    """The dedicated numbers reminders go out from, in order: SMS_REMINDER_FROM
+    (one number, or several separated by commas — a recipient who blocked one
+    still gets the message from the next), else SMS_FROM on a dedicated line.
+    The login codes keep whatever SMS_MODE they work with."""
+    raw = settings.SMS_REMINDER_FROM or ("" if is_shared_line() else settings.SMS_FROM)
+    out = []
+    for n in str(raw or "").translate(_DIGIT_MAP).replace("،", ",").replace(";", ",").split(","):
+        n = n.strip()
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
 def _reminder_line() -> str:
-    """The dedicated number reminders go out from: SMS_REMINDER_FROM if set
-    (a line bought for notices, so the login codes keep whatever SMS_MODE
-    they work with), else SMS_FROM when the account is on a dedicated line."""
-    if settings.SMS_REMINDER_FROM:
-        return settings.SMS_REMINDER_FROM
-    return "" if is_shared_line() else settings.SMS_FROM
+    lines = _reminder_lines()
+    return lines[0] if lines else ""
 
 
 def can_send_text() -> bool:
@@ -207,9 +223,11 @@ def text_status() -> dict:
     exactly is missing — in words someone setting up the host can act on."""
     if not (settings.SMS_USERNAME and settings.SMS_PASSWORD):
         return {"ok": False, "line": "", "detail": "نام کاربری و کلید وب‌سرویس ملی‌پیامک (SMS_USERNAME و SMS_PASSWORD) روی سرور تنظیم نشده است."}
-    line = _reminder_line()
-    if line:
-        return {"ok": True, "line": line, "detail": f"آماده‌ی ارسال از خط اختصاصی {line}."}
+    lines = _reminder_lines()
+    if lines:
+        more = f" (اگر از یک خط نرسید، از {'، '.join(lines[1:])} هم امتحان می‌شود)" if len(lines) > 1 else ""
+        return {"ok": True, "line": lines[0], "lines": lines,
+                "detail": f"آماده‌ی ارسال از خط اختصاصی {lines[0]}{more}."}
     if is_shared_line() and settings.SMS_REMINDER_BODY_ID:
         return {"ok": True, "line": "shared", "detail": "آماده‌ی ارسال از خط خدماتی اشتراکی (با الگوی تأییدشده)."}
     return {"ok": False, "line": "", "detail": "شماره‌ی خط اختصاصی برای یادآوری‌ها روی سرور تنظیم نشده است — در فایل .env سرور SMS_REMINDER_FROM را برابر شماره‌ی خط قرار دهید. (یا روی خط اشتراکی: کد الگوی تأییدشده در SMS_REMINDER_BODY_ID.)"}
@@ -231,9 +249,20 @@ def send_text(phone: str, text: str, template_values: list[str] | None = None) -
             return "dev-echo"
         raise SmsError("ارسال پیامک اطلاع‌رسانی پیکربندی نشده است.")
     credentials = {"username": settings.SMS_USERNAME, "password": settings.SMS_PASSWORD, "to": to}
-    line = _reminder_line()
-    if line:
-        return _post("SendSMS", {**credentials, "from": line, "text": text, "isflash": "false"}, OTP_ERRORS)
+    lines = _reminder_lines()
+    if lines:
+        # One line after another until one gets through: a recipient may have
+        # blocked one of them (لغو ۱۱ / لیست سیاه), and the next still reaches them.
+        last = None
+        for line in lines:
+            try:
+                return _post("SendSMS", {**credentials, "from": line, "text": text, "isflash": "false"}, OTP_ERRORS)
+            except SmsError as exc:
+                last = exc
+                logger.warning("SendSMS from %s to %s failed (%s): %s", line, mask_phone(to), exc.code, exc.detail)
+                if exc.code in ACCOUNT_ERRORS:
+                    break  # Another line would fail the same way.
+        raise last
     # «;» separates the template's variables, so it cannot appear inside one.
     values = [str(v).replace(";", "،") for v in (template_values or [text])]
     return _post("BaseServiceNumber", {**credentials, "text": ";".join(values),

@@ -60,7 +60,7 @@ function toggleLead(p: Priority, m: number) {
 async function saveReminders() {
   try {
     await calendarApi.saveSettings({
-      digest_enabled: st.digest_enabled, digest_time: st.digest_time,
+      digest_enabled: st.digest_enabled, digest_time: st.digest_time, sms_from: st.sms_from, sms_until: st.sms_until,
       priority_rules: st.priority_rules, sms_attendees: st.sms_attendees,
       sms_recipients: recipients.value,
     });
@@ -254,12 +254,22 @@ const field = "bg-slate-100 rounded-xl px-3 py-2 text-sm";
 
         <fieldset :disabled="!st.can_edit" class="space-y-4">
           <div class="rounded-xl border border-slate-100 p-3 space-y-2">
-            <label class="flex items-center gap-2 font-medium text-ink"><input v-model="st.digest_enabled" type="checkbox" /> پیامک برنامه‌ی فردا برای گیرندگان</label>
+            <label class="flex items-center gap-2 font-medium text-ink"><input v-model="st.digest_enabled" type="checkbox" /> پیام برنامه‌ی فردا، شب قبل</label>
+            <p class="text-xs text-slate-500 leading-5">برای هر کس که فردا جلسه دارد — برگزارکننده و دعوت‌شدگان — با فهرست برنامه‌های خودش. داخل سامانه برای همه؛ پیامک برای گیرندگان بالا (و اگر روشن باشد، برای سایر شرکت‌کنندگان).</p>
             <div class="flex flex-wrap items-center gap-3 text-sm">
               <label class="flex items-center gap-2">ساعت ارسال <TimeField v-model="st.digest_time" class="w-28" aria-label="ساعت ارسال" /></label>
               <button type="button" class="text-xs text-sky-600 hover:underline" @click="showPreview">پیش‌نمایش پیامک فردا</button>
             </div>
             <pre v-if="preview" class="text-xs bg-slate-50 rounded-lg p-2 whitespace-pre-wrap font-sans">{{ preview }}</pre>
+          </div>
+
+          <div class="rounded-xl border border-slate-100 p-3 space-y-2">
+            <h4 class="font-medium text-ink text-sm">ساعت مجاز ارسال پیامک</h4>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              از <TimeField v-model="st.sms_from" class="w-28" aria-label="شروع ارسال پیامک" />
+              تا <TimeField v-model="st.sms_until" class="w-28" aria-label="پایان ارسال پیامک" />
+            </div>
+            <p class="text-xs text-slate-500 leading-5">بیرون از این ساعت‌ها پیامکی ارسال نمی‌شود. یادآوری‌ای که در این فاصله سررسید شود، داخل سامانه همان موقع می‌آید و پیامکش در شروع ساعت مجاز (اگر جلسه هنوز شروع نشده باشد) ارسال می‌شود.</p>
           </div>
 
           <div class="space-y-2">

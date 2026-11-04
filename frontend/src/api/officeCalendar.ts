@@ -215,6 +215,9 @@ export interface CalendarSettings {
   sms_recipients: SettingsPerson[];
   digest_enabled: boolean;
   digest_time: string;
+  /** SMS go out only between these hours ("HH:mm"); in-app notices are not held. */
+  sms_from: string;
+  sms_until: string;
   priority_rules: Record<Priority, PriorityRule>;
   sms_attendees: boolean;
   sms_ready: boolean;

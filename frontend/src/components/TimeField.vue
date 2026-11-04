@@ -1,90 +1,100 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useClickOutside } from "@/composables/useClickOutside";
-import { faDigits } from "@/utils/jalali";
 
 /**
- * ساعت، ۲۴ساعته.
+ * ساعت، ۲۴ساعته — the browser's own time picker, minus its AM/PM.
  *
  * `<input type="time">` draws whatever clock the operating system uses, and on
- * most of the company's machines that is «08:00 PM». So the time is typed
- * here (۱۴:۳۰, 1430, ۹ — Persian or Latin digits) or picked from a list in
- * 15-minute steps, and the value stays "HH:mm", exactly what the native input
- * gave, so nothing that reads it changes.
+ * most of the company's machines that is «08:30 AM». This keeps its look —
+ * a field with a clock, opening two scrolling columns, hour then minute, the
+ * chosen one in blue — on a 24-hour clock. The value stays "HH:mm", exactly
+ * what the native input gave, so nothing that reads it changes.
  */
 const props = withDefaults(defineProps<{
   modelValue: string;
-  /** Minutes between the suggestions in the list. */
-  step?: number;
   ariaLabel?: string;
+  /** Classes for the field itself. */
   inputClass?: string;
-}>(), { step: 15, ariaLabel: "ساعت", inputClass: "" });
+}>(), { ariaLabel: "ساعت", inputClass: "" });
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const LATIN = (s: string) => s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+const HOURS = Array.from({ length: 24 }, (_, i) => pad(i));
+const MINUTES = Array.from({ length: 60 }, (_, i) => pad(i));
 
-/** What was typed → "HH:mm", or null if it is not a time. */
-function parse(raw: string): string | null {
-  const s = LATIN(raw).trim().replace(/[٫.,\s]/g, ":");
-  let h: number, m: number;
-  const parts = /^(\d{1,2}):(\d{1,2})$/.exec(s);
-  if (parts) { h = +parts[1]; m = +parts[2]; }
-  else if (/^\d{1,2}$/.test(s)) { h = +s; m = 0; }
-  else if (/^\d{3,4}$/.test(s)) { h = +s.slice(0, -2); m = +s.slice(-2); }
-  else return null;
-  return h <= 23 && m <= 59 ? `${pad(h)}:${pad(m)}` : null;
-}
-
-const text = ref("");
-watch(() => props.modelValue, (v) => { text.value = v ? faDigits(v) : ""; }, { immediate: true });
-
-function commit() {
-  const t = parse(text.value);
-  if (t) emit("update:modelValue", t);
-  text.value = faDigits(t ?? props.modelValue ?? "");
-}
+const parts = computed(() => {
+  const m = /^(\d{1,2}):(\d{1,2})/.exec(props.modelValue || "");
+  return m ? { h: pad(Math.min(23, +m[1])), m: pad(Math.min(59, +m[2])) } : { h: "09", m: "00" };
+});
 
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
-const list = ref<HTMLElement | null>(null);
-useClickOutside(root, () => { if (open.value) { open.value = false; commit(); } });
-const options = computed(() => {
-  const out: string[] = [];
-  for (let m = 0; m < 24 * 60; m += props.step) out.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
-  return out;
-});
-async function show() {
-  open.value = true;
-  await nextTick();
-  // Start the list at the current value, or the nearest step before it.
-  const cur = props.modelValue || "09:00";
-  const i = Math.max(0, options.value.findIndex((o) => o >= cur) - 1);
-  const el = list.value?.children[i] as HTMLElement | undefined;
-  if (el && list.value) list.value.scrollTop = el.offsetTop - 4;
+const hourCol = ref<HTMLElement | null>(null);
+const minCol = ref<HTMLElement | null>(null);
+useClickOutside(root, () => (open.value = false));
+
+/** Bring the chosen hour and minute to the top of their columns, as the native picker does. */
+function scrollToChosen() {
+  for (const [col, v] of [[hourCol.value, parts.value.h], [minCol.value, parts.value.m]] as const) {
+    const el = col?.querySelector<HTMLElement>(`[data-v="${v}"]`);
+    if (col && el) col.scrollTop = el.offsetTop - col.offsetTop;
+  }
 }
-function pick(t: string) {
-  emit("update:modelValue", t);
-  text.value = faDigits(t);
-  open.value = false;
+async function toggle() {
+  open.value = !open.value;
+  if (open.value) { await nextTick(); scrollToChosen(); }
+}
+function setHour(h: string) { emit("update:modelValue", `${h}:${parts.value.m}`); }
+function setMinute(m: string) { emit("update:modelValue", `${parts.value.h}:${m}`); }
+
+/** Arrow keys step the hour (or, with Shift, the minute) without opening the list. */
+function onKey(e: KeyboardEvent) {
+  if (e.key === "Escape") { open.value = false; return; }
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  e.preventDefault();
+  const d = e.key === "ArrowUp" ? 1 : -1;
+  if (e.shiftKey) setMinute(pad((+parts.value.m + d + 60) % 60));
+  else setHour(pad((+parts.value.h + d + 24) % 24));
 }
 </script>
 
 <template>
-  <div ref="root" class="relative">
-    <input
-      v-model="text" type="text" inputmode="numeric" dir="ltr" autocomplete="off" :aria-label="ariaLabel"
-      placeholder="۱۴:۳۰" maxlength="5"
-      :class="['text-center ltr-nums', inputClass || 'w-full bg-slate-100 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300']"
-      @focus="show" @click="!open && show()" @blur="commit" @keydown.enter.prevent="commit(); open = false" @keydown.escape="open = false"
-    />
-    <div v-if="open" ref="list" class="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto bg-surface rounded-xl shadow-pop py-1 text-sm" role="listbox">
-      <button
-        v-for="o in options" :key="o" type="button" role="option" :aria-selected="o === modelValue"
-        class="block w-full px-3 py-1.5 text-center ltr-nums hover:bg-slate-50"
-        :class="o === modelValue ? 'bg-sky-50 text-sky-700 font-semibold' : 'text-ink'"
-        @mousedown.prevent="pick(o)"
-      >{{ faDigits(o) }}</button>
+  <div ref="root" class="relative" dir="ltr">
+    <button
+      type="button" :aria-label="ariaLabel" aria-haspopup="listbox" :aria-expanded="open"
+      :class="['w-full flex items-center justify-between gap-2 text-left focus:outline-none focus:ring-2 focus:ring-sky-300',
+               inputClass || 'bg-slate-100 rounded-xl px-3 py-2 text-sm']"
+      @click="toggle" @keydown="onKey"
+    >
+      <span class="tabular-nums text-ink">{{ parts.h }}:{{ parts.m }}</span>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9"
+           stroke-linecap="round" stroke-linejoin="round" class="text-slate-500 shrink-0" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+      </svg>
+    </button>
+
+    <div v-if="open" class="absolute z-50 mt-1 left-0 flex gap-1 p-1 bg-surface rounded-xl shadow-pop border border-slate-200">
+      <div ref="hourCol" class="h-56 w-12 overflow-y-auto overscroll-contain no-scrollbar" role="listbox" aria-label="ساعت">
+        <button
+          v-for="h in HOURS" :key="h" type="button" role="option" :data-v="h" :aria-selected="h === parts.h"
+          class="block w-full rounded-md py-1.5 text-center text-sm tabular-nums"
+          :class="h === parts.h ? 'bg-sky-500 text-white font-semibold' : 'text-ink hover:bg-slate-100'"
+          @click="setHour(h)"
+        >{{ h }}</button>
+      </div>
+      <div ref="minCol" class="h-56 w-12 overflow-y-auto overscroll-contain no-scrollbar" role="listbox" aria-label="دقیقه">
+        <button
+          v-for="m in MINUTES" :key="m" type="button" role="option" :data-v="m" :aria-selected="m === parts.m"
+          class="block w-full rounded-md py-1.5 text-center text-sm tabular-nums"
+          :class="m === parts.m ? 'bg-sky-500 text-white font-semibold' : 'text-ink hover:bg-slate-100'"
+          @click="setMinute(m); open = false"
+        >{{ m }}</button>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.no-scrollbar { scrollbar-width: thin; }
+</style>

@@ -619,6 +619,8 @@ class CalendarSettingsView(APIView):
             "sms_recipients": [_person(u) for u in st.sms_recipients.filter(is_active=True)],
             "digest_enabled": st.digest_enabled,
             "digest_time": st.digest_time.strftime("%H:%M"),
+            "sms_from": st.sms_from.strftime("%H:%M"),
+            "sms_until": st.sms_until.strftime("%H:%M"),
             "priority_rules": st.priority_rules,
             "sms_attendees": st.sms_attendees,
             "sms_ready": sms.can_send_text(),
@@ -645,11 +647,12 @@ class CalendarSettingsView(APIView):
             st.digest_enabled = bool(d["digest_enabled"])
         if "sms_attendees" in d:
             st.sms_attendees = bool(d["sms_attendees"])
-        if "digest_time" in d:
-            try:
-                st.digest_time = time.fromisoformat(str(d["digest_time"])[:5])
-            except ValueError:
-                raise ValidationError({"digest_time": "ساعت نامعتبر است."})
+        for field in ("digest_time", "sms_from", "sms_until"):
+            if field in d:
+                try:
+                    setattr(st, field, time.fromisoformat(str(d[field])[:5]))
+                except ValueError:
+                    raise ValidationError({field: "ساعت نامعتبر است."})
         if "priority_rules" in d:
             rules = d["priority_rules"]
             clean = {}
