@@ -13,6 +13,7 @@ import NavIcon from "@/components/NavIcon.vue";
 import { MONTH_NAMES, faDigits, isoToJalali, jalaliToIso, monthLength, todayIso } from "@/utils/jalali";
 import EventDialog from "@/components/office/calendar/EventDialog.vue";
 import CalendarSettingsPanel from "@/components/office/calendar/CalendarSettingsPanel.vue";
+import EventPreview from "@/components/office/calendar/EventPreview.vue";
 
 /**
  * تقویم — the company's calendars, read the way Google Calendar reads them.
@@ -160,6 +161,18 @@ const events = computed(() => (data.value?.events ?? []).filter(
   (e) => shown.value.has(e.calendar) || (!!e.home_calendar && shown.value.has(e.home_calendar)),
 ));
 const dayInfo = computed(() => new Map((data.value?.days ?? []).map((d) => [d.date, d])));
+/**
+ * Working days in what the title names: the month in month view — not the
+ * spill-over days from the months either side that fill its grid — the week,
+ * the year, or the agenda's 30 days.
+ */
+const workdayCount = computed(() => {
+  const days = data.value?.days ?? [];
+  if (view.value !== "month") return days.filter((d) => d.workday).length;
+  const j = isoToJalali(cursor.value)!;
+  return days.filter((d) => d.workday && d.jalali[0] === j.jy && d.jalali[1] === j.jm).length;
+});
+const workdayHint = "روزهای کاری شرکت؛ تعطیلی‌های هفتگی و رسمی کسر شده است";
 
 /** Occurrences by the local days they touch. */
 const byDay = computed(() => {
@@ -253,7 +266,10 @@ const inWindow = (iso: string) => iso >= window_.value.from && iso < window_.val
 const dialog = ref<{ event: CalendarEvent | null; at: string } | null>(null);
 const canWrite = computed(() => calendars.value.some((c) => c.can_write));
 function create(at: string) { if (canWrite.value) dialog.value = { event: null, at }; }
-function openEvent(e: CalendarEvent) { dialog.value = { event: e, at: "" }; }
+/** A click shows the event (the invitation, its answers, its discussion); editing is a button there. */
+const preview = ref<CalendarEvent | null>(null);
+function openEvent(e: CalendarEvent) { preview.value = e; }
+function editEvent(e: CalendarEvent) { preview.value = null; dialog.value = { event: e, at: "" }; }
 function slotClick(iso: string, ev: MouseEvent) {
   const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
   const min = Math.floor(((ev.clientY - rect.top) / HOUR_PX) * 2) * 30;
@@ -364,7 +380,7 @@ function pick(e: CalendarEvent) { q.value = ""; results.value = []; cursor.value
 // ---- keyboard ------------------------------------------------------------------
 function onKey(e: KeyboardEvent) {
   const t = e.target as HTMLElement;
-  if (dialog.value || showSettings.value || e.ctrlKey || e.metaKey || e.altKey
+  if (dialog.value || preview.value || showSettings.value || e.ctrlKey || e.metaKey || e.altKey
       || /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable) return;
   const v = VIEWS.find((x) => x.key === e.key.toLowerCase());
   if (v) view.value = v.id;
@@ -375,6 +391,31 @@ function onKey(e: KeyboardEvent) {
 }
 
 const PRIORITY_RING: Record<string, string> = { normal: "", important: "ring-2 ring-amber-300", urgent: "ring-2 ring-rose-400" };
+
+/**
+ * How an invitation looks on the caller's calendar, as organisation calendars
+ * draw it: unanswered — outlined, not filled; «شاید» — paler; declined —
+ * faded and struck through. Events the caller is not invited to: solid.
+ */
+const rsvp = (e: CalendarEvent) => e.my_response?.status ?? "";
+function chipStyle(e: CalendarEvent): Record<string, string> {
+  const st = rsvp(e);
+  if (st === "pending") return { background: "var(--color-surface, #fff)", color: e.color, border: `1.5px dashed ${e.color}` };
+  if (st === "tentative") return { background: `${e.color}99` };
+  if (st === "declined") return { background: `${e.color}40`, color: "#64748b" };
+  return { background: e.color };
+}
+const chipClass = (e: CalendarEvent) => (rsvp(e) === "declined" ? "line-through" : rsvp(e) === "pending" ? "" : "text-white");
+
+/** Invitations waiting for the caller's answer, soonest first (within the drawn window). */
+const pendingInvites = computed(() => {
+  const seen = new Set<number>();
+  return (data.value?.events ?? []).filter((e) => {
+    if (e.my_response?.status !== "pending" || seen.has(e.id) || new Date(e.end) < now.value) return false;
+    seen.add(e.id);
+    return true;
+  });
+});
 const chipTitle = (e: CalendarEvent) =>
   `${e.title} · ${e.calendar_name} · ${KIND_LABELS[e.kind]} · ${PRIORITY_LABELS[e.priority]}${e.location ? " · " + e.location : ""}`;
 </script>
@@ -406,6 +447,17 @@ const chipTitle = (e: CalendarEvent) =>
                     @click="cursor = d">{{ dayNum(d) }}</button>
           </template>
         </div>
+      </div>
+
+      <div v-if="pendingInvites.length" class="office-card p-3 space-y-1.5 text-sm">
+        <h4 class="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+          <NavIcon name="inbox" :size="14" /> دعوت‌های بی‌پاسخ
+          <span class="mr-auto rounded-full bg-sky-500 text-white text-[10px] px-1.5">{{ faDigits(pendingInvites.length) }}</span>
+        </h4>
+        <button v-for="e in pendingInvites.slice(0, 6)" :key="e.key" class="w-full text-right rounded-lg px-2 py-1.5 hover:bg-slate-50 border-r-2" :style="{ borderColor: e.color }" @click="openEvent(e)">
+          <div class="truncate text-ink">{{ e.title }}</div>
+          <div class="text-[11px] text-slate-500">{{ faDigits(isoToJalali(localDay(e.start))!.jd) }} {{ MONTH_NAMES[isoToJalali(localDay(e.start))!.jm - 1] }} · {{ e.all_day ? "تمام روز" : timeOf(e.start) }} · {{ e.created_by_name }}</div>
+        </button>
       </div>
 
       <div class="office-card p-3 space-y-1 text-sm">
@@ -442,7 +494,7 @@ const chipTitle = (e: CalendarEvent) =>
         <button class="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center" aria-label="قبلی" @click="shift(-1)"><NavIcon name="chevron" :size="18" class="rotate-180" /></button>
         <button class="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center" aria-label="بعدی" @click="shift(1)"><NavIcon name="chevron" :size="18" /></button>
         <h2 class="text-lg font-bold text-ink">{{ title }}</h2>
-        <span v-if="data && view !== 'day'" class="text-xs text-slate-500">{{ faDigits(data.workdays) }} روز کاری</span>
+        <span v-if="data && view !== 'day'" class="text-xs text-slate-500" :title="workdayHint">{{ faDigits(workdayCount) }} روز کاری</span>
         <span v-if="loading" class="text-xs text-slate-400">…</span>
         <span class="flex-1"></span>
         <div class="relative">
@@ -486,6 +538,7 @@ const chipTitle = (e: CalendarEvent) =>
                         :class="d === today ? 'bg-sky-500 text-white' : isOff(d) ? 'text-rose-600 hover:bg-rose-100' : 'text-ink hover:bg-slate-100'"
                         @click="goDay(d)">{{ dayNum(d) }}</button>
                 <div v-if="info(d)?.off" class="text-[10px] text-rose-500 truncate px-1" :title="info(d)!.off">{{ info(d)!.off }}</div>
+                <div v-if="info(d) && !info(d)!.workday && info(d)!.factory_workday" class="text-[10px] text-slate-500 truncate px-1">کارخانه باز است</div>
               </div>
             </div>
             <!-- All-day row -->
@@ -494,8 +547,8 @@ const chipTitle = (e: CalendarEvent) =>
               <div v-for="d in gridDays" :key="d" class="flex-1 border-r border-slate-100 p-0.5 space-y-0.5 cursor-pointer"
                    :class="dropDay === d ? 'bg-sky-50' : ''" @click="create(d)"
                    @dragover.prevent="dropDay = d" @dragleave="dropDay === d && (dropDay = '')" @drop.prevent="onDayDrop(d)">
-                <button v-for="e in allDayOf(d)" :key="`${e.key}-${d}`" class="block w-full text-right truncate rounded px-1.5 py-0.5 text-[11px] text-white"
-                        :class="PRIORITY_RING[e.priority]" :style="{ background: e.color }" :title="chipTitle(e)" :draggable="e.can_edit"
+                <button v-for="e in allDayOf(d)" :key="`${e.key}-${d}`" class="block w-full text-right truncate rounded px-1.5 py-0.5 text-[11px]"
+                        :class="[PRIORITY_RING[e.priority], chipClass(e)]" :style="chipStyle(e)" :title="chipTitle(e)" :draggable="e.can_edit"
                         @dragstart="onDayDragStart($event, e, d)" @click.stop="openEvent(e)">{{ e.title }}</button>
               </div>
             </div>
@@ -508,10 +561,10 @@ const chipTitle = (e: CalendarEvent) =>
                 <div v-for="d in gridDays" :key="d" :data-day="d" class="flex-1 relative border-r border-slate-100 cursor-pointer" :class="isOff(d) ? 'bg-rose-50/30' : ''" @click="slotClick(d, $event)">
                   <div v-for="h in 24" :key="h" class="border-b border-slate-100" :style="{ height: `${HOUR_PX}px` }"></div>
                   <div v-for="p in placed(d)" :key="p.e.key" role="button" tabindex="0"
-                       class="absolute rounded-md px-1.5 py-0.5 text-right text-[11px] text-white overflow-hidden shadow-sm hover:z-10 hover:shadow-md select-none touch-none"
-                       :class="[PRIORITY_RING[p.e.priority], p.e.can_edit ? 'cursor-grab' : 'cursor-pointer',
+                       class="absolute rounded-md px-1.5 py-0.5 text-right text-[11px] overflow-hidden shadow-sm hover:z-10 hover:shadow-md select-none touch-none"
+                       :class="[PRIORITY_RING[p.e.priority], chipClass(p.e), p.e.can_edit ? 'cursor-grab' : 'cursor-pointer',
                                 dragKey === p.e.key ? 'z-30 opacity-90 shadow-lg cursor-grabbing' : 'transition']"
-                       :style="{ top: `${p.top}px`, right: `calc(${(p.lane / p.lanes) * 100}% + 2px)`, background: p.e.color,
+                       :style="{ ...chipStyle(p.e), top: `${p.top}px`, right: `calc(${(p.lane / p.lanes) * 100}% + 2px)`,
                                  width: dragKey === p.e.key && drag!.mode === 'move' ? 'calc(100% - 4px)' : `calc(${100 / p.lanes}% - 4px)`,
                                  height: `${Math.max(16, p.height + (dragKey === p.e.key && drag!.mode === 'resize' ? drag!.dy : 0))}px`,
                                  transform: dragKey === p.e.key && drag!.mode === 'move' ? `translate(${drag!.dx}px, ${drag!.dy}px)` : '' }"
@@ -545,8 +598,8 @@ const chipTitle = (e: CalendarEvent) =>
             </div>
             <button v-for="e in on(d).slice(0, 3)" :key="`${e.key}-${d}`"
                     class="flex items-center gap-1 w-full text-right truncate rounded px-1 py-0.5 mt-0.5 text-[11px]"
-                    :class="e.all_day || !isTimed(e) ? 'text-white' : 'text-ink hover:bg-slate-100'"
-                    :style="e.all_day || !isTimed(e) ? { background: e.color } : {}" :title="chipTitle(e)" :draggable="e.can_edit"
+                    :class="[e.all_day || !isTimed(e) ? chipClass(e) : 'text-ink hover:bg-slate-100', rsvp(e) === 'declined' ? 'line-through opacity-60' : '', rsvp(e) === 'pending' && isTimed(e) ? 'italic' : '']"
+                    :style="e.all_day || !isTimed(e) ? chipStyle(e) : {}" :title="chipTitle(e)" :draggable="e.can_edit"
                     @dragstart="onDayDragStart($event, e, d)" @click.stop="openEvent(e)">
               <span v-if="isTimed(e)" class="w-2 h-2 rounded-full shrink-0" :style="{ background: e.color }"></span>
               <span v-if="isTimed(e)" class="text-slate-500">{{ timeOf(e.start) }}</span>
@@ -596,6 +649,7 @@ const chipTitle = (e: CalendarEvent) =>
       </div>
     </section>
 
+    <EventPreview v-if="preview" :event="preview" @close="preview = null" @edit="editEvent(preview!)" @changed="load" />
     <EventDialog v-if="dialog" :event="dialog.event" :at="dialog.at" :calendars="calendars" :people="people" :settings="settings"
                  @close="dialog = null" @saved="saved" />
     <CalendarSettingsPanel v-if="showSettings && settings" :calendars="calendars" :people="people" :settings="settings" :is-admin="isAdmin"

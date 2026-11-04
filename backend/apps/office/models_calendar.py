@@ -8,8 +8,15 @@ meetings each unit, management, the whole company and each person plan.
 
 Who sees what starts from the calendar's kind — a unit's calendar is its
 members' and the managers', management's is the managers', the company's is
-everyone's, a personal one is its owner's — and is widened per person with a
-`CalendarShare` (read / write / manage). See `views_calendar.level_for`.
+everyone's — and is widened per person with a `CalendarShare` (read / write /
+manage). A personal calendar is its owner's alone: not the managers', not the
+admin's; only the owner can share it (delegate it, say, to the office
+manager). See `views_calendar.level_for`.
+
+Meetings work the way an organisation's calendar does: the people on an
+event are invited (`EventResponse` — accepted / tentative / declined / a
+proposed other time), the organiser sees every answer, and everyone on it can
+discuss it (`EventComment`).
 """
 from __future__ import annotations
 
@@ -22,17 +29,23 @@ from apps.core.models import TimeStampedModel
 
 
 class WorkWeek(models.Model):
-    """The weekly days off — a singleton the admin sets. 0 = شنبه … 6 = جمعه."""
+    """
+    The weekly days off — a singleton. 0 = شنبه … 6 = جمعه.
+
+    Two weeks, because the company keeps two: the office (`days_off` — the
+    calendar, sales' selling days) closes پنج‌شنبه and جمعه, the factory
+    (`factory_days_off` — production's entry days) runs پنج‌شنبه.
+    """
 
     days_off = models.JSONField(default=list)
+    factory_days_off = models.JSONField(default=list)
 
     class Meta:
         verbose_name = "روزهای تعطیل هفته"
 
     @classmethod
     def get(cls) -> "WorkWeek":
-        # جمعه only: the factory works پنج‌شنبه.
-        return cls.objects.get_or_create(pk=1, defaults={"days_off": [6]})[0]
+        return cls.objects.get_or_create(pk=1, defaults={"days_off": [5, 6], "factory_days_off": [6]})[0]
 
 
 class Holiday(TimeStampedModel):
@@ -122,6 +135,8 @@ class Event(TimeStampedModel):
     all_day = models.BooleanField(default=False)
     repeat = models.CharField(max_length=10, choices=Repeat.choices, default=Repeat.NONE, blank=True)
     repeat_until = models.DateField(null=True, blank=True)
+    #: Invitees are asked to answer by then (null: no deadline).
+    respond_by = models.DateTimeField(null=True, blank=True)
     #: Minutes before the start to remind; null = the priority's default from `CalendarSettings`.
     reminders = models.JSONField(null=True, blank=True)
     location = models.CharField(max_length=200, blank=True)
@@ -141,6 +156,43 @@ class Event(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.title
+
+
+class EventResponse(models.Model):
+    """One invitee's answer to one event. A row exists for every attendee;
+    it starts «بی‌پاسخ» and is reset to it when the event's time changes."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "بی‌پاسخ"
+        ACCEPTED = "accepted", "می‌آیم"
+        TENTATIVE = "tentative", "شاید / بعداً اعلام می‌کنم"
+        DECLINED = "declined", "نمی‌آیم"
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="responses")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="calendar_responses")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    note = models.CharField(max_length=300, blank=True)
+    #: An answer of «another time would suit me»: when.
+    proposed_start = models.DateTimeField(null=True, blank=True)
+    proposed_end = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("event", "user")
+        verbose_name = "پاسخ دعوت"
+
+
+class EventComment(TimeStampedModel):
+    """A message in an event's discussion — the organiser, the invitees and
+    whoever else can see the event."""
+
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="comments")
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    body = models.TextField(max_length=2000)
+
+    class Meta:
+        ordering = ("created_at",)
+        verbose_name = "نظر رویداد"
 
 
 def _default_rules():

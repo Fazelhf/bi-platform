@@ -26,6 +26,7 @@ urlpatterns = [
     path("calendar/month/", views_calendar.MonthView.as_view(), name="office-calendar-month"),
     path("calendar/range/", views_calendar.RangeView.as_view(), name="office-calendar-range"),
     path("calendar/settings/", views_calendar.CalendarSettingsView.as_view(), name="office-calendar-settings"),
+    path("calendar/freebusy/", views_calendar.FreeBusyView.as_view(), name="office-calendar-freebusy"),
     path("calendar/sms-test/", views_calendar.SmsTestView.as_view(), name="office-calendar-sms-test"),
     path("calendar/digest-preview/", views_calendar.DigestPreviewView.as_view(), name="office-calendar-digest"),
     path("calendar/workweek/", views_calendar.WorkWeekView.as_view(), name="office-workweek"),

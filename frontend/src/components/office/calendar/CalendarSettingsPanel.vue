@@ -17,7 +17,8 @@ import NavIcon from "@/components/NavIcon.vue";
  *    and its hour, and a test send. The executives and the office managers edit it.
  *  • مدیر دفتر — who runs the management team's calendars. An executive (or the admin) names them.
  *  • دسترسی‌ها — on each calendar the caller manages: who else reads / writes / manages it.
- *  • تعطیلات — the weekly days off and the holidays (the admin's).
+ *  • روزهای کاری — the office's and the factory's weekly days off, and the
+ *    holidays. Everyone sees them; whoever sets the calendar changes them.
  */
 const props = defineProps<{
   calendars: CalendarRow[];
@@ -33,7 +34,7 @@ const tabs = computed(() => [
   { id: "reminders", label: "یادآوری و پیامک" },
   ...(props.settings.can_name_office ? [{ id: "office", label: "مدیر دفتر" }] : []),
   ...(managed.value.length ? [{ id: "access", label: "دسترسی‌ها" }] : []),
-  ...(props.isAdmin ? [{ id: "holidays", label: "تعطیلات" }] : []),
+  { id: "holidays", label: "روزهای کاری و تعطیلات" },
 ]);
 const tab = ref("reminders");
 
@@ -129,10 +130,15 @@ async function saveAccess() {
 
 // ---- holidays ----------------------------------------------------------------
 const holidays = ref<HolidayRow[]>([]);
-const daysOff = ref<number[]>([]);
+const week = ref<{ days_off: number[]; factory_days_off: number[]; can_edit: boolean }>({ days_off: [], factory_days_off: [], can_edit: false });
+const WEEKS = [
+  { field: "days_off" as const, title: "شرکت (دفتر، تقویم، فروش)" },
+  { field: "factory_days_off" as const, title: "کارخانه (تولید)" },
+];
+const offNames = (days: number[]) => (days.length ? days.map((d) => WEEKDAYS[d]).join(" و ") : "بدون تعطیلی هفتگی");
 const newHoliday = reactive({ date: "", title: "" });
 async function loadHolidays() {
-  [holidays.value, daysOff.value] = await Promise.all([calendarApi.holidays(), calendarApi.workweek()]);
+  [holidays.value, week.value] = await Promise.all([calendarApi.holidays(), calendarApi.workweek()]);
 }
 async function addHoliday() {
   if (!newHoliday.date || !newHoliday.title.trim()) return toast.error("تاریخ و عنوان تعطیلی را وارد کنید.");
@@ -151,15 +157,17 @@ async function removeHoliday(h: HolidayRow) {
   await loadHolidays();
   emit("changed");
 }
-async function toggleDayOff(d: number) {
-  const next = daysOff.value.includes(d) ? daysOff.value.filter((x) => x !== d) : [...daysOff.value, d];
-  daysOff.value = await calendarApi.setWorkweek(next);
+async function toggleDayOff(d: number, which: "days_off" | "factory_days_off") {
+  const field = which;
+  const cur = week.value[field];
+  const next = cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d];
+  week.value = await calendarApi.setWorkweek({ [field]: next });
   emit("changed");
 }
 
 onMounted(() => {
   if (managed.value.length) loadAccess();
-  if (props.isAdmin) loadHolidays();
+  loadHolidays();
 });
 const field = "bg-slate-100 rounded-xl px-3 py-2 text-sm";
 </script>
@@ -299,13 +307,21 @@ const field = "bg-slate-100 rounded-xl px-3 py-2 text-sm";
 
       <!-- Holidays -->
       <section v-else-if="tab === 'holidays'" class="space-y-3">
-        <div class="flex flex-wrap items-center gap-2 text-sm">
-          <span class="text-slate-500">تعطیل هفتگی:</span>
-          <label v-for="(w, i) in WEEKDAYS" :key="w" class="flex items-center gap-1 text-xs bg-slate-100 rounded-full px-2 py-1 cursor-pointer">
-            <input type="checkbox" :checked="daysOff.includes(i)" @change="toggleDayOff(i)" />{{ w }}
-          </label>
+        <div v-for="w in WEEKS" :key="w.field" class="rounded-xl border border-slate-100 p-3 space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <b class="text-sm text-ink">{{ w.title }}</b>
+            <span class="text-xs text-slate-500">تعطیل هفتگی: {{ offNames(week[w.field]) }}</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <label v-for="(d, i) in WEEKDAYS" :key="d" class="flex items-center gap-1 text-xs rounded-full px-2.5 py-1"
+                   :class="[week[w.field].includes(i) ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600', week.can_edit ? 'cursor-pointer' : '']">
+              <input type="checkbox" :checked="week[w.field].includes(i)" :disabled="!week.can_edit" @change="toggleDayOff(i, w.field)" />{{ d }}
+            </label>
+          </div>
         </div>
-        <form class="flex flex-wrap gap-2 items-end" @submit.prevent="addHoliday">
+        <p v-if="!week.can_edit" class="text-xs text-slate-400">تعیین روزهای تعطیل با ادمین، مدیران ارشد و مدیر دفتر است.</p>
+        <h4 class="text-sm font-medium text-ink pt-1">تعطیلات رسمی و مناسبت‌ها (برای شرکت و کارخانه)</h4>
+        <form v-if="week.can_edit" class="flex flex-wrap gap-2 items-end" @submit.prevent="addHoliday">
           <div class="w-44"><JalaliDateField v-model="newHoliday.date" placeholder="تاریخ" /></div>
           <input v-model="newHoliday.title" placeholder="عنوان تعطیلی، مثلاً «عید فطر»" :class="field" class="flex-1 min-w-[180px]" />
           <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm">+ افزودن تعطیلی</button>
@@ -313,7 +329,7 @@ const field = "bg-slate-100 rounded-xl px-3 py-2 text-sm";
         <ul class="grid sm:grid-cols-2 gap-1.5 text-sm max-h-72 overflow-y-auto">
           <li v-for="h in holidays" :key="h.id" class="flex items-center justify-between bg-rose-50 rounded-lg px-3 py-1.5">
             <span><b class="ltr-nums">{{ h.jalali }}</b> · {{ h.title }}</span>
-            <button class="text-xs text-red-500" @click="removeHoliday(h)">حذف</button>
+            <button v-if="week.can_edit" class="text-xs text-red-500" @click="removeHoliday(h)">حذف</button>
           </li>
           <li v-if="!holidays.length" class="text-xs text-slate-400">هنوز تعطیلی‌ای ثبت نشده.</li>
         </ul>

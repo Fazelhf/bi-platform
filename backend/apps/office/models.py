@@ -49,6 +49,8 @@ from .models_calendar import (  # noqa: F401,E402  (re-export)
     CalendarSettings,
     CalendarShare,
     Event,
+    EventComment,
+    EventResponse,
     Holiday,
     ReminderLog,
     WorkWeek,
