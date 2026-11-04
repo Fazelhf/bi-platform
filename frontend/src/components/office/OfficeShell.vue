@@ -251,15 +251,17 @@ const tabItems = computed(() =>
     <!-- ===== Content ===== -->
     <div class="flex-1 min-w-0 p-3 md:p-0">
       <header
-        class="app-navbar bg-surface md:rounded-card md:shadow-soft mb-4 overflow-hidden"
+        class="app-navbar relative z-30 bg-surface md:rounded-card md:shadow-soft mb-4"
         :class="{ 'is-scrolled': scrolled }"
       >
         <!-- The section's colour as a top edge: present without shouting. -->
-        <div class="h-1.5" :style="{ background: 'rgb(' + section.color + ')' }"></div>
+        <!-- Rounded by hand rather than by overflow-hidden on the header: that
+             clipped the bell's list and the profile menu, which drop out of it. -->
+        <div class="h-1.5 md:rounded-t-card" :style="{ background: 'rgb(' + section.color + ')' }"></div>
         <!-- The section's colour washes the header, so you know where you are
              before you read the title — a thin strip alone was easy to miss. -->
         <div
-          class="px-4 sm:px-5 py-3 flex items-center gap-3 transition-colors duration-300"
+          class="px-4 sm:px-5 py-3 flex items-center gap-3 transition-colors duration-300 md:rounded-b-card"
           :style="{ background: 'linear-gradient(to left, rgb(' + section.color + ' / 0.16), rgb(' + section.color + ' / 0.03) 70%)' }"
         >
           <button

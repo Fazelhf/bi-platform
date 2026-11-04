@@ -89,6 +89,10 @@ def link_for(notification, user) -> dict | None:
         return {"name": "office-letter", "params": {"id": notification.target_id}}
     if label == "office.Task" and notification.target_id:
         return {"name": "office-tasks", "query": {"task": notification.target_id}}
+    if label == "office.Event" and notification.target_id:
+        return {"name": "office-calendar", "query": {"event": notification.target_id}}
+    if label == "office.Calendar":
+        return {"name": "office-calendar"}
 
     # Waiting on you: the کارتابل is where the decision is actually made, so a
     # "submitted" notice goes there rather than to a read-only dashboard.

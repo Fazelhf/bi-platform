@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import {
-  calendarApi, KIND_LABELS, PRIORITY_LABELS,
+  calendarApi, KIND_LABELS, PRIORITY_LABELS, RSVP_LABELS,
   type CalendarEvent, type CalendarRange, type CalendarRow, type CalendarSettings, type RangeDay,
 } from "@/api/officeCalendar";
 import { officeApi, type Person } from "@/api/office";
@@ -24,11 +25,12 @@ import EventPreview from "@/components/office/calendar/EventPreview.vue";
  * until switched on, so a manager is not handed seven units' meetings at once.
  * Day / week / month / year / agenda views share one fetched window.
  */
-type View = "day" | "week" | "month" | "year" | "agenda";
+type View = "day" | "week" | "month" | "year" | "agenda" | "invites";
 const VIEWS: { id: View; label: string; key: string }[] = [
   { id: "day", label: "روز", key: "d" }, { id: "week", label: "هفته", key: "w" },
   { id: "month", label: "ماه", key: "m" }, { id: "year", label: "سال", key: "y" },
   { id: "agenda", label: "برنامه‌ها", key: "a" },
+  { id: "invites", label: "دعوت‌نامه‌ها", key: "i" },
 ];
 const WEEKDAYS = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنج‌شنبه", "جمعه"];
 const WEEKDAYS_SHORT = ["ش", "ی", "د", "س", "چ", "پ", "ج"];
@@ -154,6 +156,7 @@ onMounted(async () => {
   window.addEventListener("keydown", onKey);
   tick = window.setInterval(() => { now.value = new Date(); today.value = todayIso(); }, 60_000);
   scrollToMorning();
+  openFromRoute();
 });
 onBeforeUnmount(() => { window.removeEventListener("keydown", onKey); clearInterval(tick); });
 
@@ -263,13 +266,57 @@ function miniShift(by: number) {
 const inWindow = (iso: string) => iso >= window_.value.from && iso < window_.value.to && view.value !== "year";
 
 // ---- the dialogs -------------------------------------------------------------------
-const dialog = ref<{ event: CalendarEvent | null; at: string } | null>(null);
+const dialog = ref<{ event: CalendarEvent | null; at: string; occurrence?: string } | null>(null);
 const canWrite = computed(() => calendars.value.some((c) => c.can_write));
 function create(at: string) { if (canWrite.value) dialog.value = { event: null, at }; }
 /** A click shows the event (the invitation, its answers, its discussion); editing is a button there. */
 const preview = ref<CalendarEvent | null>(null);
 function openEvent(e: CalendarEvent) { preview.value = e; }
-function editEvent(e: CalendarEvent) { preview.value = null; dialog.value = { event: e, at: "" }; }
+/** A notification links here as ?event=<id>: go to its day and open it. */
+const route = useRoute();
+const router = useRouter();
+async function openFromRoute() {
+  const id = Number(route.query.event);
+  if (!id) return;
+  try {
+    const e = await calendarApi.event(id);
+    cursor.value = localDay(e.start);
+    preview.value = { ...e, key: `${e.id}@link` };
+  } catch {
+    toast.error("این برنامه پیدا نشد؛ ممکن است حذف شده باشد یا به آن دسترسی نداشته باشید.");
+  }
+  router.replace({ query: { ...route.query, event: undefined } });
+}
+watch(() => route.query.event, (v) => { if (v) openFromRoute(); });
+
+function editEvent(e: CalendarEvent, scope: "series" | "occurrence") {
+  preview.value = null;
+  dialog.value = { event: e, at: "", occurrence: scope === "occurrence" ? e.start : undefined };
+}
+
+// ---- the invitation inbox ------------------------------------------------------------
+const box = ref<"received" | "sent">("received");
+const boxFilter = ref<string>("");
+const boxRows = ref<CalendarEvent[]>([]);
+const boxLoading = ref(false);
+async function loadBox() {
+  boxLoading.value = true;
+  try { boxRows.value = await calendarApi.invitations(box.value); } finally { boxLoading.value = false; }
+}
+watch([view, box], () => { if (view.value === "invites") loadBox(); });
+const boxShown = computed(() => boxRows.value.filter((e) => {
+  if (!boxFilter.value) return true;
+  if (box.value === "received") return (e.my_response?.status ?? "") === boxFilter.value;
+  return e.responses.some((r) => r.status === boxFilter.value);
+}));
+const tally = (e: CalendarEvent) => {
+  const c: Record<string, number> = {};
+  for (const r of e.responses) c[r.status] = (c[r.status] ?? 0) + 1;
+  return c;
+};
+async function exportIcs() {
+  try { await calendarApi.downloadIcs(); } catch (err) { toast.error(apiError(err)); }
+}
 function slotClick(iso: string, ev: MouseEvent) {
   const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
   const min = Math.floor(((ev.clientY - rect.top) / HOUR_PX) * 2) * 30;
@@ -331,12 +378,22 @@ async function onDragEnd() {
 
 async function moveEvent(e: CalendarEvent, days: number, minutes: number, resize = false) {
   if (!e.can_edit) return;
-  if (e.repeat && !(await confirm({ message: `«${e.title}» تکراری است؛ همه‌ی تکرارهایش جابه‌جا شود؟`, okText: "جابه‌جا کن" }))) return;
   const shiftMs = days * 86_400_000 + minutes * 60_000;
   const first = new Date(e.series_start ?? e.start).getTime();
   const length = new Date(e.end).getTime() - new Date(e.start).getTime();
   const start = resize ? first : first + shiftMs;
   const end = Math.max(start + SNAP * 60_000, first + length + shiftMs);
+  // A drag is a change of time like any other: say what it becomes, and ask.
+  const occStart = new Date(e.start).getTime() + (resize ? 0 : shiftMs);
+  const occEnd = Math.max(occStart + SNAP * 60_000, new Date(e.end).getTime() + shiftMs);
+  const label = (ms: number) => { const d = new Date(ms); return `${faDigits(isoToJalali(localDay(d.toISOString()))!.jd)} ${MONTH_NAMES[isoToJalali(localDay(d.toISOString()))!.jm - 1]} ${timeOf(d.toISOString())}`; };
+  const lines = [`زمان «${e.title}» به ${label(occStart)} تا ${timeOf(new Date(occEnd).toISOString())} تغییر کند؟`];
+  if (e.repeat) lines.push("این برنامه تکراری است؛ همه‌ی تکرارهایش جابه‌جا می‌شوند.");
+  if (e.attendees.length) lines.push("به دعوت‌شدگان اطلاع داده می‌شود و از آن‌ها دوباره پاسخ خواسته می‌شود.");
+  if (!(await confirm({ title: resize ? "تغییر ساعت پایان" : "جابه‌جایی برنامه", message: lines.join("\n"), okText: "بله، تغییر بده" }))) {
+    await load(); // Snap the card back to where it was.
+    return;
+  }
   try {
     await calendarApi.saveEvent({ start: new Date(start).toISOString(), end: new Date(end).toISOString() }, e.id);
     toast.success(resize ? "زمان پایان تغییر کرد." : "برنامه جابه‌جا شد.");
@@ -397,21 +454,22 @@ const PRIORITY_RING: Record<string, string> = { normal: "", important: "ring-2 r
  * draw it: unanswered — outlined, not filled; «شاید» — paler; declined —
  * faded and struck through. Events the caller is not invited to: solid.
  */
-const rsvp = (e: CalendarEvent) => e.my_response?.status ?? "";
+const rsvp = (e: CalendarEvent) => (e.cancelled_at ? "declined" : e.my_response?.status ?? "");
 function chipStyle(e: CalendarEvent): Record<string, string> {
   const st = rsvp(e);
-  if (st === "pending") return { background: "var(--color-surface, #fff)", color: e.color, border: `1.5px dashed ${e.color}` };
+  if (st === "pending" || st === "more_time" || st === "proposed") return { background: "var(--color-surface, #fff)", color: e.color, border: `1.5px dashed ${e.color}` };
   if (st === "tentative") return { background: `${e.color}99` };
   if (st === "declined") return { background: `${e.color}40`, color: "#64748b" };
   return { background: e.color };
 }
-const chipClass = (e: CalendarEvent) => (rsvp(e) === "declined" ? "line-through" : rsvp(e) === "pending" ? "" : "text-white");
+const chipClass = (e: CalendarEvent) =>
+  rsvp(e) === "declined" ? "line-through" : ["pending", "more_time", "proposed"].includes(rsvp(e)) ? "" : "text-white";
 
 /** Invitations waiting for the caller's answer, soonest first (within the drawn window). */
 const pendingInvites = computed(() => {
   const seen = new Set<number>();
   return (data.value?.events ?? []).filter((e) => {
-    if (e.my_response?.status !== "pending" || seen.has(e.id) || new Date(e.end) < now.value) return false;
+    if (!["pending", "more_time"].includes(e.my_response?.status ?? "") || e.cancelled_at || seen.has(e.id) || new Date(e.end) < now.value) return false;
     seen.add(e.id);
     return true;
   });
@@ -451,7 +509,7 @@ const chipTitle = (e: CalendarEvent) =>
 
       <div v-if="pendingInvites.length" class="office-card p-3 space-y-1.5 text-sm">
         <h4 class="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
-          <NavIcon name="inbox" :size="14" /> دعوت‌های بی‌پاسخ
+          <NavIcon name="inbox" :size="14" /> دعوت‌های منتظر پاسخ شما
           <span class="mr-auto rounded-full bg-sky-500 text-white text-[10px] px-1.5">{{ faDigits(pendingInvites.length) }}</span>
         </h4>
         <button v-for="e in pendingInvites.slice(0, 6)" :key="e.key" class="w-full text-right rounded-lg px-2 py-1.5 hover:bg-slate-50 border-r-2" :style="{ borderColor: e.color }" @click="openEvent(e)">
@@ -494,7 +552,7 @@ const chipTitle = (e: CalendarEvent) =>
         <button class="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center" aria-label="قبلی" @click="shift(-1)"><NavIcon name="chevron" :size="18" class="rotate-180" /></button>
         <button class="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center" aria-label="بعدی" @click="shift(1)"><NavIcon name="chevron" :size="18" /></button>
         <h2 class="text-lg font-bold text-ink">{{ title }}</h2>
-        <span v-if="data && view !== 'day'" class="text-xs text-slate-500" :title="workdayHint">{{ faDigits(workdayCount) }} روز کاری</span>
+        <span v-if="data && view !== 'day' && view !== 'invites'" class="text-xs text-slate-500" :title="workdayHint">{{ faDigits(workdayCount) }} روز کاری</span>
         <span v-if="loading" class="text-xs text-slate-400">…</span>
         <span class="flex-1"></span>
         <div class="relative">
@@ -514,6 +572,7 @@ const chipTitle = (e: CalendarEvent) =>
           <button v-for="v in VIEWS" :key="v.id" class="rounded-lg px-3 py-1 transition"
                   :class="view === v.id ? 'bg-surface shadow text-ink font-semibold' : 'text-slate-500'" @click="view = v.id">{{ v.label }}</button>
         </div>
+        <button class="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-600 flex items-center justify-center" aria-label="دریافت ICS" title="خروجی تقویم من (ICS) برای Outlook / Google" @click="exportIcs"><NavIcon name="download" :size="18" /></button>
         <button class="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-600 flex items-center justify-center" aria-label="تنظیمات تقویم" title="تنظیمات تقویم" @click="showSettings = true"><NavIcon name="settings" :size="19" /></button>
         <button v-if="canWrite" class="lg:hidden bg-panel text-white rounded-xl px-3 py-1.5 text-sm" @click="create(cursor)">+ برنامه</button>
       </div>
@@ -628,6 +687,42 @@ const chipTitle = (e: CalendarEvent) =>
         </div>
       </div>
 
+      <!-- Invitations -->
+      <div v-else-if="view === 'invites'" class="office-card">
+        <div class="flex flex-wrap items-center gap-2 p-3 border-b border-slate-100">
+          <div class="flex rounded-xl bg-slate-100 p-0.5 text-sm">
+            <button v-for="b in (['received', 'sent'] as const)" :key="b" class="rounded-lg px-3 py-1 transition"
+                    :class="box === b ? 'bg-surface shadow text-ink font-semibold' : 'text-slate-500'" @click="box = b; boxFilter = ''">{{ b === "received" ? "دریافتی" : "ارسالی" }}</button>
+          </div>
+          <select v-model="boxFilter" class="bg-slate-100 rounded-lg px-2 py-1.5 text-sm" aria-label="فیلتر وضعیت">
+            <option value="">همه‌ی وضعیت‌ها</option>
+            <option v-for="(label, st) in RSVP_LABELS" :key="st" :value="st">{{ label }}</option>
+          </select>
+          <span v-if="boxLoading" class="text-xs text-slate-400">…</span>
+        </div>
+        <div class="divide-y divide-slate-100">
+          <button v-for="e in boxShown" :key="e.id" class="w-full flex items-center gap-3 text-right px-4 py-3 hover:bg-slate-50 text-sm"
+                  @click="openEvent({ ...e, key: `${e.id}@inbox` })">
+            <span class="w-1 self-stretch rounded-full shrink-0" :style="{ background: e.color }"></span>
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-ink" :class="e.cancelled_at ? 'line-through text-slate-400' : ''">{{ e.title }}</div>
+              <div class="text-xs text-slate-500">
+                {{ faDigits(isoToJalali(localDay(e.start))!.jd) }} {{ MONTH_NAMES[isoToJalali(localDay(e.start))!.jm - 1] }}
+                · {{ e.all_day ? "تمام روز" : timeOf(e.start) }}
+                <template v-if="box === 'received'"> · از {{ e.created_by_name }}</template>
+                <template v-if="e.respond_by"> · مهلت پاسخ {{ faDigits(isoToJalali(localDay(e.respond_by))!.jd) }} {{ MONTH_NAMES[isoToJalali(localDay(e.respond_by))!.jm - 1] }}</template>
+              </div>
+            </div>
+            <span v-if="e.cancelled_at" class="text-[11px] rounded-full px-2 py-0.5 bg-rose-50 text-rose-700">لغو شد</span>
+            <span v-else-if="box === 'received' && e.my_response" class="text-[11px] rounded-full px-2 py-0.5 bg-slate-100 text-slate-600">{{ RSVP_LABELS[e.my_response.status] }}</span>
+            <span v-else class="text-[11px] text-slate-500 flex flex-wrap gap-x-2 justify-end max-w-[45%]">
+              <span v-for="(n, st) in tally(e)" :key="st">{{ RSVP_LABELS[st as keyof typeof RSVP_LABELS] }} {{ faDigits(n) }}</span>
+            </span>
+          </button>
+          <p v-if="!boxShown.length && !boxLoading" class="p-6 text-center text-sm text-slate-400">دعوت‌نامه‌ای نیست.</p>
+        </div>
+      </div>
+
       <!-- Agenda -->
       <div v-else class="office-card divide-y divide-slate-100">
         <div v-for="g in agenda" :key="g.d" class="flex gap-4 p-3">
@@ -649,8 +744,9 @@ const chipTitle = (e: CalendarEvent) =>
       </div>
     </section>
 
-    <EventPreview v-if="preview" :event="preview" @close="preview = null" @edit="editEvent(preview!)" @changed="load" />
-    <EventDialog v-if="dialog" :event="dialog.event" :at="dialog.at" :calendars="calendars" :people="people" :settings="settings"
+    <EventPreview v-if="preview" :event="preview" :people="people" @close="preview = null" @edit="(s) => editEvent(preview!, s)"
+                  @changed="load(); if (view === 'invites') loadBox()" />
+    <EventDialog v-if="dialog" :event="dialog.event" :at="dialog.at" :occurrence="dialog.occurrence" :calendars="calendars" :people="people" :settings="settings"
                  @close="dialog = null" @saved="saved" />
     <CalendarSettingsPanel v-if="showSettings && settings" :calendars="calendars" :people="people" :settings="settings" :is-admin="isAdmin"
                            @close="showSettings = false" @changed="settingsChanged" />

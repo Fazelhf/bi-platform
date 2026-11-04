@@ -23,6 +23,8 @@ const props = defineProps<{
   calendars: CalendarRow[];
   people: Person[];
   settings: CalendarSettings | null;
+  /** Editing one occurrence of a series on its own: that occurrence's start. */
+  occurrence?: string;
 }>();
 const emit = defineEmits<{ close: []; saved: [] }>();
 
@@ -42,23 +44,27 @@ const form = reactive({
   calendar: 0, title: "", kind: "meeting" as EventKind, priority: "normal" as Priority,
   startDate: "", startTime: "09:00", endDate: "", endTime: "10:00", all_day: false,
   repeat: "" as Repeat, repeat_until: "", respond_by: "", customReminders: false, reminders: [] as number[],
-  attendees: [] as number[], guests: [] as string[], location: "", description: "",
+  attendees: [] as number[], guests: [] as string[], location: "", online_link: "", description: "",
 });
 
 function reset() {
   const e = props.event;
   if (e) {
-    // A repeating event is edited from its first occurrence, so the series does not move.
-    const s = localParts(e.series_start ?? e.start);
+    // The whole series is edited from its first occurrence, so it does not
+    // move; one occurrence on its own, from that occurrence.
+    const from = props.occurrence ? e.start : e.series_start ?? e.start;
+    const s = localParts(from);
     const length = new Date(e.end).getTime() - new Date(e.start).getTime();
-    const en = localParts(new Date(new Date(e.series_start ?? e.start).getTime() + length).toISOString());
+    const en = localParts(new Date(new Date(from).getTime() + length).toISOString());
     Object.assign(form, {
       calendar: e.calendar, title: e.title, kind: e.kind, priority: e.priority,
       startDate: s.date, startTime: s.time, endDate: en.date, endTime: en.time, all_day: e.all_day,
       repeat: e.repeat, repeat_until: e.repeat_until ?? "", respond_by: e.respond_by ? localStamp(e.respond_by) : "",
       customReminders: e.reminders !== null,
-      reminders: [...(e.reminders ?? [])], attendees: [...e.attendees], guests: [...(e.guests ?? [])], location: e.location, description: e.description,
+      reminders: [...(e.reminders ?? [])], attendees: [...e.attendees], guests: [...(e.guests ?? [])], location: e.location, online_link: e.online_link ?? "",
+      description: e.description,
     });
+    if (props.occurrence) form.repeat = "";
     return;
   }
   const [date, time] = props.at.split("T");
@@ -69,7 +75,7 @@ function reset() {
   Object.assign(form, {
     calendar: own?.id ?? 0, title: "", kind: "meeting", priority: "normal",
     startDate: date, startTime, endDate: date, endTime, all_day: false,
-    repeat: "", repeat_until: "", respond_by: "", customReminders: false, reminders: [], attendees: [], guests: [], location: "", description: "",
+    repeat: "", repeat_until: "", respond_by: "", customReminders: false, reminders: [], attendees: [], guests: [], location: "", online_link: "", description: "",
   });
 }
 watch(() => [props.event, props.at], reset, { immediate: true });
@@ -105,14 +111,20 @@ async function save() {
   if (end < start) return toast.error("پایان پیش از شروع است.");
   saving.value = true;
   try {
-    await calendarApi.saveEvent({
+    const body = {
       calendar: form.calendar, title: form.title.trim(), kind: form.kind, priority: form.priority,
       start, end, all_day: form.all_day, repeat: form.repeat, repeat_until: form.repeat ? form.repeat_until || null : null,
       reminders: form.customReminders ? form.reminders : null, attendees: form.attendees,
       guests: [...form.guests, ...(guest.value.trim() ? [guest.value.trim()] : [])],
       respond_by: form.attendees.length && form.respond_by ? form.respond_by : null,
-      location: form.location, description: form.description,
-    }, props.event?.id);
+      location: form.location, online_link: form.online_link.trim(), description: form.description,
+    };
+    if (props.event && props.occurrence) {
+      const { repeat: _r, repeat_until: _u, ...one } = body;
+      await calendarApi.saveOccurrence(props.event.series ?? props.event.id, props.occurrence, one);
+    } else {
+      await calendarApi.saveEvent(body, props.event?.id);
+    }
     toast.success(props.event ? "برنامه ویرایش شد." : "برنامه ثبت شد.");
     emit("saved");
   } catch (e) {
@@ -144,19 +156,30 @@ function localStamp(iso: string) {
 }
 
 // ---- who is busy then: when, never with what -----------------------------------------
+/** Invitees who keep their time private (they did not opt in to free/busy). */
+const unknown = ref<string[]>([]);
+/** The organiser's own clashes, read from their own calendar only. */
+const mine = ref<string[]>([]);
 const busy = ref<string[]>([]);
 let fbTimer = 0;
 watch(() => [form.attendees.slice(), form.startDate, form.startTime, form.endDate, form.endTime, form.all_day], () => {
   clearTimeout(fbTimer);
   fbTimer = window.setTimeout(async () => {
-    if (!form.attendees.length || !form.startDate) { busy.value = []; return; }
+    if (!form.startDate) { busy.value = mine.value = unknown.value = []; return; }
     const from = new Date(`${form.startDate}T${form.all_day ? "00:00" : form.startTime}`);
     const to = new Date(`${form.endDate || form.startDate}T${form.all_day ? "23:59" : form.endTime}`);
-    if (!(to > from)) { busy.value = []; return; }
+    if (!(to > from) || form.all_day) { busy.value = mine.value = unknown.value = []; return; }
+    try {
+      const own = await calendarApi.conflicts(from.toISOString(), to.toISOString(), props.event?.id);
+      mine.value = own.map((c) => c.title);
+    } catch { mine.value = []; }
+    if (!form.attendees.length) { busy.value = unknown.value = []; return; }
     try {
       const fb = await calendarApi.freebusy(form.attendees, from.toISOString(), to.toISOString(), props.event?.id);
-      busy.value = form.attendees.filter((id) => (fb[id] ?? []).length).map((id) => peopleById.value.get(id)?.name ?? "؟");
-    } catch { busy.value = []; }
+      const name = (id: number) => peopleById.value.get(id)?.name ?? "؟";
+      busy.value = form.attendees.filter((id) => (fb[id] ?? []).length).map(name);
+      unknown.value = form.attendees.filter((id) => fb[id] === null).map(name);
+    } catch { busy.value = unknown.value = []; }
   }, 400);
 }, { immediate: true });
 </script>
@@ -294,17 +317,25 @@ watch(() => [form.attendees.slice(), form.startDate, form.startTime, form.endDat
         </div>
       </div>
 
+      <p v-if="mine.length" class="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-2 flex items-start gap-1.5">
+        <NavIcon name="alert" :size="14" class="shrink-0 mt-px" />
+        <span>در تقویم خودتان در این زمان این‌ها را دارید: {{ mine.join("، ") }}</span>
+      </p>
       <p v-if="busy.length" class="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-2 flex items-start gap-1.5">
         <NavIcon name="alert" :size="14" class="shrink-0 mt-px" />
-        <span>در این زمان برنامه‌ی دیگری دارند: {{ busy.join("، ") }}</span>
+        <span>در این زمان مشغول‌اند: {{ busy.join("، ") }}</span>
       </p>
+      <p v-if="unknown.length" class="text-[11px] text-slate-400">زمان آزاد این افراد نمایش داده نمی‌شود (خودشان نخواسته‌اند): {{ unknown.join("، ") }}</p>
       <div v-if="form.attendees.length" class="flex flex-wrap items-center gap-2 text-sm">
         <span class="text-xs text-slate-500 flex items-center gap-1"><NavIcon name="clock" :size="14" /> مهلت پاسخ به دعوت</span>
         <div class="w-56"><JalaliDateField v-model="form.respond_by" with-time placeholder="بدون مهلت" clearable /></div>
       </div>
 
-      <input v-model="form.location" placeholder="مکان (اتاق جلسه، آدرس، لینک)" :class="field" />
-      <textarea v-model="form.description" rows="3" placeholder="دستور جلسه / توضیحات" :class="field"></textarea>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <input v-model="form.location" placeholder="مکان (اتاق جلسه، آدرس)" :class="field" />
+        <input v-model="form.online_link" placeholder="لینک جلسه‌ی آنلاین (اختیاری)" :class="field" dir="ltr" class="text-left" />
+      </div>
+      <textarea v-model="form.description" rows="3" placeholder="دستور جلسه — موضوع‌ها و آنچه باید آماده شود" :class="field"></textarea>
 
       <div class="flex items-center gap-2">
         <button class="bg-panel text-white rounded-xl px-5 py-2 text-sm disabled:opacity-50" :disabled="saving">{{ saving ? "در حال ذخیره…" : "ذخیره" }}</button>
