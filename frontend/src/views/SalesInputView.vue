@@ -957,7 +957,7 @@ watch(selectedDay, load);
       <!-- Sticky action bar -->
       <!-- z-30: the table's frozen first/last columns are z-10/z-20, so without
            this the sheet scrolled over the save buttons. -->
-      <div v-if="!frozen" class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex items-center justify-between">
+      <div v-if="!frozen" class="sticky bottom-4 z-30 bg-panel text-white rounded-card shadow-pop p-3 flex flex-wrap items-center justify-between">
         <span class="text-sm text-white/70 px-2">{{ submitHint() }}</span>
         <div class="flex gap-2">
           <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-sm transition-colors" @click="save(false)">ذخیره پیش‌نویس</button>

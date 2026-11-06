@@ -131,7 +131,7 @@ function imported() {
         <button
           v-for="b in BOOKS" :key="b.key"
           class="rounded-lg px-3 py-1.5 text-sm transition"
-          :class="book === b.key ? 'bg-white shadow-sm text-ink font-medium' : 'text-slate-500'"
+          :class="book === b.key ? 'bg-surface shadow-sm text-ink font-medium' : 'text-slate-500'"
           @click="book = b.key"
         >{{ b.label }}</button>
       </div>

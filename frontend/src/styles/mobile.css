@@ -1,0 +1,89 @@
+/* ------------------------------------------------------------------ */
+/* Phones, in every skin. What makes a page sit at its real size on an  */
+/* iPhone and stay there.                                               */
+/*                                                                      */
+/* Imported before Tailwind's layers, so anything that has to beat a    */
+/* utility (`text-sm` on a field) says !important on purpose.           */
+/* ------------------------------------------------------------------ */
+
+/* Rotating a phone must not inflate the text. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* A safety net, not the fix: nothing wider than the screen may widen the page
+   and leave it needing a zoom-out. `clip` rather than `hidden` because hidden
+   would make the body a scroll container and un-stick every sticky header. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+/* Native dropdown lists. The list inherits the field's background, and the
+   field is often translucent (iOS's grey well) or transparent (a filter on a
+   dark panel), so in dark mode it opened as pale text on a pale list. */
+select option,
+select optgroup {
+  background-color: rgb(var(--c-surface));
+  color: rgb(var(--c-ink));
+}
+
+@media (max-width: 767px) {
+  /* A closed drawer sits just past the screen's edge. Safari still counts it
+     as page content, which is what lets the page zoom out to show an empty
+     strip. Hidden only after the slide-out has finished. */
+  .app-sidebar.translate-x-full {
+    visibility: hidden;
+    transition: transform 0.2s, visibility 0s linear 0.2s;
+  }
+
+  /* iOS zooms the whole page into any field under 16px, and does not zoom
+     back out when you leave it. Grid cells are excepted: they are sized to a
+     table, and main.ts stops the zoom there. */
+  :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]), select, textarea):not(td *) {
+    font-size: 16px !important;
+  }
+
+  /* iOS gives date and time fields a fixed native width that ignores
+     `width: 100%`, so two of them side by side overrun a form. An empty one
+     also collapses to nothing without the min-height. */
+  input:is([type="date"], [type="time"], [type="datetime-local"], [type="month"]) {
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 2.5rem;
+  }
+  input::-webkit-date-and-time-value {
+    text-align: right;
+    min-height: 1.5em;
+  }
+
+  /* A page header is a title plus a row of controls, too much for one line on
+     a phone. Let it break instead of pushing the controls off the screen. */
+  main .flex:has(> select),
+  main .flex.justify-between:has(> :is(h1, h2, h3)) {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  select {
+    max-width: 100%;
+  }
+
+  /* A table nobody gave a scroll wrapper scrolls inside its own card rather
+     than cutting off its last columns. */
+  :is(div, section):has(> table:not(.entry-table)) {
+    overflow-x: auto;
+  }
+
+  /* Modals: a form taller than the screen has to scroll inside itself, or its
+     buttons end up unreachable below the fold. dvh follows Safari's toolbar. */
+  .fixed.inset-0.flex > :is(form, div, section)[class*="max-w-"]:not([class*="max-h-"]) {
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}

@@ -107,10 +107,13 @@ function place() {
   const r = el.getBoundingClientRect();
   const below = window.innerHeight - r.bottom;
   const h = Math.min(panel.value?.offsetHeight ?? PANEL_H, PANEL_H);
+  // The panel never goes under 260px, so a narrower field must not decide
+  // where it may sit, and on a small phone it must not exceed the screen.
+  const width = Math.min(Math.max(r.width, 260), window.innerWidth - GAP * 2);
   pos.value = {
     top: below > h + GAP ? r.bottom + GAP : Math.max(GAP, r.top - h - GAP),
-    left: Math.max(GAP, Math.min(r.left, window.innerWidth - r.width - GAP)),
-    width: r.width,
+    left: Math.max(GAP, Math.min(r.right - width, window.innerWidth - width - GAP)),
+    width,
   };
 }
 
@@ -218,7 +221,7 @@ const box =
         :style="{
           top: pos.top + 'px',
           left: pos.left + 'px',
-          width: Math.max(pos.width, 260) + 'px',
+          width: pos.width + 'px',
           zIndex: panelZ,
         }"
         dir="rtl"

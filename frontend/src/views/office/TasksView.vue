@@ -329,7 +329,7 @@ const EDGE: Record<string, string> = {
           <button
             v-for="t in c.tasks.slice(0, 3)" :key="t.id"
             class="block w-full text-right text-[10px] leading-tight truncate rounded px-1 py-0.5 mt-0.5"
-            :class="t.is_overdue ? 'bg-red-100 text-red-700' : 'bg-white text-ink'"
+            :class="t.is_overdue ? 'bg-red-100 text-red-700' : 'bg-surface text-ink'"
             :title="t.title"
             @click="editing = t"
           >{{ t.title }}</button>

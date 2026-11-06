@@ -124,9 +124,13 @@ html[data-skin="ios"] .ios-tab-more {
 }
 html[data-skin="ios"] .ios-tabgroup {
   flex: 1;
+  /* Both zeros matter: without them a long label sets the minimum width of
+     the whole bar, the bar runs past the screen, and iOS lays out every page
+     at that wider size, which is what needed zooming out. */
+  min-width: 0;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 0;
   padding: 0.25rem;
   border-radius: 9999px;

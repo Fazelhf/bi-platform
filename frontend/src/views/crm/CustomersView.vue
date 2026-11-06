@@ -342,7 +342,7 @@ const statusClass: Record<string, string> = {
           <option value="" class="text-ink">— خالی —</option>
           <option v-for="o in bulkOptions" :key="o.id" :value="o.id" class="text-ink">{{ o.name }}</option>
         </select>
-        <button class="bg-white text-ink rounded-xl px-4 py-2 text-sm disabled:opacity-50" :disabled="acting" @click="bulkUpdate">
+        <button class="bg-surface text-ink rounded-xl px-4 py-2 text-sm disabled:opacity-50" :disabled="acting" @click="bulkUpdate">
           اعمال روی {{ num(selected.size) }} مشتری
         </button>
       </template>
@@ -358,7 +358,7 @@ const statusClass: Record<string, string> = {
       </select>
       <button
         v-if="assignTo"
-        class="bg-white text-ink rounded-xl px-4 py-2 text-sm disabled:opacity-50"
+        class="bg-surface text-ink rounded-xl px-4 py-2 text-sm disabled:opacity-50"
         :disabled="acting"
         @click="assignSelected"
       >ثبت کارشناس</button>

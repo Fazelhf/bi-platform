@@ -171,22 +171,22 @@ watch(isAdmin, (v) => { if (v) loadAdmin(); });
     </div>
 
     <div class="office-card p-2 overflow-x-auto">
-      <div class="grid grid-cols-7 min-w-[700px] text-xs">
-        <div v-for="w in WEEKDAYS" :key="w" class="text-center text-slate-400 py-2">{{ w }}</div>
+      <div class="grid grid-cols-7 sm:min-w-[700px] text-xs">
+        <div v-for="w in WEEKDAYS" :key="w" class="text-center text-slate-400 py-2 truncate"><span class="sm:hidden">{{ w.charAt(0) }}</span><span class="hidden sm:inline">{{ w }}</span></div>
         <div v-for="i in leading" :key="`b${i}`"></div>
         <div
           v-for="d in month?.days ?? []" :key="d.date"
-          class="min-h-[96px] border border-slate-100 rounded-lg m-0.5 p-1.5 cursor-pointer hover:border-sky-300 transition"
+          class="min-h-[64px] sm:min-h-[96px] min-w-0 overflow-hidden border border-slate-100 rounded-lg m-px sm:m-0.5 p-1 sm:p-1.5 cursor-pointer hover:border-sky-300 transition"
           :class="[d.workday ? 'bg-surface' : 'bg-rose-50/70', d.date === today ? 'ring-2 ring-sky-400' : '']"
           @click="newEvent(d)"
         >
           <div class="flex items-center justify-between">
             <span class="font-semibold" :class="d.workday ? 'text-ink' : 'text-rose-600'">{{ FA.format(d.day) }}</span>
-            <span v-if="d.off" class="text-[10px] text-rose-500 truncate max-w-[70%]" :title="d.off">{{ d.off }}</span>
+            <span v-if="d.off" class="hidden sm:inline text-[10px] text-rose-500 truncate max-w-[70%]" :title="d.off">{{ d.off }}</span>
           </div>
           <button
             v-for="e in eventsOn(d)" :key="`${e.id}-${d.date}`"
-            class="block w-full text-right truncate rounded px-1 py-0.5 mt-1 text-[11px] text-white"
+            class="block w-full text-right truncate rounded px-0.5 sm:px-1 py-0.5 mt-1 text-[10px] sm:text-[11px] text-white"
             :style="{ background: e.color }" :title="`${e.title} · ${e.calendar_name}`"
             @click.stop="showEvent(e)"
           >{{ e.all_day ? "" : time(e.start) + " " }}{{ e.title }}</button>
@@ -206,7 +206,7 @@ watch(isAdmin, (v) => { if (v) loadAdmin(); });
         </label>
       </div>
       <form class="flex flex-wrap gap-2 items-end" @submit.prevent="addHoliday">
-        <div class="w-44"><JalaliDateField v-model="newHoliday.date" placeholder="تاریخ" /></div>
+        <div class="w-full sm:w-44"><JalaliDateField v-model="newHoliday.date" placeholder="تاریخ" /></div>
         <input v-model="newHoliday.title" placeholder="عنوان تعطیلی، مثلاً «عید فطر»" class="flex-1 min-w-[180px] bg-slate-100 rounded-xl px-3 py-2 text-sm" />
         <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm">+ افزودن تعطیلی</button>
       </form>
@@ -221,7 +221,7 @@ watch(isAdmin, (v) => { if (v) loadAdmin(); });
 
     <!-- Event form -->
     <div v-if="open" class="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" @click.self="open = false">
-      <form class="bg-surface rounded-2xl shadow-pop w-full max-w-md p-5 space-y-3" role="dialog" @submit.prevent="save">
+      <form class="bg-surface rounded-2xl shadow-pop w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 space-y-3" role="dialog" @submit.prevent="save">
         <h3 class="font-bold text-ink">{{ editing ? (editing.can_edit ? "ویرایش برنامه" : editing.title) : "برنامه‌ی جدید" }}</h3>
         <template v-if="!editing || editing.can_edit">
           <select v-model="form.calendar" class="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm" aria-label="تقویم">
@@ -231,8 +231,8 @@ watch(isAdmin, (v) => { if (v) loadAdmin(); });
           <JalaliDateField v-model="form.date" placeholder="تاریخ" />
           <label class="flex items-center gap-2 text-sm"><input v-model="form.all_day" type="checkbox" /> تمام روز</label>
           <div v-if="!form.all_day" class="flex gap-2 text-sm">
-            <label class="flex-1">از <input v-model="form.from" type="time" class="w-full bg-slate-100 rounded-xl px-3 py-2" /></label>
-            <label class="flex-1">تا <input v-model="form.to" type="time" class="w-full bg-slate-100 rounded-xl px-3 py-2" /></label>
+            <label class="flex-1 min-w-0">از <input v-model="form.from" type="time" class="w-full bg-slate-100 rounded-xl px-3 py-2" /></label>
+            <label class="flex-1 min-w-0">تا <input v-model="form.to" type="time" class="w-full bg-slate-100 rounded-xl px-3 py-2" /></label>
           </div>
           <input v-model="form.location" placeholder="مکان" class="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm" />
           <textarea v-model="form.description" rows="3" placeholder="توضیحات" class="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm"></textarea>

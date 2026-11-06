@@ -1,4 +1,5 @@
 /** @type {import('tailwindcss').Config} */
+import colors from "tailwindcss/colors.js";
 
 // Every themeable colour is a CSS variable holding space-separated RGB
 // channels, so `<alpha-value>` keeps working (bg-surface/50, text-slate-400/70).
@@ -18,6 +19,44 @@ const sys = (hue, c500, c600) => ({
   500: vf(`c-${hue}-500`, c500),
   600: vf(`c-${hue}-600`, c600),
 });
+
+// ---- Status tints in dark mode ------------------------------------------
+// `bg-red-50 text-red-700` is a pale chip with dark text, written hundreds of
+// times across the app, and neither half can stay put on a dark page. One
+// colour cannot flip for both jobs (bg-*-700 is a real dark button while
+// text-*-700 has to turn pale), so the flip is per property: pale fills go
+// dark, dark text goes pale, pale borders go dim. Light mode falls back to the
+// stock value, so nothing changes there.
+const HUES = ["red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal",
+  "cyan", "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose"];
+const channels = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+/** `amount` of the hue over the dark card colour. */
+const overDark = (hex, amount) =>
+  channels(hex).map((c, i) => Math.round(c * amount + [30, 30, 34][i] * (1 - amount))).join(" ");
+
+const FLIPS = {
+  // property -> shade -> what it becomes in dark mode
+  bg: { 50: (h) => overDark(h[500], 0.14), 100: (h) => overDark(h[500], 0.22), 200: (h) => overDark(h[500], 0.32) },
+  text: { 600: (h) => channels(h[400]).join(" "), 700: (h) => channels(h[300]).join(" "),
+    800: (h) => channels(h[200]).join(" "), 900: (h) => channels(h[100]).join(" ") },
+  border: { 100: (h) => overDark(h[500], 0.25), 200: (h) => overDark(h[500], 0.38), 300: (h) => overDark(h[500], 0.52) },
+};
+
+/** The Tailwind colours of one property, each reading its dark variable. */
+function flippedColors(prop) {
+  return Object.fromEntries(HUES.map((hue) => [hue, Object.fromEntries(
+    Object.keys(FLIPS[prop]).map((shade) => {
+      const light = channels(colors[hue][shade]).join(" ");
+      // Text-600 keeps the skin's own colour in light mode (iOS swaps it).
+      const fallback = prop === "text" && shade === "600" ? `var(--c-${hue}-600, ${light})` : light;
+      return [shade, `rgb(var(--dark-${prop}-${hue}-${shade}, ${fallback}) / <alpha-value>)`];
+    }),
+  )]));
+}
+
+const darkTints = Object.fromEntries(Object.entries(FLIPS).flatMap(([prop, shades]) =>
+  HUES.flatMap((hue) => Object.entries(shades).map(([shade, make]) =>
+    [`--dark-${prop}-${hue}-${shade}`, make(colors[hue])]))));
 
 export default {
   content: ["./index.html", "./src/**/*.{vue,ts}"],
@@ -85,6 +124,17 @@ export default {
         pink: sys("pink", "236 72 153", "219 39 119"),
         rose: sys("rose", "244 63 94", "225 29 72"),
       },
+      backgroundColor: flippedColors("bg"),
+      textColor: {
+        ...flippedColors("text"),
+        // slate-300 and 400 double as hairline colours, and at that weight they
+        // are unreadable as text on a dark card. Text takes the next step up.
+        slate: {
+          300: "rgb(var(--dark-text-slate-300, var(--c-slate-300)) / <alpha-value>)",
+          400: "rgb(var(--dark-text-slate-400, var(--c-slate-400)) / <alpha-value>)",
+        },
+      },
+      borderColor: flippedColors("border"),
       // Shape and depth are variables too, because that is what separates the
       // three skins more than colour does: کلاسیک leans on soft drop shadows,
       // شیشه‌ای on a lit top edge over blur, and متریال on a hairline outline
@@ -98,5 +148,12 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Screen only: dark mode prints on white paper, in the light colours.
+    ({ addBase }) => addBase({ "@media screen": { ".dark": {
+      ...darkTints,
+      "--dark-text-slate-300": "var(--c-slate-400)",
+      "--dark-text-slate-400": "var(--c-slate-500)",
+    } } }),
+  ],
 };

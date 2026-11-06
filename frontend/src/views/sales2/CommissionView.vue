@@ -284,7 +284,7 @@ const SOURCE_LABEL: Record<string, string> = { tier: "جدول", override: "دس
                             :class="{
                               'bg-amber-100 text-amber-700': r.rate_source === 'override',
                               'bg-slate-200 text-slate-500': r.rate_source === 'no_cost',
-                              'bg-white text-ink': r.rate_source === 'tier',
+                              'bg-surface text-ink': r.rate_source === 'tier',
                             }"
                             :title="r.override_reason || SOURCE_LABEL[r.rate_source]"
                             :disabled="approved || r.kind === 'return'"

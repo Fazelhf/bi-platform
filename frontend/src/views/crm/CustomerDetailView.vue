@@ -482,7 +482,7 @@ const card = "bg-surface rounded-card shadow-soft p-4";
             <details class="mt-1">
               <summary class="cursor-pointer text-sky-600">مقادیر پیش از ادغام (برای بازیابی)</summary>
               <div class="grid sm:grid-cols-2 gap-2 mt-1">
-                <div v-for="side in (['survivor', 'absorbed'] as const)" :key="side" class="bg-white rounded p-2">
+                <div v-for="side in (['survivor', 'absorbed'] as const)" :key="side" class="bg-surface rounded p-2">
                   <p class="font-semibold mb-1">{{ side === "survivor" ? "مشتری ماندگار" : "مشتری ادغام‌شده" }}</p>
                   <p v-for="f in ['name_fa', 'phone', 'mobile', 'national_id', 'city', 'address', 'note']" :key="f"
                      class="text-slate-500 truncate">{{ f }}: {{ m.before[side]?.[f] || "—" }}</p>
