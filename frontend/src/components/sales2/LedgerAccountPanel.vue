@@ -128,7 +128,7 @@ const paidPct = (x: LedgerDetail["items"][number]) =>
         <div v-if="details.length > 1" class="flex rounded-xl bg-slate-100 p-1">
           <button
             v-for="(x, i) in details" :key="x.account.id"
-            class="rounded-lg px-3 py-1 text-sm" :class="active === i ? 'bg-white shadow-sm text-ink' : 'text-slate-500'"
+            class="rounded-lg px-3 py-1 text-sm" :class="active === i ? 'bg-surface shadow-sm text-ink' : 'text-slate-500'"
             @click="pickAccount(i)"
           >{{ x.account.book_label }}</button>
         </div>

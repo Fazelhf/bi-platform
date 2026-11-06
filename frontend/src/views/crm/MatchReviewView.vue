@@ -280,7 +280,7 @@ const total = computed(() => summary.value?.pending ?? 0);
 
     <p v-if="scanResult" class="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">{{ scanResult }}</p>
 
-    <section v-if="showConfig && config" class="rounded-xl border border-slate-200 bg-white p-4 space-y-3 text-sm">
+    <section v-if="showConfig && config" class="rounded-xl border border-slate-200 bg-surface p-4 space-y-3 text-sm">
       <label class="flex flex-wrap items-center gap-2">
         <span class="w-56 text-slate-600">حداقل شباهت نام برای «نام مشابه»</span>
         <input v-model.number="config.fuzzy_threshold" type="number" min="0.5" max="1" step="0.01"
@@ -300,20 +300,20 @@ const total = computed(() => summary.value?.pending ?? 0);
         «قطعی» یعنی نام نرمال‌شده یکسان و تلفن یا شناسه‌ی مشترک؛ بقیه «مشکوک»اند.
         هیچ‌کدام خودکار ادغام نمی‌شود.
       </p>
-      <button class="rounded-lg bg-slate-800 px-4 py-1.5 text-white" @click="saveConfig">ذخیره</button>
+      <button class="rounded-lg bg-panel px-4 py-1.5 text-white" @click="saveConfig">ذخیره</button>
     </section>
 
     <div class="flex flex-wrap items-center gap-2">
       <button
         class="rounded-lg px-3 py-1.5 text-sm"
-        :class="method === '' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'"
+        :class="method === '' ? 'bg-panel text-white' : 'bg-slate-100 text-slate-600'"
         @click="method = ''"
       >همه</button>
       <button
         v-for="m in summary?.by_method ?? []"
         :key="m.key"
         class="rounded-lg px-3 py-1.5 text-sm"
-        :class="method === m.key ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'"
+        :class="method === m.key ? 'bg-panel text-white' : 'bg-slate-100 text-slate-600'"
         @click="method = m.key"
       >{{ m.label }} ({{ m.count }})</button>
 
@@ -322,7 +322,7 @@ const total = computed(() => summary.value?.pending ?? 0);
         v-for="c in ([['', 'همه'], ['definite', 'قطعی'], ['suspect', 'مشکوک']] as const)"
         :key="c[0]"
         class="rounded-lg px-3 py-1.5 text-sm"
-        :class="confidence === c[0] ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'"
+        :class="confidence === c[0] ? 'bg-panel text-white' : 'bg-slate-100 text-slate-600'"
         @click="confidence = c[0]"
       >{{ c[1] }}<template v-if="c[0] && summary?.by_confidence?.[c[0]]"> ({{ summary.by_confidence[c[0]] }})</template></button>
 
@@ -354,7 +354,7 @@ const total = computed(() => summary.value?.pending ?? 0);
       v-for="row in rows"
       v-else
       :key="row.id"
-      class="rounded-xl border border-slate-200 bg-white p-4"
+      class="rounded-xl border border-slate-200 bg-surface p-4"
     >
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <span

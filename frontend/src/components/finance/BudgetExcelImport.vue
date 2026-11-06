@@ -279,7 +279,7 @@ const faYear = (y: number) => FA.format(y).replace(/٬/g, "");
           <p v-if="result.skipped_negative" class="text-amber-700">{{ FA.format(result.skipped_negative) }} رقم منفی وارد نشد.</p>
           <div class="flex gap-2 mt-3">
             <button class="px-4 py-1.5 rounded-xl bg-emerald-600 text-white text-sm" @click="close">بستن</button>
-            <button class="px-4 py-1.5 rounded-xl bg-white text-emerald-700 text-sm" @click="show">فایل دیگر</button>
+            <button class="px-4 py-1.5 rounded-xl bg-surface text-emerald-700 text-sm" @click="show">فایل دیگر</button>
           </div>
         </div>
 

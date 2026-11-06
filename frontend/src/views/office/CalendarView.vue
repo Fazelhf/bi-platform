@@ -561,7 +561,7 @@ const chipTitle = (e: CalendarEvent) =>
         <div class="relative">
           <NavIcon name="search" :size="15" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input v-model="q" placeholder="جستجوی برنامه" class="bg-slate-100 rounded-xl pr-8 pl-3 py-1.5 text-sm w-44 focus:w-60 transition-all focus:outline-none" />
-          <ul v-if="results.length" class="absolute z-30 left-0 mt-1 w-72 bg-surface rounded-xl shadow-pop max-h-80 overflow-y-auto text-sm">
+          <ul v-if="results.length" class="absolute z-30 left-0 mt-1 w-72 max-w-[calc(100vw-3rem)] bg-surface rounded-xl shadow-pop max-h-80 overflow-y-auto text-sm">
             <li v-for="e in results" :key="e.id">
               <button class="w-full text-right px-3 py-2 hover:bg-slate-50 flex gap-2 items-center" @click="pick(e)">
                 <span class="w-2.5 h-2.5 rounded-full shrink-0" :style="{ background: e.color }"></span>
@@ -648,23 +648,23 @@ const chipTitle = (e: CalendarEvent) =>
 
       <!-- Month -->
       <div v-else-if="view === 'month'" class="office-card p-2 overflow-x-auto">
-        <div class="grid grid-cols-7 min-w-[700px] text-xs">
-          <div v-for="w in WEEKDAYS" :key="w" class="text-center text-slate-400 py-2">{{ w }}</div>
+        <div class="grid grid-cols-7 sm:min-w-[700px] text-xs">
+          <div v-for="w in WEEKDAYS" :key="w" class="text-center text-slate-400 py-2 truncate"><span class="sm:hidden">{{ w.charAt(0) }}</span><span class="hidden sm:inline">{{ w }}</span></div>
           <div v-for="d in monthCells" :key="d"
-               class="min-h-[110px] border border-slate-100 -mt-px -mr-px p-1 cursor-pointer hover:bg-slate-50/60 transition"
+               class="min-h-[72px] sm:min-h-[110px] min-w-0 overflow-hidden border border-slate-100 -mt-px -mr-px p-0.5 sm:p-1 cursor-pointer hover:bg-slate-50/60 transition"
                :class="[dropDay === d ? 'bg-sky-50 ring-2 ring-sky-300 ring-inset' : isOff(d) ? 'bg-rose-50/60' : 'bg-surface', isoToJalali(d)!.jm !== curMonth ? 'opacity-45' : '']"
                @click="create(d)" @dragover.prevent="dropDay = d" @dragleave="dropDay === d && (dropDay = '')" @drop.prevent="onDayDrop(d)">
             <div class="flex items-center justify-between">
               <button class="w-6 h-6 rounded-full font-semibold" :class="d === today ? 'bg-sky-500 text-white' : isOff(d) ? 'text-rose-600' : 'text-ink'" @click.stop="goDay(d)">{{ dayNum(d) }}</button>
-              <span v-if="info(d)?.off && info(d)!.off !== 'تعطیل هفتگی'" class="text-[10px] text-rose-500 truncate max-w-[70%]" :title="info(d)!.off">{{ info(d)!.off }}</span>
+              <span v-if="info(d)?.off && info(d)!.off !== 'تعطیل هفتگی'" class="hidden sm:inline text-[10px] text-rose-500 truncate max-w-[70%]" :title="info(d)!.off">{{ info(d)!.off }}</span>
             </div>
             <button v-for="e in on(d).slice(0, 3)" :key="`${e.key}-${d}`"
-                    class="flex items-center gap-1 w-full text-right truncate rounded px-1 py-0.5 mt-0.5 text-[11px]"
+                    class="flex items-center gap-1 w-full text-right truncate rounded px-0.5 sm:px-1 py-0.5 mt-0.5 text-[10px] sm:text-[11px]"
                     :class="[e.all_day || !isTimed(e) ? chipClass(e) : 'text-ink hover:bg-slate-100', rsvp(e) === 'declined' ? 'line-through opacity-60' : '', rsvp(e) === 'pending' && isTimed(e) ? 'italic' : '']"
                     :style="e.all_day || !isTimed(e) ? chipStyle(e) : {}" :title="chipTitle(e)" :draggable="e.can_edit"
                     @dragstart="onDayDragStart($event, e, d)" @click.stop="openEvent(e)">
               <span v-if="isTimed(e)" class="w-2 h-2 rounded-full shrink-0" :style="{ background: e.color }"></span>
-              <span v-if="isTimed(e)" class="text-slate-500">{{ timeOf(e.start) }}</span>
+              <span v-if="isTimed(e)" class="hidden sm:inline text-slate-500">{{ timeOf(e.start) }}</span>
               <span class="truncate">{{ e.title }}</span>
               <span v-if="e.priority === 'urgent'" class="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title="فوری"></span>
             </button>

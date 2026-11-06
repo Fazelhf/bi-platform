@@ -4,6 +4,7 @@
 @import "./styles/ios-feel.css";
 @import "./styles/ios26.css";
 @import "./styles/entry-table.css";
+@import "./styles/mobile.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

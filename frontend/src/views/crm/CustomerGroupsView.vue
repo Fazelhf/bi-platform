@@ -190,7 +190,7 @@ async function confirmAct() {
       <tbody>
         <tr v-for="g in groups" :key="g.id" class="border-t border-slate-100">
           <td class="px-3 py-2">
-            <input v-if="editing === g.id" v-model="editName" class="bg-white border border-sky-300 rounded-lg px-2 py-1 text-sm"
+            <input v-if="editing === g.id" v-model="editName" class="bg-surface border border-sky-300 rounded-lg px-2 py-1 text-sm"
                    aria-label="نام گروه" @keydown.enter.prevent="rename(g)" @keydown.esc="editing = null" @blur="rename(g)" />
             <template v-else>
               <button class="text-ink hover:text-sky-600 hover:underline" title="دیدن مشتری‌های این گروه" @click="showCustomers(g)">{{ g.name_fa }}</button>
@@ -239,7 +239,7 @@ async function confirmAct() {
       </p>
       <p v-else>«{{ acting.group.name_fa }}» مشتری ندارد و حذف می‌شود.</p>
       <select v-if="acting.mode === 'move' || acting.group.customer_count" v-model="target"
-              class="bg-white rounded-xl border border-slate-200 px-3 py-2" aria-label="گروه مقصد">
+              class="bg-surface rounded-xl border border-slate-200 px-3 py-2" aria-label="گروه مقصد">
         <option value="">گروه مقصد…</option>
         <option v-for="o in groups.filter((x) => x.id !== acting!.group.id)" :key="o.id" :value="o.id">{{ o.name_fa }}</option>
       </select>

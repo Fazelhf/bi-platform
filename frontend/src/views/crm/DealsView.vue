@@ -430,7 +430,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
             <option value="" class="text-ink">دلیل…</option>
             <option v-for="r in crm.options?.reasons ?? []" :key="r.id" :value="r.id" class="text-ink">{{ r.name_fa }}</option>
           </select>
-          <button v-if="moveTo" class="text-xs rounded-lg px-3 py-1.5 bg-white text-ink disabled:opacity-50" :disabled="bulkBusy" @click="bulkMove">انتقال</button>
+          <button v-if="moveTo" class="text-xs rounded-lg px-3 py-1.5 bg-surface text-ink disabled:opacity-50" :disabled="bulkBusy" @click="bulkMove">انتقال</button>
         </template>
 
         <template v-if="crm.isManager">
@@ -439,7 +439,7 @@ function open(d: Deal) { router.push({ name: "crm-deal", params: { id: d.id } })
             <option value="" class="text-ink">سپردن به کارشناس…</option>
             <option v-for="e in crm.rosterEmployees" :key="e.id" :value="e.id" class="text-ink">{{ e.name }}</option>
           </select>
-          <button v-if="assignTo" class="text-xs rounded-lg px-3 py-1.5 bg-white text-ink disabled:opacity-50" :disabled="bulkBusy" @click="bulkAssign">ثبت</button>
+          <button v-if="assignTo" class="text-xs rounded-lg px-3 py-1.5 bg-surface text-ink disabled:opacity-50" :disabled="bulkBusy" @click="bulkAssign">ثبت</button>
         </template>
 
         <span class="w-px h-5 bg-white/20 mx-1"></span>

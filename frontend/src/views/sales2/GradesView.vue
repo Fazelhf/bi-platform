@@ -128,16 +128,16 @@ const bar = (v: number) => (v >= 75 ? "bg-emerald-500" : v >= 50 ? "bg-sky-500" 
                   <div>
                     <label class="text-xs text-slate-500 block mb-1">گرید</label>
                     <div class="flex gap-1">
-                      <button v-for="g in ['SP', 'A', 'B', 'C'] as Grade[]" :key="g" class="rounded-lg px-3 py-1.5 text-sm" :class="draft.grade === g ? GRADE_CLS[g] + ' ring-2 ring-slate-400' : 'bg-white text-slate-500'" @click="draft.grade = g">{{ g }}</button>
+                      <button v-for="g in ['SP', 'A', 'B', 'C'] as Grade[]" :key="g" class="rounded-lg px-3 py-1.5 text-sm" :class="draft.grade === g ? GRADE_CLS[g] + ' ring-2 ring-slate-400' : 'bg-surface text-slate-500'" @click="draft.grade = g">{{ g }}</button>
                     </div>
                   </div>
                   <div>
                     <label class="text-xs text-slate-500 block mb-1">ارزش استراتژیک (۰ تا ۱۰۰)</label>
-                    <input v-model.number="draft.strategic" type="number" min="0" max="100" class="bg-white rounded-xl px-3 py-1.5 text-sm w-28 outline-none" />
+                    <input v-model.number="draft.strategic" type="number" min="0" max="100" class="bg-surface rounded-xl px-3 py-1.5 text-sm w-28 outline-none" />
                   </div>
                   <div class="flex-1 min-w-[200px]">
                     <label class="text-xs text-slate-500 block mb-1">دلیل / یادداشت</label>
-                    <input v-model="draft.note" class="bg-white rounded-xl px-3 py-1.5 text-sm w-full outline-none" placeholder="مثلاً قرارداد سالانه، نفوذ در بازار، چک برگشتی…" />
+                    <input v-model="draft.note" class="bg-surface rounded-xl px-3 py-1.5 text-sm w-full outline-none" placeholder="مثلاً قرارداد سالانه، نفوذ در بازار، چک برگشتی…" />
                   </div>
                   <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm" @click="save(r)">ثبت گرید</button>
                 </div>

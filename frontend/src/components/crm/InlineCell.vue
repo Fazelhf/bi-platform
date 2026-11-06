@@ -68,7 +68,7 @@ async function commit() {
         v-if="options"
         ref="input"
         v-model="draft"
-        class="w-full bg-white border border-sky-300 rounded-lg px-2 py-1 text-xs outline-none"
+        class="w-full bg-surface border border-sky-300 rounded-lg px-2 py-1 text-xs outline-none"
         @change="commit"
         @blur="commit"
         @keydown.esc.prevent="cancel"
@@ -80,7 +80,7 @@ async function commit() {
         v-else
         ref="input"
         v-model="draft"
-        class="w-full bg-white border border-sky-300 rounded-lg px-2 py-1 text-xs outline-none"
+        class="w-full bg-surface border border-sky-300 rounded-lg px-2 py-1 text-xs outline-none"
         :placeholder="placeholder"
         @keydown.enter.prevent="commit"
         @keydown.esc.prevent="cancel"

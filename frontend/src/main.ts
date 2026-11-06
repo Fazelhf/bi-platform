@@ -9,6 +9,18 @@ import { installIosTransitions } from "./lib/iosTransitions";
 import { vEntryTable } from "./lib/entryTable";
 import "./style.css";
 
+// iOS zooms the page into any field under 16px and leaves it there. A maximum
+// scale switches that off, and since iOS 10 Safari ignores it for pinching, so
+// people can still zoom by hand. iOS only: elsewhere it would really block
+// pinch-zoom. (iPadOS reports itself as a Mac, hence the touch check.)
+if (
+  /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+) {
+  const viewport = document.querySelector('meta[name="viewport"]');
+  viewport?.setAttribute("content", `${viewport.getAttribute("content")}, maximum-scale=1`);
+}
+
 const app = createApp(App);
 app.use(createPinia()).use(router);
 installIosTransitions(router);

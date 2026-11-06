@@ -362,7 +362,7 @@ const field = "bg-slate-100 rounded-xl px-3 py-2 text-sm";
         <p v-if="!week.can_edit" class="text-xs text-slate-400">تعیین روزهای تعطیل با ادمین، مدیران ارشد و مدیر دفتر است.</p>
         <h4 class="text-sm font-medium text-ink pt-1">تعطیلات رسمی و مناسبت‌ها (برای شرکت و کارخانه)</h4>
         <form v-if="week.can_edit" class="flex flex-wrap gap-2 items-end" @submit.prevent="addHoliday">
-          <div class="w-44"><JalaliDateField v-model="newHoliday.date" placeholder="تاریخ" /></div>
+          <div class="w-full sm:w-44"><JalaliDateField v-model="newHoliday.date" placeholder="تاریخ" /></div>
           <input v-model="newHoliday.title" placeholder="عنوان تعطیلی، مثلاً «عید فطر»" :class="field" class="flex-1 min-w-[180px]" />
           <button class="bg-panel text-white rounded-xl px-4 py-2 text-sm">+ افزودن تعطیلی</button>
         </form>
