@@ -206,9 +206,9 @@ class ProductionDailyView(APIView):
         per_day = {
             r["period__start_date"]: r for r in cutting.values("period__start_date").annotate(
                 output=Sum("output_units"), journal=Sum("actual_journal"), pos=Sum("actual_pos"),
-                receipt=Sum("actual_receipt"), active_shifts=Sum("active_shifts"), waste=Avg("waste_pct"),
-                downtime=Sum(F("downtime_breakdown_shifts") + F("downtime_sizechange_shifts")
-                             + F("downtime_nowork_shifts")),
+                receipt=Sum("actual_receipt"), active_shifts=Sum("active_shifts"), waste_kg=Sum("waste_kg"),
+                downtime=Sum(F("downtime_breakdown_hours") + F("downtime_sizechange_hours")
+                             + F("downtime_nowork_hours")),
             )
         }
         per_shift = {}
@@ -223,16 +223,24 @@ class ProductionDailyView(APIView):
             worked, off = info[d]
             r = per_day.get(d, {})
             jy, jm, jd = jalali.from_gregorian(d)
+            j_val = float(r.get("journal") or 0)
+            p_val = float(r.get("pos") or 0)
+            rec_val = float(r.get("receipt") or 0)
+            w_equiv = 0.1595 * j_val + 1.0636 * rec_val + 0.0511 * p_val
+            w_kg = float(r.get("waste_kg") or 0)
+            waste_pct_calc = round((w_kg / w_equiv * 100) if w_equiv else 0, 2)
             days.append({
                 "date": d.isoformat(), "label": jalali.format_day(jy, jm, jd), "day": jd,
                 "weekday": jalali.weekday(d), "period": day_periods[d].pk if d in day_periods else None,
                 "workday": worked, "off": off, "entered": d in entered,
                 # A working day nobody entered — not a holiday, a gap.
                 "missing": daily and worked and d not in entered and d <= today,
-                "output": float(r.get("output") or 0), "journal": float(r.get("journal") or 0),
-                "pos": float(r.get("pos") or 0), "receipt": float(r.get("receipt") or 0),
+                "output": float(r.get("output") or 0), "journal": j_val,
+                "pos": p_val, "receipt": rec_val,
+                "weighted_equivalent": round(w_equiv, 2),
                 "active_shifts": float(r.get("active_shifts") or 0), "downtime": float(r.get("downtime") or 0),
-                "waste_pct": round(float(r.get("waste") or 0), 2),
+                "waste_kg": w_kg,
+                "waste_pct": waste_pct_calc,
                 "day_shift": per_shift.get(d, {}).get(Shift.DAY, 0.0),
                 "night_shift": per_shift.get(d, {}).get(Shift.NIGHT, 0.0),
             })
@@ -261,10 +269,13 @@ class ProductionDailyView(APIView):
                 {"machine": f.machine.name_fa, "kind": f.machine.kind, "shift": f.shift,
                  "shift_label": f.get_shift_display(), "output": float(f.output_units),
                  "journal": float(f.actual_journal), "pos": float(f.actual_pos), "receipt": float(f.actual_receipt),
-                 "active_shifts": float(f.active_shifts), "waste_pct": float(f.waste_pct),
-                 "downtime_breakdown": float(f.downtime_breakdown_shifts),
-                 "downtime_sizechange": float(f.downtime_sizechange_shifts),
-                 "downtime_nowork": float(f.downtime_nowork_shifts),
+                 "active_shifts": float(f.active_shifts),
+                 "waste_kg": float(f.waste_kg), "waste_pct": float(f.waste_pct),
+                 "weighted_equivalent": float(f.weighted_equivalent),
+                 "downtime_breakdown": float(f.downtime_breakdown_hours),
+                 "downtime_sizechange": float(f.downtime_sizechange_hours),
+                 "downtime_nowork": float(f.downtime_nowork_hours),
+                 "total_downtime": float(f.total_downtime_hours),
                  "description": f.description.strip(), "print_design": f.print_design.strip()}
                 for f in FactProduction.objects.filter(period_id=day_id).select_related("machine")
                 .order_by("machine__sort_order", "shift")
@@ -306,10 +317,10 @@ class ProductionDashboardView(APIView):
                 actual_journal=Sum("actual_journal"),
                 actual_pos=Sum("actual_pos"),
                 actual_receipt=Sum("actual_receipt"),
-                waste_pct=Avg("waste_pct"),
-                downtime_breakdown_shifts=Sum("downtime_breakdown_shifts"),
-                downtime_sizechange_shifts=Sum("downtime_sizechange_shifts"),
-                downtime_nowork_shifts=Sum("downtime_nowork_shifts"),
+                waste_kg=Sum("waste_kg"),
+                downtime_breakdown_hours=Sum("downtime_breakdown_hours"),
+                downtime_sizechange_hours=Sum("downtime_sizechange_hours"),
+                downtime_nowork_hours=Sum("downtime_nowork_hours"),
             )
             .order_by("machine__sort_order")
         )
@@ -390,9 +401,10 @@ class ProductionDashboardView(APIView):
             cutting_rows,
             index_output=Sum("output_units"), journal=Sum("actual_journal"),
             pos=Sum("actual_pos"), receipt=Sum("actual_receipt"),
+            waste_kg=Sum("waste_kg"),
             active_shifts=Sum("active_shifts"),
-            downtime=Sum(F("downtime_breakdown_shifts") + F("downtime_sizechange_shifts")
-                         + F("downtime_nowork_shifts")),
+            downtime=Sum(F("downtime_breakdown_hours") + F("downtime_sizechange_hours")
+                         + F("downtime_nowork_hours")),
         )
         printed = per_shift(FactPrintColor.objects.filter(period_id__in=units), area=Sum("area_sqm"))
         spent = per_shift(FactProductionCost.objects.filter(period_id__in=units), amount=Sum("amount_rial"))
@@ -402,6 +414,9 @@ class ProductionDashboardView(APIView):
         for shift, label in Shift.choices:
             c = cut.get(shift, {})
             journal, pos, receipt = (c.get(k) or 0 for k in ("journal", "pos", "receipt"))
+            weighted = round(0.1595 * float(journal) + 1.0636 * float(receipt) + 0.0511 * float(pos), 2)
+            w_kg = float(c.get("waste_kg") or 0)
+            waste_pct = round((w_kg / weighted * 100) if weighted else 0, 2)
             shift_summary.append({
                 "shift": shift,
                 "label": label,
@@ -410,9 +425,12 @@ class ProductionDashboardView(APIView):
                 "pos": pos,
                 "receipt": receipt,
                 "actual_total": journal + pos + receipt,
+                "weighted_equivalent": weighted,
+                "waste_kg": w_kg,
+                "waste_pct": waste_pct,
                 "active_shifts": c.get("active_shifts") or 0,
                 "downtime": c.get("downtime") or 0,
-                "print_area": printed.get(shift, {}).get("area") or 0,
+                "print_area": round(float(printed.get(shift, {}).get("area") or 0) * 1.035, 2),
                 "cost": spent.get(shift, {}).get("amount") or 0,
                 "revenue": revenue_by_shift[shift],
                 "headcount": bench.headcount_night if shift == Shift.NIGHT else bench.headcount_day,
@@ -461,8 +479,8 @@ class RecomputeProductionView(APIView):
 CUT_FIELDS = [
     "active_shifts", "output_units",
     "actual_journal", "actual_pos", "actual_receipt",
-    "waste_pct", "repair_count",
-    "downtime_breakdown_shifts", "downtime_sizechange_shifts", "downtime_nowork_shifts",
+    "waste_kg", "repair_count",
+    "downtime_breakdown_hours", "downtime_sizechange_hours", "downtime_nowork_hours",
 ]
 # Free text on a line's row: notes on any line, and the print unit's design.
 TEXT_FIELDS = ["description", "print_design"]
@@ -511,6 +529,14 @@ class ProductionInputView(APIView):
                 row[fld] = str(getattr(f, fld)) if f else "0"
             for fld in TEXT_FIELDS:
                 row[fld] = getattr(f, fld) if f else ""
+            if f:
+                row["waste_pct"] = str(round(f.waste_pct, 2))
+                row["weighted_equivalent"] = str(round(f.weighted_equivalent, 4))
+                row["total_downtime_hours"] = str(round(f.total_downtime_hours, 2))
+            else:
+                row["waste_pct"] = "0"
+                row["weighted_equivalent"] = "0"
+                row["total_downtime_hours"] = "0"
             return row
 
         def block(shift):
@@ -532,7 +558,7 @@ class ProductionInputView(APIView):
                     for c in categories
                 ],
                 "rolls": [
-                    {"product": p.id, "product_name": p.name_fa,
+                    {"product": p.id, "product_code": p.code, "product_name": p.name_fa,
                      "piece_rate_rial": str(p.piece_rate_rial),
                      "quantity": str(rolls[(p.id, shift)].quantity) if (p.id, shift) in rolls else "0"}
                     for p in products
@@ -582,7 +608,14 @@ class ProductionInputView(APIView):
                 setattr(bench, f"headcount_{shift}", int(float(hc or 0)))
 
             # 2) Machines (cutting + print)
-            rows = list(block.get("cutting", [])) + ([block["print"]] if block.get("print") else [])
+            cutting_list = list(block.get("cutting", []))
+            for row in cutting_list:
+                j = float(row.get("actual_journal") or 0)
+                p = float(row.get("actual_pos") or 0)
+                rec = float(row.get("actual_receipt") or 0)
+                row["output_units"] = round(j + 9.2 * p + 2.1 * rec, 2)
+
+            rows = cutting_list + ([block["print"]] if block.get("print") else [])
             for row in rows:
                 defaults = {f: (row.get(f) or 0) for f in CUT_FIELDS}
                 # Sent only by clients that know the fields; older ones keep what is stored.
@@ -612,12 +645,26 @@ class ProductionInputView(APIView):
                               "description": c.get("description") or ""},
                 )
 
-            # 5) Roll counts (revenue)
+            # 5) Roll counts (revenue) - auto-filled from cutting lines & print section
+            pos_sum = sum(float(r.get("actual_pos") or 0) for r in cutting_list)
+            journal_sum = sum(float(r.get("actual_journal") or 0) for r in cutting_list)
+            receipt_sum = sum(float(r.get("actual_receipt") or 0) for r in cutting_list)
+            print_sqm = round(sum(float(c.get("area_sqm") or 0) for c in block.get("print_colors", [])) * 1.035, 2)
+
             for r in block.get("rolls", []):
                 product = DimProduct.objects.get(pk=r["product"])
+                qty = float(r.get("quantity") or 0)
+                if "57" in product.code or "57" in product.name_fa or "۵۷" in product.name_fa:
+                    qty = pos_sum
+                elif "79" in product.code or "79" in product.name_fa or "۷۹" in product.name_fa:
+                    qty = journal_sum
+                elif "receipt" in product.code or "رسید" in product.name_fa:
+                    qty = receipt_sum
+                elif "print" in product.code or "چاپ" in product.name_fa:
+                    qty = print_sqm
                 FactProductionRevenue.objects.update_or_create(
                     period=period, product=product, shift=shift,
-                    defaults={"quantity": r.get("quantity") or 0,
+                    defaults={"quantity": qty,
                               "piece_rate_rial": product.piece_rate_rial},
                 )
 

@@ -119,6 +119,8 @@ class Totals:
     active_shifts: Decimal = Decimal(0)
     repairs: Decimal = Decimal(0)
     downtime: Decimal = Decimal(0)
+    waste_kg: Decimal = Decimal(0)
+    weighted_equivalent: Decimal = Decimal(0)
     machines: int = 0
     shifts: int = 0  # day/night shifts the lines actually ran in
     print_area: Decimal = Decimal(0)
@@ -156,7 +158,9 @@ def _collect(period: DimPeriod, only_approved: bool) -> Totals:
         t.output += r.output_units
         t.active_shifts += r.active_shifts
         t.repairs += r.repair_count
-        t.downtime += r.total_downtime_shifts
+        t.downtime += r.total_downtime_hours
+        t.waste_kg += r.waste_kg
+        t.weighted_equivalent += r.weighted_equivalent
         cutting_ids.add(r.machine_id)
         if r.active_shifts:
             shifts_run.add(r.shift)
@@ -207,10 +211,15 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
         Decimal(0),
     )
 
-    # --- Waste from the material balance (all streams combined) ---
+    # --- Waste: waste_kg / weighted_equivalent * 100 (fallback to material balance) ---
     balances = list(FactMaterialBalance.objects.filter(period_id__in=units))
     total_in = sum((b.input_weight for b in balances), Decimal(0))
     total_out = sum((b.output_weight for b in balances), Decimal(0))
+    waste_actual = (
+        _pct(t.waste_kg, t.weighted_equivalent)
+        if t.weighted_equivalent
+        else _pct(total_in - total_out, total_in)
+    )
 
     # --- Benchmark-derived denominators ---
     per_shift = Decimal(bench.ideal_output_per_shift)
@@ -219,14 +228,15 @@ def compute_period_kpis(period: DimPeriod, *, only_approved: bool = True) -> int
     man_hours = Decimal(bench.total_headcount) * Decimal(bench.hours_per_shift)
     # A line runs once a day per shift worked: two shifts double its schedule.
     scheduled_shifts = Decimal(t.machines or 0) * days_in_period * t.shifts
+    scheduled_hours = scheduled_shifts * Decimal(bench.hours_per_shift or 8)
     capacity_output = per_shift * Decimal(bench.monthly_shift_capacity) * share
 
     # --- The 7 company-level KPIs: (code, actual, desired, ideal) ---
     # Built-in fallbacks; an active DB formula for (kpi, slot) overrides.
     company: list[tuple[str, Decimal | None, Decimal | None, Decimal | None]] = [
         ("prod_productivity", t.output, desired_output or None, ideal_output),
-        ("waste_rate", _pct(total_in - total_out, total_in), Decimal(1), Decimal(1)),
-        ("line_stoppage_rate", _pct(t.downtime, scheduled_shifts), Decimal(0), Decimal(0)),
+        ("waste_rate", waste_actual, Decimal(1), Decimal(1)),
+        ("line_stoppage_rate", _pct(t.downtime, scheduled_hours), Decimal(0), Decimal(0)),
         ("labor_productivity",
          _div(t.output, man_hours),
          _div(desired_output, man_hours),

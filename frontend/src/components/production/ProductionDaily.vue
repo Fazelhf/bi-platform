@@ -95,7 +95,7 @@ const s = computed(() => data.value?.summary);
               <th class="text-left font-medium px-3">پوز</th>
               <th class="text-left font-medium px-3">رسید</th>
               <th class="text-left font-medium px-3">ضایعات</th>
-              <th class="text-left font-medium px-3">توقف (شیفت)</th>
+              <th class="text-left font-medium px-3">خواب دستگاه (ساعت)</th>
               <th class="text-right font-medium px-4">وضعیت</th>
             </tr>
           </thead>

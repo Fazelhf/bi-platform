@@ -180,16 +180,18 @@ def _production_workbook(period):
     _write_table(
         ws,
         ["خط تولید", "شیفت", "شیفت فعال", "تولید (شاخص)", "واقعی: ژورنال", "واقعی: پوز",
-         "واقعی: رسید", "ضایعات (٪)", "تعمیرات", "خواب (خرابی)", "خواب (تغییر سایز)",
-         "خواب (ظرفیت خالی)"],
+         "واقعی: رسید", "معادل وزنی", "ضایعات (کیلو)", "ضایعات (٪)", "تعمیرات",
+         "خواب دستگاه: خرابی (ساعت)", "خواب دستگاه: تغییر سایز (ساعت)",
+         "خواب دستگاه: ظرفیت خالی (ساعت)"],
         [[
             f.machine.name_fa, f.get_shift_display(), float(f.active_shifts),
             float(f.output_units), float(f.actual_journal), float(f.actual_pos),
-            float(f.actual_receipt), float(f.waste_pct), float(f.repair_count),
-            float(f.downtime_breakdown_shifts), float(f.downtime_sizechange_shifts),
-            float(f.downtime_nowork_shifts),
+            float(f.actual_receipt), float(f.weighted_equivalent), float(f.waste_kg),
+            float(f.waste_pct), float(f.repair_count),
+            float(f.downtime_breakdown_hours), float(f.downtime_sizechange_hours),
+            float(f.downtime_nowork_hours),
         ] for f in facts],
-        formats={7: PCT_FMT},
+        formats={9: PCT_FMT},
     )
 
     ws = _sheet(wb, "هزینه‌ها")

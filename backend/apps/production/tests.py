@@ -167,7 +167,8 @@ class ProductionShiftInputTests(TestCase):
 
         rows = {f.shift: f for f in FactProduction.objects.filter(period=self.period)}
         self.assertEqual(rows["day"].actual_journal, Decimal("60"))
-        self.assertEqual(rows["night"].output_units, Decimal("80"))
+        # output_units is auto-computed: journal + 9.2*pos + 2.1*receipt
+        self.assertEqual(rows["night"].output_units, Decimal("40"))
         area = dict(FactPrintColor.objects.filter(period=self.period).values_list("shift", "area_sqm"))
         self.assertEqual(area, {"day": Decimal("50"), "night": Decimal("20")})
         cost = dict(FactProductionCost.objects.filter(period=self.period).values_list("shift", "amount_rial"))
@@ -178,7 +179,7 @@ class ProductionShiftInputTests(TestCase):
         self.assertEqual((bench.headcount_day, bench.headcount_night, bench.total_headcount), (30, 20, 50))
 
         got = self.client.get(f"/api/production/input/?period={self.period.id}").data["shifts"]
-        self.assertEqual(got["day"]["cutting"][0]["output_units"], "100.00")
+        self.assertEqual(got["day"]["cutting"][0]["output_units"], "60.00")
         self.assertEqual(got["night"]["costs"][0]["amount_rial"], "700")
         self.assertEqual(got["night"]["print_colors"][0]["area_sqm"], "20.00")
         self.assertEqual(got["night"]["headcount"], 20)

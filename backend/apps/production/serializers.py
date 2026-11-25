@@ -46,10 +46,19 @@ class ProductionSerializer(serializers.ModelSerializer):
     machine_name = serializers.CharField(source="machine.name_fa", read_only=True)
     machine_kind = serializers.CharField(source="machine.kind", read_only=True)
     period_label = serializers.CharField(source="period.label", read_only=True)
-    total_downtime_shifts = serializers.DecimalField(
+    total_downtime_hours = serializers.DecimalField(
         max_digits=8, decimal_places=2, read_only=True
     )
     total_actual_output = serializers.DecimalField(
+        max_digits=18, decimal_places=2, read_only=True
+    )
+    waste_pct = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True
+    )
+    weighted_equivalent = serializers.DecimalField(
+        max_digits=18, decimal_places=4, read_only=True
+    )
+    index_output = serializers.DecimalField(
         max_digits=18, decimal_places=2, read_only=True
     )
 
@@ -60,9 +69,10 @@ class ProductionSerializer(serializers.ModelSerializer):
             "shift",
             "active_shifts", "output_units",
             "actual_journal", "actual_pos", "actual_receipt", "total_actual_output",
-            "waste_pct", "repair_count",
-            "downtime_breakdown_shifts", "downtime_sizechange_shifts",
-            "downtime_nowork_shifts", "total_downtime_shifts",
+            "waste_kg", "waste_pct", "repair_count",
+            "downtime_breakdown_hours", "downtime_sizechange_hours",
+            "downtime_nowork_hours", "total_downtime_hours",
+            "weighted_equivalent", "index_output",
             "status", "updated_at",
         ]
         read_only_fields = ["status"]

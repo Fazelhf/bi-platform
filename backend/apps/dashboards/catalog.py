@@ -19,7 +19,21 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from django.apps import apps as django_apps
-from django.db.models import F, Model, Q
+from django.db.models import F, FloatField, Model, Q, Value
+from django.db.models.functions import Cast, NullIf
+
+
+def _production_weighted_expr():
+    return (
+        Cast(F("actual_journal"), FloatField()) * 0.1595
+        + Cast(F("actual_receipt"), FloatField()) * 1.0636
+        + Cast(F("actual_pos"), FloatField()) * 0.0511
+    )
+
+
+def _production_waste_pct_expr():
+    we = _production_weighted_expr()
+    return (Cast(F("waste_kg"), FloatField()) / NullIf(we, Value(0.0))) * 100.0
 
 # ---------------------------------------------------------------------------
 # Building blocks
@@ -304,14 +318,27 @@ DATASETS: tuple[Dataset, ...] = (
         metrics=(
             Metric("output", "تولید", "sum", "output_units"),
             Metric("shifts", "شیفت فعال", "sum", "active_shifts"),
-            Metric("waste_pct", "درصد ضایعات", "avg", "waste_pct", "percent"),
+            Metric("waste_kg", "ضایعات (کیلو)", "sum", "waste_kg"),
+            Metric(
+                "waste_pct",
+                "درصد ضایعات",
+                "avg",
+                unit="percent",
+                expression=lambda: _production_waste_pct_expr(),
+            ),
+            Metric(
+                "weighted_equivalent",
+                "معادل وزنی",
+                "sum",
+                expression=lambda: _production_weighted_expr(),
+            ),
             Metric("repairs", "تعمیرات", "sum", "repair_count"),
-            Metric("down_breakdown", "توقف خرابی (شیفت)", "sum",
-                   "downtime_breakdown_shifts"),
-            Metric("down_sizechange", "توقف تعویض سایز (شیفت)", "sum",
-                   "downtime_sizechange_shifts"),
-            Metric("down_nowork", "توقف بی‌کاری (شیفت)", "sum",
-                   "downtime_nowork_shifts"),
+            Metric("down_breakdown", "خواب دستگاه: خرابی (ساعت)", "sum",
+                   "downtime_breakdown_hours"),
+            Metric("down_sizechange", "خواب دستگاه: تغییر سایز (ساعت)", "sum",
+                   "downtime_sizechange_hours"),
+            Metric("down_nowork", "خواب دستگاه: ظرفیت خالی (ساعت)", "sum",
+                   "downtime_nowork_hours"),
             Metric("rows", "تعداد ردیف", "count"),
         ),
     ),

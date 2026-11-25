@@ -10,6 +10,8 @@ done in SQL.
 Shares DimPeriod and FactKPI with the sales domain (see apps.core), so both
 halves of the business report on one conformed calendar and one KPI surface.
 """
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 
@@ -173,17 +175,17 @@ class FactProduction(TimeStampedModel):
         max_digits=18, decimal_places=2, default=0, help_text="تولید واقعی — رسید"
     )
 
-    waste_pct = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    waste_kg = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="ضایعات (کیلوگرم)")
     repair_count = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
-    downtime_breakdown_shifts = models.DecimalField(
-        max_digits=8, decimal_places=2, default=0, help_text="خواب به خاطر خرابی"
+    downtime_breakdown_hours = models.DecimalField(
+        max_digits=8, decimal_places=2, default=0, help_text="خواب دستگاه به خاطر خرابی (ساعت)"
     )
-    downtime_sizechange_shifts = models.DecimalField(
-        max_digits=8, decimal_places=2, default=0, help_text="خواب به خاطر تغییر سایز"
+    downtime_sizechange_hours = models.DecimalField(
+        max_digits=8, decimal_places=2, default=0, help_text="خواب دستگاه به خاطر تغییر سایز (ساعت)"
     )
-    downtime_nowork_shifts = models.DecimalField(
-        max_digits=8, decimal_places=2, default=0, help_text="خواب به خاطر عدم کار"
+    downtime_nowork_hours = models.DecimalField(
+        max_digits=8, decimal_places=2, default=0, help_text="خواب دستگاه به خاطر عدم کار (ساعت)"
     )
 
     description = models.TextField(blank=True, default="", help_text="توضیحات خط در این شیفت")
@@ -215,11 +217,38 @@ class FactProduction(TimeStampedModel):
         )
 
     @property
-    def total_downtime_shifts(self):
+    def total_downtime_hours(self):
         return (
-            self.downtime_breakdown_shifts
-            + self.downtime_sizechange_shifts
-            + self.downtime_nowork_shifts
+            self.downtime_breakdown_hours
+            + self.downtime_sizechange_hours
+            + self.downtime_nowork_hours
+        )
+
+    @property
+    def total_downtime_shifts(self):
+        return self.total_downtime_hours / Decimal(8)
+
+    @property
+    def weighted_equivalent(self):
+        return (
+            Decimal('0.1595') * (self.actual_journal or 0)
+            + Decimal('1.0636') * (self.actual_receipt or 0)
+            + Decimal('0.0511') * (self.actual_pos or 0)
+        )
+
+    @property
+    def waste_pct(self):
+        we = self.weighted_equivalent
+        if not we:
+            return Decimal(0)
+        return (self.waste_kg or 0) / we * 100
+
+    @property
+    def index_output(self):
+        return (
+            (self.actual_journal or 0)
+            + Decimal('9.2') * (self.actual_pos or 0)
+            + Decimal('2.1') * (self.actual_receipt or 0)
         )
 
     def __str__(self) -> str:

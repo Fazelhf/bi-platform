@@ -15,7 +15,7 @@ from apps.production.models import (
 
 @admin.register(FactProduction)
 class FactProductionAdmin(admin.ModelAdmin):
-    list_display = ("machine", "period", "active_shifts", "output_units", "waste_pct", "status")
+    list_display = ("machine", "period", "active_shifts", "output_units", "waste_kg", "waste_pct", "status")
     list_filter = ("status", "period", "machine")
 
 

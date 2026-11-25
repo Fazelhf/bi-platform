@@ -41,12 +41,33 @@ const machineAvg = computed(() =>
 const days = computed(() => data.value?.days_in_month ?? 30);
 
 // Day and night, from the server's per-shift summary.
-type ShiftKey = "index_output" | "journal" | "pos" | "receipt" | "actual_total" | "active_shifts"
+type ShiftKey = "index_output" | "journal" | "pos" | "receipt" | "actual_total" | "weighted_equivalent" | "active_shifts"
   | "downtime" | "print_area" | "cost" | "revenue" | "headcount";
 const EMPTY: Record<ShiftKey, number> = { index_output: 0, journal: 0, pos: 0, receipt: 0, actual_total: 0,
-  active_shifts: 0, downtime: 0, print_area: 0, cost: 0, revenue: 0, headcount: 0 };
+  weighted_equivalent: 0, active_shifts: 0, downtime: 0, print_area: 0, cost: 0, revenue: 0, headcount: 0 };
 const shiftOf = (s: "day" | "night") =>
-  computed<Record<ShiftKey, number>>(() => data.value?.shift_summary?.find((r) => r.shift === s) ?? EMPTY);
+  computed<Record<ShiftKey, number>>(() => {
+    const raw = data.value?.shift_summary?.find((r) => r.shift === s);
+    if (!raw) return EMPTY;
+    const j = Number(raw.journal) || 0;
+    const pos = Number(raw.pos) || 0;
+    const rec = Number(raw.receipt) || 0;
+    const we = Number(raw.weighted_equivalent) || (0.1595 * j + 1.0636 * rec + 0.0511 * pos);
+    return {
+      index_output: Number(raw.index_output) || 0,
+      journal: j,
+      pos: pos,
+      receipt: rec,
+      actual_total: Number(raw.actual_total) || (j + pos + rec),
+      weighted_equivalent: we,
+      active_shifts: Number(raw.active_shifts) || 0,
+      downtime: Number(raw.downtime) || 0,
+      print_area: Number(raw.print_area) || 0,
+      cost: Number(raw.cost) || 0,
+      revenue: Number(raw.revenue) || 0,
+      headcount: Number(raw.headcount) || 0,
+    };
+  });
 const day = shiftOf("day");
 const night = shiftOf("night");
 const total = (k: ShiftKey) => Number(day.value[k]) + Number(night.value[k]);
@@ -61,9 +82,9 @@ const inactiveShifts = computed(() =>
 // The comparison table: every section of the input form, day against night.
 const SHIFT_ROWS: { key: ShiftKey; label: string; rial?: boolean }[] = [
   { key: "index_output", label: "تولید (شاخص)" },
-  { key: "actual_total", label: "تولید واقعی" },
+  { key: "weighted_equivalent", label: "معادل وزنی" },
   { key: "active_shifts", label: "شیفت فعال خطوط برش" },
-  { key: "downtime", label: "خواب خطوط (شیفت)" },
+  { key: "downtime", label: "خواب دستگاه (ساعت)" },
   { key: "print_area", label: "متراژ چاپ (م²)" },
   { key: "headcount", label: "نیروی انسانی (نفرروز)" },
   { key: "cost", label: "هزینه‌ها", rial: true },
@@ -91,6 +112,29 @@ const machineNightActual = machineActual("night");
 const machineJournal = computed(() => cutting.value.map((m) => Number(m.actual_journal || 0)));
 const machinePos = computed(() => cutting.value.map((m) => Number(m.actual_pos || 0)));
 const machineReceipt = computed(() => cutting.value.map((m) => Number(m.actual_receipt || 0)));
+const machineDowntimeHours = computed(() =>
+  cutting.value.map(
+    (m) =>
+      Number(m.downtime_breakdown_hours || 0) +
+      Number(m.downtime_sizechange_hours || 0) +
+      Number(m.downtime_nowork_hours || 0),
+  ),
+);
+const machineWastePct = computed(() =>
+  cutting.value.map((m) => {
+    const we =
+      0.1595 * Number(m.actual_journal || 0) +
+      1.0636 * Number(m.actual_receipt || 0) +
+      0.0511 * Number(m.actual_pos || 0);
+    const kg = Number(m.waste_kg || 0);
+    return we > 0 ? Number(((kg / we) * 100).toFixed(2)) : 0;
+  }),
+);
+const overallWastePct = computed(() => {
+  const we = total("weighted_equivalent");
+  const kg = cutting.value.reduce((s, m) => s + Number(m.waste_kg || 0), 0);
+  return we > 0 ? Number(((kg / we) * 100).toFixed(2)) : null;
+});
 const efficiency = computed(() => {
   const v = kpi("prod_productivity")?.efficiency_pct;
   return v == null ? "—" : Number(v).toFixed(1) + "٪";
@@ -162,8 +206,8 @@ function fmtCell(v: string | null, unit: string) {
           </div>
         </div>
         <div class="bg-surface rounded-card shadow-soft p-4">
-          <div class="text-xs text-slate-400 mb-1">تولید واقعی</div>
-          <div class="text-2xl font-bold ltr-nums text-ink">{{ num(total('actual_total')) }}</div>
+          <div class="text-xs text-slate-400 mb-1">معادل وزنی</div>
+          <div class="text-2xl font-bold ltr-nums text-ink">{{ num(Math.round(total('weighted_equivalent'))) }}</div>
           <div class="mt-2 pt-2 border-t border-slate-100 flex justify-between gap-2 text-xs text-slate-500">
             <span>ژورنال <b class="text-ink ltr-nums">{{ num(total('journal')) }}</b></span>
             <span>پوز <b class="text-ink ltr-nums">{{ num(total('pos')) }}</b></span>
@@ -303,9 +347,15 @@ function fmtCell(v: string | null, unit: string) {
         <ComparisonBar title="بهره‌وری نیروی انسانی"
           :actual="n(kpi('labor_productivity')?.actual)" :target="n(kpi('labor_productivity')?.target)" :ideal="n(kpi('labor_productivity')?.ideal)" />
         <BarChart title="میانگین تولید هر شیفت" :categories="machineNames" :values="machineAvg" color="#8b7cf6" />
-        <ComparisonBar title="نرخ ضایعات"
-          :actual="n(kpi('waste_rate')?.actual)" :target="n(kpi('waste_rate')?.target)" :ideal="n(kpi('waste_rate')?.ideal)" />
-        <StackedMachineBar title="عملکرد دستگاه‌ها (فعال / خواب)" :categories="machineNames" :active="activeShifts" :inactive="inactiveShifts" />
+        <ComparisonBar title="نرخ ضایعات (٪)"
+          :actual="n(kpi('waste_rate')?.actual) ?? overallWastePct" :target="n(kpi('waste_rate')?.target) ?? 1" :ideal="n(kpi('waste_rate')?.ideal) ?? 1" />
+        <StackedMachineBar title="شیفت‌های دستگاه‌ها (فعال / غیرفعال)" :categories="machineNames" :active="activeShifts" :inactive="inactiveShifts" />
+      </div>
+
+      <!-- Per-line downtime (hours) & waste % -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <BarChart title="توقفات هر خط (ساعت)" :categories="machineNames" :values="machineDowntimeHours" color="#f59e0b" />
+        <BarChart title="درصد ضایعات هر خط (٪)" :categories="machineNames" :values="machineWastePct" color="#ef4444" />
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">

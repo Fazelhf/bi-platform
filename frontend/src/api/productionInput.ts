@@ -9,7 +9,7 @@ export interface ShiftBlock {
   print: Record<string, any> | null;
   print_colors: { color_count: number; area_sqm: string }[];
   costs: { category: number; category_code: string; category_name: string; amount_rial: string; description: string }[];
-  rolls: { product: number; product_name: string; piece_rate_rial: string; quantity: string }[];
+  rolls: { product: number; product_code?: string; product_name: string; piece_rate_rial: string; quantity: string }[];
 }
 
 export interface ProdInput {

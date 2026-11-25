@@ -41,15 +41,69 @@ const columnDefs: ColDef<ProductionRow>[] = [
     cellRenderer: (p: { value: string }) => (p.value === "night" ? "شیفت شب" : "شیفت روز"),
   },
   numCol("active_shifts", "شیفت فعال"),
-  numCol("output_units", "تولید (شاخص)"),
+  {
+    field: "output_units",
+    headerName: "تولید (شاخص)",
+    editable: false,
+    type: "numericColumn",
+    cellClass: "ltr-nums font-semibold",
+    minWidth: 110,
+    valueGetter: (p) => {
+      const j = Number(p.data?.actual_journal) || 0;
+      const pos = Number(p.data?.actual_pos) || 0;
+      const r = Number(p.data?.actual_receipt) || 0;
+      return Number(p.data?.output_units) || (j + 9.2 * pos + 2.1 * r).toFixed(2);
+    },
+  },
   numCol("actual_journal", "واقعی: ژورنال"),
   numCol("actual_pos", "واقعی: پوز"),
   numCol("actual_receipt", "واقعی: رسید"),
-  numCol("waste_pct", "ضایعات ٪"),
+  {
+    headerName: "معادل وزنی",
+    editable: false,
+    type: "numericColumn",
+    cellClass: "ltr-nums font-bold text-accent-600",
+    minWidth: 110,
+    valueGetter: (p) => {
+      const j = Number(p.data?.actual_journal) || 0;
+      const pos = Number(p.data?.actual_pos) || 0;
+      const r = Number(p.data?.actual_receipt) || 0;
+      return (0.1595 * j + 1.0636 * r + 0.0511 * pos).toFixed(2);
+    },
+  },
+  numCol("waste_kg", "ضایعات (کیلو)"),
+  {
+    headerName: "درصد ضایعات",
+    editable: false,
+    type: "numericColumn",
+    cellClass: "ltr-nums text-slate-500",
+    minWidth: 100,
+    valueGetter: (p) => {
+      const j = Number(p.data?.actual_journal) || 0;
+      const pos = Number(p.data?.actual_pos) || 0;
+      const r = Number(p.data?.actual_receipt) || 0;
+      const we = 0.1595 * j + 1.0636 * r + 0.0511 * pos;
+      const kg = Number(p.data?.waste_kg) || 0;
+      return we ? `${((kg / we) * 100).toFixed(2)}٪` : "—";
+    },
+  },
   numCol("repair_count", "تعمیری"),
-  numCol("downtime_breakdown_shifts", "خواب (خرابی)"),
-  numCol("downtime_sizechange_shifts", "خواب (تغییر سایز)"),
-  numCol("downtime_nowork_shifts", "خواب (ظرفیت خالی)"),
+  numCol("downtime_breakdown_hours", "خواب دستگاه: خرابی (ساعت)"),
+  numCol("downtime_sizechange_hours", "خواب دستگاه: تغییر سایز (ساعت)"),
+  numCol("downtime_nowork_hours", "خواب دستگاه: ظرفیت خالی (ساعت)"),
+  {
+    headerName: "درصد خواب",
+    editable: false,
+    type: "numericColumn",
+    cellClass: "ltr-nums text-slate-500",
+    minWidth: 90,
+    valueGetter: (p) => {
+      const h = (Number(p.data?.downtime_breakdown_hours) || 0)
+        + (Number(p.data?.downtime_sizechange_hours) || 0)
+        + (Number(p.data?.downtime_nowork_hours) || 0);
+      return `${((h / 8) * 100).toFixed(1)}٪`;
+    },
+  },
   {
     field: "status", headerName: "وضعیت", editable: false, minWidth: 110,
     cellRenderer: (p: { value: string }) => {

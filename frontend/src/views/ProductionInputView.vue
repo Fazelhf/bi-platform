@@ -50,13 +50,13 @@ const ACTUAL_COLS = [
   { key: "actual_receipt", label: "رسید" },
 ];
 const QUALITY_COLS = [
-  { key: "waste_pct", label: "ضایعات ٪" },
+  { key: "waste_kg", label: "ضایعات (کیلو)" },
   { key: "repair_count", label: "تعمیری" },
 ];
 const DOWNTIME_COLS = [
-  { key: "downtime_breakdown_shifts", label: "خرابی" },
-  { key: "downtime_sizechange_shifts", label: "تغییر سایز" },
-  { key: "downtime_nowork_shifts", label: "ظرفیت خالی" },
+  { key: "downtime_breakdown_hours", label: "خرابی" },
+  { key: "downtime_sizechange_hours", label: "تغییر سایز" },
+  { key: "downtime_nowork_hours", label: "ظرفیت خالی" },
 ];
 const COLOR_FA: Record<number, string> = { 1: "تک‌رنگ", 2: "دو‌رنگ", 3: "سه‌رنگ", 4: "چهار‌رنگ" };
 
@@ -67,21 +67,79 @@ const visible = <T extends { category_code: string }>(costs: T[]) =>
 
 const n = (v: unknown) => Number(v) || 0;
 const sum = <T,>(rows: T[], f: (r: T) => number) => rows.reduce((s, r) => s + f(r), 0);
-const actualOf = (r: Row) => sum(ACTUAL_COLS, (c) => n(r[c.key]));
+
+// فرمول شاخص: ژورنال + (پز * 9.2) + (رسید * 2.1)
+const indexOf = (r: Row) => n(r.actual_journal) + 9.2 * n(r.actual_pos) + 2.1 * n(r.actual_receipt);
+
+// فرمول معادل وزنی: 0.1595 * ژورنال + 1.0636 * رسید + 0.0511 * پز
+const weightedEquivalent = (r: Row) =>
+  0.1595 * n(r.actual_journal) + 1.0636 * n(r.actual_receipt) + 0.0511 * n(r.actual_pos);
+
+// درصد ضایعات = ضایعات (کیلو) / معادل وزنی * 100
+const wastePctOf = (r: Row) => {
+  const we = weightedEquivalent(r);
+  return we > 0 ? (n(r.waste_kg) / we) * 100 : 0;
+};
+
+// مجموع ساعات خواب دستگاه
 const downtimeOf = (r: Row) => sum(DOWNTIME_COLS, (c) => n(r[c.key]));
+
+// درصد خواب دستگاه = ساعت خواب / 8 * 100
+const downtimePctOf = (r: Row) => (downtimeOf(r) / 8) * 100;
+
+// منبع پر شدن خودکار رول‌ها در بخش ۴
+type RollSource = "pos" | "journal" | "receipt" | "print" | null;
+function rollSourceOf(r: { product_code?: string; product_name?: string }): RollSource {
+  const code = r.product_code ?? "";
+  const name = r.product_name ?? "";
+  if (code.includes("57") || name.includes("57") || name.includes("۵۷")) return "pos";
+  if (code.includes("79") || name.includes("79") || name.includes("۷۹")) return "journal";
+  if (code.includes("receipt") || name.includes("رسید")) return "receipt";
+  if (code.includes("print") || name.includes("چاپ")) return "print";
+  return null;
+}
+
+function syncRolls(b: ShiftBlock) {
+  const cuttingList = b.cutting || [];
+  const rawPrintMeters = sum(b.print_colors || [], (c) => n(c.area_sqm));
+  const printSqm = Number((rawPrintMeters * 1.035).toFixed(2));
+  const vals: Record<Exclude<RollSource, null>, number> = {
+    pos: sum(cuttingList, (m: Row) => n(m.actual_pos)),
+    journal: sum(cuttingList, (m: Row) => n(m.actual_journal)),
+    receipt: sum(cuttingList, (m: Row) => n(m.actual_receipt)),
+    print: printSqm,
+  };
+  for (const r of b.rolls || []) {
+    const src = rollSourceOf(r);
+    if (src) r.quantity = String(vals[src]);
+  }
+}
 
 /** Every figure the form shows a total for, per shift. */
 function totalsOf(b: ShiftBlock) {
+  const cuttingList = b.cutting || [];
+  const rawPrintMeters = sum(b.print_colors || [], (c) => n(c.area_sqm));
+  const printSqm = rawPrintMeters * 1.035; // تبدیل متر به متر مربع
+
+  syncRolls(b);
+
   const t: Record<string, number> = {
-    actual: sum(b.cutting, actualOf),
-    downtime: sum(b.cutting, downtimeOf),
-    print: sum(b.print_colors, (c) => n(c.area_sqm)),
-    cost: sum(visible(b.costs), (c) => n(c.amount_rial)),
-    revenue: sum(b.rolls, (r) => n(r.quantity) * n(r.piece_rate_rial)),
+    actual: sum(cuttingList, (r) => sum(ACTUAL_COLS, (c) => n(r[c.key]))),
+    weighted_equivalent: sum(cuttingList, weightedEquivalent),
+    output_units: sum(cuttingList, indexOf),
+    downtime: sum(cuttingList, downtimeOf),
+    waste_kg: sum(cuttingList, (r) => n(r.waste_kg)),
+    repair_count: sum(cuttingList, (r) => n(r.repair_count)),
+    print: rawPrintMeters,
+    print_sqm: printSqm,
+    cost: sum(visible(b.costs || []), (c) => n(c.amount_rial)),
+    revenue: sum(b.rolls || [], (r) => n(r.quantity) * n(r.piece_rate_rial)),
     headcount: n(b.headcount),
+    active_shifts: sum(cuttingList, (r) => n(r.active_shifts)),
   };
-  for (const k of ["active_shifts", "output_units", ...ACTUAL_COLS.map((c) => c.key),
-    ...DOWNTIME_COLS.map((c) => c.key)]) t[k] = sum(b.cutting, (r) => n(r[k]));
+  for (const c of [...ACTUAL_COLS, ...DOWNTIME_COLS]) {
+    t[c.key] = sum(cuttingList, (r) => n(r[c.key]));
+  }
   return t;
 }
 const totals = computed(() =>
@@ -100,8 +158,8 @@ const comparisonLines = computed(() => {
     return {
       machine: d.machine,
       name: d.machine_name,
-      index: [n(d.output_units), n(nr.output_units)],
-      actual: [actualOf(d), actualOf(nr)],
+      index: [indexOf(d), indexOf(nr)],
+      weighted: [weightedEquivalent(d), weightedEquivalent(nr)],
       downtime: [downtimeOf(d), downtimeOf(nr)],
     };
   });
@@ -110,7 +168,7 @@ const comparisonLines = computed(() => {
 const COMPARE_ROWS = [
   { key: "headcount", label: "نیروی انسانی (نفرروز)" },
   { key: "active_shifts", label: "شیفت فعال خطوط برش" },
-  { key: "print", label: "متراژ چاپ (م²)" },
+  { key: "print_sqm", label: "متراژ چاپ (م²)" },
   { key: "cost", label: "هزینه‌ها (ریال)" },
   { key: "revenue", label: "درآمد اجرت (ریال)" },
 ];
@@ -128,6 +186,17 @@ async function load() {
 async function save(submit: boolean) {
   const d = data.value!;
   saving.value = submit ? "در حال ارسال…" : "در حال ذخیره…";
+
+  // پیش از ذخیره، مقادیر شاخص و رول‌ها همگام می‌شوند
+  for (const s of SHIFTS) {
+    const block = d.shifts[s];
+    if (!block) continue;
+    for (const m of block.cutting || []) {
+      m.output_units = indexOf(m);
+    }
+    syncRolls(block);
+  }
+
   try {
     await productionInputApi.save({ period: selectedPeriod.value, submit, shifts: d.shifts });
     saving.value = submit ? `${submittedMessage()} ✓` : "ذخیره شد ✓";
@@ -279,8 +348,8 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   <th :colspan="ACTUAL_COLS.length + 1" class="font-semibold text-accent-600 pt-1 pb-1.5 border-b-2 border-accent-500/40 bg-accent-50/60 rounded-t-lg">
                     تولید واقعی
                   </th>
-                  <th :colspan="QUALITY_COLS.length" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">کیفیت</th>
-                  <th :colspan="DOWNTIME_COLS.length" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">خواب (شیفت)</th>
+                  <th :colspan="QUALITY_COLS.length + 1" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">کیفیت</th>
+                  <th :colspan="DOWNTIME_COLS.length + 1" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">خواب دستگاه (ساعت)</th>
                   <th></th>
                 </tr>
                 <tr class="text-slate-400 border-b border-slate-100 text-xs">
@@ -291,12 +360,15 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                     <span class="sr-only">تولید واقعی — </span>{{ c.label }}
                   </th>
                   <th class="font-medium py-2 px-1.5 text-center bg-accent-50/60 border-l border-slate-100">
-                    <span class="sr-only">تولید واقعی — </span>جمع
+                    <span class="sr-only">تولید واقعی — </span>معادل وزنی
                   </th>
-                  <th v-for="c in QUALITY_COLS" :key="c.key" class="font-medium py-2 px-1.5 text-center">{{ c.label }}</th>
+                  <th class="font-medium py-2 px-1.5 text-center">ضایعات (کیلو)</th>
+                  <th class="font-medium py-2 px-1 text-center">درصد ضایعات</th>
+                  <th class="font-medium py-2 px-1.5 text-center">تعمیری</th>
                   <th v-for="(c, i) in DOWNTIME_COLS" :key="c.key" class="font-medium py-2 px-1.5 text-center" :class="i === 0 ? 'border-r border-slate-100' : ''">
-                    <span class="sr-only">خواب — </span>{{ c.label }}
+                    <span class="sr-only">خواب دستگاه — </span>{{ c.label }}
                   </th>
+                  <th class="font-medium py-2 px-1 text-center">درصد خواب</th>
                   <th class="text-right font-medium py-2 px-1.5 border-r border-slate-100 w-48">توضیحات</th>
                 </tr>
               </thead>
@@ -307,19 +379,30 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                     <input v-model="m.active_shifts" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                   </td>
                   <td class="py-1.5 px-1 border-l border-slate-100">
-                    <input v-model="m.output_units" type="number" step="any" :class="[INPUT, 'font-semibold']" @focus="selectIfZero" />
+                    <div :class="[INPUT, 'font-semibold bg-slate-100 text-ink cursor-default select-all']" title="محاسبه خودکار: ژورنال + پوز×۹.۲ + رسید×۲.۱">
+                      {{ num(indexOf(m)) }}
+                    </div>
                   </td>
                   <td v-for="c in ACTUAL_COLS" :key="c.key" class="py-1.5 px-1 bg-accent-50/40">
                     <input v-model="m[c.key]" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                   </td>
-                  <td class="sum-cell py-1.5 px-2 text-center font-bold text-ink ltr-nums bg-accent-50/40 border-l border-slate-100">
-                    {{ num(actualOf(m)) }}
+                  <td class="sum-cell py-1.5 px-2 text-center font-bold text-accent-600 ltr-nums bg-accent-50/40 border-l border-slate-100" title="۰.۱۵۹۵×ژورنال + ۱.۰۶۳۶×رسید + ۰.۰۵۱۱×پوز">
+                    {{ num(weightedEquivalent(m).toFixed(2)) }}
                   </td>
-                  <td v-for="c in QUALITY_COLS" :key="c.key" class="py-1.5 px-1">
-                    <input v-model="m[c.key]" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
+                  <td class="py-1.5 px-1">
+                    <input v-model="m.waste_kg" type="number" step="any" :class="INPUT" placeholder="کیلو" @focus="selectIfZero" />
+                  </td>
+                  <td class="py-1.5 px-1 text-center ltr-nums text-xs text-slate-500 font-medium">
+                    <span :class="wastePctOf(m) > 5 ? 'text-amber-600 font-bold' : ''">{{ wastePctOf(m) ? `${wastePctOf(m).toFixed(1)}٪` : '—' }}</span>
+                  </td>
+                  <td class="py-1.5 px-1">
+                    <input v-model="m.repair_count" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
                   </td>
                   <td v-for="(c, i) in DOWNTIME_COLS" :key="c.key" class="py-1.5 px-1" :class="i === 0 ? 'border-r border-slate-100' : ''">
-                    <input v-model="m[c.key]" type="number" step="any" :class="INPUT" @focus="selectIfZero" />
+                    <input v-model="m[c.key]" type="number" step="any" :class="INPUT" placeholder="ساعت" @focus="selectIfZero" />
+                  </td>
+                  <td class="py-1.5 px-1 text-center ltr-nums text-xs text-slate-500 font-medium" title="تقسیم بر ۸ ساعت">
+                    {{ downtimeOf(m) ? `${downtimePctOf(m).toFixed(0)}٪` : '۰٪' }}
                   </td>
                   <td class="py-1.5 px-1 border-r border-slate-100">
                     <input v-model="m.description" type="text" :class="TEXT" placeholder="مثلاً علت توقف، سفارش خاص…" :aria-label="`توضیحات ${m.machine_name}`" />
@@ -332,9 +415,16 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   <td class="py-2.5 text-center ltr-nums">{{ num(curTotals.active_shifts) }}</td>
                   <td class="py-2.5 text-center ltr-nums text-ink">{{ num(curTotals.output_units) }}</td>
                   <td v-for="c in ACTUAL_COLS" :key="c.key" class="py-2.5 text-center ltr-nums">{{ num(curTotals[c.key]) }}</td>
-                  <td class="py-2.5 text-center ltr-nums text-accent-600 font-bold">{{ num(curTotals.actual) }}</td>
-                  <td v-for="c in QUALITY_COLS" :key="c.key" class="py-2.5 text-center text-slate-300">—</td>
+                  <td class="py-2.5 text-center ltr-nums text-accent-600 font-bold">{{ num(curTotals.weighted_equivalent.toFixed(2)) }}</td>
+                  <td class="py-2.5 text-center ltr-nums">{{ num(curTotals.waste_kg) }}</td>
+                  <td class="py-2.5 text-center ltr-nums text-slate-400">
+                    {{ curTotals.weighted_equivalent ? `${((curTotals.waste_kg / curTotals.weighted_equivalent) * 100).toFixed(1)}٪` : '—' }}
+                  </td>
+                  <td class="py-2.5 text-center ltr-nums">{{ num(curTotals.repair_count) }}</td>
                   <td v-for="c in DOWNTIME_COLS" :key="c.key" class="py-2.5 text-center ltr-nums">{{ num(curTotals[c.key]) }}</td>
+                  <td class="py-2.5 text-center ltr-nums text-slate-400">
+                    {{ curTotals.active_shifts ? `${((curTotals.downtime / (curTotals.active_shifts * 8)) * 100).toFixed(0)}٪` : '—' }}
+                  </td>
                   <td></td>
                 </tr>
               </tfoot>
@@ -385,8 +475,8 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
             </div>
             <div class="space-y-2">
               <label v-for="c in cur.print_colors" :key="c.color_count" class="flex items-center justify-between gap-3">
-                <span class="text-sm text-slate-600">{{ COLOR_FA[c.color_count] }} (متر مربع)</span>
-                <input v-model="c.area_sqm" type="number" step="any" :class="FIELD" @focus="selectIfZero" />
+                <span class="text-sm text-slate-600">{{ COLOR_FA[c.color_count] }} (متر)</span>
+                <input v-model="c.area_sqm" type="number" step="any" :class="FIELD" placeholder="متر" @focus="selectIfZero" />
               </label>
               <label v-if="cur.print" class="flex items-center justify-between gap-3">
                 <span class="text-sm text-slate-600">شیفت فعال دستگاه چاپ</span>
@@ -403,9 +493,12 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                 </label>
               </template>
             </div>
-            <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
-              <span class="text-slate-500">مجموع متراژ چاپ</span>
-              <span class="font-bold text-ink ltr-nums">{{ num(curTotals.print) }} م²</span>
+            <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center text-sm">
+              <span class="text-slate-500">مجموع متراژ چاپ (متر مربع = متراژ × ۱.۰۳۵)</span>
+              <span class="font-bold text-ink ltr-nums">
+                {{ num(curTotals.print_sqm.toFixed(2)) }} م²
+                <span class="text-xs text-slate-400 font-normal">({{ num(curTotals.print) }} متر)</span>
+              </span>
             </div>
           </section>
 
@@ -416,13 +509,33 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
               <h3 class="font-bold text-ink">تعداد رول‌ها</h3>
             </div>
             <div class="space-y-2">
-              <label v-for="r in cur.rolls" :key="r.product" class="flex items-center justify-between gap-3">
+              <div v-for="r in cur.rolls" :key="r.product" class="flex items-center justify-between gap-3">
                 <span class="text-sm text-slate-600">
                   {{ r.product_name }}
                   <span class="text-xs text-slate-400 ltr-nums">(اجرت {{ num(r.piece_rate_rial) }})</span>
                 </span>
-                <input v-model="r.quantity" type="number" step="any" :class="[FIELD, 'w-32']" @focus="selectIfZero" />
-              </label>
+                <div class="flex items-center gap-2">
+                  <span v-if="rollSourceOf(r) === 'pos'" class="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded">خودکار از پوز</span>
+                  <span v-else-if="rollSourceOf(r) === 'journal'" class="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded">خودکار از ژورنال</span>
+                  <span v-else-if="rollSourceOf(r) === 'receipt'" class="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">خودکار از رسید</span>
+                  <span v-else-if="rollSourceOf(r) === 'print'" class="text-xs text-purple-700 bg-purple-50 px-2 py-0.5 rounded">خودکار از بخش ۳</span>
+                  <input
+                    v-if="rollSourceOf(r)"
+                    :value="r.quantity"
+                    type="number"
+                    readonly
+                    class="w-32 bg-slate-100 text-ink rounded-lg px-3 py-1.5 text-left ltr-nums font-semibold outline-none cursor-default"
+                  />
+                  <input
+                    v-else
+                    v-model="r.quantity"
+                    type="number"
+                    step="any"
+                    :class="[FIELD, 'w-32']"
+                    @focus="selectIfZero"
+                  />
+                </div>
+              </div>
             </div>
             <div class="mt-3 pt-3 border-t border-slate-100 flex justify-between text-sm">
               <span class="text-slate-500">درآمد اجرت (برآورد)</span>
@@ -442,15 +555,15 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                 <tr class="text-xs text-slate-400">
                   <th></th>
                   <th colspan="3" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">تولید (شاخص)</th>
-                  <th colspan="3" class="font-semibold text-accent-600 pt-1 pb-1.5 border-b-2 border-accent-500/40 bg-accent-50/60">تولید واقعی</th>
-                  <th colspan="2" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">خواب (شیفت)</th>
+                  <th colspan="3" class="font-semibold text-accent-600 pt-1 pb-1.5 border-b-2 border-accent-500/40 bg-accent-50/60">معادل وزنی</th>
+                  <th colspan="2" class="font-semibold pt-1 pb-1.5 border-b-2 border-slate-200">خواب دستگاه (ساعت)</th>
                 </tr>
                 <tr class="text-slate-400 border-b border-slate-100 text-xs">
                   <th class="text-right font-medium py-2 pr-2">خط تولید</th>
-                  <template v-for="g in ['index', 'actual']" :key="g">
-                    <th class="font-medium py-2 px-2 text-center" :class="g === 'actual' ? 'bg-accent-50/60' : ''">روز</th>
-                    <th class="font-medium py-2 px-2 text-center" :class="g === 'actual' ? 'bg-accent-50/60' : ''">شب</th>
-                    <th class="font-medium py-2 px-2 text-center border-l border-slate-100" :class="g === 'actual' ? 'bg-accent-50/60' : ''">جمع</th>
+                  <template v-for="g in ['index', 'weighted']" :key="g">
+                    <th class="font-medium py-2 px-2 text-center" :class="g === 'weighted' ? 'bg-accent-50/60' : ''">روز</th>
+                    <th class="font-medium py-2 px-2 text-center" :class="g === 'weighted' ? 'bg-accent-50/60' : ''">شب</th>
+                    <th class="font-medium py-2 px-2 text-center border-l border-slate-100" :class="g === 'weighted' ? 'bg-accent-50/60' : ''">جمع</th>
                   </template>
                   <th class="font-medium py-2 px-2 text-center">روز</th>
                   <th class="font-medium py-2 px-2 text-center">شب</th>
@@ -459,10 +572,10 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
               <tbody>
                 <tr v-for="r in comparisonLines" :key="r.machine" class="border-b border-slate-50">
                   <td class="py-2.5 pr-2 font-medium text-ink whitespace-nowrap">{{ r.name }}</td>
-                  <template v-for="g in (['index', 'actual'] as const)" :key="g">
-                    <td class="py-2 px-2 text-center ltr-nums text-slate-600" :class="g === 'actual' ? 'bg-accent-50/40' : ''">{{ num(r[g][0]) }}</td>
-                    <td class="py-2 px-2 text-center ltr-nums text-slate-600" :class="g === 'actual' ? 'bg-accent-50/40' : ''">{{ num(r[g][1]) }}</td>
-                    <td class="py-2 px-2 text-center ltr-nums font-bold text-ink border-l border-slate-100" :class="g === 'actual' ? 'bg-accent-50/40' : ''">{{ num(r[g][0] + r[g][1]) }}</td>
+                  <template v-for="g in (['index', 'weighted'] as const)" :key="g">
+                    <td class="py-2 px-2 text-center ltr-nums text-slate-600" :class="g === 'weighted' ? 'bg-accent-50/40' : ''">{{ num(r[g][0].toFixed(2)) }}</td>
+                    <td class="py-2 px-2 text-center ltr-nums text-slate-600" :class="g === 'weighted' ? 'bg-accent-50/40' : ''">{{ num(r[g][1].toFixed(2)) }}</td>
+                    <td class="py-2 px-2 text-center ltr-nums font-bold text-ink border-l border-slate-100" :class="g === 'weighted' ? 'bg-accent-50/40' : ''">{{ num((r[g][0] + r[g][1]).toFixed(2)) }}</td>
                   </template>
                   <td class="py-2 px-2 text-center ltr-nums text-slate-600">{{ num(r.downtime[0]) }}</td>
                   <td class="py-2 px-2 text-center ltr-nums text-slate-600">{{ num(r.downtime[1]) }}</td>
@@ -474,9 +587,9 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   <td class="py-3 text-center ltr-nums">{{ num(totals.day.output_units) }}</td>
                   <td class="py-3 text-center ltr-nums">{{ num(totals.night.output_units) }}</td>
                   <td class="py-3 text-center ltr-nums font-bold text-ink border-l border-slate-100">{{ num(totals.day.output_units + totals.night.output_units) }}</td>
-                  <td class="py-3 text-center ltr-nums">{{ num(totals.day.actual) }}</td>
-                  <td class="py-3 text-center ltr-nums">{{ num(totals.night.actual) }}</td>
-                  <td class="py-3 text-center ltr-nums font-bold text-accent-600 border-l border-slate-100">{{ num(totals.day.actual + totals.night.actual) }}</td>
+                  <td class="py-3 text-center ltr-nums">{{ num(totals.day.weighted_equivalent.toFixed(2)) }}</td>
+                  <td class="py-3 text-center ltr-nums">{{ num(totals.night.weighted_equivalent.toFixed(2)) }}</td>
+                  <td class="py-3 text-center ltr-nums font-bold text-accent-600 border-l border-slate-100">{{ num((totals.day.weighted_equivalent + totals.night.weighted_equivalent).toFixed(2)) }}</td>
                   <td class="py-3 text-center ltr-nums">{{ num(totals.day.downtime) }}</td>
                   <td class="py-3 text-center ltr-nums">{{ num(totals.night.downtime) }}</td>
                 </tr>

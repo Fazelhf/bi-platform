@@ -322,12 +322,18 @@ export interface ProductionRow {
   actual_pos?: string;
   actual_receipt?: string;
   total_actual_output?: string;
-  waste_pct: string;
+  weighted_equivalent?: string;
+  waste_kg?: string;
+  waste_pct?: string;
   repair_count: string;
-  downtime_breakdown_shifts: string;
-  downtime_sizechange_shifts: string;
-  downtime_nowork_shifts: string;
-  total_downtime_shifts: string;
+  downtime_breakdown_hours?: string;
+  downtime_sizechange_hours?: string;
+  downtime_nowork_hours?: string;
+  total_downtime_hours?: string;
+  downtime_breakdown_shifts?: string;
+  downtime_sizechange_shifts?: string;
+  downtime_nowork_shifts?: string;
+  total_downtime_shifts?: string;
   status: "draft" | "submitted" | "approved" | "rejected" | "needs_revision";
   updated_at: string;
 }
@@ -345,10 +351,16 @@ export interface ProductionDashboard {
     actual_pos?: number;
     actual_receipt?: number;
     total_actual_output?: number;
+    weighted_equivalent?: number;
+    waste_kg?: number;
     waste_pct: number;
-    downtime_breakdown_shifts: number;
-    downtime_sizechange_shifts: number;
-    downtime_nowork_shifts: number;
+    downtime_breakdown_hours?: number;
+    downtime_sizechange_hours?: number;
+    downtime_nowork_hours?: number;
+    total_downtime_hours?: number;
+    downtime_breakdown_shifts?: number;
+    downtime_sizechange_shifts?: number;
+    downtime_nowork_shifts?: number;
   }[];
   /** Day against night across the whole input form. */
   shift_summary: {
@@ -359,6 +371,9 @@ export interface ProductionDashboard {
     pos: number;
     receipt: number;
     actual_total: number;
+    weighted_equivalent?: number;
+    waste_kg?: number;
+    waste_pct?: number;
     active_shifts: number;
     downtime: number;
     print_area: number;
