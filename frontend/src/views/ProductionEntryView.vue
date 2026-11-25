@@ -7,6 +7,7 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 import { salesApi } from "@/api/sales";
 import { productionApi } from "@/api/production";
 import type { Period, ProductionRow } from "@/types";
+import { downtimePct, indexOf, wastePct, weightedEquivalentOf } from "@/utils/production";
 
 const periods = ref<Period[]>([]);
 const selectedPeriod = ref<number | null>(null);
@@ -49,10 +50,9 @@ const columnDefs: ColDef<ProductionRow>[] = [
     cellClass: "ltr-nums font-semibold",
     minWidth: 110,
     valueGetter: (p) => {
-      const j = Number(p.data?.actual_journal) || 0;
-      const pos = Number(p.data?.actual_pos) || 0;
-      const r = Number(p.data?.actual_receipt) || 0;
-      return Number(p.data?.output_units) || (j + 9.2 * pos + 2.1 * r).toFixed(2);
+      // From the real output when there is any; an old row keeps its typed شاخص.
+      const idx = indexOf(p.data ?? {});
+      return idx ? idx.toFixed(2) : Number(p.data?.output_units) || 0;
     },
   },
   numCol("actual_journal", "واقعی: ژورنال"),
@@ -65,10 +65,7 @@ const columnDefs: ColDef<ProductionRow>[] = [
     cellClass: "ltr-nums font-bold text-accent-600",
     minWidth: 110,
     valueGetter: (p) => {
-      const j = Number(p.data?.actual_journal) || 0;
-      const pos = Number(p.data?.actual_pos) || 0;
-      const r = Number(p.data?.actual_receipt) || 0;
-      return (0.1595 * j + 1.0636 * r + 0.0511 * pos).toFixed(2);
+      return weightedEquivalentOf(p.data ?? {}).toFixed(2);
     },
   },
   numCol("waste_kg", "ضایعات (کیلو)"),
@@ -79,12 +76,8 @@ const columnDefs: ColDef<ProductionRow>[] = [
     cellClass: "ltr-nums text-slate-500",
     minWidth: 100,
     valueGetter: (p) => {
-      const j = Number(p.data?.actual_journal) || 0;
-      const pos = Number(p.data?.actual_pos) || 0;
-      const r = Number(p.data?.actual_receipt) || 0;
-      const we = 0.1595 * j + 1.0636 * r + 0.0511 * pos;
-      const kg = Number(p.data?.waste_kg) || 0;
-      return we ? `${((kg / we) * 100).toFixed(2)}٪` : "—";
+      const we = weightedEquivalentOf(p.data ?? {});
+      return we ? `${wastePct(Number(p.data?.waste_kg) || 0, we).toFixed(2)}٪` : "—";
     },
   },
   numCol("repair_count", "تعمیری"),
@@ -101,7 +94,7 @@ const columnDefs: ColDef<ProductionRow>[] = [
       const h = (Number(p.data?.downtime_breakdown_hours) || 0)
         + (Number(p.data?.downtime_sizechange_hours) || 0)
         + (Number(p.data?.downtime_nowork_hours) || 0);
-      return `${((h / 8) * 100).toFixed(1)}٪`;
+      return `${downtimePct(h, Math.max(Number(p.data?.active_shifts) || 0, 1)).toFixed(1)}٪`;
     },
   },
   {

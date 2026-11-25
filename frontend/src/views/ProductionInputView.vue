@@ -8,6 +8,9 @@ import { submitHint, submittedMessage } from "@/utils/approval";
 import { selectIfZero } from "@/utils/inputs";
 import MoneyInput from "@/components/MoneyInput.vue";
 import ExportActions from "@/components/ExportActions.vue";
+import {
+  PRINT_SQM_PER_METRE, downtimePct, indexOf, wastePct, weightedEquivalentOf as weightedEquivalent,
+} from "@/utils/production";
 
 type Row = Record<string, any>;
 
@@ -68,60 +71,45 @@ const visible = <T extends { category_code: string }>(costs: T[]) =>
 const n = (v: unknown) => Number(v) || 0;
 const sum = <T,>(rows: T[], f: (r: T) => number) => rows.reduce((s, r) => s + f(r), 0);
 
-// فرمول شاخص: ژورنال + (پز * 9.2) + (رسید * 2.1)
-const indexOf = (r: Row) => n(r.actual_journal) + 9.2 * n(r.actual_pos) + 2.1 * n(r.actual_receipt);
-
-// فرمول معادل وزنی: 0.1595 * ژورنال + 1.0636 * رسید + 0.0511 * پز
-const weightedEquivalent = (r: Row) =>
-  0.1595 * n(r.actual_journal) + 1.0636 * n(r.actual_receipt) + 0.0511 * n(r.actual_pos);
-
-// درصد ضایعات = ضایعات (کیلو) / معادل وزنی * 100
-const wastePctOf = (r: Row) => {
-  const we = weightedEquivalent(r);
-  return we > 0 ? (n(r.waste_kg) / we) * 100 : 0;
-};
+// شاخص، معادل وزنی و ضریب‌ها: utils/production.ts (همان فرمول‌های سرور)
+const wastePctOf = (r: Row) => wastePct(n(r.waste_kg), weightedEquivalent(r));
 
 // مجموع ساعات خواب دستگاه
 const downtimeOf = (r: Row) => sum(DOWNTIME_COLS, (c) => n(r[c.key]));
 
-// درصد خواب دستگاه = ساعت خواب / 8 * 100
-const downtimePctOf = (r: Row) => (downtimeOf(r) / 8) * 100;
+// درصد خواب دستگاه = ساعت خواب ÷ (۸ ساعت × شیفت‌های این ردیف)
+const downtimePctOf = (r: Row) => downtimePct(downtimeOf(r), Math.max(n(r.active_shifts), 1));
 
-// منبع پر شدن خودکار رول‌ها در بخش ۴
+// بخش ۴ از جدول‌های بالا پر می‌شود؛ سرور می‌گوید هر محصول از کدام جمع (کد محصول، نه اسمش).
 type RollSource = "pos" | "journal" | "receipt" | "print" | null;
-function rollSourceOf(r: { product_code?: string; product_name?: string }): RollSource {
-  const code = r.product_code ?? "";
-  const name = r.product_name ?? "";
-  if (code.includes("57") || name.includes("57") || name.includes("۵۷")) return "pos";
-  if (code.includes("79") || name.includes("79") || name.includes("۷۹")) return "journal";
-  if (code.includes("receipt") || name.includes("رسید")) return "receipt";
-  if (code.includes("print") || name.includes("چاپ")) return "print";
-  return null;
-}
+const SOURCE_KEY = { actual_pos: "pos", actual_journal: "journal", actual_receipt: "receipt", print_sqm: "print" } as const;
+const rollSourceOf = (r: { source?: keyof typeof SOURCE_KEY | null }): RollSource =>
+  (r.source && SOURCE_KEY[r.source]) || null;
 
-function syncRolls(b: ShiftBlock) {
+function rollValues(b: ShiftBlock): Record<Exclude<RollSource, null>, number> {
   const cuttingList = b.cutting || [];
-  const rawPrintMeters = sum(b.print_colors || [], (c) => n(c.area_sqm));
-  const printSqm = Number((rawPrintMeters * 1.035).toFixed(2));
-  const vals: Record<Exclude<RollSource, null>, number> = {
+  return {
     pos: sum(cuttingList, (m: Row) => n(m.actual_pos)),
     journal: sum(cuttingList, (m: Row) => n(m.actual_journal)),
     receipt: sum(cuttingList, (m: Row) => n(m.actual_receipt)),
-    print: printSqm,
+    print: Number((sum(b.print_colors || [], (c) => n(c.length_m)) * PRINT_SQM_PER_METRE).toFixed(2)),
   };
-  for (const r of b.rolls || []) {
-    const src = rollSourceOf(r);
-    if (src) r.quantity = String(vals[src]);
-  }
+}
+/** A product's roll count: its total from above, or what was typed. */
+function rollQty(b: ShiftBlock, r: ShiftBlock["rolls"][number]) {
+  const src = rollSourceOf(r);
+  return src ? rollValues(b)[src] : n(r.quantity);
+}
+/** Write the derived counts into the block, right before it is saved. */
+function syncRolls(b: ShiftBlock) {
+  for (const r of b.rolls || []) r.quantity = String(rollQty(b, r));
 }
 
 /** Every figure the form shows a total for, per shift. */
 function totalsOf(b: ShiftBlock) {
   const cuttingList = b.cutting || [];
-  const rawPrintMeters = sum(b.print_colors || [], (c) => n(c.area_sqm));
-  const printSqm = rawPrintMeters * 1.035; // تبدیل متر به متر مربع
-
-  syncRolls(b);
+  const rawPrintMeters = sum(b.print_colors || [], (c) => n(c.length_m));
+  const printSqm = rawPrintMeters * PRINT_SQM_PER_METRE; // متر به متر مربع
 
   const t: Record<string, number> = {
     actual: sum(cuttingList, (r) => sum(ACTUAL_COLS, (c) => n(r[c.key]))),
@@ -133,7 +121,7 @@ function totalsOf(b: ShiftBlock) {
     print: rawPrintMeters,
     print_sqm: printSqm,
     cost: sum(visible(b.costs || []), (c) => n(c.amount_rial)),
-    revenue: sum(b.rolls || [], (r) => n(r.quantity) * n(r.piece_rate_rial)),
+    revenue: sum(b.rolls || [], (r) => rollQty(b, r) * n(r.piece_rate_rial)),
     headcount: n(b.headcount),
     active_shifts: sum(cuttingList, (r) => n(r.active_shifts)),
   };
@@ -476,7 +464,7 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
             <div class="space-y-2">
               <label v-for="c in cur.print_colors" :key="c.color_count" class="flex items-center justify-between gap-3">
                 <span class="text-sm text-slate-600">{{ COLOR_FA[c.color_count] }} (متر)</span>
-                <input v-model="c.area_sqm" type="number" step="any" :class="FIELD" placeholder="متر" @focus="selectIfZero" />
+                <input v-model="c.length_m" type="number" step="any" :class="FIELD" placeholder="متر" @focus="selectIfZero" />
               </label>
               <label v-if="cur.print" class="flex items-center justify-between gap-3">
                 <span class="text-sm text-slate-600">شیفت فعال دستگاه چاپ</span>
@@ -521,7 +509,7 @@ const BADGE = "w-7 h-7 rounded-lg bg-panel text-white text-xs flex items-center 
                   <span v-else-if="rollSourceOf(r) === 'print'" class="text-xs text-purple-700 bg-purple-50 px-2 py-0.5 rounded">خودکار از بخش ۳</span>
                   <input
                     v-if="rollSourceOf(r)"
-                    :value="r.quantity"
+                    :value="rollQty(cur, r)"
                     type="number"
                     readonly
                     class="w-32 bg-slate-100 text-ink rounded-lg px-3 py-1.5 text-left ltr-nums font-semibold outline-none cursor-default"

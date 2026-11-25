@@ -11,7 +11,7 @@ export interface ProductionDaily {
     date: string; label: string; day: number; weekday: number; period: number | null;
     workday: boolean; off: string; entered: boolean; missing: boolean;
     output: number; journal: number; pos: number; receipt: number; active_shifts: number;
-    downtime: number; waste_pct: number; day_shift: number; night_shift: number;
+    downtime: number; downtime_pct?: number; waste_pct: number; day_shift: number; night_shift: number;
   }[];
   summary: {
     output: number; workdays: number; entered_workdays: number; missing: number;

@@ -102,9 +102,11 @@ class ProductionRevenueSerializer(serializers.ModelSerializer):
 
 
 class PrintColorSerializer(serializers.ModelSerializer):
+    area_sqm = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+
     class Meta:
         model = FactPrintColor
-        fields = ["id", "period", "color_count", "shift", "area_sqm"]
+        fields = ["id", "period", "color_count", "shift", "length_m", "area_sqm"]
 
 
 class MaterialBalanceSerializer(serializers.ModelSerializer):

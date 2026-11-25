@@ -24,6 +24,8 @@ from django.core.management.base import BaseCommand, CommandError
 from apps.core.models import DimPeriod, PeriodKind
 from apps.core.periods import backfill_dates
 from apps.production.models import (
+    HOURS_PER_SHIFT,
+    PRINT_SQM_PER_METRE,
     DimCostCategory,
     DimMachine,
     DimProduct,
@@ -42,21 +44,19 @@ CUTTING_COLS = {3: "cut-1", 4: "cut-2", 5: "cut-3", 6: "cut-4", 7: "cut-5"}
 CUT_ROWS = {
     "active_shifts": 3,
     "output_units": 4,
-    "waste_pct": 5,
     "repair_count": 6,
-    "downtime_breakdown_shifts": 7,   # ورودی label: خرابی
-    "downtime_sizechange_shifts": 8,  # ورودی label: تغییر سایز
-    "downtime_nowork_shifts": 9,      # ورودی label: عدم کار
+    "downtime_breakdown_hours": 7,   # ورودی label: خرابی
+    "downtime_sizechange_hours": 8,  # ورودی label: تغییر سایز
+    "downtime_nowork_hours": 9,      # ورودی label: عدم کار
 }
 
 # ورودی print block (totals in column G = 7).
 PRINT_ROWS = {
     "active_shifts": 12,
     "output_units": 13,
-    "waste_pct": 14,
-    "downtime_breakdown_shifts": 15,
-    "downtime_sizechange_shifts": 16,
-    "downtime_nowork_shifts": 17,
+    "downtime_breakdown_hours": 15,
+    "downtime_sizechange_hours": 16,
+    "downtime_nowork_hours": 17,
 }
 PRINT_COLOR_COLS = {3: 1, 4: 2, 5: 3, 6: 4}  # C..F -> 1..4 colours, row 13
 
@@ -211,6 +211,9 @@ class Command(BaseCommand):
                 field: _num(wsin.cell(row, col).value)
                 for field, row in CUT_ROWS.items()
             }
+            # The workbook counts downtime in shifts; the warehouse keeps hours.
+            for k in [k for k in values if k.startswith("downtime_")]:
+                values[k] = (values[k] or 0) * HOURS_PER_SHIFT
             FactProduction.objects.update_or_create(
                 period=period, shift="day", machine=machine,
                 defaults={**values, "status": status},
@@ -223,6 +226,9 @@ class Command(BaseCommand):
                 field: _num(wsin.cell(row, 7).value)
                 for field, row in PRINT_ROWS.items()
             }
+            # The workbook counts downtime in shifts; the warehouse keeps hours.
+            for k in [k for k in values if k.startswith("downtime_")]:
+                values[k] = (values[k] or 0) * HOURS_PER_SHIFT
             FactProduction.objects.update_or_create(
                 period=period, shift="day", machine=machines["print"],
                 defaults={**values, "repair_count": 0, "status": status},
@@ -236,7 +242,7 @@ class Command(BaseCommand):
             if not area:
                 continue
             FactPrintColor.objects.update_or_create(
-                period=period, shift="day", color_count=colors, defaults={"area_sqm": area}
+                period=period, shift="day", color_count=colors, defaults={"length_m": area / PRINT_SQM_PER_METRE}
             )
             n_colors += 1
 

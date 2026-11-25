@@ -1,0 +1,1 @@
+const o=t=>Number(t)||0,_={actual_pos:1,actual_receipt:9.2,actual_journal:2.1},u={actual_journal:.1595,actual_receipt:1.0636,actual_pos:.0511},l=8,E=1.035,c=(t,a)=>Object.entries(a).reduce((n,[s,e])=>n+o(t[s])*e,0),r=t=>c(t,_),i=t=>c(t,u),I=(t,a)=>a?100*t/a:0,P=(t,a)=>a?100*t/(l*a):0;export{E as P,I as a,P as d,r as i,i as w};

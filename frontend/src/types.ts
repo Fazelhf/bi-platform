@@ -330,10 +330,6 @@ export interface ProductionRow {
   downtime_sizechange_hours?: string;
   downtime_nowork_hours?: string;
   total_downtime_hours?: string;
-  downtime_breakdown_shifts?: string;
-  downtime_sizechange_shifts?: string;
-  downtime_nowork_shifts?: string;
-  total_downtime_shifts?: string;
   status: "draft" | "submitted" | "approved" | "rejected" | "needs_revision";
   updated_at: string;
 }
@@ -358,9 +354,6 @@ export interface ProductionDashboard {
     downtime_sizechange_hours?: number;
     downtime_nowork_hours?: number;
     total_downtime_hours?: number;
-    downtime_breakdown_shifts?: number;
-    downtime_sizechange_shifts?: number;
-    downtime_nowork_shifts?: number;
   }[];
   /** Day against night across the whole input form. */
   shift_summary: {
@@ -375,7 +368,11 @@ export interface ProductionDashboard {
     waste_kg?: number;
     waste_pct?: number;
     active_shifts: number;
+    /** Hours, and as a share of the shifts' hours (8 to a shift). */
     downtime: number;
+    downtime_pct?: number;
+    /** The shifts downtime is a share of. */
+    shifts?: number;
     print_area: number;
     cost: number;
     revenue: number;
@@ -398,7 +395,7 @@ export interface ProductionDashboard {
     period_label: string; description: string; print_design: string;
   }[];
   revenue: { product: string; quantity: number; amount: number }[];
-  print_colors: { color_count: number; area_sqm: number }[];
+  print_colors: { color_count: number; length_m: number; area_sqm: number }[];
   days_in_month: number;
   financials: { revenue: number; cost: number; net: number };
 }

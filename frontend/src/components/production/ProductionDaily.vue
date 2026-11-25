@@ -111,7 +111,7 @@ const s = computed(() => data.value?.summary);
               <td class="px-3 text-left ltr-nums text-slate-500">{{ d.pos ? num(d.pos) : "—" }}</td>
               <td class="px-3 text-left ltr-nums text-slate-500">{{ d.receipt ? num(d.receipt) : "—" }}</td>
               <td class="px-3 text-left ltr-nums text-slate-500">{{ d.entered ? `${num(d.waste_pct)}٪` : "—" }}</td>
-              <td class="px-3 text-left ltr-nums text-slate-500">{{ d.downtime ? num(d.downtime) : "—" }}</td>
+              <td class="px-3 text-left ltr-nums text-slate-500">{{ d.downtime ? num(d.downtime) : "—" }}<span v-if="d.downtime_pct" class="text-[11px] text-slate-400"> ({{ num(d.downtime_pct) }}٪)</span></td>
               <td class="px-4 text-xs whitespace-nowrap">
                 <span v-if="!d.workday" class="text-rose-600">{{ d.off }}<template v-if="d.entered"> · با تولید</template></span>
                 <span v-else-if="d.missing" class="text-red-500 font-medium">ثبت نشده</span>

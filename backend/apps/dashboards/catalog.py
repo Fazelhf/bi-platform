@@ -24,10 +24,11 @@ from django.db.models.functions import Cast, NullIf
 
 
 def _production_weighted_expr():
-    return (
-        Cast(F("actual_journal"), FloatField()) * 0.1595
-        + Cast(F("actual_receipt"), FloatField()) * 1.0636
-        + Cast(F("actual_pos"), FloatField()) * 0.0511
+    from apps.production.models import WEIGHT_EQUIV
+
+    return sum(
+        (Cast(F(k), FloatField()) * float(w) for k, w in WEIGHT_EQUIV.items()),
+        Value(0.0),
     )
 
 

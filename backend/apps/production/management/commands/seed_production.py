@@ -147,11 +147,11 @@ class Command(BaseCommand):
                         "actual_journal": j_day,
                         "actual_pos": p_day,
                         "actual_receipt": r_day,
-                        "waste_pct": Decimal(f"{1.6 + (idx * 0.2):.2f}"),
+                        "waste_kg": Decimal("80"),
                         "repair_count": Decimal(12 + idx * 3),
-                        "downtime_breakdown_shifts": Decimal("0.8"),
-                        "downtime_sizechange_shifts": Decimal("0.5"),
-                        "downtime_nowork_shifts": Decimal("0.2"),
+                        "downtime_breakdown_hours": Decimal("6.4"),
+                        "downtime_sizechange_hours": Decimal("4"),
+                        "downtime_nowork_hours": Decimal("1.6"),
                         "status": ApprovalStatus.APPROVED,
                     },
                 )
@@ -170,11 +170,11 @@ class Command(BaseCommand):
                         "actual_journal": j_night,
                         "actual_pos": p_night,
                         "actual_receipt": r_night,
-                        "waste_pct": Decimal(f"{2.1 + (idx * 0.2):.2f}"),
+                        "waste_kg": Decimal("105"),
                         "repair_count": Decimal(16 + idx * 4),
-                        "downtime_breakdown_shifts": Decimal("1.2"),
-                        "downtime_sizechange_shifts": Decimal("0.7"),
-                        "downtime_nowork_shifts": Decimal("0.4"),
+                        "downtime_breakdown_hours": Decimal("9.6"),
+                        "downtime_sizechange_hours": Decimal("5.6"),
+                        "downtime_nowork_hours": Decimal("3.2"),
                         "status": ApprovalStatus.APPROVED,
                     },
                 )
@@ -190,11 +190,11 @@ class Command(BaseCommand):
                         "actual_journal": Decimal("0"),
                         "actual_pos": Decimal("0"),
                         "actual_receipt": Decimal("0"),
-                        "waste_pct": Decimal("1.4"),
+                        "waste_kg": Decimal("70"),
                         "repair_count": Decimal("6"),
-                        "downtime_breakdown_shifts": Decimal("0.5"),
-                        "downtime_sizechange_shifts": Decimal("0.8"),
-                        "downtime_nowork_shifts": Decimal("0.0"),
+                        "downtime_breakdown_hours": Decimal("4"),
+                        "downtime_sizechange_hours": Decimal("6.4"),
+                        "downtime_nowork_hours": Decimal("0"),
                         "status": ApprovalStatus.APPROVED,
                     },
                 )
@@ -206,11 +206,11 @@ class Command(BaseCommand):
                         "actual_journal": Decimal("0"),
                         "actual_pos": Decimal("0"),
                         "actual_receipt": Decimal("0"),
-                        "waste_pct": Decimal("1.9"),
+                        "waste_kg": Decimal("95"),
                         "repair_count": Decimal("8"),
-                        "downtime_breakdown_shifts": Decimal("0.9"),
-                        "downtime_sizechange_shifts": Decimal("1.0"),
-                        "downtime_nowork_shifts": Decimal("0.3"),
+                        "downtime_breakdown_hours": Decimal("7.2"),
+                        "downtime_sizechange_hours": Decimal("8"),
+                        "downtime_nowork_hours": Decimal("2.4"),
                         "status": ApprovalStatus.APPROVED,
                     },
                 )
@@ -237,7 +237,7 @@ class Command(BaseCommand):
                 for colors, area in print_map.items():
                     FactPrintColor.objects.update_or_create(
                         period=period, color_count=colors, shift=shift,
-                        defaults={"area_sqm": (area * share).quantize(Decimal("1"))},
+                        defaults={"length_m": (area * share).quantize(Decimal("1"))},
                     )
                 for code, amount in cost_map.items():
                     if code in cost_cats:

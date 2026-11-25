@@ -185,11 +185,13 @@ const gap = computed(() => {
 const PRODUCTION_FIELDS: { key: string; label: string }[] = [
   { key: "output_units", label: "تعداد تولید" },
   { key: "active_shifts", label: "شیفت فعال" },
+  { key: "weighted_equivalent", label: "معادل وزنی (کیلو)" },
+  { key: "waste_kg", label: "ضایعات (کیلو)" },
   { key: "waste_pct", label: "درصد ضایعات" },
   { key: "repair_count", label: "تعداد تعمیر" },
-  { key: "downtime_breakdown_shifts", label: "توقف خرابی (شیفت)" },
-  { key: "downtime_sizechange_shifts", label: "توقف تعویض سایز (شیفت)" },
-  { key: "downtime_nowork_shifts", label: "توقف بی‌کاری (شیفت)" },
+  { key: "downtime_breakdown_hours", label: "خواب دستگاه: خرابی (ساعت)" },
+  { key: "downtime_sizechange_hours", label: "خواب دستگاه: تغییر سایز (ساعت)" },
+  { key: "downtime_nowork_hours", label: "خواب دستگاه: ظرفیت خالی (ساعت)" },
 ];
 function productionValue(key: string): string {
   const v = productionPreview.value?.[key];

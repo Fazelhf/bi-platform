@@ -26,6 +26,48 @@ class Shift(models.TextChoices):
     NIGHT = "night", "شیفت شب"
 
 
+# --------------------------------------------------------------------------
+# Plant formulas (from the production manager). The input form mirrors these
+# in frontend/src/utils/production.ts — keep the two in step.
+# --------------------------------------------------------------------------
+# شاخص: پوز as is, رسید × 9.2, ژورنال × 2.1 (the products' index factors).
+INDEX_WEIGHTS = {"actual_pos": Decimal("1"), "actual_receipt": Decimal("9.2"),
+                 "actual_journal": Decimal("2.1")}
+# معادل وزنی (kg): what waste is a percentage of.
+WEIGHT_EQUIV = {"actual_journal": Decimal("0.1595"), "actual_receipt": Decimal("1.0636"),
+                "actual_pos": Decimal("0.0511")}
+HOURS_PER_SHIFT = Decimal("8")
+# The press's run is entered in metres; one metre is 1.035 m².
+PRINT_SQM_PER_METRE = Decimal("1.035")
+
+
+def _dec(v) -> Decimal:
+    """Numbers arrive as text from the form; an empty box is zero."""
+    return Decimal(str(v or 0))
+
+
+def index_output_of(values) -> Decimal:
+    """شاخص of anything with the three actuals (a row, a dict of sums)."""
+    get = values.get if isinstance(values, dict) else (lambda k: getattr(values, k, 0))
+    return sum((_dec(get(k)) * w for k, w in INDEX_WEIGHTS.items()), Decimal(0))
+
+
+def weighted_equivalent_of(values) -> Decimal:
+    get = values.get if isinstance(values, dict) else (lambda k: getattr(values, k, 0))
+    return sum((_dec(get(k)) * w for k, w in WEIGHT_EQUIV.items()), Decimal(0))
+
+
+def waste_pct_of(waste_kg, weighted) -> Decimal:
+    weighted = _dec(weighted)
+    return _dec(waste_kg) / weighted * 100 if weighted else Decimal(0)
+
+
+def downtime_pct_of(hours, shifts) -> Decimal:
+    """Idle hours out of the shifts' hours."""
+    shifts = _dec(shifts)
+    return _dec(hours) / (HOURS_PER_SHIFT * shifts) * 100 if shifts else Decimal(0)
+
+
 def shift_field():
     return models.CharField(
         max_length=10, choices=Shift.choices, default=Shift.DAY,
@@ -226,30 +268,19 @@ class FactProduction(TimeStampedModel):
 
     @property
     def total_downtime_shifts(self):
-        return self.total_downtime_hours / Decimal(8)
+        return self.total_downtime_hours / HOURS_PER_SHIFT
 
     @property
     def weighted_equivalent(self):
-        return (
-            Decimal('0.1595') * (self.actual_journal or 0)
-            + Decimal('1.0636') * (self.actual_receipt or 0)
-            + Decimal('0.0511') * (self.actual_pos or 0)
-        )
+        return weighted_equivalent_of(self)
 
     @property
     def waste_pct(self):
-        we = self.weighted_equivalent
-        if not we:
-            return Decimal(0)
-        return (self.waste_kg or 0) / we * 100
+        return waste_pct_of(self.waste_kg, self.weighted_equivalent)
 
     @property
     def index_output(self):
-        return (
-            (self.actual_journal or 0)
-            + Decimal('9.2') * (self.actual_pos or 0)
-            + Decimal('2.1') * (self.actual_receipt or 0)
-        )
+        return index_output_of(self)
 
     def __str__(self) -> str:
         return f"{self.machine} ({self.get_shift_display()}) · {self.period}"
@@ -266,7 +297,12 @@ class FactPrintColor(TimeStampedModel):
     )
     color_count = models.PositiveSmallIntegerField()  # 1..4
     shift = shift_field()
-    area_sqm = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    # Entered in metres; the area every report shows follows from it.
+    length_m = models.DecimalField(max_digits=16, decimal_places=2, default=0, help_text="متراژ چاپ (متر)")
+
+    @property
+    def area_sqm(self):
+        return self.length_m * PRINT_SQM_PER_METRE
 
     class Meta:
         unique_together = ("period", "color_count", "shift")

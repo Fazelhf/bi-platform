@@ -14,6 +14,7 @@ import BarChart from "@/components/BarChart.vue";
 import DashboardSkeleton from "@/components/DashboardSkeleton.vue";
 import ExportActions from "@/components/ExportActions.vue";
 import { kpiValue, num, rial } from "@/utils/format";
+import { downtimePct, wastePct, weightedEquivalentOf } from "@/utils/production";
 import SectionBoard from "@/components/boards/SectionBoard.vue";
 import ProductionDaily from "@/components/production/ProductionDaily.vue";
 
@@ -42,9 +43,9 @@ const days = computed(() => data.value?.days_in_month ?? 30);
 
 // Day and night, from the server's per-shift summary.
 type ShiftKey = "index_output" | "journal" | "pos" | "receipt" | "actual_total" | "weighted_equivalent" | "active_shifts"
-  | "downtime" | "print_area" | "cost" | "revenue" | "headcount";
+  | "downtime" | "shifts" | "waste_kg" | "print_area" | "cost" | "revenue" | "headcount";
 const EMPTY: Record<ShiftKey, number> = { index_output: 0, journal: 0, pos: 0, receipt: 0, actual_total: 0,
-  weighted_equivalent: 0, active_shifts: 0, downtime: 0, print_area: 0, cost: 0, revenue: 0, headcount: 0 };
+  weighted_equivalent: 0, active_shifts: 0, downtime: 0, shifts: 0, waste_kg: 0, print_area: 0, cost: 0, revenue: 0, headcount: 0 };
 const shiftOf = (s: "day" | "night") =>
   computed<Record<ShiftKey, number>>(() => {
     const raw = data.value?.shift_summary?.find((r) => r.shift === s);
@@ -52,7 +53,8 @@ const shiftOf = (s: "day" | "night") =>
     const j = Number(raw.journal) || 0;
     const pos = Number(raw.pos) || 0;
     const rec = Number(raw.receipt) || 0;
-    const we = Number(raw.weighted_equivalent) || (0.1595 * j + 1.0636 * rec + 0.0511 * pos);
+    const we = Number(raw.weighted_equivalent)
+      || weightedEquivalentOf({ actual_journal: j, actual_receipt: rec, actual_pos: pos });
     return {
       index_output: Number(raw.index_output) || 0,
       journal: j,
@@ -62,6 +64,8 @@ const shiftOf = (s: "day" | "night") =>
       weighted_equivalent: we,
       active_shifts: Number(raw.active_shifts) || 0,
       downtime: Number(raw.downtime) || 0,
+      shifts: Number(raw.shifts) || 0,
+      waste_kg: Number(raw.waste_kg) || 0,
       print_area: Number(raw.print_area) || 0,
       cost: Number(raw.cost) || 0,
       revenue: Number(raw.revenue) || 0,
@@ -122,12 +126,8 @@ const machineDowntimeHours = computed(() =>
 );
 const machineWastePct = computed(() =>
   cutting.value.map((m) => {
-    const we =
-      0.1595 * Number(m.actual_journal || 0) +
-      1.0636 * Number(m.actual_receipt || 0) +
-      0.0511 * Number(m.actual_pos || 0);
-    const kg = Number(m.waste_kg || 0);
-    return we > 0 ? Number(((kg / we) * 100).toFixed(2)) : 0;
+    const we = weightedEquivalentOf(m);
+    return Number(wastePct(Number(m.waste_kg || 0), we).toFixed(2));
   }),
 );
 const overallWastePct = computed(() => {
@@ -135,6 +135,8 @@ const overallWastePct = computed(() => {
   const kg = cutting.value.reduce((s, m) => s + Number(m.waste_kg || 0), 0);
   return we > 0 ? Number(((kg / we) * 100).toFixed(2)) : null;
 });
+/** Idle hours over the hours of every shift the lines were down for (8 to a shift). */
+const overallDowntimePct = computed(() => downtimePct(total("downtime"), total("shifts")));
 const efficiency = computed(() => {
   const v = kpi("prod_productivity")?.efficiency_pct;
   return v == null ? "—" : Number(v).toFixed(1) + "٪";
@@ -196,7 +198,7 @@ function fmtCell(v: string | null, unit: string) {
 
     <template v-else>
       <!-- Headline figures -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-4">
         <div class="bg-surface rounded-card shadow-soft p-4">
           <div class="text-xs text-slate-400 mb-1">تولید (شاخص)</div>
           <div class="text-2xl font-bold ltr-nums text-ink">{{ num(total('index_output')) }}</div>
@@ -212,6 +214,20 @@ function fmtCell(v: string | null, unit: string) {
             <span>ژورنال <b class="text-ink ltr-nums">{{ num(total('journal')) }}</b></span>
             <span>پوز <b class="text-ink ltr-nums">{{ num(total('pos')) }}</b></span>
             <span>رسید <b class="text-ink ltr-nums">{{ num(total('receipt')) }}</b></span>
+          </div>
+        </div>
+        <div class="bg-surface rounded-card shadow-soft p-4">
+          <div class="text-xs text-slate-400 mb-1" title="ضایعات (کیلو) ÷ معادل وزنی">ضایعات</div>
+          <div class="text-2xl font-bold ltr-nums text-ink">{{ overallWastePct == null ? "—" : overallWastePct.toFixed(1) + "٪" }}</div>
+          <div class="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
+            وزن ضایعات <b class="text-ink ltr-nums">{{ num(Math.round(total('waste_kg'))) }}</b> کیلو
+          </div>
+        </div>
+        <div class="bg-surface rounded-card shadow-soft p-4">
+          <div class="text-xs text-slate-400 mb-1" title="ساعت خواب ÷ (۸ ساعت × شیفت‌ها)">خواب دستگاه</div>
+          <div class="text-2xl font-bold ltr-nums text-ink">{{ num(Math.round(total('downtime'))) }} <span class="text-sm font-medium text-slate-400">ساعت</span></div>
+          <div class="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-500">
+            از ساعت شیفت‌ها <b class="text-ink ltr-nums">{{ overallDowntimePct.toFixed(1) }}٪</b>
           </div>
         </div>
         <div class="bg-surface rounded-card shadow-soft p-4">

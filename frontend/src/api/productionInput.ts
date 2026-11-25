@@ -7,9 +7,14 @@ export interface ShiftBlock {
   headcount: number;
   cutting: Record<string, any>[];
   print: Record<string, any> | null;
-  print_colors: { color_count: number; area_sqm: string }[];
+  /** Entered in metres; m² = متر × 1.035. */
+  print_colors: { color_count: number; length_m: string }[];
   costs: { category: number; category_code: string; category_name: string; amount_rial: string; description: string }[];
-  rolls: { product: number; product_code?: string; product_name: string; piece_rate_rial: string; quantity: string }[];
+  /** `source`: which total from tables 1/3 fills the count (null: typed). */
+  rolls: {
+    product: number; product_code?: string; product_name: string; piece_rate_rial: string; quantity: string;
+    source?: "actual_pos" | "actual_journal" | "actual_receipt" | "print_sqm" | null;
+  }[];
 }
 
 export interface ProdInput {
