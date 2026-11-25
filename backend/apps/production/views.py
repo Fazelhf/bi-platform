@@ -613,7 +613,8 @@ class ProductionInputView(APIView):
                 j = float(row.get("actual_journal") or 0)
                 p = float(row.get("actual_pos") or 0)
                 rec = float(row.get("actual_receipt") or 0)
-                row["output_units"] = round(j + 9.2 * p + 2.1 * rec, 2)
+                if j or p or rec:
+                    row["output_units"] = round(j + 9.2 * p + 2.1 * rec, 2)
 
             rows = cutting_list + ([block["print"]] if block.get("print") else [])
             for row in rows:
