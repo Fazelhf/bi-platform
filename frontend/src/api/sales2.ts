@@ -499,6 +499,20 @@ export interface CommissionPerson {
   override_lines: number;
 }
 
+export interface CommissionFillRow {
+  sheet: string; row: number; product: string; pre_date: string;
+  grammage: number | null; official: boolean;
+  status: "filled" | "warn" | "empty";
+  price_200_rial: string | null; final_rial: string | null; list: string; note: string;
+}
+
+export interface CommissionFillResult {
+  summary: { filled: number; warn: number; empty: number };
+  rows: CommissionFillRow[];
+  filename: string;
+  file_b64: string;
+}
+
 export interface CommissionTier { min_margin_pct: string; rate_pct: string }
 
 export interface CommissionSheet {
@@ -771,6 +785,12 @@ export const sales2Api = {
     api.post<CommissionSheet>(`${B}/commission/override/`, { line, rate_pct, reason }).then((r) => r.data),
   saveTiers: (tiers: CommissionTier[]) =>
     api.put<CommissionTier[]>(`${B}/commission/tiers/`, { tiers }).then((r) => r.data),
+  /** Finance's commission workbook back with «قیمت نهایی کاغذ» filled from the price lists. */
+  fillCommissionWorkbook: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post<CommissionFillResult>(`${B}/commission/fill-workbook/`, fd).then((r) => r.data);
+  },
   exportCommission: (year: number, month: number) =>
     api.get(`${B}/commission/export/`, { params: { year, month }, responseType: "blob" }).then((r) => r.data as Blob),
   chequeStatus: (id: number, cheque_status: string) =>

@@ -10,6 +10,7 @@ import {
 import Skeleton from "@/components/Skeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import FormModal from "@/components/crm/FormModal.vue";
+import CommissionWorkbookFill from "@/components/sales2/CommissionWorkbookFill.vue";
 import { apiError } from "@/components/crm/formError";
 import { confirm, prompt, toast } from "@/composables/useUi";
 import { faDate } from "@/utils/adminFormat";
@@ -187,6 +188,8 @@ const SOURCE_LABEL: Record<string, string> = { tier: "جدول", override: "دس
       این برگه از فاکتورهای «فروش ۲» ساخته می‌شود؛ فعلاً فقط برای مدیر سامانه نمایش داده می‌شود.
     </p>
     <p v-if="error" class="bg-red-50 text-red-600 text-sm rounded-xl px-3 py-2 whitespace-pre-line">{{ error }}</p>
+
+    <CommissionWorkbookFill />
 
     <div v-if="loading" class="space-y-2"><Skeleton v-for="i in 5" :key="i" class="h-16 rounded-xl" /></div>
 

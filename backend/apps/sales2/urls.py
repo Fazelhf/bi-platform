@@ -29,6 +29,7 @@ urlpatterns = [
     path("commission/approve/", views_pricing.CommissionApproveView.as_view(), name="sales2-commission-approve"),
     path("commission/override/", views_pricing.CommissionOverrideView.as_view(), name="sales2-commission-override"),
     path("commission/tiers/", views_pricing.CommissionTiersView.as_view(), name="sales2-commission-tiers"),
+    path("commission/fill-workbook/", views_pricing.CommissionFillView.as_view(), name="sales2-commission-fill"),
     path("commission/export/", views_pricing.CommissionExportView.as_view(), name="sales2-commission-export"),
     path("summary/", views.SummaryView.as_view(), name="sales2-summary"),
     path("kpis/", views_grades.KpiView.as_view(), name="sales2-kpis"),

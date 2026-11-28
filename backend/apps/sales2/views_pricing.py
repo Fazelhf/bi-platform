@@ -1,6 +1,7 @@
 """فروش ۲ API — لیست قیمت، فی حسابداری و پورسانت."""
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 
@@ -454,6 +455,38 @@ class CommissionTiersView(APIView):
         audit_log(request.user, CommissionTier.objects.first() or CommissionTier(pk=0),
                   AuditLog.Action.UPDATE, {"tiers": {"before": None, "after": [[str(m), str(r)] for m, r in parsed]}})
         return self.get(request)
+
+
+class CommissionFillView(APIView):
+    """
+    Finance's commission workbook back with «قیمت نهایی کاغذ» filled from the
+    price list in force on each row's تاریخ پیش فاکتور (200 cartons − 3%).
+    Returns the report and the file (base64) in one go, so the page can show
+    what was filled and offer the download without uploading twice.
+    """
+
+    permission_classes = [Sales2Access]
+
+    def post(self, request):
+        import base64
+
+        from apps.sales2 import commission_fill
+
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "فایل اکسل پورسانت را انتخاب کنید."})
+        try:
+            content, report = commission_fill.fill(upload)
+        except ValidationError:
+            raise
+        except Exception:
+            raise ValidationError({"file": "فایل اکسل خوانده نشد؛ فایل xlsx باشد."})
+        stem = re.sub(r"\.xls[xm]?$", "", upload.name or "پورسانت", flags=re.I)
+        return Response({
+            **report,
+            "filename": f"{stem} - قیمت نهایی کاغذ.xlsx",
+            "file_b64": base64.b64encode(content).decode("ascii"),
+        })
 
 
 class CommissionExportView(APIView):

@@ -24,6 +24,8 @@ from apps.sales2.models import (
     AccountingCost, CustomerAccount, PriceListItem, ProductProfile, Receipt, SalesDocument,
 )
 
+from io import BytesIO  # noqa: E402
+
 URL = "/api/sales2"
 
 
@@ -1038,3 +1040,90 @@ class LedgerTests(Sales2Base):
     def test_non_admin_cannot_see_the_ledger(self):
         self.client.force_authenticate(_user("ceo2", role="executive"))
         self.assertEqual(self.client.get(f"{URL}/ledger/receivables/").status_code, 403)
+
+
+class CommissionWorkbookFillTests(Sales2Base):
+    """«تکمیل اکسل پورسانت»: the list of the pre-invoice date, 200 cartons − 3%."""
+
+    def setUp(self):
+        super().setUp()
+        from apps.sales2.models import PriceSheet, PriceSheetRow
+
+        def sheet(official, day_key, base):
+            jm, jd = day_key
+            s = PriceSheet.objects.create(name=f"{'رسمی' if official else 'غیر رسمی'} 48", grammage=48,
+                                          is_official=official, base_fi_rial=base,
+                                          jalali_year=1405, jalali_month=jm, jalali_day=jd)
+            PriceSheetRow.objects.create(sheet=s, width_mm=79, length_m=36, cut_fee_rial=30000)
+            return s
+
+        sheet(False, (6, 12), 225000)   # 79×36×225000×103%÷1000 + 30000 = 689,097
+        sheet(False, (7, 14), 352000)   # … = 1,061,120.64 → 1,061,121
+        sheet(True, (7, 14), 324000)    # … = 979,099.68 → 979,100
+
+    def workbook(self, rows):
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "مهدیس"
+        ws["A1"] = "اطلاعات فاکتور"
+        hdr = ["تاریخ پیش فاکتور", "نوع لیست قیمت", "تاريخ برگه", "شماره برگه", "نام طرف حساب", "نام کالا",
+               "تعداد", "في", "مبلغ خالص", "ماليات", "مبلغ + ارزش افزوده ", "مبلغ پرداختی ", "نحوه فروش",
+               "نوع کالا", None, "قیمت کاغذ", "نوع کاغذ", "گرماژ", "قیمت نهایی کاغذ", "اجرت", "فی"]
+        for i, h in enumerate(hdr, 1):
+            ws.cell(2, i, h)
+        for n, (pre, product, tax, g) in enumerate(rows, start=3):
+            ws.cell(n, 1, pre)
+            ws.cell(n, 6, product)
+            ws.cell(n, 7, 100)
+            ws.cell(n, 10, tax)
+            ws.cell(n, 18, g)
+            ws.cell(n, 21, f"=S{n}+T{n}")
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        buf.name = "آبان.xlsx"
+        return buf
+
+    def fill(self, rows):
+        import base64
+
+        from openpyxl import load_workbook
+
+        r = self.client.post(f"{URL}/commission/fill-workbook/", {"file": self.workbook(rows)}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.data)
+        ws = load_workbook(BytesIO(base64.b64decode(r.data["file_b64"]))).active
+        return r.data, ws
+
+    def test_list_of_the_pre_invoice_date_less_three_percent(self):
+        data, ws = self.fill([
+            ("1405/06/18", "79 - 36 - ساده", 0, 48),     # → 12 شهریور
+            ("1405/07/13", "79 - 36 - ساده", 0, 48),     # the day before 14 مهر: still 12 شهریور
+            ("1405/07/14", "79 - 36 - ساده", 0, 48),     # → 14 مهر
+            ("1405/07/20", "79 - 36 - ساده", 5000, 48),  # ماليات → رسمی 14 مهر
+        ])
+        self.assertEqual([ws.cell(r, 19).value for r in (3, 4, 5, 6)],
+                         [round(689097 * 0.97), round(689097 * 0.97),
+                          round(1061121 * 0.97), round(979100 * 0.97)])
+        self.assertEqual(data["summary"], {"filled": 4, "warn": 0, "empty": 0})
+        self.assertIn("1405/06/12", data["rows"][1]["list"])
+        # The workbook's own formulas come back untouched.
+        self.assertEqual(ws["U3"].value, "=S3+T3")
+
+    def test_nothing_is_guessed(self):
+        data, ws = self.fill([
+            (None, "79 - 36 - ساده", 0, 48),                         # no pre-invoice date
+            ("1405/07/20", "79 - 36 - ساده", 0, None),               # no grammage
+            ("1405/07/20", "ليبل 57*40 - حرارتي - ساده", 0, 48),     # a label
+            ("1405/07/20", "79 - 34 - ساده", 0, 48),                 # size not in the list
+            ("1405/05/01", "79 - 36 - ساده", 0, 48),                 # before any list
+        ])
+        self.assertEqual(data["summary"], {"filled": 0, "warn": 0, "empty": 5})
+        self.assertTrue(all(ws.cell(r, 19).value is None for r in range(3, 8)))
+        self.assertIn("79×34", data["rows"][3]["note"])
+
+    def test_after_the_newest_list_is_flagged(self):
+        data, ws = self.fill([("1405/08/09", "79 - 36 - ساده", 0, 48)])
+        self.assertEqual(data["summary"]["warn"], 1)
+        self.assertEqual(ws["S3"].value, round(1061121 * 0.97))
